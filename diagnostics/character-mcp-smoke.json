@@ -1,0 +1,11 @@
+{
+  "test": "character MCP attach smoke",
+  "extension_version": "0.2.6",
+  "character": "MCP Test Mug",
+  "first_attach": "confirmed character chip",
+  "repeat_attach": "reused existing chip",
+  "missing_character": "rejected before attachment",
+  "credits_before": 47,
+  "credits_after": 47,
+  "generation_submitted": false
+}

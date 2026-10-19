@@ -18,4 +18,6 @@ Uploads use Chrome's native file-input selection through DevTools Protocol, with
 
 ## Known limits
 
+Named character references use `character:<name>` in `reference_images` or `flow_attach_references.references`. The latter only prepares the composer and returns `submitted: false`. Confirmed attachment means a unique selected option produced a matching ingredient-chip type; it does not mean a generation was submitted or completed. Character enumeration reads the Characters category in the same picker rather than navigating to the character editor. When no exact match exists or a name is ambiguous, attachment fails before submit.
+
 Virtualized library scans are bounded and may omit items in very large projects. Local file selection requires the extension's Chrome debugger permission; if Chrome DevTools is already attached to the Flow tab, close it and retry. Long jobs require the Flow tab, extension, backend, and WebSocket to remain available. Browser downloads also depend on Chrome's configured download directory.

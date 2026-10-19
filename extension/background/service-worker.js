@@ -2,7 +2,7 @@ const defaults = { bridge: "http://127.0.0.1:18899" };
 const flowUrl = url => /^https:\/\/(flow\.google\.com|labs\.google\/fx)\//.test(url || "");
 const nativeFlowOperations = new Set([
   "flow.context", "flow.state", "flow.projects.list", "flow.project.open", "flow.assets.list", "flow.characters.list",
-  "flow.generation.submit", "flow.generation.observe",
+  "flow.generation.submit", "flow.generation.observe", "flow.references.attach",
   "flow.generation.upload.preflight",
   "flow.file.upload.begin", "flow.file.upload.chunk", "flow.file.upload.finish", "flow.file.upload.abort", "flow.media.upload",
   "flow.asset.download",
@@ -23,8 +23,11 @@ async function ensureActivityOverlay(tabId) {
   await chrome.scripting.executeScript({ target: { tabId }, files: ["content/activity-overlay.js"] });
 }
 async function ensureFlowSubmitBridge(tabId) {
-  await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["content/flow-submit-main.js"] }).catch(() => {});
-  await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["content/flow-upload-main.js"] }).catch(() => {});
+  let injectionError = "";
+  await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["content/flow-submit-main.js"] })
+    .catch(error => { injectionError = String(error?.message || error); });
+  await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["content/flow-upload-main.js"] })
+    .catch(error => { injectionError = [injectionError, String(error?.message || error)].filter(Boolean).join("; "); });
   const readBridge = () => chrome.scripting.executeScript({
     target: { tabId },
     world: "MAIN",
@@ -41,22 +44,24 @@ async function ensureFlowSubmitBridge(tabId) {
   }).then(results => results?.[0]?.result || 0);
   let bridge = await readBridge();
   let uploadClientVersion = await readUploadClientVersion();
-  if (bridge.version === 3 && bridge.uploadVersion >= 7 && uploadClientVersion >= 7) return;
+  const bridgeReady = () => bridge.version === 3 && bridge.uploadVersion >= 8 && uploadClientVersion >= 8;
+  if (bridgeReady()) { reloadedBridgeTabs.delete(tabId); return; }
 
   // Prevent infinite reload loop: reload at most once per tab lifecycle
   if (reloadedBridgeTabs.has(tabId)) {
-    console.warn(`[Flow MCP] Bridge for tab ${tabId} already reloaded once (version=${bridge.uploadVersion}, client=${uploadClientVersion}); skipping reload.`);
-    return;
+    throw new Error(`Flow submit/upload bridge is unavailable after a reload (submit=${bridge.version ?? "missing"}, upload=${bridge.uploadVersion ?? "missing"}, client=${uploadClientVersion}). Reload the Flow MCP extension and Flow tab.${injectionError ? ` Injection error: ${injectionError}` : ""}`);
   }
   reloadedBridgeTabs.add(tabId);
 
   // Extension updates do not run document_start scripts inside already-open tabs.
   // Reload once so Flow registers its click handlers after our MAIN-world hook.
+  let loadTimedOut = false;
   const loaded = new Promise(resolve => {
     const timer = setTimeout(() => {
       chrome.tabs.onUpdated.removeListener(onUpdated);
+      loadTimedOut = true;
       resolve();
-    }, 15_000);
+    }, 30_000);
     const onUpdated = (updatedTabId, changeInfo) => {
       if (updatedTabId !== tabId || changeInfo.status !== "complete") return;
       clearTimeout(timer);
@@ -67,13 +72,14 @@ async function ensureFlowSubmitBridge(tabId) {
   });
   await chrome.tabs.reload(tabId);
   await loaded;
-  const verifyDeadline = Date.now() + 5_000;
+  const verifyDeadline = Date.now() + 10_000;
   do {
     bridge = await readBridge();
     uploadClientVersion = await readUploadClientVersion();
-    if (bridge.version === 3 && bridge.uploadVersion >= 7 && uploadClientVersion >= 7) return;
-    await new Promise(resolve => setTimeout(resolve, 150));
+    if (bridgeReady()) { reloadedBridgeTabs.delete(tabId); return; }
+    await new Promise(resolve => setTimeout(resolve, 250));
   } while (Date.now() < verifyDeadline);
+  throw new Error(`Flow submit/upload bridge failed to initialize after reloading the tab (submit=${bridge.version ?? "missing"}, upload=${bridge.uploadVersion ?? "missing"}, client=${uploadClientVersion}).${loadTimedOut ? " The tab did not finish loading within 30 seconds." : ""}${injectionError ? ` Injection error: ${injectionError}` : ""}`);
 }
 async function sendFlowCommand(tabId, message) {
   try {
@@ -96,6 +102,7 @@ async function sendFlowCommand(tabId, message) {
         "content/character-actions.js",
         "content/image-actions.js",
         "content/video-actions.js",
+        "content/reference-actions.js",
         "content/dom-actions.js",
       ],
     });
@@ -159,6 +166,11 @@ async function ensureEnglishFlowTab(tabId) {
   if (!tab || !flowUrl(tab.url)) return;
   const url = new URL(tab.url);
   if (url.searchParams.get("hl") === "en") return;
+  // SPA routes may drop hl even though the interface is already English.
+  // Rewriting that URL reloads the page and destroys in-flight content commands.
+  const language = await chrome.scripting.executeScript({ target: { tabId }, func: () => document.documentElement.lang })
+    .then(results => String(results?.[0]?.result || "")).catch(() => "");
+  if (/^en\b/i.test(language) || tab.status === "loading") return;
   url.searchParams.set("hl", "en");
   await chrome.tabs.update(tabId, { url: url.href });
   await waitForTabComplete(tabId).catch(() => {});
@@ -343,7 +355,8 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     return;
   }
   if (flowUrl(tab.url) && (tab.active || selectedTabId === undefined)) {
-    void adoptFlowTab(tab, tab.active).catch(error => { lastError = String(error?.message || error); });
+    // Selection can follow SPA navigation without preparing/reloading that document.
+    void adoptFlowTab(tab, false).catch(error => { lastError = String(error?.message || error); });
   }
 });
 chrome.tabs.onCreated.addListener(tab => {

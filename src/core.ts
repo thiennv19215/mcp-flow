@@ -7,6 +7,7 @@ import { GEMINI_VOICES, geminiKey, saveGeminiKey, speakWithGemini } from "./gemi
 import { extractLastFrame } from "./chain.js";
 import { characterLook, createCharacter, downloadAsset, trashAsset, editCharacter, getFlowState, listAssets, listCharacters, listFlowProjects, openFlowProject, rememberCharacter, runAgentBatch, runContinue, runEdit, runGeneration, uploadFlowMediaToProject } from "./flow.js";
 import { JobQueue, type Job } from "./queue.js";
+import { attachReferences } from "./flow.js";
 import { BIN, COMPUTER, IS_MAC, IS_WIN, moveToBin } from "./platform.js";
 import { TECHNIQUES, techniqueById } from "./techniques.js";
 
@@ -34,7 +35,7 @@ const sceneSchema = z.object({
     .max(3)
     .optional()
     .describe(
-      "Reference media: absolute image paths, or 'asset:<title>' for media or characters already in the Flow project. Flow's COMPOSER takes references OR first/last frames on a video scene, never both, so with frames set these are skipped and the job says so. Flow itself can do both via agent mode (save the last frame, Animate it, then add the character).",
+      "Reference media: absolute image paths, 'character:<name>' for saved characters, or 'asset:<title>' for project media. Flow's COMPOSER takes references OR first/last frames on a video scene, never both, so with frames set these are skipped and the job says so. Flow itself can do both via agent mode (save the last frame, Animate it, then add the character).",
     ),
   download_quality: z.enum(["original", "upscaled"]).optional().describe("'upscaled' fetches 1080p video / 2K image (free, slower). Default original."),
   retries: z.number().int().min(0).max(3).default(1).describe("Automatic retries when Flow itself reports the generation failed."),
@@ -63,6 +64,7 @@ export const shapes = {
   cancel: { job_id: z.string() },
   retry: { job_ids: z.array(z.string()).optional().describe("Jobs with a confirmed failed or cancelled result. Default: every safe failed job; jobs with an unknown submit outcome are blocked until you inspect Flow to avoid duplicates.") },
   assets: { kind: z.enum(["image", "video", "scene"]).optional() },
+  attach_references: { references: z.array(z.string().min(1)).min(1).max(3).describe("Named references to attach without generation. Use character:<name> for saved characters; asset:<title> for project media.") },
   upload_media: { path: z.string().min(1).describe("Absolute path to an image or video file to upload to the open Flow project. Supports PNG, JPG, WebP, GIF, HEIC, HEIF, AVIF, MP4, MOV, WebM, AVI, MKV or 3GP.") },
   projects: {},
   open_project: { project_id: z.string().uuid() },
@@ -164,7 +166,7 @@ export const shapes = {
       ),
   },
   character: {
-    name: z.string().min(1).max(60).describe("Character name; scenes then reference it as 'asset:<name>' in reference_images."),
+    name: z.string().min(1).max(60).describe("Character name; scenes then reference it as 'character:<name>' in reference_images."),
     describe: z
       .string()
       .max(1200)
@@ -209,6 +211,7 @@ export interface Core {
   cancel(a: Args<"cancel">): Promise<unknown>;
   retry(a: Args<"retry">): Promise<unknown>;
   assets(a: Args<"assets">): Promise<unknown>;
+  attach_references(a: Args<"attach_references">): Promise<unknown>;
   upload_media(a: Args<"upload_media">): Promise<unknown>;
   projects(): Promise<unknown>;
   open_project(a: Args<"open_project">): Promise<unknown>;
@@ -308,9 +311,7 @@ export class LocalCore implements Core {
       // A referenced character must come out identical, not merely similar, so the scene says so explicitly. The
       // wording stays medium-neutral: the same lock has to serve a flat cartoon character and a photoreal avatar.
       const cast = (scene.reference_images ?? [])
-        .filter((r) => r.startsWith("asset:"))
-        .map((r) => r.slice(6).trim())
-        .filter((n) => characterLook(n) !== undefined || /^[\w .'-]{1,60}$/.test(n));
+        .flatMap(r => /^character:/i.test(r) ? [r.slice(10).trim()] : r.startsWith("asset:") && characterLook(r.slice(6).trim()) !== undefined ? [r.slice(6).trim()] : []);
       const lock = cast.length
         ? ` CHARACTER LOCK — ${cast.join(" and ")} must match the reference image exactly, as if copying it: same head shape and size, same face, same eyes, same hair, same skin, same build and proportions, same clothing items in the same colours, same hands, and the same rendering style and level of realism as the reference. Never redesign, restyle, re-proportion, re-age or re-colour them, and never swap an item for a similar one.${cast
             .map((n) => (characterLook(n) ? ` ${n} is exactly: ${characterLook(n)}.` : ""))
@@ -395,6 +396,13 @@ export class LocalCore implements Core {
     if (this.mediaUploadActive || this.queue.list().some(job => job.status === "queued" || job.status === "running")) throw new Error(BUSY);
     this.mediaUploadActive = true;
     try { return await uploadFlowMediaToProject(path); }
+    finally { this.mediaUploadActive = false; }
+  }
+
+  async attach_references({ references }: Args<"attach_references">) {
+    if (this.mediaUploadActive || this.queue.busy) throw new Error(BUSY);
+    this.mediaUploadActive = true;
+    try { return await attachReferences(references); }
     finally { this.mediaUploadActive = false; }
   }
 
@@ -539,7 +547,7 @@ export class LocalCore implements Core {
     if (!a.image && !a.describe) throw new Error("Pass either `describe` (Flow draws the portrait) or `image`.");
     const made = await createCharacter(a);
     if (a.describe) rememberCharacter(a.name, a.describe);
-    return { ...made, use_as: `asset:${a.name}` };
+    return { ...made, use_as: `character:${a.name}` };
   }
 
   async character_edit({ name, change, look }: Args<"character_edit">) {
@@ -550,13 +558,13 @@ export class LocalCore implements Core {
     // the NEW look - "deep navy coat" left in it would argue with a portrait whose coat is now red.
     if (look) rememberCharacter(name, look);
     else if (change) rememberCharacter(name, `${characterLook(name) ?? ""} Changed since, and this wins over anything above: ${change.replace(/[.\s]+$/, "")}`.trim());
-    return { ...out, use_as: `asset:${name}` };
+    return { ...out, use_as: `character:${name}` };
   }
 
   async characters() {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     if (this.queue.busy) throw new Error(BUSY);
-    return (await listCharacters()).map((name) => ({ name, use_as: `asset:${name}` }));
+    return (await listCharacters()).map((name) => ({ name, use_as: `character:${name}` }));
   }
 
   // Panel only: deliberately NOT registered as an MCP tool, so a key typed into Flow Studio never reaches Claude.

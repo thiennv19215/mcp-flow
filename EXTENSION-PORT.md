@@ -23,4 +23,6 @@ Uploads are staged in temporary files, streamed to the extension in bounded, che
 
 ## Limits
 
+Version 0.2.6 adds and verifies named-reference preparation, including reuse of a character already attached in the current prompt. Call `flow_attach_references` with `references: ["character:Name"]` to select a saved character and confirm its character ingredient chip without submitting or spending credits. `asset:Title` remains supported for media. Reload the extension and refresh Flow after updating content scripts; refresh alone can leave Chrome's cached unpacked-extension scripts in use.
+
 Large virtualized Flow libraries may exceed the bounded scan. Long generation, upscale downloads, and Agent jobs depend on the browser tab, extension, backend, and socket remaining available. An interrupted paid operation may have completed in Flow even when the backend has not received its result; check the project before retrying.

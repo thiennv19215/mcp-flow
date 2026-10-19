@@ -154,6 +154,17 @@ server.registerTool(
 );
 
 server.registerTool(
+  "flow_attach_references",
+  {
+    title: "Attach named references",
+    description: "Attach saved characters or project images to the current Flow prompt without generating or spending credits. Use character:<name> to require a character, asset:<title> for project media. Returns confirmed attachment types.",
+    inputSchema: shapes.attach_references,
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  },
+  (args) => reply(patient("flow_attach_references", core.attach_references(args))),
+);
+
+server.registerTool(
   "flow_upload_media",
   {
     title: "Upload media to Flow",

@@ -242,7 +242,7 @@ export async function runGeneration(job: Job): Promise<string[]> {
   const s = job.params;
   const refs = s.reference_images ?? [];
   const localFileSupported = (file?: string) => {
-    if (!file || file.startsWith(ASSET_PREFIX)) return true;
+    if (!file || /^(?:asset|character):/i.test(file)) return true;
     try {
       const info = statSync(file);
       return [".png", ".jpg", ".jpeg", ".webp"].includes(extname(file).toLowerCase()) && info.isFile() && info.size > 0 && info.size <= 25 * 1024 * 1024;
@@ -254,10 +254,11 @@ export async function runGeneration(job: Job): Promise<string[]> {
   requireCapabilities(
     "flow.native.generation.submit", "flow.native.generation.observe", "flow.native.asset.download",
   );
+  if (refs.length) requireCapabilities("flow.native.references.attach");
   const localInputs = [
     ...(s.first_frame && !s.first_frame.startsWith(ASSET_PREFIX) ? [{ path: s.first_frame, slot: "start" }] : []),
     ...(s.last_frame && !s.last_frame.startsWith(ASSET_PREFIX) ? [{ path: s.last_frame, slot: "end" }] : []),
-    ...refs.flatMap((file, index) => file.startsWith(ASSET_PREFIX) ? [] : [{ path: file, slot: `ref${index + 1}` }]),
+    ...refs.flatMap((file, index) => /^(?:asset|character):/i.test(file) ? [] : [{ path: file, slot: `ref${index + 1}` }]),
   ];
   if (localInputs.length) requireCapabilities("flow.native.generation.upload.preflight");
 
@@ -277,7 +278,8 @@ export async function runGeneration(job: Job): Promise<string[]> {
     ? { assetName: value.slice(ASSET_PREFIX.length).trim() }
     : { assetName: uploadedAssetByPath.get(value)!, slot };
 
-  const attachments = refs.map((value, index) => value.startsWith(ASSET_PREFIX)
+  const attachments = refs.map((value, index) => /^character:/i.test(value) ? { assetName: value }
+    : value.startsWith(ASSET_PREFIX)
     ? { assetName: value.slice(ASSET_PREFIX.length).trim() }
     : { assetName: uploadedAssetByPath.get(value)!, slot: `ref${index + 1}` });
 
@@ -301,6 +303,11 @@ export async function runGeneration(job: Job): Promise<string[]> {
   }, "flow.native.generation.observe", job, s.type === "image" ? IMAGE_TIMEOUT_MS : VIDEO_TIMEOUT_MS);
   job.progress = undefined;
   return downloadNativeResults(observed.media, s.output_dir, s.file_stem, s.download_quality ?? "original", job);
+}
+
+export async function attachReferences(references: string[]): Promise<unknown> {
+  requireCapabilities("flow.native.references.attach");
+  return nativeOperation("flow.references.attach", { references }, "flow.native.references.attach", undefined, 60_000);
 }
 
 export async function listCharacters(): Promise<string[]> {

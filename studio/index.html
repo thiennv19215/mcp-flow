@@ -545,7 +545,7 @@ $("#castList").addEventListener("click", async (e) => {
     const group = S.tab === "shots" ? "shots" : "frames";
     const sc = S[group].scenes[0];
     if (sc.refs.length >= 3) return toast("Scene 1 already has 3 references.", true);
-    sc.refs.push({ asset: use.dataset.castuse }); save(); renderAll();
+    sc.refs.push({ asset: use.dataset.castuse, kind: "character" }); save(); renderAll();
     return toast(`${use.dataset.castuse} added to ${group === "shots" ? "shot" : "frame"} 1`);
   }
   if (edit) {
@@ -906,7 +906,7 @@ $("#roll").onclick = async () => {
   const cfg = S[group], video = group === "shots";
   const list = cfg.scenes.filter((x) => x.prompt.trim());
   if (!list.length) return;
-  const ref = (v) => (v ? (v.asset ? `asset:${v.asset}` : v.path) : undefined);
+  const ref = (v) => (v ? (v.asset ? `${v.kind === "character" ? "character" : "asset"}:${v.asset}` : v.path) : undefined);
   if (!video && cfg.engine === "agent") {
     try { await api("agent", { project: cfg.project, scenes: list.map((s) => s.prompt.trim()), aspect_ratio: cfg.aspect }); toast("Handed to Flow's agent."); poll(); } catch (err) { toast(err.message, true); }
     return;

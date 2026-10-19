@@ -20,4 +20,8 @@ Native Flow handlers cover session and library reads, generation, asset download
 
 ## Limits
 
+Named references share the `FlowReferenceActions` picker driver. `character:<name>` selects only the Characters category; `asset:<title>` retains project-media compatibility. A successful attachment requires an exact, unique picker option and a newly rendered ingredient chip of the expected type. Image CDN URLs are not treated as cross-representation asset IDs. Confirmed selections can be reused within the same content-script session. `flow.references.attach` prepares references without submitting generation and is exposed as `flow_attach_references` / Studio API `attach_references`. Character listing uses the composer picker to avoid navigating away from the project. Ordinary media names no longer imply a character lock; explicit characters or locally remembered character descriptions do.
+
+Tab URL updates adopt the selection without re-preparing the page. An English document does not need its URL rewritten when an SPA route drops `hl=en`; this avoids interrupting content operations with a language reload.
+
 Asset and character scans have bounded virtualized-grid traversal. Local file selection is synthetic and may not satisfy every Flow upload state. Long-running commands depend on the Flow tab, extension service worker, backend, and WebSocket remaining available. After an uncertain submit or disconnect, inspect the Flow project before retrying.

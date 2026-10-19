@@ -778,6 +778,7 @@ async function chooseNativeModel(model, type) {
   await wait(350);
 }
 async function chooseNativePickerAsset(assetName, slot) {
+  if (!slot) return globalThis.FlowReferenceActions.attach(assetName);
   const wanted = String(assetName).trim().toLocaleLowerCase();
   const wantedStem = wanted.replace(/\.(?:png|jpe?g|webp|gif|heic|heif|avif|mp4|m4v|mov|webm|avi|mkv|3gp)$/i, "");
 
@@ -1729,7 +1730,14 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
     return state;
   }
   if (name === "flow.assets.list") return scanNativeAssets();
-  if (name === "flow.characters.list") return scanNativeCharacters();
+  if (name === "flow.characters.list") return globalThis.FlowReferenceActions.listCharacters();
+  if (name === "flow.references.attach") {
+    const references = payload.references;
+    if (!Array.isArray(references) || !references.length || references.length > 3) throw flowError("FLOW_INVALID_ARGUMENT", "Provide one to three named references.");
+    const attached = [];
+    for (const reference of references) attached.push(await globalThis.FlowReferenceActions.attach(reference));
+    return { attached, submitted: false };
+  }
   if (name === "flow.generation.submit") {
     const state = nativeRead("flowState");
     if (!state.signedIn || !state.inProject) throw flowError("FLOW_NOT_READY", state.hint || "Open a signed-in Flow project first.", true);
