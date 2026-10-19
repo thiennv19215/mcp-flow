@@ -84,30 +84,13 @@ function flowNavigationItem(label) {
   const wanted = normalize(label);
   return candidates.find(el => {
     if (!visible(el) || el.disabled || el.getAttribute("aria-disabled") === "true") return false;
-    const text = normalize(el.getAttribute("aria-label") || el.innerText || el.textContent || "");
-    // The collapsed Flow drawer leaves Material icon ligatures in the accessible text
-    // (for example "image All media"). Match the navigation label at the end.
+    const text = normalize(el.innerText || el.textContent || accessibleName(el));
+    const iconNames = [...el.querySelectorAll("mat-icon")].map(icon => normalize(icon.innerText || icon.textContent));
+    if (label === "Characters" && iconNames.includes("accessibility_new")) return true;
+    if (label === "All media" && iconNames.includes("dashboard")) return true;
+    // Material icon ligatures can prefix the visible navigation label (for example "image All media").
     return text === wanted || text.endsWith(` ${wanted}`);
   });
-}
-function flowNavigationSelected(item) {
-  if (!item) return undefined;
-  const roots = [item, item.closest('a,button,[role="button"],[role="menuitem"],mat-list-item')].filter(Boolean);
-  let explicitlyUnselected = false;
-  for (const el of roots) {
-    for (const attr of ["aria-current", "aria-selected", "aria-pressed"]) {
-      const value = el.getAttribute(attr);
-      if (value !== null) {
-        if (value === "true" || value === "page") return true;
-        explicitlyUnselected = true;
-      }
-    }
-    const state = el.getAttribute("data-state");
-    if (state === "active" || state === "selected") return true;
-    if (state !== null) explicitlyUnselected = true;
-    if (el.classList.contains("selected") || el.classList.contains("active") || el.classList.contains("mdc-list-item--activated")) return true;
-  }
-  return explicitlyUnselected ? false : undefined;
 }
 function clickFlowNavigation(label) {
   const target = flowNavigationItem(label);
@@ -140,32 +123,24 @@ async function ensureFlowLibrarySection(label) {
   if (!target) {
     throw flowError("FLOW_NAV_UNAVAILABLE", `Flow's project navigation could not open "${label}" from this view.`, true);
   }
-  const selectedBefore = flowNavigationSelected(target);
-  if (selectedBefore !== true) target.click();
+  target.click();
   const deadline = Date.now() + (label === "Characters" ? 10_000 : 5000);
-  let settledEmptySince = 0;
-  const hasCharacterAction = () => [...document.querySelectorAll('button,[role="button"],a[href]')].some(el => {
-    if (!visible(el)) return false;
-    const name = cleanCharacterName(accessibleName(el).replace(/\s+/g, " ").trim()).toLowerCase()
-      .replace(/^add\s+(?=new character$)/, "");
-    return /^(?:new character|create character|create new character|add character|add a character)$/.test(name);
+  const hasCharacterAction = () => [...document.querySelectorAll("flow-custom-tile")].some(tile => {
+    if (!visible(tile)) return false;
+    const addIcon = [...tile.querySelectorAll("mat-icon")].some(icon =>
+      cleanCharacterName(icon.innerText || icon.textContent || "").toLowerCase() === "add");
+    const text = cleanCharacterName(tile.innerText || tile.textContent || "").toLowerCase();
+    return addIcon && (/character/.test(text) || /nhân vật/.test(text));
   });
-  const hasSectionMarker = selected => label === "Characters"
-    ? hasCharacterAction() || selected === true && [...document.querySelectorAll("flow-character-tile")].some(visible)
+  const hasSectionMarker = () => label === "Characters"
+    ? hasCharacterAction()
     : label === "All media" && [...document.querySelectorAll("flow-grid-tile-container")].some(visible);
   while (Date.now() < deadline) {
-    const selected = flowNavigationSelected(flowNavigationItem(label));
     const loading = [...document.querySelectorAll('[role="progressbar"],[aria-busy="true"]')].some(visible);
-    const marker = hasSectionMarker(selected);
-    if (!loading && marker) break;
-    if (selected === true && !loading && !marker) {
-      if (!settledEmptySince) settledEmptySince = Date.now();
-      if (Date.now() - settledEmptySince >= 700) break;
-    } else settledEmptySince = 0;
+    if (!loading && hasSectionMarker()) break;
     await wait(150);
   }
-  const selected = flowNavigationSelected(flowNavigationItem(label));
-  if (selected !== true && !hasSectionMarker(selected)) {
+  if (!hasSectionMarker()) {
     throw flowError("FLOW_LIBRARY_LOADING", `Flow's "${label}" library did not become ready after navigation.`, true);
   }
   blurFlowNavigationFocus();

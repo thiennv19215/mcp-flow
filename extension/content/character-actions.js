@@ -30,14 +30,25 @@
 
   async function waitForCharacterCreateButton(timeoutMs = 10_000) {
     const deadline = Date.now() + timeoutMs;
+    const enabled = el => visible(el) && !el.disabled && el.getAttribute("aria-disabled") !== "true";
+    const semanticCreateButton = () => {
+      for (const tile of document.querySelectorAll("flow-custom-tile")) {
+        if (!visible(tile)) continue;
+        const hasAddIcon = [...tile.querySelectorAll("mat-icon")].some(icon => normalize(icon.innerText || icon.textContent) === "add");
+        const tileText = normalize(cleanCharacterName(tile.innerText || tile.textContent || ""));
+        if (!hasAddIcon || !/(?:new character|nhân vật mới)/i.test(tileText)) continue;
+        const button = [...tile.querySelectorAll('button,[role="button"],a[href]')].find(enabled);
+        if (button) return button;
+      }
+      return null;
+    };
     const isCreateAction = el => {
       const label = normalize(cleanCharacterName(accessibleName(el).replace(/\s+/g, " ").trim()))
         .replace(/^add\s+(?=new character$)/, "");
-      return /^(?:new character|create character|create new character|add character|add a character)$/.test(label);
+      return /^(?:new character|create character|create new character|add character|add a character|nhân vật mới)$/.test(label);
     };
     while (Date.now() < deadline) {
-      const button = [...document.querySelectorAll('button,[role="button"],a[href]')].find(el =>
-        visible(el) && isCreateAction(el) && !el.disabled && el.getAttribute("aria-disabled") !== "true");
+      const button = semanticCreateButton() || [...document.querySelectorAll('button,[role="button"],a[href]')].find(el => enabled(el) && isCreateAction(el));
       if (button) return button;
       await wait(150);
     }
