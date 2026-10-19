@@ -105,7 +105,7 @@ function flowNavigationSelected(item) {
     const state = el.getAttribute("data-state");
     if (state === "active" || state === "selected") return true;
     if (state !== null) explicitlyUnselected = true;
-    if (el.classList.contains("selected") || el.classList.contains("active")) return true;
+    if (el.classList.contains("selected") || el.classList.contains("active") || el.classList.contains("mdc-list-item--activated")) return true;
   }
   return explicitlyUnselected ? false : undefined;
 }
@@ -146,7 +146,8 @@ async function ensureFlowLibrarySection(label) {
   let settledEmptySince = 0;
   const hasCharacterAction = () => [...document.querySelectorAll('button,[role="button"],a[href]')].some(el => {
     if (!visible(el)) return false;
-    const name = cleanCharacterName(accessibleName(el).replace(/\s+/g, " ").trim()).toLowerCase();
+    const name = cleanCharacterName(accessibleName(el).replace(/\s+/g, " ").trim()).toLowerCase()
+      .replace(/^add\s+(?=new character$)/, "");
     return /^(?:new character|create character|create new character|add character|add a character)$/.test(name);
   });
   const hasSectionMarker = selected => label === "Characters"

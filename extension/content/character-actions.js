@@ -31,7 +31,8 @@
   async function waitForCharacterCreateButton(timeoutMs = 10_000) {
     const deadline = Date.now() + timeoutMs;
     const isCreateAction = el => {
-      const label = normalize(cleanCharacterName(accessibleName(el).replace(/\s+/g, " ").trim()));
+      const label = normalize(cleanCharacterName(accessibleName(el).replace(/\s+/g, " ").trim()))
+        .replace(/^add\s+(?=new character$)/, "");
       return /^(?:new character|create character|create new character|add character|add a character)$/.test(label);
     };
     while (Date.now() < deadline) {
