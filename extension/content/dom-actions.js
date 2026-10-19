@@ -483,13 +483,20 @@ async function waitForFlowTileMedia(tile, title, timeoutMs = 10_000) {
 }
 function flowRadio(name) {
   return [...document.querySelectorAll('[role="radio"],mat-radio-button')].find(el =>
-    visible(el) && matchesName(accessibleName(el).replace(/\s+/g, " ").trim(), name, null, true));
+    visible(el) && !isFlowProjectNavigationControl(el) && matchesName(accessibleName(el).replace(/\s+/g, " ").trim(), name, null, true));
+}
+function isFlowProjectNavigationControl(el) {
+  if (el.closest('nav,[role="navigation"]')) return true;
+  for (let parent = el; parent && parent !== document.body; parent = parent.parentElement) {
+    if (/project navigation/i.test(parent.getAttribute("aria-label") || "")) return true;
+  }
+  return false;
 }
 function flowOption(name) {
   const expected = String(name).replace(/\s+/g, " ").trim().toLowerCase();
   return [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')].find(el => {
     const label = accessibleName(el).replace(/\s+/g, " ").trim().toLowerCase();
-    return visible(el) && (label === expected || label.endsWith(` ${expected}`));
+    return visible(el) && !isFlowProjectNavigationControl(el) && (label === expected || label.endsWith(` ${expected}`));
   });
 }
 async function activateFlowSubmitButton(button) {
@@ -661,11 +668,12 @@ async function openFlowSettings() {
   throw flowError("FLOW_SETTINGS_OPEN_FAILED", "Flow's settings panel did not open; no generation was submitted.", true);
 }
 async function chooseRadio(name) {
-  let radio = flowRadio(name) || flowOption(name);
-  if (!radio && flowButton("Settings trigger")) {
+  let radio = flowRadio(name);
+  if (!radio) {
     await openFlowSettings();
+    const findOption = () => flowRadio(name) || flowOption(name);
     const openedBy = Date.now() + 2500;
-    while (Date.now() < openedBy && !radio) { await wait(100); radio = flowRadio(name) || flowOption(name); }
+    while (Date.now() < openedBy && !radio) { await wait(100); radio = findOption(); }
   }
   if (!radio) {
     const options = [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')]
@@ -676,7 +684,7 @@ async function chooseRadio(name) {
   await wait(400);
   const deadline = Date.now() + 3000;
   while (Date.now() < deadline) {
-    const current = flowRadio(name) || flowOption(name);
+    const current = flowRadio(name) || (flowSettingsPanelVisible() && flowOption(name));
     if (nativeRadioSelected(current)) return;
     // Some Flow versions close the settings popover immediately after accepting a radio.
     if (!current && (!radio.isConnected || !visible(radio))) return;
@@ -684,12 +692,12 @@ async function chooseRadio(name) {
   }
   // Retry the same radio once only while it is still visible and unselected.
   // This is safe before submit and helps when Flow drops a click during a slow repaint.
-  radio = flowRadio(name) || flowOption(name);
+  radio = flowRadio(name) || (flowSettingsPanelVisible() && flowOption(name));
   if (radio && !nativeRadioSelected(radio)) {
     radio.click();
     const retryDeadline = Date.now() + 2500;
     while (Date.now() < retryDeadline) {
-      const current = flowRadio(name) || flowOption(name);
+      const current = flowRadio(name) || (flowSettingsPanelVisible() && flowOption(name));
       if (nativeRadioSelected(current) || (!current && (!radio.isConnected || !visible(radio)))) return;
       await wait(100);
     }
@@ -754,7 +762,8 @@ async function closeFlowSettings() {
 async function restoreNativeFramesMode() {
   await openFlowSettings();
   const findFrames = () => [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')]
-    .find(el => visible(el) && accessibleName(el).replace(/^(?:accessibility_new|dashboard|face)\s*/i, "").replace(/\s+/g, " ").trim().toLocaleLowerCase() === "frames");
+    .find(el => visible(el) && !isFlowProjectNavigationControl(el) &&
+      accessibleName(el).replace(/^(?:accessibility_new|dashboard|face)\s*/i, "").replace(/\s+/g, " ").trim().toLocaleLowerCase() === "frames");
   let frames = findFrames();
   if (!frames) throw flowError("FLOW_FRAMES_MODE_UNAVAILABLE", "Flow does not show a Frames mode control after local frame upload. Nothing was submitted.", true, false);
   if (!nativeRadioSelected(frames) && frames.getAttribute("aria-selected") !== "true") frames.click();
@@ -811,21 +820,63 @@ async function chooseNativeModel(model, type) {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     throw flowError("FLOW_MODEL_NOT_FOUND", `Model "${model}" was not found in Flow. Available: ${names.join(", ")}`, true);
   }
+  const chosenName = names[index];
   items[index].click();
   await wait(500);
-  const selected = () => {
+  const summaryConfirms = () => {
     const trigger = flowButton("Settings trigger");
     const settingSummary = (trigger?.innerText || trigger?.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
-    if (legacyImage ? /nano banana\s+\d/i.test(settingSummary) && !/\blite\b/i.test(settingSummary) : settingSummary.includes(model.toLowerCase())) return true;
-    return [...document.querySelectorAll('button,[role="button"]')].some(el => {
-      if (!visible(el)) return false;
-      const label = accessibleName(el).replace(/\s+/g, " ").trim().toLowerCase();
-      return legacyImage ? /nano banana\s+\d/i.test(label) && !/\blite\b/i.test(label) : label.includes(model.toLowerCase());
-    });
+    return legacyImage
+      ? /nano banana\s+\d/i.test(settingSummary) && !/\blite\b/i.test(settingSummary)
+      : settingSummary.includes(model.toLowerCase());
   };
   const selectDeadline = Date.now() + 4000;
-  while (Date.now() < selectDeadline && !selected()) await wait(100);
-  if (!selected()) throw flowError("FLOW_MODEL_SELECTION_FAILED", `Flow did not confirm model "${model}" within 4 seconds. Nothing was submitted.`, true);
+  while (Date.now() < selectDeadline && !summaryConfirms()) await wait(100);
+  let selectionConfirmed = summaryConfirms();
+  if (!selectionConfirmed) {
+    // Some Flow versions omit the selected model from the settings summary. Reopen
+    // the model menu and require its requested item to expose a selected state.
+    button = flowButton("Select model family") || flowButton("Model");
+    if (!button) {
+      await openFlowSettings();
+      button = flowButton("Select model family") || flowButton("Model");
+    }
+    if (button) {
+      button.click();
+      const verifyDeadline = Date.now() + 4000;
+      let verifyItems = [];
+      while (Date.now() < verifyDeadline) {
+        verifyItems = [...document.querySelectorAll('[role="menuitem"]')].filter(visible);
+        if (verifyItems.length) break;
+        await wait(100);
+      }
+      const wantedName = chosenName.replace(/\s+/g, " ").trim().toLowerCase();
+      const chosen = verifyItems.find(item => {
+        const label = accessibleName(item).replace(/\s+/g, " ").trim().toLowerCase();
+        return label === wantedName || label.includes(wantedName);
+      });
+      const itemSelected = item => {
+        if (!item) return false;
+        if (["aria-selected", "aria-checked", "aria-pressed", "aria-current", "data-selected", "data-state"]
+          .some(attribute => ["true", "checked", "selected", "page"].includes((item.getAttribute(attribute) || "").toLowerCase()))) return true;
+        if (["selected", "active", "checked"].some(className => item.classList.contains(className))) return true;
+        if (item.querySelector('input[type="radio"]:checked,input[type="checkbox"]:checked,[aria-checked="true"],[aria-selected="true"],[data-state="checked"]')) return true;
+        return [...item.querySelectorAll("mat-icon")].some(icon => /^(?:check|check_circle|done|radio_button_checked)$/i.test((icon.innerText || icon.textContent || "").trim()));
+      };
+      selectionConfirmed = itemSelected(chosen);
+      // The verification menu is only an observation step. Close it before the
+      // caller continues applying settings or attempts to submit the video.
+      if (chosen?.isConnected && visible(chosen)) {
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+        await wait(200);
+        if (chosen.isConnected && visible(chosen) && button?.isConnected && visible(button)) {
+          button.click();
+          await wait(200);
+        }
+      }
+    }
+  }
+  if (!selectionConfirmed) throw flowError("FLOW_MODEL_SELECTION_FAILED", `Flow did not confirm model "${model}" in its settings summary or selected model menu item. Nothing was submitted.`, true);
   await wait(350);
 }
 async function chooseNativePickerAsset(assetName, slot) {

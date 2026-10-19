@@ -5,10 +5,17 @@
   const normalize = value => String(value || "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
   const cleanControlName = element => normalize(accessibleName(element).replace(/^(?:accessibility_new|dashboard|face)\s*/i, ""));
   const isSelected = element => nativeRadioSelected(element) || element?.getAttribute("aria-selected") === "true";
+  function isProjectNavigationControl(element) {
+    if (element.closest('nav,[role="navigation"]')) return true;
+    for (let parent = element; parent && parent !== document.body; parent = parent.parentElement) {
+      if (/project navigation/i.test(parent.getAttribute("aria-label") || "")) return true;
+    }
+    return false;
+  }
   function exactModeControl(name) {
     const wanted = normalize(name);
     return [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')]
-      .find(element => visible(element) && cleanControlName(element) === wanted);
+      .find(element => visible(element) && !isProjectNavigationControl(element) && cleanControlName(element) === wanted);
   }
 
   async function selectAndConfirmMode(name, framesMode) {
