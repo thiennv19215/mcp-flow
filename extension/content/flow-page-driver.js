@@ -63,7 +63,7 @@
   FlowPageDriver.OPERATIONS = Object.freeze([
     "flow.context", "flow.state", "flow.projects.list", "flow.assets.list", "flow.characters.list",
     "flow.generation.upload.preflight", "flow.file.upload.begin", "flow.file.upload.chunk",
-    "flow.file.upload.finish", "flow.file.upload.abort",
+    "flow.file.upload.finish", "flow.file.upload.abort", "flow.media.upload",
     "flow.generation.submit", "flow.generation.observe", "flow.asset.download",
     "flow.asset.rename", "flow.asset.trash", "flow.character.create", "flow.character.edit",
     "flow.edit.run", "flow.agent.batch", "flow.continue.run",

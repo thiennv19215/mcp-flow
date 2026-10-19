@@ -154,6 +154,17 @@ server.registerTool(
 );
 
 server.registerTool(
+  "flow_upload_media",
+  {
+    title: "Upload media to Flow",
+    description: "Upload one local image or video into the open Flow project's media library. Supports PNG, JPG, WebP, GIF, HEIC, HEIF, AVIF, MP4, MOV, WebM, AVI, MKV and 3GP; images up to 25 MiB and videos up to 200 MiB. Returns the uploaded title and kind for use with flow_assets or flow_generate.",
+    inputSchema: shapes.upload_media,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  },
+  (args) => reply(patient("flow_upload_media", core.upload_media(args))),
+);
+
+server.registerTool(
   "flow_download",
   {
     title: "Download existing project media",

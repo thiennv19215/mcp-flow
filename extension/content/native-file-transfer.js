@@ -83,5 +83,56 @@
     return { assigned: input.files?.length === 1, trustedGesture: false };
   }
 
-  globalThis.FlowNativeFileTransfer = Object.freeze({ UploadAssembler, assignFileToInput, defaults: DEFAULTS });
+  function bridgeCall(action, detail = {}, timeoutMs = 3000) {
+    const requestId = crypto.randomUUID();
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { cleanup(); reject(new Error(`Flow upload bridge timed out (${action}).`)); }, timeoutMs);
+      const onMessage = event => {
+        if (event.source !== window || event.data?.source !== "flow-mcp-upload-result" || event.data.requestId !== requestId) return;
+        cleanup();
+        if (event.data.success) resolve(event.data);
+        else reject(new Error(event.data.error || `Flow upload bridge rejected ${action}.`));
+      };
+      function cleanup() { clearTimeout(timer); window.removeEventListener("message", onMessage); }
+      window.addEventListener("message", onMessage);
+      window.postMessage({ source: "flow-mcp-upload", action, requestId, ...detail }, location.origin);
+    });
+  }
+
+  async function selectFileThroughPicker(file, openPicker) {
+    if (!(file instanceof Blob)) throw new Error("Upload value must be a Blob or File");
+    if (typeof openPicker !== "function") throw new Error("Flow upload picker action is missing.");
+    const owner = crypto.randomUUID();
+    await bridgeCall("arm", { owner, file }, 5000);
+    try {
+      await openPicker();
+      for (let attempt = 0; attempt < 25; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 200));
+        const status = await bridgeCall("status", { owner }, 1500);
+        if (status.fired) return { selected: true, method: status.fired, trustedGesture: false };
+      }
+      throw new Error("Flow did not open its file input after the upload control was clicked.");
+    } finally {
+      await bridgeCall("cancel", { owner }).catch(() => {});
+    }
+  }
+
+  async function assignFileToFlowInput(file, input) {
+    if (!(file instanceof Blob) || !(input instanceof HTMLInputElement) || input.type !== "file") throw new Error("Invalid media file input.");
+    const owner = crypto.randomUUID();
+    const attribute = "data-flow-mcp-upload-target";
+    input.setAttribute(attribute, owner);
+    try {
+      const selector = `input[type="file"][${attribute}="${owner}"]`;
+      return await bridgeCall("assign", { owner, selector, file }, 5000);
+    } finally { input.removeAttribute(attribute); }
+  }
+
+  async function dropFileToFlow(file) {
+    if (!(file instanceof Blob)) throw new Error("Upload value must be a Blob or File");
+    const owner = crypto.randomUUID();
+    return bridgeCall("drop", { owner, file }, 5000);
+  }
+
+  globalThis.FlowNativeFileTransfer = Object.freeze({ UploadAssembler, assignFileToInput, selectFileThroughPicker, assignFileToFlowInput, dropFileToFlow, defaults: DEFAULTS });
 })();

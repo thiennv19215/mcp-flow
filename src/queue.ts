@@ -40,6 +40,9 @@ export interface Job {
   progress?: string;
   note?: string;
   error?: string;
+  // True when Flow may have accepted a submit but the backend could not confirm its result.
+  // Such a job must not be retried automatically or from the Retry button.
+  outcomeUnknown?: boolean;
   // Scene numbers a batch still could not make after all its own retries; flow_retry redoes just these.
   failed_scenes?: number[];
   createdAt: string;
@@ -48,10 +51,9 @@ export interface Job {
 
 export type JobRunner = (job: Job) => Promise<string[]>;
 
-// Flow is driven like a careful person would: one generation at a time, with a
-// randomised pause between them.
-const PAUSE_MIN_MS = Number(process.env.FLOW_MCP_PAUSE_MIN_S ?? 25) * 1000;
-const PAUSE_MAX_MS = Number(process.env.FLOW_MCP_PAUSE_MAX_S ?? 70) * 1000;
+// Flow is driven one generation at a time, with a short randomized pause between jobs.
+const PAUSE_MIN_MS = Number(process.env.FLOW_MCP_PAUSE_MIN_S ?? 5) * 1000;
+const PAUSE_MAX_MS = Number(process.env.FLOW_MCP_PAUSE_MAX_S ?? 10) * 1000;
 
 export class JobQueue {
   private jobs = new Map<string, Job>();
@@ -90,7 +92,7 @@ export class JobQueue {
   // Puts a failed or cancelled job back in line with the same settings and file name.
   retry(id: string): Job | undefined {
     const job = this.jobs.get(id);
-    if (job && (job.status === "failed" || job.status === "cancelled")) {
+    if (job && !job.outcomeUnknown && (job.status === "failed" || job.status === "cancelled")) {
       job.status = "queued";
       job.error = undefined;
       job.finishedAt = undefined;
@@ -131,8 +133,10 @@ export class JobQueue {
           job.files = await this.runner(job);
           job.status = "done";
           job.error = undefined;
+          job.outcomeUnknown = false;
         } catch (err) {
           job.error = err instanceof Error ? err.message : String(err);
+          job.outcomeUnknown = Boolean((err as { outcome_unknown?: unknown } | null)?.outcome_unknown);
           // Failed tiles are already retried inside Flow (its own Retry button); only an agent that produced nothing
           // is re-queued here. Timeouts are never retried automatically: they may still have spent credits.
           const retryable = /agent finished without creating/i.test(job.error);

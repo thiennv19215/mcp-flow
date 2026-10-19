@@ -4,7 +4,7 @@ const nativeFlowOperations = new Set([
   "flow.context", "flow.state", "flow.projects.list", "flow.project.open", "flow.assets.list", "flow.characters.list",
   "flow.generation.submit", "flow.generation.observe",
   "flow.generation.upload.preflight",
-  "flow.file.upload.begin", "flow.file.upload.chunk", "flow.file.upload.finish", "flow.file.upload.abort",
+  "flow.file.upload.begin", "flow.file.upload.chunk", "flow.file.upload.finish", "flow.file.upload.abort", "flow.media.upload",
   "flow.asset.download",
   "flow.asset.rename", "flow.asset.trash",
   "flow.character.create", "flow.character.edit", "flow.edit.run",
@@ -23,6 +23,7 @@ async function ensureActivityOverlay(tabId) {
 }
 async function ensureFlowSubmitBridge(tabId) {
   await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["content/flow-submit-main.js"] });
+  await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["content/flow-upload-main.js"] });
   const readBridge = () => chrome.scripting.executeScript({
     target: { tabId },
     world: "MAIN",
@@ -74,9 +75,13 @@ async function sendFlowCommand(tabId, message) {
         "content/flow-page-driver.js",
         "content/flow-driver-registry.js",
         "content/flow-v2-driver.js",
+        "content/character-actions.js",
+        "content/image-actions.js",
+        "content/video-actions.js",
         "content/dom-actions.js",
       ],
     });
+    await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["content/flow-upload-main.js"] });
     return chrome.tabs.sendMessage(tabId, message);
   }
 }
@@ -251,7 +256,7 @@ async function execute(ws, method, args = []) {
     const operation = command.name;
     if (operation === "flow.projects.list") return listFlowProjects();
     if (operation === "flow.project.open") return openFlowProject(command.payload?.projectId);
-    const interactive = !["flow.state", "flow.assets.list", "flow.characters.list", "flow.generation.observe", "flow.generation.upload.preflight", "flow.file.upload.begin", "flow.file.upload.chunk", "flow.file.upload.finish", "flow.file.upload.abort"].includes(operation);
+  const interactive = !["flow.state", "flow.assets.list", "flow.characters.list", "flow.generation.observe", "flow.generation.upload.preflight", "flow.file.upload.begin", "flow.file.upload.chunk", "flow.file.upload.finish", "flow.file.upload.abort"].includes(operation);
     if (interactive) showActivity(true);
     let response;
     try {

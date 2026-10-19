@@ -5,7 +5,7 @@ import { z } from "zod";
 import { assemble, localVoices, speakLocally } from "./assemble.js";
 import { GEMINI_VOICES, geminiKey, saveGeminiKey, speakWithGemini } from "./gemini.js";
 import { extractLastFrame } from "./chain.js";
-import { characterLook, createCharacter, downloadAsset, trashAsset, editCharacter, getFlowState, listAssets, listCharacters, listFlowProjects, openFlowProject, rememberCharacter, runAgentBatch, runContinue, runEdit, runGeneration } from "./flow.js";
+import { characterLook, createCharacter, downloadAsset, trashAsset, editCharacter, getFlowState, listAssets, listCharacters, listFlowProjects, openFlowProject, rememberCharacter, runAgentBatch, runContinue, runEdit, runGeneration, uploadFlowMediaToProject } from "./flow.js";
 import { JobQueue, type Job } from "./queue.js";
 import { BIN, COMPUTER, IS_MAC, IS_WIN, moveToBin } from "./platform.js";
 import { TECHNIQUES, techniqueById } from "./techniques.js";
@@ -61,8 +61,9 @@ export const shapes = {
     timeout_seconds: z.number().int().min(5).max(900).default(40).describe("An MCP call returns after at most 40 s whatever this says, so call again until finished is true."),
   },
   cancel: { job_id: z.string() },
-  retry: { job_ids: z.array(z.string()).optional().describe("Jobs to re-queue. Default: every failed job.") },
+  retry: { job_ids: z.array(z.string()).optional().describe("Jobs with a confirmed failed or cancelled result. Default: every safe failed job; jobs with an unknown submit outcome are blocked until you inspect Flow to avoid duplicates.") },
   assets: { kind: z.enum(["image", "video", "scene"]).optional() },
+  upload_media: { path: z.string().min(1).describe("Absolute path to an image or video file to upload to the open Flow project. Supports PNG, JPG, WebP, GIF, HEIC, HEIF, AVIF, MP4, MOV, WebM, AVI, MKV or 3GP.") },
   projects: {},
   open_project: { project_id: z.string().uuid() },
   download: {
@@ -184,7 +185,7 @@ export const shapes = {
 
 type Args<K extends keyof typeof shapes> = z.infer<z.ZodObject<(typeof shapes)[K]>>;
 
-export const jobView = ({ id, status, params, files, attempts, credits, progress, note, error, failed_scenes }: Job) => ({
+export const jobView = ({ id, status, params, files, attempts, credits, progress, note, error, failed_scenes, outcomeUnknown }: Job) => ({
   id,
   status,
   project: params.output_dir,
@@ -197,6 +198,7 @@ export const jobView = ({ id, status, params, files, attempts, credits, progress
   note,
   error,
   failed_scenes,
+  outcome_unknown: outcomeUnknown ?? false,
 });
 
 // One implementation runs in whichever process owns the Flow tab; the other process talks to it over HTTP (remote.ts).
@@ -207,6 +209,7 @@ export interface Core {
   cancel(a: Args<"cancel">): Promise<unknown>;
   retry(a: Args<"retry">): Promise<unknown>;
   assets(a: Args<"assets">): Promise<unknown>;
+  upload_media(a: Args<"upload_media">): Promise<unknown>;
   projects(): Promise<unknown>;
   open_project(a: Args<"open_project">): Promise<unknown>;
   download(a: Args<"download">): Promise<unknown>;
@@ -249,6 +252,7 @@ const BUSY = "A generation is running in the Flow tab. Wait for it to finish (fl
 
 export class LocalCore implements Core {
   private detailedState: ReturnType<typeof getFlowState> | undefined;
+  private mediaUploadActive = false;
   private queue: JobQueue = new JobQueue(async (job) => {
     const { chain_from, reference_from } = job.params;
     if (reference_from) {
@@ -268,6 +272,7 @@ export class LocalCore implements Core {
   });
 
   async status({ detailed }: Args<"status">) {
+    if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     // Studio and MCP can poll at once. Share the account-panel read so one
     // request cannot release focus/close a panel another request is using.
     let flow;
@@ -282,6 +287,7 @@ export class LocalCore implements Core {
   }
 
   async generate({ project, scenes }: Args<"generate">) {
+    if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     const invalid = scenes.findIndex((s, i) => s.chain_previous && (i === 0 || s.first_frame || s.type === "image"));
     if (invalid >= 0) {
       throw new Error(`Scene ${invalid + 1}: chain_previous needs a preceding video scene in the same call and cannot be combined with first_frame.`);
@@ -348,10 +354,11 @@ export class LocalCore implements Core {
   }
 
   async retry({ job_ids }: Args<"retry">) {
-    const ids = job_ids ?? this.queue.list().filter((j) => j.status === "failed" || j.failed_scenes?.length).map((j) => j.id);
+    const ids = job_ids ?? this.queue.list().filter((j) => (j.status === "failed" && !j.outcomeUnknown) || j.failed_scenes?.length).map((j) => j.id);
     const jobs: Job[] = [];
     for (const id of ids) {
       const job = this.queue.get(id);
+      if (job?.outcomeUnknown) throw new Error(`Job ${id} may already have been submitted to Flow. Check the project for its result before retrying; automatic replay is blocked to avoid duplicate generation or charges.`);
       const p = job?.params;
       if (job?.failed_scenes?.length && p?.agent_scenes && job.status === "done") {
         // A batch that finished with some images still failed: make just those again, under their own scene numbers,
@@ -379,20 +386,31 @@ export class LocalCore implements Core {
   }
 
   async assets({ kind }: Args<"assets">) {
+    if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     if (this.queue.busy) throw new Error(BUSY);
     return (await listAssets()).filter((a) => !kind || a.kind === kind).map(({ name, kind }) => ({ name, kind }));
   }
 
+  async upload_media({ path }: Args<"upload_media">) {
+    if (this.mediaUploadActive || this.queue.list().some(job => job.status === "queued" || job.status === "running")) throw new Error(BUSY);
+    this.mediaUploadActive = true;
+    try { return await uploadFlowMediaToProject(path); }
+    finally { this.mediaUploadActive = false; }
+  }
+
   async projects() {
+    if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     return listFlowProjects();
   }
 
   async open_project({ project_id }: Args<"open_project">) {
+    if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     if (this.queue.busy) throw new Error(BUSY);
     return openFlowProject(project_id);
   }
 
   async download({ project, assets, quality }: Args<"download">) {
+    if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     if (this.queue.busy) throw new Error(BUSY);
     const dir = projectDir(project);
     mkdirSync(dir, { recursive: true });
@@ -440,6 +458,7 @@ export class LocalCore implements Core {
   }
 
   async agent({ project, scenes, aspect_ratio, download_quality }: Args<"agent">) {
+    if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     const output_dir = projectDir(project);
     const job = this.queue.add({
       prompt: `Agent batch: ${scenes.length} images`,
@@ -455,6 +474,7 @@ export class LocalCore implements Core {
   }
 
   async edit({ project, asset, prompt, download_quality }: Args<"edit">) {
+    if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     const output_dir = projectDir(project);
     const job = this.queue.add({ prompt, type: "video", max_credits: 0, edit_asset: asset, download_quality, output_dir, file_stem: this.nextStem(output_dir, "edit") });
     return { output_dir, jobs: [jobView(job)] };
@@ -462,6 +482,7 @@ export class LocalCore implements Core {
 
   // Flow's composer takes a start frame OR a character, never both; agent mode takes both, so this goes that way.
   async continue_shot({ project, from_asset, prompt, attach, aspect_ratio, mode, download_quality, force }: Args<"continue_shot">) {
+    if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     // A lost queue entry is not proof that nothing ran: when the owner process is replaced mid-job the job vanishes
     // while Flow carries on and charges for it. Re-running then spends twice, which is exactly what happened on
     // 2026-09-20. Flow's own grid is the only honest record, so ask it before starting another paid generation.
@@ -507,11 +528,13 @@ export class LocalCore implements Core {
   }
 
   async trash({ name }: Args<"trash">) {
+    if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     if (this.queue.busy) throw new Error(BUSY);
     return trashAsset(name);
   }
 
   async character(a: Args<"character">) {
+    if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     if (this.queue.busy) throw new Error(BUSY);
     if (!a.image && !a.describe) throw new Error("Pass either `describe` (Flow draws the portrait) or `image`.");
     const made = await createCharacter(a);
@@ -520,6 +543,7 @@ export class LocalCore implements Core {
   }
 
   async character_edit({ name, change, look }: Args<"character_edit">) {
+    if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     if (this.queue.busy) throw new Error(BUSY);
     const out = await editCharacter(name, change);
     // Every scene that references the character quotes this description in its character lock, so it has to describe
@@ -530,6 +554,7 @@ export class LocalCore implements Core {
   }
 
   async characters() {
+    if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     if (this.queue.busy) throw new Error(BUSY);
     return (await listCharacters()).map((name) => ({ name, use_as: `asset:${name}` }));
   }

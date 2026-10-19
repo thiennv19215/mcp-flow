@@ -30,7 +30,7 @@
         "https://flow.google.com/*",
         "https://labs.google/fx/*"
       ],
-      "js": ["content/flow-submit-main.js"],
+      "js": ["content/flow-submit-main.js", "content/flow-upload-main.js"],
       "run_at": "document_start",
       "world": "MAIN"
     },
@@ -45,6 +45,9 @@
         "content/flow-page-driver.js",
         "content/flow-driver-registry.js",
         "content/flow-v2-driver.js",
+        "content/character-actions.js",
+        "content/image-actions.js",
+        "content/video-actions.js",
         "content/dom-actions.js"
       ],
       "run_at": "document_idle"

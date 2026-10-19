@@ -224,7 +224,8 @@ key → Save key**. It's checked with Google before it's saved, and stored only 
 
 ## Behaviour and settings
 
-- One generation at a time, with a random 25–70 second pause between them. The page carries an
+- One generation at a time, with a random 5–10 second pause between jobs. Set
+  `FLOW_MCP_PAUSE_MIN_S` and `FLOW_MCP_PAUSE_MAX_S` to adjust the pause. The page carries an
   invisible reCAPTCHA; this drives the real interface at human pace and does nothing to evade it.
 - Before each generation the server reads Flow's own credit quote and skips the scene if it exceeds
   `max_credits` (default 25).

@@ -1,12 +1,12 @@
-import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { homedir, tmpdir } from "node:os";
 import { dirname, extname, join } from "node:path";
 import type { Job } from "./queue.js";
 import { extractZip } from "./platform.js";
 import { executeFlowDom, extensionSupportsCapability } from "./extension.js";
+import { streamFileChunks, type FileChunk } from "./native-file-transfer.js";
 import { HOME_DIR } from "./paths.js";
-import { streamFileChunks } from "./native-file-transfer.js";
 import { nativeDownloadIds, waitForNativeDownload } from "./native-downloads.js";
 
 export interface FlowState {
@@ -96,29 +96,90 @@ export async function openFlowProject(projectId: string): Promise<{ opened: bool
   }, { timeoutMs: 65_000 });
 }
 
-async function stageNativeImage(
+function uploadMimeType(name: string): string {
+  const extension = extname(name).toLowerCase();
+  const types: Record<string, string> = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
+    ".gif": "image/gif", ".heic": "image/heic", ".heif": "image/heif", ".avif": "image/avif",
+    ".mp4": "video/mp4", ".m4v": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime",
+    ".avi": "video/x-msvideo", ".mkv": "video/x-matroska", ".3gp": "video/3gpp",
+  };
+  const type = types[extension];
+  if (!type) throw new Error(`Flow cannot upload media with extension ${extension || "(none)"}. Use PNG, JPG, WebP, GIF, HEIC, HEIF, AVIF, MP4, MOV, WebM, AVI, MKV or 3GP.`);
+  return type;
+}
+
+async function stageNativeMedia(
   filePath: string,
   name: string,
-  transferIds: string[],
+  stagedDirs: string[],
   job?: Job,
 ): Promise<{ transferId: string; name: string }> {
-  const transferId = randomUUID().replace(/-/g, "");
-  transferIds.push(transferId);
   const extension = extname(filePath).toLowerCase();
-  const type = extension === ".png" ? "image/png" : extension === ".webp" ? "image/webp" : "image/jpeg";
-  let started = false;
-  for await (const chunk of streamFileChunks(filePath, transferId, { maxBytes: 25 * 1024 * 1024, chunkBytes: 256 * 1024, maxChunks: 100 })) {
-    if (!started) {
-      await nativeOperation("flow.file.upload.begin", { transfer: { transferId, name, type, size: chunk.size, sha256: chunk.sha256 } }, "flow.native.file.upload.begin", job, 30_000);
-      started = true;
+  const type = uploadMimeType(filePath);
+  const isVideo = type.startsWith("video/");
+  const maxBytes = isVideo ? 200 * 1024 * 1024 : 25 * 1024 * 1024;
+  const uploadName = /\.jpe?g$/i.test(name) ? name.replace(/\.jpeg$/i, ".jpg") : name;
+  const dir = mkdtempSync(join(tmpdir(), "flow-native-upload-"));
+  stagedDirs.push(dir);
+  const stagedPath = join(dir, uploadName);
+  copyFileSync(filePath, stagedPath);
+  const stagedSize = statSync(stagedPath).size;
+  if (stagedSize < 1 || stagedSize > maxBytes) throw new Error(`${isVideo ? "Videos" : "Images"} must be non-empty and no larger than ${isVideo ? 200 : 25} MiB.`);
+  const transferId = randomUUID();
+  requireCapabilities("flow.native.file.upload.begin", "flow.native.file.upload.chunk", "flow.native.file.upload.finish", "flow.native.file.upload.abort");
+  let began = false;
+  try {
+    let first = true;
+    let batch: FileChunk[] = [];
+    const sendBatch = async () => {
+      if (!batch.length) return;
+      await nativeOperation("flow.file.upload.chunk", { chunks: batch }, "flow.native.file.upload.chunk", job, 60_000);
+      batch = [];
+    };
+    for await (const chunk of streamFileChunks(stagedPath, transferId, { maxBytes, maxChunks: isVideo ? 800 : 100 })) {
+      if (first) {
+        await nativeOperation("flow.file.upload.begin", { transfer: {
+          transferId, name: uploadName, type, size: chunk.size, sha256: chunk.sha256,
+        } }, "flow.native.file.upload.begin", job, 30_000);
+        began = true;
+        first = false;
+      }
+      batch.push(chunk);
+      if (batch.length === 4) await sendBatch();
     }
-    await nativeOperation("flow.file.upload.chunk", {
-      chunk: { transferId: chunk.transferId, index: chunk.index, offset: chunk.offset, data: chunk.data, chunkSha256: chunk.chunkSha256 },
-    }, "flow.native.file.upload.chunk", job, 30_000);
+    await sendBatch();
+    await nativeOperation("flow.file.upload.finish", { transferId }, "flow.native.file.upload.finish", job, 30_000);
+    return { transferId, name: uploadName };
+  } catch (error) {
+    if (began) await nativeOperation("flow.file.upload.abort", { transferId }, "flow.native.file.upload.abort", job, 10_000).catch(() => {});
+    throw error;
   }
-  if (!started) throw new Error(`Image file is empty: ${filePath}`);
-  await nativeOperation("flow.file.upload.finish", { transferId }, "flow.native.file.upload.finish", job, 30_000);
-  return { transferId, name };
+}
+
+export async function uploadFlowMediaToProject(filePath: string): Promise<{ name: string; kind: "image" | "video" }> {
+  const type = uploadMimeType(filePath);
+  const kind = type.startsWith("video/") ? "video" : "image";
+  const prefix = `fm-${randomUUID().replace(/-/g, "").slice(0, 12)}-upload`;
+  const basename = filePath.split(/[\\/]/).pop() || "media";
+  const name = `${prefix}${extname(basename).toLowerCase()}`;
+  const stagedDirs: string[] = [];
+  let staged: { transferId: string; name: string } | undefined;
+  const transferContext = {} as Job;
+  try {
+    requireCapabilities("flow.native.generation.upload.preflight", "flow.native.media.upload");
+    await nativeOperation("flow.generation.upload.preflight", {}, "flow.native.generation.upload.preflight", transferContext, 10_000);
+    staged = await stageNativeMedia(filePath, name, stagedDirs, transferContext);
+    return await nativeOperation("flow.media.upload", { ...staged, kind }, "flow.native.media.upload", transferContext, 180_000);
+  } finally {
+    if (staged) await nativeOperation("flow.file.upload.abort", { transferId: staged.transferId }, "flow.native.file.upload.abort", transferContext, 10_000).catch(() => {});
+    cleanStagedFiles(stagedDirs);
+  }
+}
+
+function cleanStagedFiles(dirs: string[]): void {
+  for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  dirs.length = 0;
 }
 
 function extensionOf(file: string): string {
@@ -198,13 +259,10 @@ export async function runGeneration(job: Job): Promise<string[]> {
     ...(s.last_frame && !s.last_frame.startsWith(ASSET_PREFIX) ? [{ path: s.last_frame, slot: "end" }] : []),
     ...refs.flatMap((file, index) => file.startsWith(ASSET_PREFIX) ? [] : [{ path: file, slot: `ref${index + 1}` }]),
   ];
-  if (localInputs.length) requireCapabilities(
-    "flow.native.generation.upload.preflight", "flow.native.file.upload.begin", "flow.native.file.upload.chunk",
-    "flow.native.file.upload.finish", "flow.native.file.upload.abort",
-  );
+  if (localInputs.length) requireCapabilities("flow.native.generation.upload.preflight");
 
-  const transferIds: string[] = [];
-  let stagingStarted = false;
+  const stagedDirs: string[] = [];
+  const stagedTransferIds: string[] = [];
   let submitted: { submitted: boolean; before: string[]; type: MediaKind; expectedCount: number; credits?: number };
   try {
     const stagedByPath = new Map<string, { transferId: string; name: string }>();
@@ -212,8 +270,9 @@ export async function runGeneration(job: Job): Promise<string[]> {
       await nativeOperation("flow.generation.upload.preflight", {}, "flow.native.generation.upload.preflight", job, 10_000);
       for (const { path: filePath, slot } of localInputs) {
         const name = `fm-${randomUUID().replace(/-/g, "").slice(0, 12)}-${slot}${extname(filePath).toLowerCase()}`;
-        stagingStarted = true;
-        stagedByPath.set(filePath, await stageNativeImage(filePath, name, transferIds, job));
+        const staged = await stageNativeMedia(filePath, name, stagedDirs, job);
+        stagedByPath.set(filePath, staged);
+        stagedTransferIds.push(staged.transferId);
       }
     }
     const frame = (value?: string, slot?: string) => !value ? undefined : value.startsWith(ASSET_PREFIX)
@@ -231,10 +290,11 @@ export async function runGeneration(job: Job): Promise<string[]> {
       resolution: s.resolution, variants: s.variants, maxCredits: s.max_credits,
       firstFrame: frame(s.first_frame, "start"), lastFrame: frame(s.last_frame, "end"), attachments,
     }, "flow.native.generation.submit", job, 120_000);
-  } catch (error) {
-    if (stagingStarted) await Promise.allSettled(transferIds.map(transferId =>
-      nativeOperation("flow.file.upload.abort", { transferId }, "flow.native.file.upload.abort", job, 5000)));
-    throw error;
+  } finally {
+    await Promise.all(stagedTransferIds.map(transferId => nativeOperation(
+      "flow.file.upload.abort", { transferId }, "flow.native.file.upload.abort", job, 10_000,
+    ).catch(() => undefined)));
+    cleanStagedFiles(stagedDirs);
   }
 
   if (typeof submitted.credits !== "number") throw new Error("Native generation did not return its credit quote after submission. The outcome may be unknown; inspect Flow before retrying.");
@@ -312,15 +372,15 @@ export async function createCharacter(c: CharacterParams, job?: Job): Promise<{ 
     }
   }
   requireCapabilities("flow.native.character.create");
-  const transferIds: string[] = [];
-  let stagingStarted = false;
+  const stagedDirs: string[] = [];
+  let stagedTransferId: string | undefined;
   try {
     let character = c;
     if (localImage) {
-      requireCapabilities("flow.native.generation.upload.preflight", "flow.native.file.upload.begin", "flow.native.file.upload.chunk", "flow.native.file.upload.finish", "flow.native.file.upload.abort");
+      requireCapabilities("flow.native.generation.upload.preflight");
       await nativeOperation("flow.generation.upload.preflight", {}, "flow.native.generation.upload.preflight", job, 10_000);
-      stagingStarted = true;
-      const staged = await stageNativeImage(c.image!, `fm-${randomUUID().replace(/-/g, "").slice(0, 12)}-character${extname(c.image!).toLowerCase()}`, transferIds, job);
+      const staged = await stageNativeMedia(c.image!, `fm-${randomUUID().replace(/-/g, "").slice(0, 12)}-character${extname(c.image!).toLowerCase()}`, stagedDirs, job);
+      stagedTransferId = staged.transferId;
       character = { ...c, image: staged } as unknown as CharacterParams;
     }
     const result = await nativeOperation<{ name: string; url: string; portraitMedia?: NativeMedia }>("flow.character.create", { character }, "flow.native.character.create", job, 10 * 60_000);
@@ -338,10 +398,9 @@ export async function createCharacter(c: CharacterParams, job?: Job): Promise<{ 
     if (c.describe) rememberCharacter(c.name, c.describe);
     if (job) job.progress = undefined;
     return { name: result.name, url: result.url, portrait };
-  } catch (error) {
-    if (stagingStarted) await Promise.allSettled(transferIds.map(transferId =>
-      nativeOperation("flow.file.upload.abort", { transferId }, "flow.native.file.upload.abort", job, 5000)));
-    throw error;
+  } finally {
+    if (stagedTransferId) await nativeOperation("flow.file.upload.abort", { transferId: stagedTransferId }, "flow.native.file.upload.abort", job, 10_000).catch(() => {});
+    cleanStagedFiles(stagedDirs);
   }
 }
 

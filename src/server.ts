@@ -92,9 +92,15 @@ export async function startServer(core: Core): Promise<ServerRole> {
       if (req.method === "GET" && url.pathname === "/media") return sendMedia(req, res, url.searchParams.get("path") ?? "");
 
       if (req.method === "POST" && url.pathname === "/api/upload") {
-        const name = basename(url.searchParams.get("name") ?? "upload").replace(/[^\w.-]+/g, "_");
+        const originalName = basename(url.searchParams.get("name") ?? "upload");
+        const extension = extname(originalName).toLowerCase();
+        const allowed = [".png", ".jpg", ".jpeg", ".webp", ".mp4", ".webm", ".mov", ".gif", ".mp3", ".wav", ".m4a"];
+        if (!allowed.includes(extension)) return json(res, 415, { error: `Unsupported file type "${extension || "(no extension)"}".` });
+        const name = originalName.replace(/[^\w.-]+/g, "_");
         const path = join(UPLOAD_DIR, `${randomBytes(4).toString("hex")}-${name}`);
-        writeFileSync(path, await readBody(req, MAX_UPLOAD));
+        const body = await readBody(req, MAX_UPLOAD);
+        if (!body.length) return json(res, 400, { error: "The selected file is empty." });
+        writeFileSync(path, body);
         return json(res, 200, { path });
       }
 

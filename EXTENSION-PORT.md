@@ -19,7 +19,7 @@ The extension injects its content scripts into an already-open Flow tab when nee
 
 ## File handling
 
-Uploads are sent from backend-authorized local paths in bounded, checksummed chunks. The content script selects a synthetic `File`; that does not constitute a trusted user gesture, so Flow may change which upload states it accepts. Flow downloads are initiated in the tab and tracked through Chrome's downloads API. The backend collects the completed file, applies output names, and extracts ZIP takes when needed.
+Uploads are staged under a temporary, unique local filename, then selected through Chrome DevTools Protocol's `DOM.setFileInputFiles` on the selected Flow tab. This uses Chrome's native file-input path instead of synthesizing a `File` in page JavaScript. The extension needs the Chrome `debugger` permission for this operation; Chrome may show its standard debugging notice while the file is selected. Temporary staged files are removed after Flow finishes processing the upload. Flow downloads are initiated in the tab and tracked through Chrome's downloads API. The backend collects the completed file, applies output names, and extracts ZIP takes when needed.
 
 ## Limits
 

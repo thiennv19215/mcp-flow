@@ -426,6 +426,7 @@ const DEFAULTS = {
 };
 const S = Object.assign(structuredClone(DEFAULTS), JSON.parse(localStorage.getItem("flow-studio-v2") || "{}"));
 const save = () => localStorage.setItem("flow-studio-v2", JSON.stringify(S));
+if (S.frames.engine === "agent" && S.frames.variants !== 1) { S.frames.variants = 1; save(); }
 let TECH = [], VOICES = { gemini: [], mac: [] }, CAST = [], LIB = [], GAL = [], castImage = null, pickTarget = null, busy = false;
 
 /* ---------- tabs ---------- */
@@ -461,11 +462,16 @@ function renderSegs() {
     const omni = S.shots.model.startsWith("Omni");
     const off = (key === "c_variants" && Boolean(castImage)) || ((key === "s_duration" || key === "s_resolution") && !omni);
     host.innerHTML = cfg.opts.map((o) => `<button type="button" data-v="${o}" class="${String(cfg.get()) === String(o) ? "on" : ""}" ${off ? "disabled" : ""}>${cfg.labels?.[o] ?? o}</button>`).join("");
+    if (key === "f_variants" && S.frames.engine === "agent") {
+      host.querySelectorAll('button:not([data-v="1"])').forEach(button => { button.disabled = true; });
+    }
   }
 }
 document.addEventListener("click", (e) => {
   const b = e.target.closest("[data-seg] button"); if (!b || b.disabled) return;
-  SEGS[b.parentElement.dataset.seg].set(b.dataset.v);
+  const key = b.parentElement.dataset.seg;
+  SEGS[key].set(b.dataset.v);
+  if (key === "f_engine" && b.dataset.v === "agent") S.frames.variants = 1;
   renderAll();
 });
 
@@ -498,11 +504,12 @@ document.addEventListener("click", (e) => {
 });
 $("#file").addEventListener("change", async (e) => {
   const f = e.target.files[0]; e.target.value = ""; if (!f || !pickTarget || !guard()) return;
+  const target = pickTarget;
   try {
     const res = await fetch(`/api/upload?name=${encodeURIComponent(f.name)}`, { method: "POST", headers: { "x-flow-token": TOKEN }, body: f });
-    const data = await res.json(); if (!res.ok) throw new Error(data.error);
-    setSlot(pickTarget.kind, pickTarget.i, { path: data.path, name: f.name });
-  } catch (err) { toast(err.message, true); }
+    const data = await res.json(); if (!res.ok) throw new Error(data.error || `Upload failed (HTTP ${res.status}).`);
+    setSlot(target.kind, target.i, { path: data.path, name: f.name });
+  } catch (err) { toast(err.message || "Upload failed. Check that Flow Studio is running and try again.", true); }
 });
 async function openPicker(audioOnly) {
   $("#picker h2").textContent = "Pick from Flow"; $("#picker p.empty").textContent = "Media already in the open Flow project.";
@@ -598,7 +605,7 @@ function renderScenes() {
   $("#f_count").textContent = `${S.frames.scenes.length} frame${S.frames.scenes.length > 1 ? "s" : ""}`;
   $("#s_count").textContent = `${S.shots.scenes.length} shot${S.shots.scenes.length > 1 ? "s" : ""}`;
   $("#f_engineNote").textContent = S.frames.engine === "agent"
-    ? "Flow's agent renders every frame at once (about a minute for 30) and rewrites each prompt itself. No references, no frame matching."
+    ? "Flow's agent makes one image per frame and renders every frame at once (about a minute for 30). It rewrites each prompt itself; references and frame matching are unavailable."
     : "Each frame runs on its own with your exact prompt, references and matching — about a minute each.";
 }
 document.addEventListener("input", (e) => {
@@ -900,11 +907,10 @@ $("#roll").onclick = async () => {
   const list = cfg.scenes.filter((x) => x.prompt.trim());
   if (!list.length) return;
   const ref = (v) => (v ? (v.asset ? `asset:${v.asset}` : v.path) : undefined);
-  if (!video && cfg.engine === "agent" && cfg.variants === 1) {
+  if (!video && cfg.engine === "agent") {
     try { await api("agent", { project: cfg.project, scenes: list.map((s) => s.prompt.trim()), aspect_ratio: cfg.aspect }); toast("Handed to Flow's agent."); poll(); } catch (err) { toast(err.message, true); }
     return;
   }
-  if (!video && cfg.engine === "agent" && cfg.variants > 1) toast("Multi-output uses One by one to honor the selected take count.");
   const scenes = list.map((sc, i) => ({
     prompt: sc.prompt.trim(),
     type: video ? "video" : "image",
@@ -1075,15 +1081,15 @@ function renderStatus(st) {
   $("#hint").innerHTML = f.hint ? `<div class="hint">${esc(f.hint)}</div>` : "";
   $("#pacing").innerHTML = st.pacing ? `<div class="pacing">⏱ ${esc(st.pacing)}</div>` : "";
   const jobs = [...st.jobs].reverse();
-  const sig = JSON.stringify(jobs.map((j) => [j.id, j.status, j.progress, j.files.length, j.credits, j.attempts, j.failed_scenes?.length ?? 0]));
+  const sig = JSON.stringify(jobs.map((j) => [j.id, j.status, j.progress, j.files.length, j.credits, j.attempts, j.failed_scenes?.length ?? 0, j.outcome_unknown]));
   if (sig !== renderStatus.sig) {
     if (renderStatus.sig && LIVE) loadGallery(slateFolder());
     renderStatus.sig = sig;
     $("#jobs").innerHTML = jobs.map((j) => `<div class="job"><div class="top"><span class="name">${esc((j.project || "").split(/[\\/]/).pop())} · ${esc(j.scene)}</span>
       <span class="badge ${j.status}">${j.status}${j.progress ? " " + esc(j.progress) : ""}</span>${j.credits !== undefined ? `<span class="badge">${j.credits} cr</span>` : ""}${j.attempts > 1 ? `<span class="badge">try ${j.attempts}</span>` : ""}
-      ${j.status === "queued" ? `<button class="btn small ghost" data-cancel="${j.id}">Cancel</button>` : ""}${/failed|cancelled/.test(j.status) ? `<button class="btn small" data-retry="${j.id}">Retry</button>` : ""}${j.status === "done" && j.failed_scenes?.length ? `<button class="btn small" data-retry="${j.id}">Retry ${j.failed_scenes.length} failed image${j.failed_scenes.length > 1 ? "s" : ""}</button>` : ""}</div>
+      ${j.status === "queued" ? `<button class="btn small ghost" data-cancel="${j.id}">Cancel</button>` : ""}${/failed|cancelled/.test(j.status) && !j.outcome_unknown ? `<button class="btn small" data-retry="${j.id}">Retry</button>` : ""}${j.status === "done" && j.failed_scenes?.length ? `<button class="btn small" data-retry="${j.id}">Retry ${j.failed_scenes.length} failed image${j.failed_scenes.length > 1 ? "s" : ""}</button>` : ""}</div>
       ${j.status === "running" ? `<div class="meter"><i style="width:${parseInt(j.progress) || 4}%"></i></div>` : ""}
-      <p>${esc(j.prompt)}</p>${j.note ? `<p style="color:var(--warn)">${esc(j.note)}</p>` : ""}${j.error ? `<p class="err">${esc(j.error)}</p>` : ""}
+      <p>${esc(j.prompt)}</p>${j.note ? `<p style="color:var(--warn)">${esc(j.note)}</p>` : ""}${j.error ? `<p class="err">${esc(j.error)}</p>` : ""}${j.outcome_unknown ? `<p class="err">Flow may already have accepted this request. Check the project before retrying; replay is blocked to avoid duplicates.</p>` : ""}
       ${j.files.map((p) => (/\.(mp4|webm|mov)$/i.test(p) ? `<video controls playsinline preload="metadata" src="${media(p)}"></video>` : /\.(m4a|mp3|wav)$/i.test(p) ? `<audio controls src="${media(p)}"></audio>` : `<img class="out" src="${media(p)}">`)).join("")}</div>`).join("") || `<p class="empty">${dict.nothingQueued}</p>`;
   }
   estimate();
