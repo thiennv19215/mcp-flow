@@ -1,6 +1,6 @@
 # Gán nhân vật — 19/10/2026
 
-Đã xác nhận qua MCP rằng nhân vật đã lưu `MCP Test Mug` được gán vào prompt. Phản hồi có `kind: "character"`, `confirmed: true`, `submitted: false`. Quan sát DOM sau lệnh cho thấy đúng một `flow-character-ingredient-chip`; đây là nhân vật đã lưu, không phải reference ảnh thường. 
+Đã xác nhận qua MCP rằng nhân vật đã lưu `MCP Test Mug` được gán vào prompt. Phản hồi có `kind: "character"`, `confirmed: true`, `submitted: false`. Quan sát DOM sau lệnh cho thấy đúng một `flow-character-ingredient-chip`; đây là nhân vật đã lưu, không phải reference ảnh thường.
 
 ## Thay đổi
 
