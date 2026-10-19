@@ -493,38 +493,20 @@ function flowOption(name) {
   });
 }
 async function activateFlowSubmitButton(button) {
-  if (!(button instanceof HTMLButtonElement) || !button.isConnected) {
+  if (!(button instanceof HTMLButtonElement) || !button.isConnected || !visible(button)) {
     throw flowError("FLOW_SUBMIT_BUTTON_MISSING", "Flow's Start generation button disappeared before activation.", true);
   }
-  const token = crypto.randomUUID();
-  button.setAttribute("data-flow-mcp-submit-token", token);
-  try {
-    button.removeAttribute("data-flow-mcp-submit-result");
-    button.setAttribute("data-flow-mcp-submit-request", token);
-    const deadline = Date.now() + 5000;
-    let activation;
-    while (Date.now() < deadline) {
-      const raw = button.getAttribute("data-flow-mcp-submit-result");
-      if (raw) {
-        try {
-          const result = JSON.parse(raw);
-          if (result?.token === token) { activation = result; break; }
-        } catch { /* The main-world bridge may still be writing the result. */ }
-      }
-      await wait(50);
-    }
-    button.removeAttribute("data-flow-mcp-submit-request");
-    button.removeAttribute("data-flow-mcp-submit-result");
-    if (!activation) throw flowError("FLOW_SUBMIT_BRIDGE_TIMEOUT", "The Flow main-world submit bridge did not answer; the click may already have reached Flow. Inspect the project before retrying.", false, true);
-    if (!activation?.success && !activation?.clickDelivered && !activation?.controlAccepted) {
-      const detail = activation?.error || "no matching Flow listener";
-      const bridge = activation?.bridgeReadyState && ` Bridge started at document.readyState=${activation.bridgeReadyState}; captured ${activation.capturedClickRegistrations || 0} click listener(s).`;
-      throw flowError("FLOW_SUBMIT_ACTIVATION_FAILED", `Flow's submit listener was not activated: ${detail}.${bridge || ""} Nothing was confirmed submitted.`, !activation?.clickDelivered, Boolean(activation?.clickDelivered));
-    }
-    return activation;
-  } finally {
-    button.removeAttribute("data-flow-mcp-submit-token");
+  if (button.disabled || button.getAttribute("aria-disabled") === "true") {
+    throw flowError("FLOW_SUBMIT_DISABLED", "Flow's Start generation button is disabled; nothing was submitted.", true);
   }
+  try {
+    button.click();
+  } catch (error) {
+    throw flowError("FLOW_SUBMIT_ACTIVATION_FAILED", `Flow's DOM click raised an error (${String(error?.message || error)}). The click may have reached Flow; inspect the project before retrying.`, false, true);
+  }
+  // A completed DOM click call proves delivery to the element, not that Flow accepted
+  // the request. Callers must observe Flow's UI before treating submission as confirmed.
+  return { clickDelivered: true, controlAccepted: false, strategy: "dom-click" };
 }
 function nativeRadioMatching(predicate) {
   return [...document.querySelectorAll('[role="radio"],mat-radio-button')].find(el =>
@@ -776,11 +758,12 @@ async function restoreNativeFramesMode() {
   let frames = findFrames();
   if (!frames) throw flowError("FLOW_FRAMES_MODE_UNAVAILABLE", "Flow does not show a Frames mode control after local frame upload. Nothing was submitted.", true, false);
   if (!nativeRadioSelected(frames) && frames.getAttribute("aria-selected") !== "true") frames.click();
+  const hasFrameControls = () => Boolean(flowButton("Start") && flowButton("End"));
   const deadline = Date.now() + 5000;
   let confirmed = false;
   while (Date.now() < deadline) {
     frames = findFrames();
-    if (frames && (nativeRadioSelected(frames) || frames.getAttribute("aria-selected") === "true")) { confirmed = true; break; }
+    if (frames && (nativeRadioSelected(frames) || frames.getAttribute("aria-selected") === "true" || hasFrameControls())) { confirmed = true; break; }
     if (!flowSettingsPanelVisible()) await openFlowSettings();
     await wait(100);
   }
@@ -1684,15 +1667,8 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
     if (!start) throw flowError("FLOW_SUBMIT_DISABLED", "Flow's edit action is unavailable; nothing was submitted.", true);
     let submitted = false;
     try {
-      try {
-        await activateFlowSubmitButton(start);
-        submitted = true;
-      } catch (error) {
-        // The bridge can time out after delivering the activation. Treat it as possibly
-        // submitted so callers do not blindly retry an edit that may already be running.
-        if (error?.code === "FLOW_SUBMIT_BRIDGE_TIMEOUT" || error?.outcome_unknown) error.outcome_unknown = true;
-        throw error;
-      }
+      await activateFlowSubmitButton(start);
+      submitted = true;
       await waitForNativeEditorCompletion(command, Number(params.timeout_ms || 10 * 60_000), "video edit");
       const back = flowButton("Back button to go to previous page");
       if (!back) throw flowError("FLOW_EDIT_BACK_MISSING", "Flow finished the video edit, but its Back control is unavailable. The result remains in Flow.", true, true);
@@ -1711,6 +1687,8 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
     const params = payload.job?.params || payload.params || {};
     const scenes = params.agent_scenes || [];
     if (!scenes.length) throw flowError("FLOW_INVALID_ARGUMENT", "agent_scenes is required.");
+    await closeNativeAgentSession();
+    await ensureFlowLibrarySection("All media");
     const before = collectNativeMedia().map(item => item.id || `title:${item.title}`);
     let submitted = false;
     let outcomeUnknown = false;
@@ -2023,7 +2001,7 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
     if (!acknowledged && !activation.controlAccepted) {
       const newError = currentFlowSubmitErrors().find(message => !errorsBeforeSubmit.has(message));
       if (newError) throw flowError("FLOW_SUBMIT_REJECTED", `Flow rejected the submit: ${newError}`, false, false);
-      throw flowError("FLOW_SUBMIT_UNCONFIRMED", `Flow did not confirm the submit within 30 seconds (${activation.invoked || 0} listener(s), click delivered: ${Boolean(activation.clickDelivered)}). No render wait or download was started.`, false, true);
+      throw flowError("FLOW_SUBMIT_UNCONFIRMED", `Flow did not confirm the submit within 30 seconds (DOM click delivered: ${Boolean(activation.clickDelivered)}). No render wait or download was started.`, false, true);
     }
     return {
       submitted: true,
@@ -2031,7 +2009,7 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
       type: payload.type === "image" ? "image" : "video",
       expectedCount: variants,
       credits,
-      activation: activation.strategy || "flow-main-world",
+      activation: activation.strategy || "dom-click",
       acceptanceObserved: acknowledged || Boolean(activation.controlAccepted),
     };
   }

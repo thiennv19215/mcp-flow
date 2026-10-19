@@ -19,7 +19,8 @@ let selectedTabId;
 let lastError = "";
 const activeInteractiveRequests = new Map();
 const activeInteractiveCounts = new Map();
-const reloadedBridgeTabs = new Set();
+const reloadedUploadBridgeTabs = new Set();
+const reloadedSubmitCleanupTabs = new Set();
 const tabPreparations = new Map();
 const activeTabOperations = new Map();
 const maybeSubmittedOperations = new Set([
@@ -38,40 +39,7 @@ function leaveTabOperation(tabId) {
 async function ensureActivityOverlay(tabId) {
   await chrome.scripting.executeScript({ target: { tabId }, files: ["content/activity-overlay.js"] });
 }
-async function ensureFlowSubmitBridge(tabId) {
-  if (tabOperationActive(tabId)) return;
-  let injectionError = "";
-  await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["content/flow-submit-main.js"] })
-    .catch(error => { injectionError = String(error?.message || error); });
-  await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["content/flow-upload-main.js"] })
-    .catch(error => { injectionError = [injectionError, String(error?.message || error)].filter(Boolean).join("; "); });
-  const readBridge = () => chrome.scripting.executeScript({
-    target: { tabId },
-    world: "MAIN",
-    func: () => ({
-      version: window.__flowMcpSubmitBridge?.version,
-      installedReadyState: window.__flowMcpSubmitBridge?.installedReadyState,
-      uploadVersion: window.__flowMcpUploadBridge?.version,
-    }),
-  }).then(results => results?.[0]?.result || {});
-  const readUploadClientVersion = () => chrome.scripting.executeScript({
-    target: { tabId },
-    world: "ISOLATED",
-    func: () => globalThis.FlowNativeFileTransfer?.version || 0,
-  }).then(results => results?.[0]?.result || 0);
-  let bridge = await readBridge();
-  let uploadClientVersion = await readUploadClientVersion();
-  const bridgeReady = () => bridge.version === 3 && bridge.uploadVersion >= 8 && uploadClientVersion >= 8;
-  if (bridgeReady()) { reloadedBridgeTabs.delete(tabId); return; }
-
-  // Prevent infinite reload loop: reload at most once per tab lifecycle
-  if (reloadedBridgeTabs.has(tabId)) {
-    throw new Error(`Flow submit/upload bridge is unavailable after a reload (submit=${bridge.version ?? "missing"}, upload=${bridge.uploadVersion ?? "missing"}, client=${uploadClientVersion}). Reload the Flow MCP extension and Flow tab.${injectionError ? ` Injection error: ${injectionError}` : ""}`);
-  }
-  reloadedBridgeTabs.add(tabId);
-
-  // Extension updates do not run document_start scripts inside already-open tabs.
-  // Reload once so Flow registers its click handlers after our MAIN-world hook.
+async function reloadFlowTabOnce(tabId) {
   let loadTimedOut = false;
   const loaded = new Promise(resolve => {
     const timer = setTimeout(() => {
@@ -89,14 +57,66 @@ async function ensureFlowSubmitBridge(tabId) {
   });
   await chrome.tabs.reload(tabId);
   await loaded;
+  return loadTimedOut;
+}
+async function clearStaleFlowSubmitBridge(tabId) {
+  if (tabOperationActive(tabId)) return;
+  const installed = await chrome.scripting.executeScript({
+    target: { tabId },
+    world: "MAIN",
+    func: () => Boolean(window.__flowMcpSubmitBridge),
+  }).then(results => Boolean(results?.[0]?.result)).catch(() => false);
+  if (!installed || reloadedSubmitCleanupTabs.has(tabId)) return;
+  const cleanupState = await chrome.storage.session.get("reloadedSubmitCleanupTabIds");
+  const reloadedTabIds = Array.isArray(cleanupState.reloadedSubmitCleanupTabIds) ? cleanupState.reloadedSubmitCleanupTabIds : [];
+  if (reloadedTabIds.includes(tabId)) {
+    reloadedSubmitCleanupTabs.add(tabId);
+    return;
+  }
+  // A prior MAIN-world bridge patches EventTarget.prototype for the lifetime of its
+  // document. Reload once to discard that document before running native operations.
+  reloadedSubmitCleanupTabs.add(tabId);
+  await chrome.storage.session.set({ reloadedSubmitCleanupTabIds: [...reloadedTabIds, tabId] });
+  await reloadFlowTabOnce(tabId);
+}
+async function ensureFlowUploadBridge(tabId) {
+  if (tabOperationActive(tabId)) return;
+  let injectionError = "";
+  await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["content/flow-upload-main.js"] })
+    .catch(error => { injectionError = [injectionError, String(error?.message || error)].filter(Boolean).join("; "); });
+  const readBridge = () => chrome.scripting.executeScript({
+    target: { tabId },
+    world: "MAIN",
+    func: () => ({
+      uploadVersion: window.__flowMcpUploadBridge?.version,
+    }),
+  }).then(results => results?.[0]?.result || {});
+  const readUploadClientVersion = () => chrome.scripting.executeScript({
+    target: { tabId },
+    world: "ISOLATED",
+    func: () => globalThis.FlowNativeFileTransfer?.version || 0,
+  }).then(results => results?.[0]?.result || 0);
+  let uploadBridge = await readBridge();
+  let uploadClientVersion = await readUploadClientVersion();
+  const uploadBridgeReady = () => uploadBridge.uploadVersion >= 8 && uploadClientVersion >= 8;
+  if (uploadBridgeReady()) { reloadedUploadBridgeTabs.delete(tabId); return; }
+
+  // Prevent infinite reload loop: reload at most once per tab lifecycle
+  if (reloadedUploadBridgeTabs.has(tabId)) {
+    throw new Error(`Flow upload bridge is unavailable after a reload (upload=${uploadBridge.uploadVersion ?? "missing"}, client=${uploadClientVersion}). Reload the Flow MCP extension and Flow tab.${injectionError ? ` Injection error: ${injectionError}` : ""}`);
+  }
+  reloadedUploadBridgeTabs.add(tabId);
+
+  // Extension updates do not run document_start scripts inside already-open tabs.
+  const loadTimedOut = await reloadFlowTabOnce(tabId);
   const verifyDeadline = Date.now() + 10_000;
   do {
-    bridge = await readBridge();
+    uploadBridge = await readBridge();
     uploadClientVersion = await readUploadClientVersion();
-    if (bridgeReady()) { reloadedBridgeTabs.delete(tabId); return; }
+    if (uploadBridgeReady()) { reloadedUploadBridgeTabs.delete(tabId); return; }
     await new Promise(resolve => setTimeout(resolve, 250));
   } while (Date.now() < verifyDeadline);
-  throw new Error(`Flow submit/upload bridge failed to initialize after reloading the tab (submit=${bridge.version ?? "missing"}, upload=${bridge.uploadVersion ?? "missing"}, client=${uploadClientVersion}).${loadTimedOut ? " The tab did not finish loading within 30 seconds." : ""}${injectionError ? ` Injection error: ${injectionError}` : ""}`);
+  throw new Error(`Flow upload bridge failed to initialize after reloading the tab (upload=${uploadBridge.uploadVersion ?? "missing"}, client=${uploadClientVersion}).${loadTimedOut ? " The tab did not finish loading within 30 seconds." : ""}${injectionError ? ` Injection error: ${injectionError}` : ""}`);
 }
 async function sendFlowCommand(tabId, message) {
   try {
@@ -123,7 +143,6 @@ async function sendFlowCommand(tabId, message) {
         "content/dom-actions.js",
       ],
     });
-    await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["content/flow-submit-main.js"] });
     await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["content/flow-upload-main.js"] });
     return chrome.tabs.sendMessage(tabId, message);
   }
@@ -202,7 +221,9 @@ async function prepareFlowTab(tabId) {
     if (tabOperationActive(tabId)) return;
     await ensureEnglishFlowTab(tabId);
     if (tabOperationActive(tabId)) return;
-    await ensureFlowSubmitBridge(tabId);
+    await clearStaleFlowSubmitBridge(tabId);
+    if (tabOperationActive(tabId)) return;
+    await ensureFlowUploadBridge(tabId);
   })();
   tabPreparations.set(tabId, preparation);
   try { await preparation; }
@@ -416,6 +437,12 @@ async function connect() {
   finally { opening = false; }
 }
 chrome.tabs.onRemoved.addListener((tabId, info) => {
+  reloadedUploadBridgeTabs.delete(tabId);
+  reloadedSubmitCleanupTabs.delete(tabId);
+  void chrome.storage.session.get("reloadedSubmitCleanupTabIds").then(state => {
+    const ids = Array.isArray(state.reloadedSubmitCleanupTabIds) ? state.reloadedSubmitCleanupTabIds : [];
+    if (ids.includes(tabId)) return chrome.storage.session.set({ reloadedSubmitCleanupTabIds: ids.filter(id => id !== tabId) });
+  }).catch(() => {});
   if (tabId === selectedTabId) {
     selectedTabId = undefined;
     void chrome.storage.session.remove("selectedFlowTabId");

@@ -41,7 +41,7 @@ async function nativeTarget(job?: Job): Promise<NativeFlowTarget> {
   if (job && nativeJobTargets.has(job)) return nativeJobTargets.get(job)!;
   const target = await executeFlowDom<NativeFlowTarget>({ op: "flowOperation", name: "flow.context", capability: "flow.native.context" }, { timeoutMs: 8_000 });
   if (!Number.isInteger(target.tabId)) {
-    throw Object.assign(new Error("Reload this repository's Flow extension to version 0.2.7 to enable native tab pinning."), {
+    throw Object.assign(new Error("Reload this repository's Flow extension to version 0.2.8 to enable native tab pinning."), {
       code: "NATIVE_CAPABILITY_UNSUPPORTED", retryable: true, outcome_unknown: false,
     });
   }
