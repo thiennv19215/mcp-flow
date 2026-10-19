@@ -30,10 +30,17 @@ async function ensureFlowSubmitBridge(tabId) {
     func: () => ({
       version: window.__flowMcpSubmitBridge?.version,
       installedReadyState: window.__flowMcpSubmitBridge?.installedReadyState,
+      uploadVersion: window.__flowMcpUploadBridge?.version,
     }),
   }).then(results => results?.[0]?.result || {});
+  const readUploadClientVersion = () => chrome.scripting.executeScript({
+    target: { tabId },
+    world: "ISOLATED",
+    func: () => globalThis.FlowNativeFileTransfer?.version || 0,
+  }).then(results => results?.[0]?.result || 0);
   let bridge = await readBridge();
-  if (bridge.version === 3 && bridge.installedReadyState === "loading") return;
+  let uploadClientVersion = await readUploadClientVersion();
+  if (bridge.version === 3 && bridge.uploadVersion === 4 && bridge.installedReadyState === "loading" && uploadClientVersion === 4) return;
 
   // Extension updates do not run document_start scripts inside already-open tabs.
   // Reload once so Flow registers its click handlers after our MAIN-world hook.
@@ -52,9 +59,15 @@ async function ensureFlowSubmitBridge(tabId) {
   });
   await chrome.tabs.reload(tabId);
   await loaded;
-  bridge = await readBridge();
-  if (bridge.version !== 3 || bridge.installedReadyState !== "loading") {
-    throw new Error("Flow submit bridge did not initialize at document_start. Reload the Flow tab and reconnect the extension.");
+  const verifyDeadline = Date.now() + 10_000;
+  do {
+    bridge = await readBridge();
+    uploadClientVersion = await readUploadClientVersion();
+    if (bridge.version === 3 && bridge.uploadVersion === 4 && bridge.installedReadyState === "loading" && uploadClientVersion === 4) return;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  } while (Date.now() < verifyDeadline);
+  if (bridge.version !== 3 || bridge.uploadVersion !== 4 || bridge.installedReadyState !== "loading" || uploadClientVersion !== 4) {
+    throw new Error("Flow upload bridge or content client did not initialize at the expected version. Reload the Flow extension and project tab.");
   }
 }
 async function sendFlowCommand(tabId, message) {
@@ -254,6 +267,7 @@ async function execute(ws, method, args = []) {
     if (tabId !== selectedTabId) throw new Error("Native Flow command targets a tab other than the selected Flow tab");
     if (tabId === undefined) throw new Error("No Flow tab is selected");
     const operation = command.name;
+    if (operation === "flow.generation.upload.preflight") await ensureFlowSubmitBridge(tabId);
     if (operation === "flow.projects.list") return listFlowProjects();
     if (operation === "flow.project.open") return openFlowProject(command.payload?.projectId);
   const interactive = !["flow.state", "flow.assets.list", "flow.characters.list", "flow.generation.observe", "flow.generation.upload.preflight", "flow.file.upload.begin", "flow.file.upload.chunk", "flow.file.upload.finish", "flow.file.upload.abort"].includes(operation);

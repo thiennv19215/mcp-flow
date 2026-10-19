@@ -88,14 +88,14 @@
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { cleanup(); reject(new Error(`Flow upload bridge timed out (${action}).`)); }, timeoutMs);
       const onMessage = event => {
-        if (event.source !== window || event.data?.source !== "flow-mcp-upload-result" || event.data.requestId !== requestId) return;
+        if (event.source !== window || event.data?.source !== "flow-mcp-upload-v4-result" || event.data.requestId !== requestId) return;
         cleanup();
         if (event.data.success) resolve(event.data);
         else reject(new Error(event.data.error || `Flow upload bridge rejected ${action}.`));
       };
       function cleanup() { clearTimeout(timer); window.removeEventListener("message", onMessage); }
       window.addEventListener("message", onMessage);
-      window.postMessage({ source: "flow-mcp-upload", action, requestId, ...detail }, location.origin);
+      window.postMessage({ source: "flow-mcp-upload-v4", action, requestId, ...detail }, location.origin);
     });
   }
 
@@ -103,13 +103,19 @@
     if (!(file instanceof Blob)) throw new Error("Upload value must be a Blob or File");
     if (typeof openPicker !== "function") throw new Error("Flow upload picker action is missing.");
     const owner = crypto.randomUUID();
-    await bridgeCall("arm", { owner, file }, 5000);
+    await bridgeCall("arm", { owner, file, timeoutMs: 10_000 }, 5000);
     try {
-      await openPicker();
+      const opened = await openPicker();
+      if (opened === false) throw new Error("Flow's Upload menu item was detached before it could be clicked.");
       for (let attempt = 0; attempt < 25; attempt++) {
         await new Promise(resolve => setTimeout(resolve, 200));
         const status = await bridgeCall("status", { owner }, 1500);
-        if (status.fired) return { selected: true, method: status.fired, trustedGesture: false };
+        if (status.fired) {
+          if (status.fileName !== file.name || status.fileSize !== file.size || status.fileType !== file.type) {
+            throw new Error("Flow's picker selected a different file than the staged upload.");
+          }
+          return { selected: true, method: status.fired, trustedGesture: false };
+        }
       }
       throw new Error("Flow did not open its file input after the upload control was clicked.");
     } finally {
@@ -134,5 +140,5 @@
     return bridgeCall("drop", { owner, file }, 5000);
   }
 
-  globalThis.FlowNativeFileTransfer = Object.freeze({ UploadAssembler, assignFileToInput, selectFileThroughPicker, assignFileToFlowInput, dropFileToFlow, defaults: DEFAULTS });
+  globalThis.FlowNativeFileTransfer = Object.freeze({ version: 4, UploadAssembler, assignFileToInput, selectFileThroughPicker, assignFileToFlowInput, dropFileToFlow, defaults: DEFAULTS });
 })();

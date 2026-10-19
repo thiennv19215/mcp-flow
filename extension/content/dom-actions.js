@@ -747,35 +747,61 @@ async function waitForNativeMediaTile(assetName, command, kind) {
   throw flowError("FLOW_UPLOAD_TIMEOUT", `Flow did not confirm that ${kind} "${assetName}" finished uploading. Inspect Flow before retrying.`, false, true);
 }
 async function uploadStagedFlowMedia(file, kind, command) {
-  const isFlowV2 = /\/(?:fx\/tools\/flow|fx\/flow)(?:\/|$)/i.test(location.pathname);
-  const mediaRoots = () => [...document.querySelectorAll('[role="dialog"],[role="menu"],[role="listbox"],[data-state="open"],mat-dialog-container,mat-menu-panel')].filter(visible);
-  const findUploadTab = () => [...document.querySelectorAll('[role="tab"]')].find(el =>
-    visible(el) && accessibleName(el).replace(/\s+/g, " ").trim().toLowerCase() === "upload");
-  const findUploadAction = () => {
-    const roots = [...mediaRoots(), document];
-    const candidates = roots.flatMap(root => [...root.querySelectorAll('button,[role="button"],[role="menuitem"]')]);
-    return candidates.find(el => {
-      if (!visible(el) || el.matches('[role="tab"]') || el.disabled || el.getAttribute("aria-disabled") === "true") return false;
-      const label = accessibleName(el).replace(/\s+/g, " ").trim().toLowerCase();
-      const text = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
-      const materialIcon = [...el.querySelectorAll("i,mat-icon,[class*='icon']")].map(icon => (icon.textContent || "").trim().toLowerCase()).join(" ");
-      return /^(upload|upload media|upload file|tải lên|tải tệp lên|tải nội dung nghe nhìn lên)$/.test(label) ||
-        /^(upload|upload media|upload file|tải lên|tải tệp lên|tải nội dung nghe nhìn lên)$/.test(text) ||
-        /^(upload|upload_file|file_upload)$/.test(materialIcon);
-    });
+  const uploadButton = flowButton("Add media menu");
+  const normalize = value => String(value || "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
+  const uploadNames = new Set(["upload", "upload media", "upload file", "tải lên", "tải tệp lên", "tải nội dung nghe nhìn lên"]);
+  const menuRoots = () => [...document.querySelectorAll('[role="menu"],mat-menu-panel,[role="dialog"],.cdk-overlay-pane,[data-state="open"]')].filter(visible);
+  const labelOf = el => {
+    const labels = [accessibleName(el), el.getAttribute("aria-label"), el.getAttribute("title"), el.innerText, el.textContent];
+    // Material icon ligatures are exposed as text in some Flow builds (for example,
+    // "upload Upload"). Ignore decorative icon text when resolving the menu row.
+    try {
+      const clone = el.cloneNode(true);
+      clone.querySelectorAll('mat-icon,.mat-icon,.google-symbols,svg,[aria-hidden="true"]').forEach(icon => icon.remove());
+      labels.push(clone.innerText || clone.textContent);
+    } catch {}
+    return labels.map(normalize);
+  };
+  const isUploadLabel = el => {
+    return labelOf(el).some(label => uploadNames.has(label) || uploadNames.has(label.replace(/^(?:upload|upload_file|file_upload|arrow_upward)\s+/, "")));
+  };
+  const findUploadItem = () => {
+    const activeMenus = menuRoots();
+    // Like TobyFlow, resolve the Upload control relative to Flow's open menu first;
+    // only scan the page if this Flow build does not expose an overlay/menu root.
+    const roots = activeMenus.length ? [...activeMenus, document] : [document];
+    for (const root of roots) {
+      const semantic = [...root.querySelectorAll('button,[role="button"],[role="menuitem"],a,[tabindex]')]
+        .filter(el => visible(el) && !el.matches('[role="tab"]') && !el.disabled && el.getAttribute("aria-disabled") !== "true" && isUploadLabel(el));
+      if (semantic.length) return semantic[0];
+    }
+    // Some Flow builds render menu rows as clickable divs without ARIA roles.
+    for (const root of roots) {
+      const textLeaves = [...root.querySelectorAll("*")].filter(el => visible(el) && isUploadLabel(el));
+      for (const leaf of textLeaves) {
+        let candidate = leaf;
+        while (candidate && candidate !== root) {
+          if (visible(candidate) && !candidate.matches('[role="tab"]') &&
+              (candidate.getAttribute("tabindex") === "0" || getComputedStyle(candidate).cursor === "pointer")) return candidate;
+          candidate = candidate.parentElement;
+        }
+        // Clicking the exact text leaf bubbles to Flow's delegated menu-row listener.
+        if (leaf !== root) return leaf;
+      }
+    }
+    return null;
   };
   const clickFlowControl = element => {
     const rect = element.getBoundingClientRect();
-    const point = { bubbles: true, cancelable: true, composed: true, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2, button: 0 };
-    element.focus?.();
+    if (!rect.width || !rect.height) return false;
+    const point = { bubbles: true, cancelable: true, composed: true, button: 0, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
     element.dispatchEvent(new PointerEvent("pointerdown", { ...point, pointerId: 1, pointerType: "mouse" }));
     element.dispatchEvent(new MouseEvent("mousedown", point));
     element.dispatchEvent(new PointerEvent("pointerup", { ...point, pointerId: 1, pointerType: "mouse" }));
     element.dispatchEvent(new MouseEvent("mouseup", point));
     element.dispatchEvent(new MouseEvent("click", point));
+    return true;
   };
-  const beforeInputs = new Set(document.querySelectorAll('input[type="file"]'));
-  const uploadButton = flowButton("Add media menu") || (isFlowV2 && flowButton("Add ingredients to the prompt box"));
   const acceptsMedia = input => {
     const accept = String(input.getAttribute("accept") || "").toLowerCase();
     return kind === "video"
@@ -793,47 +819,33 @@ async function uploadStagedFlowMedia(file, kind, command) {
     }
   }
   if (!dispatched) {
-    if (!uploadButton && !isFlowV2) {
+    if (!uploadButton) {
       if (kind !== "video") throw flowError("FLOW_UPLOAD_UNAVAILABLE", "Flow's upload menu is unavailable.", false);
       await FlowNativeFileTransfer.dropFileToFlow(file);
     } else {
-      if (uploadButton) uploadButton.click();
-      const menuDeadline = Date.now() + 5000;
+      uploadButton.click();
+      const menuDeadline = Date.now() + 2500;
       let uploadItem = null;
-      let newlyCreatedInput = null;
-      while (Date.now() < menuDeadline && !uploadItem && !newlyCreatedInput) {
-        await wait(100);
-        // Flow V2 first shows an Upload category tab. Select it, then click the
-        // separate upload-media action inside that category (TobyFlow's flow).
-        const uploadTab = isFlowV2 && findUploadTab();
-        if (uploadTab && uploadTab.getAttribute("aria-selected") !== "true") clickFlowControl(uploadTab);
-        uploadItem = findUploadAction();
-        newlyCreatedInput = [...document.querySelectorAll('input[type="file"]')].find(input => !beforeInputs.has(input) && acceptsMedia(input));
-      }
-      if (newlyCreatedInput) {
-        try {
-          const result = await FlowNativeFileTransfer.assignFileToFlowInput(file, newlyCreatedInput);
-          dispatched = result.success === true;
-        } catch { /* Use the menu's upload action below if direct assignment was refused. */ }
-      }
-      if (dispatched) {
-        // Continue to the shared completion check below.
-      } else if (!uploadItem) {
-        if (kind === "video") {
-          await FlowNativeFileTransfer.dropFileToFlow(file);
-          dispatched = true;
-        } else {
-          const menuText = mediaRoots().map(root => (root.innerText || "").replace(/\s+/g, " ").trim().slice(0, 300)).filter(Boolean).join(" | ");
-          throw flowError("FLOW_UPLOAD_MENU_MISSING", `Flow's upload control was not found after opening its media menu${menuText ? ` (${menuText})` : ""}.`, true);
+      while (Date.now() < menuDeadline && !uploadItem) { uploadItem = findUploadItem(); if (!uploadItem) await wait(100); }
+      if (!uploadItem) {
+        if (kind !== "video") {
+          const menuText = menuRoots().map(root => normalize(root.innerText || root.textContent).slice(0, 240)).filter(Boolean).join(" | ");
+          throw flowError("FLOW_UPLOAD_MENU_MISSING", `Flow opened the add menu but no clickable Upload row was found${menuText ? ` (${menuText})` : ""}.`, true);
         }
+        await FlowNativeFileTransfer.dropFileToFlow(file);
       } else {
         try {
-          await FlowNativeFileTransfer.selectFileThroughPicker(file, () => clickFlowControl(uploadItem));
-          dispatched = true;
+          await FlowNativeFileTransfer.selectFileThroughPicker(file, () => {
+            // Arming the MAIN-world picker trap is asynchronous. Flow can replace
+            // its menu DOM during that round trip, so reacquire the live row just
+            // before the click (TobyFlow performs this same detached-node check).
+            if (!uploadItem?.isConnected || !visible(uploadItem)) uploadItem = findUploadItem();
+            if (!uploadItem?.isConnected || !visible(uploadItem)) return false;
+            return clickFlowControl(uploadItem);
+          });
         } catch (error) {
-          if (kind !== "video") throw flowError("FLOW_UPLOAD_CONTROL_NOT_OPENED", "Flow's upload action did not open a file input, so the file was not selected and no upload was started. Retry after reloading the Flow extension page.", true, false);
+          if (kind !== "video") throw flowError("FLOW_UPLOAD_CONTROL_NOT_OPENED", "Flow's Upload row was found, but it did not open a file input; the staged file was not selected. Retry after reloading the Flow extension page.", true, false);
           await FlowNativeFileTransfer.dropFileToFlow(file);
-          dispatched = true;
         }
       }
     }
