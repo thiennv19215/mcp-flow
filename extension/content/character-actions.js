@@ -11,6 +11,17 @@
     return String(current || "").replace(/\s+/g, " ").trim() === String(value || "").replace(/\s+/g, " ").trim();
   };
   const visibleOptions = list => [...(list?.querySelectorAll('[role="option"]') || [])].filter(visible);
+  function clickFlowControl(element) {
+    const rect = element?.getBoundingClientRect();
+    if (!rect?.width || !rect.height) return false;
+    const point = { bubbles: true, cancelable: true, composed: true, button: 0, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
+    element.dispatchEvent(new PointerEvent("pointerdown", { ...point, pointerId: 1, pointerType: "mouse" }));
+    element.dispatchEvent(new MouseEvent("mousedown", point));
+    element.dispatchEvent(new PointerEvent("pointerup", { ...point, pointerId: 1, pointerType: "mouse" }));
+    element.dispatchEvent(new MouseEvent("mouseup", point));
+    element.dispatchEvent(new MouseEvent("click", point));
+    return true;
+  }
 
   async function waitForPicker(listGetter, label, timeoutMs = 20_000) {
     const deadline = Date.now() + timeoutMs;
@@ -165,15 +176,14 @@
       let portraitMedia;
       await closeNativeAgentSession();
       await closeCurrentCharacterRoute();
-      await ensureFlowLibrarySection("All media");
       const activeAgent = flowButton("Agent");
       if (activeAgent?.getAttribute("aria-pressed") === "true") await setNativeAgentMode(false);
       if (localImage) {
         if (!validStagedLocalImage(localImage, /character/)) throw flowError("FLOW_TRANSFER_UNKNOWN", "The local character image transfer is invalid or no longer staged.", true);
         const file = stagedNativeFiles.get(localImage.transferId);
         if (!file) throw flowError("FLOW_TRANSFER_UNKNOWN", "The staged character image is no longer available.", true);
-        await uploadStagedFlowMedia(file, "image", command);
-        sourceTitle = localImage.name;
+      } else {
+        await ensureFlowLibrarySection("All media");
       }
       if (!c.image) {
         if (!document.querySelector(".ProseMirror")) throw flowError("NATIVE_CAPABILITY_UNSUPPORTED", "Flow's image composer is unavailable for description-based character creation.", true);
@@ -212,28 +222,43 @@
         }
         if (!newPage) throw flowError("FLOW_CHARACTER_ROUTE_UNEXPECTED", "Flow did not reach the New character page.", true, true);
 
-        const add = await waitForEnabledFlowButton("Add from project", 15_000);
-        if (!add) throw flowError("FLOW_CHARACTER_CREATE_MISSING", "Flow's New character page is not ready.", true);
-        add.click();
-        const listGetter = () => [...document.querySelectorAll('[role="listbox"]')].find(visible);
-        let list = await waitForPicker(listGetter, "project asset");
-        const exactTitle = value => normalize(value) === normalize(sourceTitle);
-        let matches = await findPickerMatches(listGetter, sourceTitle, "project asset", exactTitle);
-        if (!matches.length) {
-          const uploads = [...document.querySelectorAll('[role="tab"]')].find(el => visible(el) && normalize(accessibleName(el)) === "uploads");
-          if (uploads) {
-            uploads.click();
-            list = await waitForPicker(listGetter, "uploaded asset");
-            matches = await findPickerMatches(listGetter, sourceTitle, "uploaded asset", exactTitle);
+        if (localImage) {
+          const file = stagedNativeFiles.get(localImage.transferId);
+          const upload = await waitForEnabledFlowButton("Upload", 15_000);
+          if (!upload) throw flowError("FLOW_CHARACTER_UPLOAD_MISSING", "Flow's New character page does not show Upload. Nothing was selected.", true, false);
+          try {
+            await FlowNativeFileTransfer.selectFileThroughPicker(file, async () => {
+              const currentUpload = await waitForEnabledFlowButton("Upload", 4000);
+              return currentUpload ? clickFlowControl(currentUpload) : false;
+            });
+          } catch (error) {
+            throw flowError("FLOW_CHARACTER_UPLOAD_FAILED", `Flow did not accept the staged character image: ${String(error?.message || error)}. Nothing was submitted.`, true, false);
           }
+          await waitForFlowRoute(path => characterEditorRoute(path), 90_000, "Flow did not open the character editor after the image upload.");
+        } else {
+          const add = await waitForEnabledFlowButton("Add from project", 15_000);
+          if (!add) throw flowError("FLOW_CHARACTER_CREATE_MISSING", "Flow's New character page is not ready.", true);
+          add.click();
+          const listGetter = () => [...document.querySelectorAll('[role="listbox"]')].find(visible);
+          let list = await waitForPicker(listGetter, "project asset");
+          const exactTitle = value => normalize(value) === normalize(sourceTitle);
+          let matches = await findPickerMatches(listGetter, sourceTitle, "project asset", exactTitle);
+          if (!matches.length) {
+            const uploads = [...document.querySelectorAll('[role="tab"]')].find(el => visible(el) && normalize(accessibleName(el)) === "uploads");
+            if (uploads) {
+              uploads.click();
+              list = await waitForPicker(listGetter, "uploaded asset");
+              matches = await findPickerMatches(listGetter, sourceTitle, "uploaded asset", exactTitle);
+            }
+          }
+          if (matches.length > 1) throw flowError("FLOW_ASSET_AMBIGUOUS", `More than one project image is titled "${sourceTitle}"; no image was selected.`);
+          if (!matches.length) throw flowError("FLOW_ASSET_NOT_FOUND", `No exact project image titled "${sourceTitle}" is available for the character; no image was selected.`);
+          matches[0].click();
+          const addMedia = await waitForEnabledFlowButton("Add media", 10_000);
+          if (!addMedia) throw flowError("FLOW_ADD_MEDIA_MISSING", "Flow did not show Add media for the selected portrait.", true);
+          addMedia.click();
+          await waitForFlowRoute(path => characterEditorRoute(path), 90_000, "Flow did not open the character editor.");
         }
-        if (matches.length > 1) throw flowError("FLOW_ASSET_AMBIGUOUS", `More than one project image is titled "${sourceTitle}"; no image was selected.`);
-        if (!matches.length) throw flowError("FLOW_ASSET_NOT_FOUND", `No exact project image titled "${sourceTitle}" is available for the character; no image was selected.`);
-        matches[0].click();
-        const addMedia = await waitForEnabledFlowButton("Add media", 10_000);
-        if (!addMedia) throw flowError("FLOW_ADD_MEDIA_MISSING", "Flow did not show Add media for the selected portrait.", true);
-        addMedia.click();
-        await waitForFlowRoute(path => characterEditorRoute(path), 90_000, "Flow did not open the character editor.");
         enteredEditor = true;
         characterUrl = location.href;
 
