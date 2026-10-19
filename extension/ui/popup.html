@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <title>Flow MCP Connector</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --card-bg: #171b24;
+      --card-border: #262c3d;
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --accent: #10b981;
+      --accent-glow: rgba(16, 185, 129, 0.25);
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --warn: #f59e0b;
+      --warn-bg: rgba(245, 158, 11, 0.12);
+      --danger: #ef4444;
+      --danger-bg: rgba(239, 68, 68, 0.12);
+      --font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      width: 340px;
+      padding: 16px;
+      font-family: var(--font);
+      background-color: var(--bg);
+      color: var(--text-main);
+      font-size: 13px;
+      line-height: 1.5;
+      user-select: none;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--card-border);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .logo-icon {
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #10b981 0%, #3b82f6 100%);
+      border-radius: 8px;
+      box-shadow: 0 2px 8px var(--accent-glow);
+      flex-shrink: 0;
+    }
+
+    .logo-icon svg {
+      width: 18px;
+      height: 18px;
+      fill: #ffffff;
+    }
+
+    .title-wrap {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .title {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: -0.2px;
+      color: #fff;
+    }
+
+    .version-badge {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--text-dim);
+      background: rgba(255, 255, 255, 0.05);
+      padding: 1px 5px;
+      border-radius: 4px;
+      display: inline-block;
+      width: fit-content;
+      margin-top: 2px;
+    }
+
+    /* Language Switcher */
+    .lang-switch {
+      display: flex;
+      background: #1e2433;
+      border: 1px solid var(--card-border);
+      border-radius: 6px;
+      padding: 2px;
+      gap: 2px;
+    }
+
+    .lang-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 6px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .lang-btn.active {
+      background: #3b82f6;
+      color: #ffffff;
+      box-shadow: 0 1px 4px rgba(59, 130, 246, 0.3);
+    }
+
+    /* Status Card */
+    .status-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+
+    .status-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 20px;
+      background: rgba(148, 163, 184, 0.1);
+      color: var(--text-muted);
+    }
+
+    .status-badge.connected {
+      background: rgba(16, 185, 129, 0.12);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.25);
+    }
+
+    .status-badge.disconnected {
+      background: var(--danger-bg);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.25);
+    }
+
+    .pulse-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .status-badge.connected .pulse-dot {
+      animation: pulse 1.8s infinite;
+    }
+
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+      70% { box-shadow: 0 0 0 5px rgba(16, 185, 129, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+    }
+
+    .info-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 12px;
+    }
+
+    .info-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--text-muted);
+    }
+
+    .info-val {
+      font-weight: 600;
+      color: var(--text-main);
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 11.5px;
+    }
+
+    /* Alert / Error Box */
+    .alert-box {
+      margin-top: 10px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      font-size: 11.5px;
+      display: none;
+      align-items: flex-start;
+      gap: 6px;
+      line-height: 1.4;
+    }
+
+    .alert-box.show {
+      display: flex;
+    }
+
+    .alert-box.warn {
+      background: var(--warn-bg);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      color: #fbbf24;
+    }
+
+    .alert-box.error {
+      background: var(--danger-bg);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #f87171;
+    }
+
+    /* Actions */
+    .actions {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 14px;
+      font-family: var(--font);
+      font-size: 12.5px;
+      font-weight: 600;
+      border-radius: 8px;
+      cursor: pointer;
+      border: none;
+      transition: all 0.18s ease;
+      width: 100%;
+    }
+
+    .btn:active {
+      transform: scale(0.98);
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+      color: #ffffff;
+      box-shadow: 0 3px 10px rgba(16, 185, 129, 0.3);
+    }
+
+    .btn-primary:hover {
+      background: linear-gradient(135deg, #059669 0%, #047857 100%);
+      box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);
+    }
+
+    .btn-row {
+      display: grid;
+      grid-template-columns: 1.4fr 1fr;
+      gap: 8px;
+    }
+
+    .btn-secondary {
+      background: #1e2433;
+      border: 1px solid var(--card-border);
+      color: var(--text-main);
+    }
+
+    .btn-secondary:hover {
+      background: #272e42;
+      border-color: #3b445e;
+      color: #ffffff;
+    }
+
+    /* Feedback notice */
+    .feedback {
+      min-height: 18px;
+      font-size: 11.5px;
+      text-align: center;
+      color: var(--text-muted);
+      margin-top: 6px;
+      transition: all 0.2s ease;
+    }
+
+    .feedback.active {
+      color: #34d399;
+      font-weight: 500;
+    }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <header class="header">
+    <div class="brand">
+      <div class="logo-icon">
+        <svg viewBox="0 0 24 24">
+          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+        </svg>
+      </div>
+      <div class="title-wrap">
+        <div class="title">Flow MCP Connector</div>
+        <div class="version-badge" id="versionBadge">v...</div>
+      </div>
+    </div>
+    <div class="lang-switch" title="Chuyển đổi ngôn ngữ / Switch language">
+      <button class="lang-btn" id="langVi">VI</button>
+      <button class="lang-btn" id="langEn">EN</button>
+    </div>
+  </header>
+
+  <!-- Status Card -->
+  <div class="status-card">
+    <div class="status-top">
+      <span class="status-badge" id="wsBadge">
+        <span class="pulse-dot"></span>
+        <span id="wsText">Đang kiểm tra…</span>
+      </span>
+      <span style="font-size: 11px; color: var(--text-dim);" id="bridgeSummary">127.0.0.1:8799</span>
+    </div>
+
+    <div class="info-list">
+      <div class="info-row">
+        <span id="lblFlowTabs">Tab Google Flow:</span>
+        <span class="info-val" id="valFlowTabs">0</span>
+      </div>
+      <div class="info-row">
+        <span id="lblSelectedTab">Tab điều khiển:</span>
+        <span class="info-val" id="valSelectedTab">Chưa chọn</span>
+      </div>
+      <div class="info-row">
+        <span id="lblBridgeUrl">Địa chỉ máy chủ:</span>
+        <span class="info-val" id="valBridgeUrl" style="max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">...</span>
+      </div>
+    </div>
+
+    <div class="alert-box" id="alertBox">
+      <span>⚠️</span>
+      <span id="alertText"></span>
+    </div>
+  </div>
+
+  <!-- Actions -->
+  <div class="actions">
+    <button class="btn btn-primary" id="connect">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+      </svg>
+      <span id="txtConnect">Kết nối tab Flow hiện tại</span>
+    </button>
+
+    <div class="btn-row">
+      <button class="btn btn-secondary" id="preview">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+          <circle cx="12" cy="12" r="3"></circle>
+        </svg>
+        <span id="txtPreview">Xem viền (5s)</span>
+      </button>
+
+      <button class="btn btn-secondary" id="options">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+        <span id="txtOptions">Cài đặt</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="feedback" id="feedback"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
+
