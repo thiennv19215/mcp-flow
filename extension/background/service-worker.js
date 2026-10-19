@@ -478,6 +478,62 @@ chrome.storage.onChanged.addListener((changes, area) => {
   else void connect();
 });
 chrome.runtime.onMessage.addListener((message, _sender, respond) => {
+  if (message?.type === "flow-mcp:trusted-submit-click") {
+    void (async () => {
+      const tabId = _sender.tab?.id;
+      const requestId = String(message.requestId || "");
+      const x = Number(message.x), y = Number(message.y);
+      if (!Number.isInteger(tabId) || !flowUrl(_sender.tab?.url) || _sender.frameId !== 0) {
+        throw new Error("Trusted submit clicks are accepted only from the top-level Flow tab.");
+      }
+      if (!requestId || activeInteractiveRequests.get(requestId) !== tabId) {
+        throw new Error("The submit click does not belong to an active Flow request.");
+      }
+      if (message.label !== "Start generation" || !Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x > 10000 || y > 10000) {
+        throw new Error("The requested Flow submit target is invalid.");
+      }
+      const tab = await chrome.tabs.get(tabId).catch(() => null);
+      if (!tab || !flowUrl(tab.url)) throw new Error("The submit target is no longer an open Flow tab.");
+      if (!tab.active) throw new Error("The Flow tab is not the visible active tab. Activate it and retry; no submit was attempted.");
+
+      await ensureActivityOverlay(tabId);
+      const permit = await chrome.tabs.sendMessage(tabId, {
+        type: "flow-mcp:permit-submit-click",
+        requestId,
+        x,
+        y,
+        label: message.label,
+        prompt: String(message.prompt || ""),
+      });
+      if (!permit?.ok) throw new Error("The activity guard could not authorize the exact submit button.");
+
+      const target = { tabId };
+      let attached = false;
+      let pressDispatched = false;
+      try {
+        await chrome.debugger.attach(target, "1.3");
+        attached = true;
+      } catch (error) {
+        throw new Error(`Chrome could not attach its trusted-input controller: ${String(error?.message || error)}`);
+      }
+      try {
+        await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", { type: "mouseMoved", x, y, button: "none" });
+        await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1 });
+        pressDispatched = true;
+        await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1 });
+        respond({ ok: true });
+      } catch (error) {
+        respond({
+          ok: false,
+          outcome_unknown: pressDispatched,
+          error: `Chrome's trusted click sequence failed${pressDispatched ? " after mouse press; check the Flow project before retrying" : " before mouse press"}: ${String(error?.message || error)}`,
+        });
+      } finally {
+        if (attached) await chrome.debugger.detach(target).catch(() => {});
+      }
+    })().catch(error => respond({ ok: false, outcome_unknown: false, error: String(error?.message || error) }));
+    return true;
+  }
   if (message?.type === "flow-mcp:ensure-active-tab") {
     void (async () => {
       const tabId = _sender.tab?.id;

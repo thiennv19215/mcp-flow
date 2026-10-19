@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Flow MCP Native Automation",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "minimum_chrome_version": "116",
   "description": "Flow MCP with browser-side automation handlers in a Chrome extension.",
   "permissions": [
@@ -9,7 +9,8 @@
     "tabs",
     "alarms",
     "downloads",
-    "scripting"
+    "scripting",
+    "debugger"
   ],
   "host_permissions": [
     "https://flow.google.com/*",

@@ -199,9 +199,9 @@
         const creditCost = Number.isFinite(renderedCreditCost) ? renderedCreditCost : settingsCreditCost;
         if (!Number.isFinite(creditCost)) throw flowError("FLOW_CREDIT_QUOTE_UNAVAILABLE", "Flow did not show the portrait's credit quote after the prompt was prepared. Nothing was submitted.", true);
         if (creditCost > 0) throw flowError("NATIVE_CAPABILITY_UNSUPPORTED", `Flow quotes ${creditCost} credits for the portrait; character creation only proceeds when it is free. Nothing was submitted.`, true);
-        const start = await waitForEnabledFlowButton("Start generation", 8000);
+        const start = await waitForGenerationSubmitButton(String(c.describe), 8000);
         if (!start) throw flowError("FLOW_SUBMIT_DISABLED", "Flow's portrait generation button did not become ready within 8 seconds; nothing was submitted.", true);
-        await activateFlowSubmitButton(start);
+        await activateFlowSubmitButton(start, command, String(c.describe));
         const generated = await waitForProgressResult(command, before, variants, "image", Number(payload.timeoutMs || 180000), "main");
         if (!generated.length) throw flowError("FLOW_CHARACTER_PORTRAIT_MISSING", "Flow did not return a portrait image for character creation.", false, true);
         sourceTitle = generated[0].title;
@@ -356,9 +356,9 @@
           const change = String(payload.change).replace(/\s*\n+\s*/g, " ").trim().replace(/[.\s]*$/, ".");
           const prompt = `${change} Exactly one ${characterName} in the picture: never add copies of ${characterName} or extra poses side by side.`;
           if (!replaceNativeEditableText(box, prompt)) throw flowError("FLOW_PROMPT_INPUT_UNCONFIRMED", "Flow did not accept the character edit prompt. Nothing was submitted.", true);
-          const start = await waitForEnabledFlowButton("Start generation", 8000);
+          const start = await waitForGenerationSubmitButton(prompt, 8000);
           if (!start) throw flowError("FLOW_SUBMIT_DISABLED", "Flow's character edit button is disabled.", true);
-          await activateFlowSubmitButton(start);
+          await activateFlowSubmitButton(start, command, prompt);
           const deadline = Date.now() + Number(payload.timeoutMs || 4 * 60_000);
           while (Date.now() < deadline) {
             await wait(2500); portrait = document.querySelector('img[aria-label="Generated character image"]');
