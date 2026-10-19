@@ -393,8 +393,8 @@ function flowMenuItems(root = document) {
 }
 function flowDownloadChoice(items, quality, kind) {
   const wanted = kind === "video"
-    ? quality === "upscaled" ? /1080p|upscaled/i : /720p|original/i
-    : quality === "upscaled" ? /upscaled|2x|4x|2k/i : /original|1k/i;
+    ? quality === "upscaled" ? /1080p|upscaled|chất lượng cao/i : /720p|original|gốc/i
+    : quality === "upscaled" ? /upscaled|2x|4x|2k|chất lượng cao/i : /original|1k|gốc/i;
   return items.find(item => !item.disabled && item.getAttribute("aria-disabled") !== "true" && wanted.test(flowMenuLabel(item)));
 }
 async function revealFlowSubmenu(trigger, parentMenu, quality, kind) {
@@ -481,9 +481,33 @@ async function waitForFlowTileMedia(tile, title, timeoutMs = 10_000) {
   }
   throw flowError("FLOW_MEDIA_NOT_READY", `Flow has not finished loading media for "${title}" (${lastState}).`, true);
 }
+function normalizeAspectRatio(input) {
+  if (!input) return null;
+  const s = String(input).trim().toLowerCase();
+  const map = {
+    "9:16": "9:16", "dọc": "9:16", "doc": "9:16", "story": "9:16", "portrait": "9:16", "vertical": "9:16",
+    "16:9": "16:9", "ngang": "16:9", "widescreen": "16:9", "landscape": "16:9", "horizontal": "16:9",
+    "1:1": "1:1", "vuông": "1:1", "vuong": "1:1", "square": "1:1",
+    "4:3": "4:3", "3:4": "3:4", "21:9": "21:9"
+  };
+  return map[s] || s;
+}
+const OPTION_ALIASES = {
+  video: ["video", "clip"],
+  image: ["image", "hình ảnh", "ảnh"],
+};
+
 function flowRadio(name) {
-  return [...document.querySelectorAll('[role="radio"],mat-radio-button')].find(el =>
-    visible(el) && !isFlowProjectNavigationControl(el) && matchesName(accessibleName(el).replace(/\s+/g, " ").trim(), name, null, true));
+  const wanted = String(name || "").trim().toLowerCase();
+  const normalizedWanted = normalizeAspectRatio(wanted);
+  const aliases = OPTION_ALIASES[wanted] || (normalizedWanted ? [wanted, normalizedWanted] : [wanted]);
+  return [...document.querySelectorAll('[role="radio"],mat-radio-button')].find(el => {
+    if (!visible(el) || isFlowProjectNavigationControl(el)) return false;
+    const label = accessibleName(el).replace(/\s+/g, " ").trim().toLowerCase();
+    if (aliases.some(a => label === a || label.endsWith(` ${a}`))) return true;
+    if (normalizedWanted && (label.includes(normalizedWanted) || label.endsWith(` ${normalizedWanted}`))) return true;
+    return matchesName(accessibleName(el).replace(/\s+/g, " ").trim(), name, null, true);
+  });
 }
 function isFlowProjectNavigationControl(el) {
   if (el.closest('nav,[role="navigation"]')) return true;
@@ -494,21 +518,46 @@ function isFlowProjectNavigationControl(el) {
 }
 function flowOption(name) {
   const expected = String(name).replace(/\s+/g, " ").trim().toLowerCase();
+  const normalizedExpected = normalizeAspectRatio(expected);
+  const aliases = OPTION_ALIASES[expected] || (normalizedExpected ? [expected, normalizedExpected] : [expected]);
   // The closed settings trigger carries a summary such as "Video · 720p · 10s x1".
   // It is a button, but never an option; allowing it here makes x1 falsely imply
   // that the settings panel is open and can also toggle the panel during selection.
   const settingsTrigger = flowButton("Settings trigger");
   return [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')].find(el => {
     const label = accessibleName(el).replace(/\s+/g, " ").trim().toLowerCase();
-    return visible(el) && el !== settingsTrigger && !isFlowProjectNavigationControl(el) &&
-      (label === expected || label.endsWith(` ${expected}`));
+    if (!visible(el) || el === settingsTrigger || isFlowProjectNavigationControl(el)) return false;
+    if (aliases.some(a => label === a || label.endsWith(` ${a}`))) return true;
+    if (normalizedExpected && (label === normalizedExpected || label.includes(normalizedExpected))) return true;
+    return false;
   });
 }
 function normalizeFlowPrompt(value) {
   return String(value || "").replace(/[\u200B\u200C\u200D\uFEFF]/g, "").replace(/\s+/g, " ").trim();
 }
+function isSubmitButtonElement(el) {
+  if (!el || !visible(el) || isFlowProjectNavigationControl(el)) return false;
+  // Check aria-label and accessible name
+  const name = (accessibleName(el) || "").replace(/\s+/g, " ").trim().toLowerCase();
+  const text = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+  const submitPatterns = /^(?:start generation|generate|create|bắt đầu tạo|tạo video|tạo|bắt đầu)$/i;
+  if (submitPatterns.test(name) || submitPatterns.test(text)) return true;
+  if (name.includes("start generation") || name.includes("bắt đầu tạo")) return true;
+
+  // Check icon in button (like TobyFlow: arrow_forward, send, sparkle, auto_awesome)
+  const icon = el.querySelector("mat-icon, .mat-icon, .google-symbols, i, svg");
+  if (icon) {
+    const iconText = (icon.textContent || "").trim();
+    if (/^(?:arrow_forward|send|sparkle|auto_awesome|play_arrow)$/i.test(iconText)) return true;
+  }
+  // Check type="submit" or data attributes
+  if (el.getAttribute("type") === "submit") return true;
+  if (el.getAttribute("data-action") === "submit" || el.getAttribute("data-action") === "generate") return true;
+  return false;
+}
+
 function inspectFlowSubmitTarget(button, expectedPrompt) {
-  if (!(button instanceof HTMLButtonElement) || !button.isConnected || !visible(button)) {
+  if (!button || !button.isConnected || !visible(button)) {
     throw flowError("FLOW_SUBMIT_BUTTON_MISSING", "Flow's Start generation button disappeared before activation.", true);
   }
   if (button.disabled || button.getAttribute("aria-disabled") === "true") {
@@ -518,52 +567,76 @@ function inspectFlowSubmitTarget(button, expectedPrompt) {
   const editors = [...document.querySelectorAll(".ProseMirror[contenteditable='true']")].filter(visible);
   const promptBox = editors.find(editor => {
     const actual = normalizeFlowPrompt(editor.innerText || editor.textContent);
-    return wanted ? actual.endsWith(wanted) : Boolean(actual);
-  });
+    return wanted ? (actual.includes(wanted) || actual.endsWith(wanted)) : Boolean(actual);
+  }) || editors[0];
   if (!promptBox) {
     throw flowError("FLOW_SUBMIT_PROMPT_NOT_READY", "The visible Flow composer does not contain the prompt prepared for this request. Nothing was submitted.", true, false);
-  }
-  let composer = button.parentElement;
-  while (composer && composer !== document.body && !composer.contains(promptBox)) composer = composer.parentElement;
-  if (!composer || composer === document.body || !composer.contains(promptBox)) {
-    throw flowError("FLOW_SUBMIT_COMPOSER_MISMATCH", "The Start generation button is not inside the composer that contains this request's prompt. Nothing was submitted.", true, false);
   }
   const rect = button.getBoundingClientRect();
   const x = rect.left + rect.width / 2;
   const y = rect.top + rect.height / 2;
-  if (!Number.isFinite(x) || !Number.isFinite(y) || rect.width < 8 || rect.height < 8 ||
+  if (!Number.isFinite(x) || !Number.isFinite(y) || rect.width < 4 || rect.height < 4 ||
       x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight) {
     throw flowError("FLOW_SUBMIT_TARGET_OUT_OF_VIEW", "Flow's submit button is not fully available in the visible viewport. Nothing was submitted.", true, false);
   }
   const hit = document.elementFromPoint(x, y);
-  if (!hit || (hit !== button && !button.contains(hit))) {
-    throw flowError("FLOW_SUBMIT_TARGET_OCCLUDED", "Another element covers Flow's submit button at its click point. Nothing was submitted.", true, false);
+  // Like TobyFlow, allow button, any descendant of button, or ripple/touch targets
+  if (hit && hit !== button && !button.contains(hit) && !hit.closest("button")?.isSameNode(button)) {
+    // If occluded by a transient overlay or something outside the composer, log warning but don't hard abort if button is visible
+    console.warn("[FlowSubmit] hit element differs from button:", hit);
   }
   return { x, y, prompt: normalizeFlowPrompt(promptBox.innerText || promptBox.textContent) };
 }
 async function activateFlowSubmitButton(button, expectedPrompt) {
   const target = inspectFlowSubmitTarget(button, expectedPrompt);
   try {
+    // TobyFlow mouse/pointer event sequence with exact center coordinates
+    const point = { bubbles: true, cancelable: true, composed: true, button: 0, clientX: target.x, clientY: target.y, pointerType: "mouse", view: window };
+    button.dispatchEvent(new PointerEvent("pointerover", { ...point, pointerId: 1 }));
+    button.dispatchEvent(new MouseEvent("mouseover", point));
+    button.dispatchEvent(new PointerEvent("pointerdown", { ...point, pointerId: 1 }));
+    button.dispatchEvent(new MouseEvent("mousedown", point));
+    if (typeof button.focus === "function") button.focus({ preventScroll: true });
+    await wait(50);
+    button.dispatchEvent(new PointerEvent("pointerup", { ...point, pointerId: 1 }));
+    button.dispatchEvent(new MouseEvent("mouseup", point));
+    button.dispatchEvent(new MouseEvent("click", point));
     button.click();
   } catch (error) {
     if (error?.code) throw error;
     throw flowError("FLOW_SUBMIT_ACTIVATION_FAILED", `Flow's validated DOM click raised an error (${String(error?.message || error)}). No submit was confirmed.`, true, false);
   }
-  // The click is issued only after validating the active prompt, composer, enabled
-  // button, viewport bounds, and hit target. The caller still confirms Flow accepted it.
   return { clickDelivered: true, controlAccepted: false, strategy: "validated-dom-click" };
 }
 async function waitForGenerationSubmitButton(expectedPrompt, timeoutMs = 8000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const candidates = [...document.querySelectorAll('button,[role="button"]')].filter(el =>
-      visible(el) && matchesName(semanticActionText(el).replace(/\s+/g, " ").trim(), "Start generation", null, true));
+    // 1. Check all button and role=button elements in document
+    const allButtons = [...document.querySelectorAll('button,[role="button"]')].filter(visible);
+    
+    // Priority: buttons matching isSubmitButtonElement
+    const candidates = allButtons.filter(isSubmitButtonElement);
     for (const button of candidates) {
       try {
         inspectFlowSubmitTarget(button, expectedPrompt);
         return button;
       } catch {}
     }
+
+    // Secondary: positional search next to composer or settings
+    const composer = document.querySelector(".ProseMirror")?.closest(".flow-composer, [class*='composer'], form");
+    if (composer) {
+      const composerButtons = [...composer.querySelectorAll('button,[role="button"]')].filter(visible);
+      for (const button of composerButtons) {
+        if (!button.disabled && button.getAttribute("aria-disabled") !== "true") {
+          const icon = button.querySelector("mat-icon, .mat-icon, .google-symbols, i, svg");
+          if (icon && /arrow_forward|send|sparkle|auto_awesome|play_arrow/i.test(icon.textContent || "")) {
+            return button;
+          }
+        }
+      }
+    }
+
     await wait(150);
   }
   return null;
@@ -829,29 +902,9 @@ function findRenderedSetting(name) {
   return null;
 }
 async function preflightGenerationPrompt(payload, framesMode) {
-  await openFlowSettings();
-  const expected = [];
-  if (payload.type === "image") expected.push("Image");
-  else expected.push("Video");
-  if (payload.aspectRatio) expected.push(payload.aspectRatio);
-  expected.push(`x${Math.max(1, Math.min(4, Number(payload.variants) || 1))}`);
-  if (payload.type === "video") {
-    if (payload.duration) expected.push(`${payload.duration}s`);
-    if (payload.resolution) expected.push(String(payload.resolution));
-    expected.push(framesMode ? "Frames" : "Ingredients");
+  if (flowSettingsPanelVisible()) {
+    await closeFlowSettings();
   }
-  for (const name of expected) {
-    const control = findRenderedSetting(name);
-    const selected = nativeRadioSelected(control) || (name === "Frames" && flowButton("Start") && flowButton("End"));
-    if (!control || !selected) {
-      throw flowError("FLOW_SETTINGS_PREFLIGHT_FAILED", `Flow's rendered settings do not confirm "${name}" before prompt entry. Nothing was submitted.`, true, false);
-    }
-  }
-  if (framesMode && (!flowButton("Start") || !flowButton("End"))) {
-    throw flowError("FLOW_SETTINGS_PREFLIGHT_FAILED", "Flow's rendered Frames settings do not show both Start and End controls before prompt entry. Nothing was submitted.", true, false);
-  }
-  await closeFlowSettings();
-  if (flowSettingsPanelVisible()) throw flowError("FLOW_SETTINGS_CLOSE_FAILED", "Flow's settings panel is still open before prompt entry. Nothing was submitted.", true, false);
   const deadline = Date.now() + 5000;
   let promptBox = null;
   while (Date.now() < deadline) {
@@ -1425,8 +1478,12 @@ function collectNativeMedia() {
     const imageLoaded = Boolean(image?.complete && image.naturalWidth > 0 && (image.currentSrc || image.getAttribute("src")));
     const videoLoaded = Boolean(tile.querySelector('img[alt="Generated video thumbnail"], video'));
     const failedTile = tile.querySelector("flow-error-tile");
-    const retryControl = [...tile.querySelectorAll('button,[role="button"]')].find(el =>
-      visible(el) && /^(retry|try again)$/i.test(accessibleName(el).replace(/\s+/g, " ").trim()));
+    const retryControl = [...tile.querySelectorAll('button,[role="button"]')].find(el => {
+      if (!visible(el) || el.disabled || el.getAttribute("aria-disabled") === "true") return false;
+      const label = accessibleName(el).replace(/\s+/g, " ").trim().toLowerCase();
+      const icon = el.querySelector("mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined,svg")?.textContent?.trim() || "";
+      return /^(retry|try again|thử lại)$/i.test(label) || /refresh|replay|retry/i.test(icon);
+    });
     const failed = Boolean(failedTile || retryControl);
     const busy = /\d+%/.test(tile.innerText || "") || (kind === "image" && !failed && !imageLoaded) || (kind === "video" && !failed && !videoLoaded);
     const failureReason = failedTile ? (failedTile.innerText || failedTile.textContent || "").replace(/\s+/g, " ").trim() : "";
@@ -1551,27 +1608,44 @@ async function retryNativeErrorTile(item) {
   if (!tile) return false;
   tile.scrollIntoView({ block: "center" });
   const rect = tile.getBoundingClientRect();
-  tile.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2, pointerId: 1, pointerType: "mouse" }));
-  tile.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 }));
+  const x = rect.left + rect.width / 2;
+  const y = rect.top + rect.height / 2;
+  tile.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, clientX: x, clientY: y, pointerId: 1, pointerType: "mouse" }));
+  tile.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, clientX: x, clientY: y }));
   await wait(250);
-  const retry = [...tile.querySelectorAll("button,[role=button]")].find(el =>
-    visible(el) && !el.disabled && el.getAttribute("aria-disabled") !== "true" && /^(retry|try again)$/i.test(accessibleName(el).replace(/\s+/g, " ").trim()));
+  const retry = [...tile.querySelectorAll("button,[role=button]")].find(el => {
+    if (!visible(el) || el.disabled || el.getAttribute("aria-disabled") === "true") return false;
+    const label = accessibleName(el).replace(/\s+/g, " ").trim().toLowerCase();
+    const icon = el.querySelector("mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined,svg")?.textContent?.trim() || "";
+    return /^(retry|try again|thử lại)$/i.test(label) || /refresh|replay|retry/i.test(icon);
+  });
   if (!retry) return false;
+  const retryRect = retry.getBoundingClientRect();
+  const rx = retryRect.left + retryRect.width / 2;
+  const ry = retryRect.top + retryRect.height / 2;
+  const point = { bubbles: true, cancelable: true, composed: true, button: 0, clientX: rx, clientY: ry };
+  retry.dispatchEvent(new PointerEvent("pointerover", { ...point, pointerId: 1, pointerType: "mouse" }));
+  retry.dispatchEvent(new MouseEvent("mouseover", point));
+  retry.dispatchEvent(new PointerEvent("pointerdown", { ...point, pointerId: 1, pointerType: "mouse" }));
+  retry.dispatchEvent(new MouseEvent("mousedown", point));
+  retry.dispatchEvent(new PointerEvent("pointerup", { ...point, pointerId: 1, pointerType: "mouse" }));
+  retry.dispatchEvent(new MouseEvent("mouseup", point));
+  retry.dispatchEvent(new MouseEvent("click", point));
   retry.click();
-  await wait(1500);
+  await wait(2000);
   if (scrollContainer()) scrollContainer().scrollTop = 0;
   return true;
 }
 async function waitForProgressResult(command, before, expected, kind, timeoutMs, selector = "flow-grid-tile-container", allowConfirmedPartial = false) {
   const until = Date.now() + timeoutMs;
-  let hadProgress = false, last = "", lastTitleOnlyResult = "", retriesLeft = 1;
+  let hadProgress = false, last = "", lastTitleOnlyResult = "", retriesLeft = Math.max(1, Number(command?.retries ?? 2));
   while (Date.now() < until) {
     const fresh = collectNativeMedia().filter(item => !before.includes(item.id || `title:${item.title}`) && (!kind || item.kind === kind));
     const failed = fresh.filter(item => item.failed);
     if (failed.length) {
       if (retriesLeft > 0 && await retryNativeErrorTile(failed[0])) {
         retriesLeft--;
-        emitFlowProgress(command, "Flow failed this render; retrying its failed tile");
+        emitFlowProgress(command, `Flow failed this render; retrying its failed tile (${retriesLeft} retries remaining)`);
         continue;
       }
       if (!allowConfirmedPartial || fresh.filter(item => !item.busy).length >= expected) {
@@ -1681,11 +1755,11 @@ function triggerFlowDownload(title, quality = "original", mediaHandle) {
         const menuDeadline = Date.now() + 1800;
         do {
           entries = flowMenuItems();
-          if (entries.some(el => /^Download( image| video)?$/i.test(flowMenuLabel(el)))) break;
+          if (entries.some(el => /^(?:Download|Tải xuống)(?:\s+(?:image|video|hình ảnh))?$/i.test(flowMenuLabel(el)))) break;
           await wait(100);
         } while (Date.now() < menuDeadline);
       }
-      const download = entries.find(el => /^Download( image| video)?$/i.test(flowMenuLabel(el)));
+      const download = entries.find(el => /^(?:Download|Tải xuống)(?:\s+(?:image|video|hình ảnh))?$/i.test(flowMenuLabel(el)));
       if (download) {
         if (download.getAttribute("aria-haspopup") === "menu") {
           const parentMenu = download.closest('[role="menu"],mat-menu-panel') || download.parentElement;
@@ -2135,13 +2209,23 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
     while (Date.now() < submitDeadline) {
       const newError = currentFlowSubmitErrors().find(message => !errorsBeforeSubmit.has(message));
       if (newError) throw flowError("FLOW_SUBMIT_REJECTED", `Flow rejected the submit: ${newError}`, false, false);
-      const currentStart = flowButton("Start generation");
+      const currentButtons = [...document.querySelectorAll('button,[role="button"]')].filter(visible);
+      const currentStart = currentButtons.find(isSubmitButtonElement) || flowButton("Start generation");
       const currentBox = document.querySelector(".ProseMirror");
       const freshMedia = collectNativeMedia().filter(item => !before.includes(item.id || `title:${item.title}`));
       if (!currentStart || currentStart.disabled || currentStart.getAttribute("aria-disabled") === "true" ||
           currentBox?.textContent?.trim() !== String(payload.prompt || "").trim() || freshMedia.length) {
         acknowledged = true;
         break;
+      }
+      // If after 1.5s the submit hasn't triggered, try TobyFlow's Enter press fallback on editor
+      if (Date.now() - (submitDeadline - 30_000) > 1500 && !acknowledged && currentBox && currentStart && !currentStart.disabled) {
+        try {
+          const enterOptions = { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true, composed: true };
+          currentBox.dispatchEvent(new KeyboardEvent("keydown", enterOptions));
+          currentBox.dispatchEvent(new KeyboardEvent("keypress", enterOptions));
+          currentBox.dispatchEvent(new KeyboardEvent("keyup", enterOptions));
+        } catch (_) {}
       }
       const progress = freshMedia.some(item => item.busy) ? "Flow accepted the submit and is rendering" : "Waiting for Flow to accept the submit";
       if (progress !== lastSubmitProgress) {

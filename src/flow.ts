@@ -298,8 +298,21 @@ export async function runGeneration(job: Job): Promise<string[]> {
   if (framesMode && refs.length) {
     job.note = [job.note, `first/last frames were set, so ${refs.length} reference image(s) were skipped — Flow allows one or the other.`].filter(Boolean).join(" · ");
   }
+  function normalizeAspectRatio(input?: string): string | undefined {
+    if (!input) return undefined;
+    const lower = String(input).trim().toLowerCase();
+    const map: Record<string, string> = {
+      "9:16": "9:16", "dọc": "9:16", "doc": "9:16", "story": "9:16", "portrait": "9:16", "vertical": "9:16",
+      "16:9": "16:9", "ngang": "16:9", "widescreen": "16:9", "landscape": "16:9", "horizontal": "16:9",
+      "1:1": "1:1", "vuông": "1:1", "vuong": "1:1", "square": "1:1",
+      "4:3": "4:3", "3:4": "3:4", "21:9": "21:9"
+    };
+    return map[lower] || input;
+  }
+  const normalizedRatio = normalizeAspectRatio(s.aspect_ratio);
+
   const submitted = await nativeOperation<{ submitted: boolean; before: string[]; type: MediaKind; expectedCount: number; credits?: number }>("flow.generation.submit", {
-    prompt: s.prompt, type: s.type, model: s.model, aspectRatio: s.aspect_ratio, duration: s.duration,
+    prompt: s.prompt, type: s.type, model: s.model, aspectRatio: normalizedRatio, duration: s.duration,
     resolution: s.resolution, variants: s.variants, maxCredits: s.max_credits,
     firstFrame: frame(s.first_frame, "start"), lastFrame: frame(s.last_frame, "end"), attachments,
   }, "flow.native.generation.submit", job, 120_000);
@@ -310,7 +323,7 @@ export async function runGeneration(job: Job): Promise<string[]> {
   if (!submitted.submitted) throw new Error("Native Flow submit did not confirm that generation started.");
   const observed = await nativeOperation<{ media: NativeMedia[] }>("flow.generation.observe", {
     before: submitted.before, kind: submitted.type, expectedCount: submitted.expectedCount,
-    timeoutMs: s.type === "image" ? IMAGE_TIMEOUT_MS : VIDEO_TIMEOUT_MS, retries: s.retries ?? 1,
+    timeoutMs: s.type === "image" ? IMAGE_TIMEOUT_MS : VIDEO_TIMEOUT_MS, retries: s.retries ?? 2,
   }, "flow.native.generation.observe", job, s.type === "image" ? IMAGE_TIMEOUT_MS : VIDEO_TIMEOUT_MS);
   job.progress = undefined;
   return downloadNativeResults(observed.media, s.output_dir, s.file_stem, s.download_quality ?? "original", job);

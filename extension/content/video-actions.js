@@ -12,15 +12,28 @@
     }
     return false;
   }
+  const MODE_ALIASES = {
+    ingredients: ["ingredients", "thành phần", "nguyên liệu", "ingredient"],
+    frames: ["frames", "khung hình", "khung", "frame"],
+  };
+
   function exactModeControl(name) {
-    const wanted = normalize(name);
+    const rawWanted = normalize(name);
+    const aliases = MODE_ALIASES[rawWanted] || [rawWanted];
     return [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')]
-      .find(element => visible(element) && !isProjectNavigationControl(element) && cleanControlName(element) === wanted);
+      .find(element => {
+        if (!visible(element) || isProjectNavigationControl(element)) return false;
+        const cName = cleanControlName(element);
+        return aliases.includes(cName) || aliases.some(a => cName.endsWith(` ${a}`));
+      });
   }
 
   async function selectAndConfirmMode(name, framesMode) {
     let control = exactModeControl(name);
     if (!control) {
+      // If control is not found directly, check if frames mode controls are already displayed
+      const hasFrameControls = () => Boolean(flowButton("Start") && flowButton("End"));
+      if (framesMode && hasFrameControls()) return;
       const code = framesMode ? "FLOW_FRAMES_MODE_UNAVAILABLE" : "FLOW_VIDEO_MODE_UNAVAILABLE";
       throw flowError(code, `Flow does not offer the exact ${name} mode for the selected model. Nothing was submitted.`, true, false);
     }
@@ -35,8 +48,11 @@
       await wait(100);
     }
     if (!confirmed) {
-      const code = framesMode ? "FLOW_FRAMES_MODE_UNCONFIRMED" : "FLOW_VIDEO_MODE_UNCONFIRMED";
-      throw flowError(code, `Flow did not confirm that ${name} mode is selected. Nothing was submitted.`, true, false);
+      if (framesMode && hasFrameControls()) confirmed = true;
+      else {
+        const code = framesMode ? "FLOW_FRAMES_MODE_UNCONFIRMED" : "FLOW_VIDEO_MODE_UNCONFIRMED";
+        throw flowError(code, `Flow did not confirm that ${name} mode is selected. Nothing was submitted.`, true, false);
+      }
     }
     if (framesMode) {
       const controlsDeadline = Date.now() + 4000;
@@ -53,6 +69,8 @@
       const requestedModel = payload.model;
       const modeName = framesMode ? "Frames" : "Ingredients";
 
+      const durationStr = payload.duration ? (String(payload.duration).endsWith("s") ? String(payload.duration) : `${payload.duration}s`) : null;
+
       await openFlowSettings();
       await chooseRadio("Video");
       if (payload.aspectRatio) await chooseRadio(payload.aspectRatio);
@@ -64,7 +82,7 @@
       await openFlowSettings();
       await chooseRadio("Video");
       if (payload.aspectRatio) await chooseRadio(payload.aspectRatio);
-      if (payload.duration) await chooseRadio(`${payload.duration}s`);
+      if (durationStr) await chooseRadio(durationStr);
       if (payload.resolution) await chooseRadio(String(payload.resolution));
       await chooseNativeVariantCount(variants);
 
