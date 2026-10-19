@@ -541,31 +541,17 @@ function inspectFlowSubmitTarget(button, expectedPrompt) {
   }
   return { x, y, prompt: normalizeFlowPrompt(promptBox.innerText || promptBox.textContent) };
 }
-async function activateFlowSubmitButton(button, command, expectedPrompt) {
+async function activateFlowSubmitButton(button, expectedPrompt) {
   const target = inspectFlowSubmitTarget(button, expectedPrompt);
-  const requestId = command?.id ?? command?.requestId ?? command?.request_id;
-  if (requestId === undefined || requestId === null || String(requestId).length === 0) {
-    throw flowError("FLOW_SUBMIT_REQUEST_ID_MISSING", "Flow's submit cannot be tied to an active request. Nothing was submitted.", true, false);
-  }
   try {
-    const result = await chrome.runtime.sendMessage({
-      type: "flow-mcp:trusted-submit-click",
-      requestId: String(requestId),
-      x: target.x,
-      y: target.y,
-      label: "Start generation",
-      prompt: target.prompt,
-    });
-    if (!result?.ok) {
-      throw flowError("FLOW_SUBMIT_ACTIVATION_FAILED", result?.error || "Chrome could not activate Flow's submit button.", true, Boolean(result?.outcome_unknown));
-    }
+    button.click();
   } catch (error) {
     if (error?.code) throw error;
-    throw flowError("FLOW_SUBMIT_ACTIVATION_FAILED", `Chrome could not activate Flow's submit button (${String(error?.message || error)}). No submit was confirmed.`, true, false);
+    throw flowError("FLOW_SUBMIT_ACTIVATION_FAILED", `Flow's validated DOM click raised an error (${String(error?.message || error)}). No submit was confirmed.`, true, false);
   }
-  // Chrome's input pipeline produces the trusted pointer sequence Flow expects. The
-  // caller still observes the page before it starts waiting for the render result.
-  return { clickDelivered: true, controlAccepted: false, strategy: "cdp-trusted-click" };
+  // The click is issued only after validating the active prompt, composer, enabled
+  // button, viewport bounds, and hit target. The caller still confirms Flow accepted it.
+  return { clickDelivered: true, controlAccepted: false, strategy: "validated-dom-click" };
 }
 async function waitForGenerationSubmitButton(expectedPrompt, timeoutMs = 8000) {
   const deadline = Date.now() + timeoutMs;
@@ -1834,7 +1820,7 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
     if (!start) throw flowError("FLOW_SUBMIT_DISABLED", "Flow's edit action is unavailable; nothing was submitted.", true);
     let submitted = false;
     try {
-      await activateFlowSubmitButton(start, command, prompt);
+      await activateFlowSubmitButton(start, prompt);
       submitted = true;
       await waitForNativeEditorCompletion(command, Number(params.timeout_ms || 10 * 60_000), "video edit");
       const back = flowButton("Back button to go to previous page");
@@ -1870,7 +1856,7 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
       setEditable(box, script); await wait(300);
       const start = await waitForGenerationSubmitButton(script, 8000);
       if (!start) throw flowError("FLOW_SUBMIT_DISABLED", "Flow's Agent Start generation button is disabled or is not in the composer containing the prompt; nothing was submitted.", true);
-      await activateFlowSubmitButton(start, command, script);
+      await activateFlowSubmitButton(start, script);
       submitted = true;
       let media;
       let partialFailure = false;
@@ -1999,7 +1985,7 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
       if (!activeBox || !replaceNativeEditableText(activeBox, prompt)) throw flowError("FLOW_PROMPT_INPUT_UNCONFIRMED", "Flow did not accept the continuation prompt. Nothing was submitted.", true);
       const start = await waitForGenerationSubmitButton(prompt, 10_000);
       if (!start) throw flowError("FLOW_SUBMIT_DISABLED", "Flow's continuation Start generation button is disabled.", true);
-      await activateFlowSubmitButton(start, command, prompt);
+      await activateFlowSubmitButton(start, prompt);
       submitted = true;
       await resolveNativeAgentQuestion(command, exact
         ? "Use I2V, first frame animation. Start exactly on that frame and continue from it with no cut. Do not use the other reference."
@@ -2139,7 +2125,7 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
     const start = await waitForGenerationSubmitButton(payload.prompt, 10_000);
     if (!start) throw flowError("FLOW_SUBMIT_DISABLED", "Flow's Start generation button did not become ready within 10 seconds; nothing was submitted.", true);
     const errorsBeforeSubmit = new Set(currentFlowSubmitErrors());
-    const activation = await activateFlowSubmitButton(start, command, payload.prompt);
+    const activation = await activateFlowSubmitButton(start, payload.prompt);
 
     // Follow TobyFlow's submit contract: a delivered click is only an attempt.
     // Require a changed control/editor or a new tile before starting the render wait.

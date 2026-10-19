@@ -57,55 +57,14 @@
   let previewUntil = 0;
   let locked = false;
   let lockDeadline = 0;
-  let submitPermit = null;
   const display = active => {
     locked = Boolean(active);
     lockDeadline = active ? Date.now() + 6000 : 0;
     frame.classList.toggle("active", locked || Date.now() < previewUntil);
   };
   // Pause direct user input while the content driver owns the Flow page.
-  function submitButtonName(button) {
-    const labelledBy = (button.getAttribute("aria-labelledby") || "").split(/\s+/).filter(Boolean)
-      .map(id => document.getElementById(id)?.innerText || document.getElementById(id)?.textContent || "").join(" ").trim();
-    const labels = button.labels ? [...button.labels].map(label => label.innerText || label.textContent || "").join(" ").trim() : "";
-    const explicit = button.getAttribute("aria-label") || labelledBy || button.getAttribute("title") || labels || button.getAttribute("alt");
-    if (explicit) return explicit.replace(/\s+/g, " ").trim();
-    const walker = document.createTreeWalker(button, NodeFilter.SHOW_TEXT);
-    const text = [];
-    while (walker.nextNode()) {
-      const node = walker.currentNode;
-      if (node.parentElement?.closest('[aria-hidden="true"]')) continue;
-      text.push(node.nodeValue || "");
-    }
-    return text.join(" ").replace(/\s+/g, " ").trim();
-  }
-  function allowSubmitEvent(event) {
-    const permit = submitPermit;
-    if (!permit) return false;
-    if (Date.now() > permit.expiresAt) { submitPermit = null; return false; }
-    if (!Number.isFinite(event.clientX) || !Number.isFinite(event.clientY) ||
-        Math.abs(event.clientX - permit.x) > 3 || Math.abs(event.clientY - permit.y) > 3) return false;
-    const target = event.target instanceof Element ? event.target : null;
-    const button = target?.closest('button,[role="button"]');
-    const hit = document.elementFromPoint(permit.x, permit.y);
-    const hitButton = hit instanceof Element ? hit.closest('button,[role="button"]') : null;
-    if (!button || button !== hitButton || submitButtonName(button) !== permit.label) return false;
-    const type = event.type;
-    if (["pointerover", "pointermove", "mouseover", "mousemove"].includes(type)) return true;
-    if (type === "pointerdown" || type === "mousedown") {
-      permit.pressed = true;
-      return true;
-    }
-    if (type === "pointerup" || type === "mouseup") return permit.pressed;
-    if (type === "click" && permit.pressed) {
-      submitPermit = null;
-      return true;
-    }
-    return false;
-  }
   function guard(event) {
     if (!locked || Date.now() > lockDeadline || !event.isTrusted) return;
-    if (allowSubmitEvent(event)) return;
     if (event.cancelable) event.preventDefault();
     event.stopImmediatePropagation();
   }
@@ -116,31 +75,6 @@
     window.addEventListener(type, guard, { capture:true, passive:false });
   }
   chrome.runtime.onMessage.addListener((message, _sender, respond) => {
-    if (message?.type === "flow-mcp:permit-submit-click") {
-      const x = Number(message.x), y = Number(message.y);
-      if (typeof message.requestId !== "string" || !message.requestId || message.label !== "Start generation" ||
-          !Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight) {
-        respond({ ok: false });
-        return;
-      }
-      const hit = document.elementFromPoint(x, y);
-      const button = hit instanceof Element ? hit.closest('button,[role="button"]') : null;
-      const expectedPrompt = String(message.prompt || "").replace(/[\u200B\u200C\u200D\uFEFF]/g, "").replace(/\s+/g, " ").trim();
-      let composer = button?.parentElement;
-      while (composer && composer !== document.body && !composer.querySelector(".ProseMirror[contenteditable='true']")) composer = composer.parentElement;
-      const editor = composer?.querySelector(".ProseMirror[contenteditable='true']");
-      const currentPrompt = String(editor?.innerText || editor?.textContent || "").replace(/[\u200B\u200C\u200D\uFEFF]/g, "").replace(/\s+/g, " ").trim();
-      const rect = button?.getBoundingClientRect();
-      if (!button || button.disabled || button.getAttribute("aria-disabled") === "true" ||
-          submitButtonName(button) !== message.label || !expectedPrompt || !currentPrompt.endsWith(expectedPrompt) ||
-          !rect || rect.width < 8 || rect.height < 8 || x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
-        respond({ ok: false });
-        return;
-      }
-      submitPermit = { requestId: message.requestId, x, y, label: message.label, expiresAt: Date.now() + 1800, pressed: false };
-      respond({ ok: true });
-      return;
-    }
     if (message?.type === "flow-mcp:activity-preview") {
       previewUntil = Date.now() + 5000;
       display(locked);
