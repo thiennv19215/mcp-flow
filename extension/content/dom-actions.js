@@ -520,15 +520,17 @@ function nativeRadioMatching(predicate) {
     visible(el) && predicate(accessibleName(el).replace(/\s+/g, " ").trim()));
 }
 function nativeRadioSelected(radio) {
-  return radio?.getAttribute("aria-checked") === "true" ||
-    radio?.getAttribute("aria-pressed") === "true" ||
-    radio?.getAttribute("aria-selected") === "true" ||
-    radio?.getAttribute("data-state") === "checked" ||
-    radio?.classList.contains("mat-radio-checked") ||
-    radio?.classList.contains("mdc-radio--checked") ||
-    radio?.classList.contains("selected") ||
-    radio?.classList.contains("active") ||
-    Boolean(radio?.querySelector('input[type="radio"]:checked'));
+  if (!radio) return false;
+  const stateControl = radio.closest('[role="radio"],[role="tab"],[role="option"],[aria-checked],[aria-pressed],[aria-selected],mat-radio-button,mat-button-toggle') || radio;
+  const controls = stateControl === radio ? [radio] : [radio, stateControl];
+  return controls.some(control =>
+    control.getAttribute("aria-checked") === "true" ||
+    control.getAttribute("aria-pressed") === "true" ||
+    control.getAttribute("aria-selected") === "true" ||
+    control.getAttribute("data-selected") === "true" ||
+    control.getAttribute("data-state") === "checked" ||
+    [...control.classList].some(className => /(?:^|[-_])(?:checked|selected|active|activated)(?:$|[-_])/i.test(className))
+  ) || Boolean(stateControl.querySelector('input[type="radio"]:checked,input[type="checkbox"]:checked,[aria-checked="true"],[aria-pressed="true"],[aria-selected="true"],[data-state="checked"]'));
 }
 async function setNativeAgentSettings(confirm, aspect) {
   const composer = document.querySelector("flow-base-prompt-box");
@@ -652,7 +654,8 @@ async function pickNativeAgentImageModel() {
 }
 function flowSettingsPanelVisible() {
   return Boolean(flowRadio("x1") || flowOption("x1") || flowRadio("Image") || flowOption("Image") ||
-    flowRadio("Video") || flowOption("Video") || flowButton("Select model family") || flowButton("Model"));
+    flowRadio("Video") || flowOption("Video") || flowRadio("Ingredients") || flowOption("Ingredients") ||
+    flowRadio("Frames") || flowOption("Frames") || flowButton("Select model family") || flowButton("Model"));
 }
 async function openFlowSettings() {
   if (flowSettingsPanelVisible()) return true;
@@ -742,7 +745,7 @@ async function chooseNativeVariantCount(count) {
   throw flowError("FLOW_VARIANT_SELECTION_UNCONFIRMED", `Flow did not confirm the requested ${name} output count. Nothing was submitted.`, true);
 }
 async function closeFlowSettings() {
-  const isOpen = () => Boolean(flowRadio("x1") || flowOption("x1"));
+  const isOpen = () => flowSettingsPanelVisible();
   if (!isOpen()) return;
   // Flow can ignore a synthetic Escape, so use its own settings toggle and confirm the
   // quantity controls are actually gone before allowing the submit action to continue.
@@ -758,6 +761,52 @@ async function closeFlowSettings() {
     while (Date.now() < closeDeadline && isOpen()) await wait(100);
   }
   if (isOpen()) throw flowError("FLOW_SETTINGS_CLOSE_FAILED", "Flow's settings panel stayed open after choosing the quantity. Nothing was submitted.", true);
+}
+function findRenderedSetting(name) {
+  const normalized = String(name || "").replace(/\s+/g, " ").trim().toLowerCase();
+  const candidates = [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')]
+    .filter(el => visible(el) && !isFlowProjectNavigationControl(el));
+  const exact = candidates.find(el => {
+    const label = accessibleName(el).replace(/\s+/g, " ").trim().toLowerCase();
+    return label === normalized || label.endsWith(` ${normalized}`);
+  });
+  if (exact) return exact;
+  const seconds = /^(\d+)s$/.exec(normalized);
+  if (seconds) return candidates.find(el => new RegExp(`(?:^|\\s)${seconds[1]}\\s*seconds?(?:\\s|$)`, "i").test(accessibleName(el).replace(/\s+/g, " ").trim()));
+  return null;
+}
+async function preflightGenerationPrompt(payload, framesMode) {
+  await openFlowSettings();
+  const expected = [];
+  if (payload.type === "image") expected.push("Image");
+  else expected.push("Video");
+  if (payload.aspectRatio) expected.push(payload.aspectRatio);
+  expected.push(`x${Math.max(1, Math.min(4, Number(payload.variants) || 1))}`);
+  if (payload.type === "video") {
+    if (payload.duration) expected.push(`${payload.duration}s`);
+    if (payload.resolution) expected.push(String(payload.resolution));
+    expected.push(framesMode ? "Frames" : "Ingredients");
+  }
+  for (const name of expected) {
+    const control = findRenderedSetting(name);
+    const selected = nativeRadioSelected(control) || (name === "Frames" && flowButton("Start") && flowButton("End"));
+    if (!control || !selected) {
+      throw flowError("FLOW_SETTINGS_PREFLIGHT_FAILED", `Flow's rendered settings do not confirm "${name}" before prompt entry. Nothing was submitted.`, true, false);
+    }
+  }
+  if (framesMode && (!flowButton("Start") || !flowButton("End"))) {
+    throw flowError("FLOW_SETTINGS_PREFLIGHT_FAILED", "Flow's rendered Frames settings do not show both Start and End controls before prompt entry. Nothing was submitted.", true, false);
+  }
+  await closeFlowSettings();
+  if (flowSettingsPanelVisible()) throw flowError("FLOW_SETTINGS_CLOSE_FAILED", "Flow's settings panel is still open before prompt entry. Nothing was submitted.", true, false);
+  const deadline = Date.now() + 5000;
+  let promptBox = null;
+  while (Date.now() < deadline) {
+    promptBox = [...document.querySelectorAll(".ProseMirror")].find(el => visible(el) && el.isContentEditable);
+    if (promptBox) return promptBox;
+    await wait(100);
+  }
+  throw flowError("FLOW_PROMPT_COMPOSER_NOT_READY", "Flow's prompt editor is not visible after closing settings. Nothing was submitted.", true, false);
 }
 async function restoreNativeFramesMode() {
   await openFlowSettings();
@@ -2011,8 +2060,7 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
         }
       }
     }
-    const activeBox = document.querySelector(".ProseMirror");
-    if (!activeBox) throw flowError("FLOW_COMPOSER_MISSING", "Flow's composer disappeared while preparing references; no generation was submitted.", false, false);
+    const activeBox = await preflightGenerationPrompt(payload, framesMode);
     const promptApplied = await insertNativeFlowPrompt(activeBox, payload.prompt);
     if (!promptApplied) throw flowError("FLOW_PROMPT_INPUT_UNCONFIRMED", "Flow's composer did not confirm the full prompt text. Nothing was submitted.", true, false);
     // Flow may not calculate/render its usage quote until settings, references and prompt are applied.
