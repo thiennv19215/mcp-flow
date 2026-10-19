@@ -470,7 +470,7 @@ async function activateFlowSubmitButton(button) {
     }
     button.removeAttribute("data-flow-mcp-submit-request");
     button.removeAttribute("data-flow-mcp-submit-result");
-    if (!activation) throw flowError("FLOW_SUBMIT_BRIDGE_TIMEOUT", "The Flow main-world submit bridge did not answer. Refresh the Flow tab and retry.", true);
+    if (!activation) throw flowError("FLOW_SUBMIT_BRIDGE_TIMEOUT", "The Flow main-world submit bridge did not answer; the click may already have reached Flow. Inspect the project before retrying.", false, true);
     if (!activation?.success && !activation?.clickDelivered && !activation?.controlAccepted) {
       const detail = activation?.error || "no matching Flow listener";
       const bridge = activation?.bridgeReadyState && ` Bridge started at document.readyState=${activation.bridgeReadyState}; captured ${activation.capturedClickRegistrations || 0} click listener(s).`;
@@ -724,6 +724,29 @@ async function closeFlowSettings() {
   }
   if (isOpen()) throw flowError("FLOW_SETTINGS_CLOSE_FAILED", "Flow's settings panel stayed open after choosing the quantity. Nothing was submitted.", true);
 }
+async function restoreNativeFramesMode() {
+  await openFlowSettings();
+  const findFrames = () => [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')]
+    .find(el => visible(el) && accessibleName(el).replace(/^(?:accessibility_new|dashboard|face)\s*/i, "").replace(/\s+/g, " ").trim().toLocaleLowerCase() === "frames");
+  let frames = findFrames();
+  if (!frames) throw flowError("FLOW_FRAMES_MODE_UNAVAILABLE", "Flow does not show a Frames mode control after local frame upload. Nothing was submitted.", true, false);
+  if (!nativeRadioSelected(frames) && frames.getAttribute("aria-selected") !== "true") frames.click();
+  const deadline = Date.now() + 5000;
+  let confirmed = false;
+  while (Date.now() < deadline) {
+    frames = findFrames();
+    if (frames && (nativeRadioSelected(frames) || frames.getAttribute("aria-selected") === "true")) { confirmed = true; break; }
+    if (!flowSettingsPanelVisible()) await openFlowSettings();
+    await wait(100);
+  }
+  if (!confirmed) throw flowError("FLOW_FRAMES_MODE_UNCONFIRMED", "Flow did not confirm Frames mode after local frame upload. Nothing was submitted.", true, false);
+  await closeFlowSettings();
+  const controlsDeadline = Date.now() + 4000;
+  while (Date.now() < controlsDeadline && !(flowButton("Start") && flowButton("End"))) await wait(100);
+  if (!flowButton("Start") || !flowButton("End")) {
+    throw flowError("FLOW_FRAMES_CONTROLS_UNAVAILABLE", "Flow selected Frames but did not restore both Start and End frame controls. Nothing was submitted.", true, false);
+  }
+}
 async function chooseNativeModel(model, type) {
   if (!model) return;
   const legacyImage = type === "image" && /^\s*(nano banana( 2)?|latest)?\s*$/i.test(model);
@@ -779,123 +802,176 @@ async function chooseNativeModel(model, type) {
 }
 async function chooseNativePickerAsset(assetName, slot) {
   if (!slot) return globalThis.FlowReferenceActions.attach(assetName);
-  const wanted = String(assetName).trim().toLocaleLowerCase();
-  const wantedStem = wanted.replace(/\.(?:png|jpe?g|webp|gif|heic|heif|avif|mp4|m4v|mov|webm|avi|mkv|3gp)$/i, "");
-
-  // Strategy 1: For references (!slot), try adding directly from the project tile (TobyFlow pattern)
-  if (!slot) {
-    const tile = [...document.querySelectorAll("flow-grid-tile-container")]
-      .find(item => matchesFlowTile(item, assetName));
-    if (tile) {
-      tile.scrollIntoView({ behavior: "instant", block: "center" });
-      await wait(150);
-      const directAdd = [...tile.querySelectorAll('button,[role="button"]')].find(el => {
-        if (!visible(el) || el.disabled || el.getAttribute("aria-disabled") === "true") return false;
-        const label = accessibleName(el).replace(/\s+/g, " ").trim().toLowerCase();
-        return /add to prompt|thêm vào lời nhắc|thêm vào prompt/i.test(label);
-      });
-      if (directAdd) {
-        directAdd.click();
-        await wait(350);
-        return true;
-      }
-      const optionsBtn = flowTileOptionsButton(tile);
-      if (optionsBtn) {
-        optionsBtn.click();
-        await wait(250);
-      } else {
-        const rect = tile.getBoundingClientRect();
-        const x = rect.left + rect.width / 2;
-        const y = rect.top + rect.height / 2;
-        tile.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, button: 2, clientX: x, clientY: y, pointerType: "mouse" }));
-        tile.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 2, clientX: x, clientY: y }));
-        tile.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2, clientX: x, clientY: y }));
-        await wait(250);
-      }
-      const activeMenus = [...document.querySelectorAll('[role="menu"],mat-menu-panel,[data-state="open"]')].filter(visible);
-      for (const menu of activeMenus) {
-        const items = [...menu.querySelectorAll('[role="menuitem"],button')].filter(visible);
-        const addOption = items.find(item => {
-          const label = (item.innerText || item.textContent || accessibleName(item)).replace(/\s+/g, " ").trim().toLowerCase();
-          return /add to prompt|thêm vào lời nhắc|add as ingredient|thêm làm thành phần/i.test(label);
-        });
-        if (addOption) {
-          addOption.click();
-          await wait(350);
-          return true;
-        }
-      }
-    }
-  }
-
-  // Strategy 2: Open picker via composer button
-  let opener = slot === "start"
-    ? flowButton("Start")
-    : slot === "end"
-      ? flowButton("End")
-      : (flowButton("Add ingredients to the prompt box") || findAddMediaButton());
-
-  if (!opener) throw flowError("NATIVE_CAPABILITY_UNSUPPORTED", `Flow's ${slot || "reference"} picker is unavailable; nothing was submitted.`, true);
-  let list;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const priorLists = new Set(document.querySelectorAll('[role="listbox"]'));
-    opener.click();
-    const controlledIds = [opener.getAttribute("aria-controls"), opener.getAttribute("aria-owns")].filter(Boolean).flatMap(value => value.split(/\s+/));
-    const deadline = Date.now() + 2500;
+  const wanted = String(assetName || "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
+  if (!wanted || !["start", "end"].includes(slot)) throw flowError("FLOW_INVALID_ARGUMENT", "Frame selection requires an exact asset title and a Start or End slot.", false, false);
+  const buttonForSlot = () => flowButton(slot === "start" ? "Start" : "End");
+  const listForOpener = (opener, priorLists) => {
+    const ids = [opener?.getAttribute("aria-controls"), opener?.getAttribute("aria-owns")].filter(Boolean).flatMap(value => value.split(/\s+/));
+    const controlled = ids.map(id => document.getElementById(id)).find(el => el?.getAttribute("role") === "listbox" && visible(el));
+    const lists = [...document.querySelectorAll('[role="listbox"]')].filter(visible);
+    return controlled || lists.find(el => !priorLists.has(el)) || lists.at(-1);
+  };
+  const pickerSettled = async (listGetter, timeoutMs = 15_000) => {
+    const deadline = Date.now() + timeoutMs;
+    let stableAt = 0;
     while (Date.now() < deadline) {
-      const controlled = controlledIds.map(id => document.getElementById(id)).find(el => el?.getAttribute("role") === "listbox" && visible(el));
-      const visibleLists = [...document.querySelectorAll('[role="listbox"]')].filter(visible);
-      list = controlled || visibleLists.find(el => !priorLists.has(el)) || visibleLists.at(-1);
-      if (list) break;
-      await wait(100);
+      const list = listGetter();
+      const loading = [...document.querySelectorAll('[role="progressbar"],[aria-busy="true"]')].some(visible);
+      if (list && !loading) {
+        const options = [...list.querySelectorAll('[role="option"]')].filter(visible);
+        if (options.length || /no (?:assets|items) found/i.test(list.innerText || "")) return list;
+        if (!stableAt) stableAt = Date.now();
+        if (Date.now() - stableAt >= 700) return list;
+      } else stableAt = 0;
+      await wait(150);
     }
-    if (list) break;
-    if (attempt < 2) {
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-      await wait(400);
-      opener = slot === "start" ? flowButton("Start") : slot === "end" ? flowButton("End") : (flowButton("Add ingredients to the prompt box") || findAddMediaButton());
-    }
-  }
-  if (!visible(list)) throw flowError("FLOW_ASSET_PICKER_MISSING", `Flow's ${slot || "reference"} asset picker did not open.`, true);
-  const findTab = name => [...document.querySelectorAll('[role="tab"]')].find(tab => {
-    if (!visible(tab)) return false;
-    const label = accessibleName(tab).replace(/\s+/g, " ").trim().toLowerCase();
-    const wantedLower = name.toLowerCase();
-    return label === wantedLower || label.includes(wantedLower);
-  });
-  const allTab = findTab("All") || findTab("Tất cả") || findTab("Ingredients") || findTab("Thành phần");
-  if (allTab && allTab.getAttribute("aria-selected") !== "true") { allTab.click(); await wait(300); }
+    throw flowError("FLOW_ASSET_PICKER_LOADING", `Flow's ${slot} frame picker did not finish loading. Nothing was selected.`, true, false);
+  };
+  const findTab = name => [...document.querySelectorAll('[role="tab"]')].find(tab => visible(tab) &&
+    accessibleName(tab).replace(/\s+/g, " ").trim().toLocaleLowerCase() === name.toLocaleLowerCase());
   const optionNames = option => {
     const values = [accessibleName(option), option.getAttribute("aria-label"), option.getAttribute("title")];
     for (const node of option.querySelectorAll("[aria-label],[title],img[alt],flow-grid-tile-container")) {
       values.push(node.getAttribute("aria-label"), node.getAttribute("title"), node.getAttribute("alt"));
     }
-    return values.map(value => String(value || "").replace(/\s+/g, " ").trim().toLocaleLowerCase()).filter(Boolean);
+    return [...new Set(values.map(value => String(value || "").replace(/\s+/g, " ").trim().toLocaleLowerCase()).filter(Boolean))];
   };
-  const findOptions = () => [...list.querySelectorAll('[role="option"]')].filter(option => {
-    if (!visible(option)) return false;
-    return optionNames(option).some(label => label === wanted || label === wantedStem || label.includes(wanted) || (wantedStem.length >= 3 && label.includes(wantedStem)));
-  });
-  const requireUniqueOption = () => {
-    const matches = findOptions();
-    if (matches.length > 1) return matches[0]; // Prefer first match instead of hard failing
-    return matches[0] || null;
+  const isExactOption = option => optionNames(option).some(label => label === wanted ||
+    label.replace(/\s+(?:image|video|character|avatar)$/i, "") === wanted);
+  const optionIdentity = (option, pageIndex, itemIndex, scroller) => {
+    const tile = option.querySelector("flow-grid-tile-container");
+    const id = tile && mediaId(tile);
+    if (id && !id.startsWith("title:")) return id;
+    const image = option.querySelector("img");
+    return image?.currentSrc || image?.src || option.getAttribute("data-media-id") || option.id ||
+      option.getAttribute("aria-posinset") || `${wanted}|${Math.floor((scroller?.scrollTop || 0) / Math.max(1, scroller?.clientHeight || 1))}|${pageIndex}|${itemIndex}`;
   };
-  let option = requireUniqueOption();
-  if (!option) for (const tabName of ["Ingredients", "Thành phần", "Uploads", "Tải lên", "Characters", "Avatars"]) {
-    const tab = findTab(tabName);
-    if (!tab) continue;
-    tab.click(); await wait(350); option = requireUniqueOption(); if (option) break;
+  const slotSignature = () => {
+    const opener = buttonForSlot();
+    if (!opener) return "missing";
+    const container = opener.parentElement?.parentElement || opener;
+    return JSON.stringify({
+      label: opener.getAttribute("aria-label"), title: opener.getAttribute("title"), text: (opener.innerText || "").replace(/\s+/g, " ").trim(),
+      expanded: opener.getAttribute("aria-expanded"),
+      media: [...container.querySelectorAll("img,video")].map(el => el.currentSrc || el.getAttribute("src") || el.getAttribute("alt") || ""),
+      names: [...container.querySelectorAll("[aria-label],[title]")].map(el => el.getAttribute("aria-label") || el.getAttribute("title")),
+    });
+  };
+
+  let opener = buttonForSlot();
+  if (!opener) throw flowError("FLOW_FRAMES_CONTROLS_UNAVAILABLE", `Flow's ${slot} frame picker is unavailable. Nothing was submitted.`, true, false);
+  const beforeSlot = slotSignature();
+  let list;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    opener = buttonForSlot();
+    if (!opener) break;
+    const priorLists = new Set(document.querySelectorAll('[role="listbox"]'));
+    const controlledIds = [opener.getAttribute("aria-controls"), opener.getAttribute("aria-owns")].filter(Boolean).flatMap(value => value.split(/\s+/));
+    opener.click();
+    const listGetter = () => {
+      const controlled = controlledIds.map(id => document.getElementById(id)).find(el => el?.getAttribute("role") === "listbox" && visible(el));
+      const lists = [...document.querySelectorAll('[role="listbox"]')].filter(visible);
+      return controlled || lists.find(el => !priorLists.has(el)) || lists.at(-1);
+    };
+    try { list = await pickerSettled(listGetter, 5000); } catch (error) {
+      if (attempt === 2) throw error;
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await wait(250);
+      continue;
+    }
+    if (list) break;
   }
-  if (!option) {
-    const visibleNames = [...list.querySelectorAll('[role="option"]')].filter(visible).slice(0, 12).map(option => optionNames(option).slice(0, 3).join(" / ")).filter(Boolean);
-    throw flowError("FLOW_ASSET_NOT_FOUND", `Flow's picker does not contain an exact match for "${assetName}". Visible entries: ${visibleNames.join("; ") || "none"}. No asset was selected.`, true);
+  if (!list || !visible(list)) throw flowError("FLOW_ASSET_PICKER_MISSING", `Flow's ${slot} frame picker did not open. Nothing was submitted.`, true, false);
+  const listGetter = () => {
+    const lists = [...document.querySelectorAll('[role="listbox"]')].filter(visible);
+    return lists.find(item => item === list) || lists.at(-1);
+  };
+
+  const categories = ["All", "Tất cả", "Ingredients", "Thành phần", "Uploads", "Tải lên"];
+  let matches = new Map();
+  let scroller = null;
+  let pageIndex = 0;
+  try {
+    let search = [...document.querySelectorAll('input,[role="textbox"]')].find(el => visible(el) && /search assets/i.test(accessibleName(el)));
+    if (search) {
+      setEditable(search, assetName);
+      await wait(650);
+      await pickerSettled(listGetter);
+    }
+    for (const category of categories) {
+      const tab = findTab(category);
+      if (tab && tab.getAttribute("aria-selected") !== "true") {
+        tab.click();
+        const tabDeadline = Date.now() + 5000;
+        while (Date.now() < tabDeadline) {
+          const current = findTab(category);
+          if (current?.getAttribute("aria-selected") === "true") break;
+          await wait(100);
+        }
+        if (findTab(category)?.getAttribute("aria-selected") !== "true") throw flowError("FLOW_ASSET_CATEGORY_UNCONFIRMED", `Flow did not select the ${category} picker category. Nothing was submitted.`, true, false);
+        await pickerSettled(listGetter);
+      }
+      list = listGetter();
+      if (!list) continue;
+      search = [...document.querySelectorAll('input,[role="textbox"]')].find(el => visible(el) && /search assets/i.test(accessibleName(el)));
+      if (search && String(search.value ?? "") !== assetName) {
+        setEditable(search, assetName);
+        await wait(650);
+        await pickerSettled(listGetter);
+      }
+      list = listGetter();
+      scroller = list && [list, ...list.querySelectorAll("*")].find(el => el.clientHeight > 0 && el.scrollHeight > el.clientHeight + 5);
+      if (scroller) scroller.scrollTop = 0;
+      matches = new Map();
+      for (pageIndex = 0; pageIndex < (scroller ? 150 : 1); pageIndex++) {
+        list = await pickerSettled(listGetter);
+        if (!list) break;
+        const visibleOptions = [...list.querySelectorAll('[role="option"]')].filter(visible);
+        visibleOptions.forEach((option, itemIndex) => {
+          if (isExactOption(option)) matches.set(optionIdentity(option, pageIndex, itemIndex, scroller), option);
+        });
+        if (matches.size > 1) break;
+        if (!scroller || scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 2) break;
+        const previous = scroller.scrollTop;
+        scroller.scrollTop = Math.min(scroller.scrollHeight - scroller.clientHeight, previous + Math.max(120, scroller.clientHeight * 0.75));
+        await wait(250);
+        if (scroller.scrollTop === previous) break;
+      }
+      if (matches.size) break;
+    }
+    if (matches.size > 1) throw flowError("FLOW_AMBIGUOUS_ASSET", `More than one project image is titled "${assetName}"; no frame was selected.`, false, false);
+    if (!matches.size) {
+      const visibleNames = [...(list?.querySelectorAll('[role="option"]') || [])].filter(visible).slice(0, 12).map(option => optionNames(option).slice(0, 3).join(" / ")).filter(Boolean);
+      throw flowError("FLOW_ASSET_NOT_FOUND", `Flow's ${slot} frame picker has no exact asset titled "${assetName}". Visible entries: ${visibleNames.join("; ") || "none"}. Nothing was selected.`, true, false);
+    }
+    const option = [...matches.values()][0];
+    option.click();
+    const selectionDeadline = Date.now() + 5000;
+    let attached = false;
+    while (Date.now() < selectionDeadline) {
+      const currentList = listGetter();
+      const selected = currentList && [...currentList.querySelectorAll('[role="option"]')].find(item => isExactOption(item) &&
+        (item.getAttribute("aria-selected") === "true" || item.getAttribute("aria-checked") === "true" || item.getAttribute("data-state") === "checked"));
+      if (selected || (slotSignature() !== beforeSlot && !currentList)) { attached = true; break; }
+      await wait(150);
+    }
+    if (!attached) throw flowError("FLOW_FRAME_ATTACH_UNCONFIRMED", `Flow did not confirm that "${assetName}" was selected for the ${slot} frame. Nothing was submitted.`, false, false);
+    return true;
+  } finally {
+    const openPicker = () => {
+      const currentList = listGetter();
+      return currentList && visible(currentList) ? currentList : null;
+    };
+    if (openPicker()) {
+      const currentList = openPicker();
+      const closeButton = flowButton("Close", currentList.closest('[role="dialog"]') || document);
+      if (closeButton) closeButton.click();
+      else document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      const closeDeadline = Date.now() + 2500;
+      while (Date.now() < closeDeadline && openPicker()) await wait(100);
+      if (openPicker()) throw flowError("FLOW_ASSET_PICKER_CLOSE_FAILED", `Flow's ${slot} frame picker stayed open after selection. Inspect the composer before retrying.`, true, false);
+    }
   }
-  option.click(); await wait(300);
-  const add = flowButton("Add to prompt") || flowButton("Thêm vào lời nhắc") ||
-    [...document.querySelectorAll('button,[role="button"]')].find(b => visible(b) && /add to prompt|thêm vào lời nhắc/i.test(accessibleName(b)));
-  if (!slot && add) { add.click(); await wait(300); }
-  return true;
 }
 function findAddMediaButton() {
   const direct = flowButton("Add media menu");
@@ -1305,19 +1381,28 @@ async function retryNativeErrorTile(item) {
   if (scrollContainer()) scrollContainer().scrollTop = 0;
   return true;
 }
-async function waitForProgressResult(command, before, expected, kind, timeoutMs, selector = "flow-grid-tile-container") {
+async function waitForProgressResult(command, before, expected, kind, timeoutMs, selector = "flow-grid-tile-container", allowConfirmedPartial = false) {
   const until = Date.now() + timeoutMs;
   let hadProgress = false, last = "", lastTitleOnlyResult = "", retriesLeft = 1;
   while (Date.now() < until) {
     const fresh = collectNativeMedia().filter(item => !before.includes(item.id || `title:${item.title}`) && (!kind || item.kind === kind));
-    const failed = fresh.find(item => item.failed);
-    if (failed) {
-      if (retriesLeft > 0 && await retryNativeErrorTile(failed)) {
+    const failed = fresh.filter(item => item.failed);
+    if (failed.length) {
+      if (retriesLeft > 0 && await retryNativeErrorTile(failed[0])) {
         retriesLeft--;
         emitFlowProgress(command, "Flow failed this render; retrying its failed tile");
         continue;
       }
-      throw flowError("FLOW_GENERATION_FAILED", `Flow failed while processing "${failed.title}"${failed.failureReason ? `: ${failed.failureReason}` : ""}. Nothing was charged for this failed render.`, false, false);
+      if (!allowConfirmedPartial || fresh.filter(item => !item.busy).length >= expected) {
+        const ready = fresh.filter(item => !item.busy && !item.failed);
+        const failure = failed[0];
+        const error = flowError("FLOW_GENERATION_FAILED", `Flow failed while processing "${failure.title}"${failure.failureReason ? `: ${failure.failureReason}` : ""}. Nothing was charged for the failed render.`, false, false);
+        if (allowConfirmedPartial && ready.length + failed.length >= expected) {
+          error.partialMedia = ready.map(descriptor);
+          error.failedMedia = failed.map(descriptor);
+        }
+        throw error;
+      }
     }
     const ready = fresh.filter(item => !item.busy && !item.failed);
     if (ready.length >= expected) {
@@ -1535,7 +1620,9 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
     if (activeAgent?.getAttribute("aria-pressed") === "true") await setNativeAgentMode(false);
     await ensureFlowLibrarySection("All media");
     const assets = await scanNativeAssets();
-    const found = assets.find(asset => asset.kind === "video" && asset.name.toLowerCase().startsWith(source.toLowerCase()));
+    const matches = assets.filter(asset => asset.kind === "video" && asset.name.toLowerCase().startsWith(source.toLowerCase()));
+    if (matches.length > 1) throw flowError("FLOW_AMBIGUOUS_ASSET", `${matches.length} videos begin with "${source}"; no edit was started. Use the full title from flow_assets.`, true, false);
+    const found = matches[0];
     if (!found) throw flowError("FLOW_VIDEO_NOT_FOUND", `No video beginning "${source}" exists in the project. Use flow_assets to list titles.`, true);
     if (scrollContainer()) scrollContainer().scrollTop = 0;
     const before = collectNativeMedia().map(item => item.id || `title:${item.title}`);
@@ -1550,16 +1637,30 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
     await wait(500);
     const start = await waitForEnabledFlowButton("Start generation", 8000);
     if (!start) throw flowError("FLOW_SUBMIT_DISABLED", "Flow's edit action is unavailable; nothing was submitted.", true);
-    await activateFlowSubmitButton(start);
-    await waitForNativeEditorCompletion(command, Number(params.timeout_ms || 10 * 60_000), "video edit");
-    const back = flowButton("Back button to go to previous page");
-    if (!back) throw flowError("FLOW_EDIT_BACK_MISSING", "Flow finished the video edit, but its Back control is unavailable. The result remains in Flow.", true, true);
-    back.click();
-    await waitForFlowRoute(path => !/\/edit(?:\/|$)/i.test(path), 20_000, "Flow finished the edit but did not return to the project.");
-    await ensureFlowLibrarySection("All media");
-    if (scrollContainer()) scrollContainer().scrollTop = 0;
-    const results = await waitForProgressResult(command, before, 1, "video", 90_000);
-    return { media: results, trustedGesture: false };
+    let submitted = false;
+    try {
+      try {
+        await activateFlowSubmitButton(start);
+        submitted = true;
+      } catch (error) {
+        // The bridge can time out after delivering the activation. Treat it as possibly
+        // submitted so callers do not blindly retry an edit that may already be running.
+        if (error?.code === "FLOW_SUBMIT_BRIDGE_TIMEOUT" || error?.outcome_unknown) error.outcome_unknown = true;
+        throw error;
+      }
+      await waitForNativeEditorCompletion(command, Number(params.timeout_ms || 10 * 60_000), "video edit");
+      const back = flowButton("Back button to go to previous page");
+      if (!back) throw flowError("FLOW_EDIT_BACK_MISSING", "Flow finished the video edit, but its Back control is unavailable. The result remains in Flow.", true, true);
+      back.click();
+      await waitForFlowRoute(path => !/\/edit(?:\/|$)/i.test(path), 20_000, "Flow finished the edit but did not return to the project.");
+      await ensureFlowLibrarySection("All media");
+      if (scrollContainer()) scrollContainer().scrollTop = 0;
+      const results = await waitForProgressResult(command, before, 1, "video", 90_000);
+      return { media: results, trustedGesture: false };
+    } catch (error) {
+      if (submitted && error && typeof error === "object") error.outcome_unknown = true;
+      throw error;
+    }
   }
   if (name === "flow.agent.batch") {
     const params = payload.job?.params || payload.params || {};
@@ -1581,7 +1682,18 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
       if (!start || start.disabled) throw flowError("FLOW_SUBMIT_DISABLED", "Flow's Agent Start generation button is disabled; nothing was submitted.", true);
       await activateFlowSubmitButton(start);
       submitted = true;
-      const media = await waitForProgressResult(command, before, scenes.length, "image", Number(params.timeout_ms || 1800000), "main");
+      let media;
+      let partialFailure = false;
+      let failedMedia = [];
+      try {
+        media = await waitForProgressResult(command, before, scenes.length, "image", Number(params.timeout_ms || 1800000), "main", true);
+      } catch (error) {
+        if (error?.code !== "FLOW_GENERATION_FAILED" || error?.outcome_unknown !== false
+          || !Array.isArray(error.partialMedia) || !Array.isArray(error.failedMedia)) throw error;
+        media = error.partialMedia;
+        failedMedia = error.failedMedia;
+        partialFailure = true;
+      }
       const prompts = [];
       for (const item of media) {
         const scroller = scrollContainer();
@@ -1609,7 +1721,7 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
         if (close && flowButton("Start new session")) { close.click(); await wait(350); }
       }
       const clear = flowButton("Clear prompt"); if (clear) clear.click();
-      return { media, prompts, trustedGesture: false };
+      return { media, prompts, ...(partialFailure ? { partial: true, failedMedia } : {}), trustedGesture: false };
     } catch (error) {
       outcomeUnknown = Boolean(error?.outcome_unknown) || submitted;
       throw error;
@@ -1635,7 +1747,9 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
     if (activeAgent?.getAttribute("aria-pressed") === "true") await setNativeAgentMode(false);
     await ensureFlowLibrarySection("All media");
     const assets = await scanNativeAssets();
-    const source = assets.find(asset => asset.kind === "video" && asset.name.toLowerCase().startsWith(sourcePrefix.toLowerCase()));
+    const matches = assets.filter(asset => asset.kind === "video" && asset.name.toLowerCase().startsWith(sourcePrefix.toLowerCase()));
+    if (matches.length > 1) throw flowError("FLOW_AMBIGUOUS_ASSET", `${matches.length} videos begin with "${sourcePrefix}"; no continuation was started. Use the full title from flow_assets.`, true, false);
+    const source = matches[0];
     if (!source) throw flowError("FLOW_VIDEO_NOT_FOUND", `No video beginning "${sourcePrefix}" exists in the project. Use flow_assets to list titles.`, true);
     if (scrollContainer()) scrollContainer().scrollTop = 0;
     const before = collectNativeMedia().map(item => item.id || `title:${item.title}`);
@@ -1753,13 +1867,13 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
       return null;
     };
     const firstFrame = frameValue(payload.firstFrame), lastFrame = frameValue(payload.lastFrame);
-    if (firstFrame === null || lastFrame === null || attachments.some(item => {
+    const framesMode = payload.type === "video" && Boolean(firstFrame || lastFrame);
+    if (firstFrame === null || lastFrame === null || (!framesMode && attachments.some(item => {
       if (typeof item === "string") return !item.trim();
       if (!item || typeof item !== "object") return true;
       if (typeof item.assetName === "string") return !item.assetName.trim();
       return !validStagedLocalImage(item, /(?:ref[1-3]|attach[1-3])/);
-    })) throw flowError("NATIVE_CAPABILITY_UNSUPPORTED", "Native generation accepts project asset names or staged local image attachments only; nothing was submitted.", true);
-    const framesMode = payload.type === "video" && Boolean(firstFrame || lastFrame);
+    }))) throw flowError("NATIVE_CAPABILITY_UNSUPPORTED", "Native generation accepts project asset names or staged local image attachments only; nothing was submitted.", true, false);
     const referenceAttachments = framesMode ? [] : attachments;
     if (scrollContainer()) scrollContainer().scrollTop = 0;
     const before = collectNativeMedia().map(item => item.id || `title:${item.title}`);
@@ -1773,7 +1887,7 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
       : await globalThis.FlowVideoActions.prepare(payload, variants, framesMode);
 
     const uploadAndResolve = async (attachment, slot) => {
-      if (!validStagedLocalImage(attachment, /(?:start|end|ref[1-3])/)) throw flowError("FLOW_UPLOAD_UNAVAILABLE", "Flow's staged image transfer is unavailable before file selection.", false, Boolean(slot));
+      if (!validStagedLocalImage(attachment, /(?:start|end|ref[1-3])/)) throw flowError("FLOW_UPLOAD_UNAVAILABLE", "Flow's staged image transfer is unavailable before file selection.", false, false);
       const file = stagedNativeFiles.get(attachment.transferId);
       if (!file) throw flowError("FLOW_TRANSFER_UNKNOWN", "The staged image is no longer available.", true);
       try {
@@ -1781,11 +1895,7 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
       } finally {
         // Uploading from Flow V2's Frames composer temporarily switches to Ingredients
         // when the + menu is hidden. Restore Frames before using Start/End pickers.
-        if (framesMode && (slot === "start" || slot === "end")) {
-          await openFlowSettings();
-          await chooseRadio("Frames");
-          await closeFlowSettings();
-        }
+        if (framesMode && (slot === "start" || slot === "end")) await restoreNativeFramesMode();
       }
       await chooseNativePickerAsset(attachment.name, slot);
     };
@@ -1828,7 +1938,7 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
       }
     }
     const activeBox = document.querySelector(".ProseMirror");
-    if (!activeBox) throw flowError("FLOW_COMPOSER_MISSING", "Flow's composer disappeared while preparing references; no generation was submitted.", false, Boolean(attachments.length));
+    if (!activeBox) throw flowError("FLOW_COMPOSER_MISSING", "Flow's composer disappeared while preparing references; no generation was submitted.", false, false);
     const promptApplied = await insertNativeFlowPrompt(activeBox, payload.prompt);
     if (!promptApplied) throw flowError("FLOW_PROMPT_INPUT_UNCONFIRMED", "Flow's composer did not confirm the full prompt text. Nothing was submitted.", true, false);
     // Flow may not calculate/render its usage quote until settings, references and prompt are applied.

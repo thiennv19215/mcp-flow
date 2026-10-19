@@ -35,11 +35,16 @@ const IMAGE_TIMEOUT_MS = 3 * 60_000;
 const VIDEO_TIMEOUT_MS = 12 * 60_000;
 const ASSET_PREFIX = "asset:";
 const nativeJobTargets = new WeakMap<object, NativeFlowTarget>();
-type NativeFlowTarget = { driverKey: string; origin: string; projectId: string | null; routePrefix: string; isProjectEditor: boolean };
+type NativeFlowTarget = { driverKey: string; origin: string; projectId: string | null; routePrefix: string; isProjectEditor: boolean; tabId: number };
 
 async function nativeTarget(job?: Job): Promise<NativeFlowTarget> {
   if (job && nativeJobTargets.has(job)) return nativeJobTargets.get(job)!;
   const target = await executeFlowDom<NativeFlowTarget>({ op: "flowOperation", name: "flow.context", capability: "flow.native.context" }, { timeoutMs: 8_000 });
+  if (!Number.isInteger(target.tabId)) {
+    throw Object.assign(new Error("Reload this repository's Flow extension to version 0.2.7 to enable native tab pinning."), {
+      code: "NATIVE_CAPABILITY_UNSUPPORTED", retryable: true, outcome_unknown: false,
+    });
+  }
   if (!target.isProjectEditor || !target.projectId) {
     throw Object.assign(new Error("Open a Flow project before running this operation."), { code: "FLOW_PROJECT_REQUIRED", retryable: true, outcome_unknown: false });
   }
@@ -241,24 +246,31 @@ async function downloadNativeResults(
 export async function runGeneration(job: Job): Promise<string[]> {
   const s = job.params;
   const refs = s.reference_images ?? [];
+  const framesMode = s.type === "video" && Boolean(s.first_frame || s.last_frame);
+  // Frames and references are mutually exclusive in Flow. When frames are present,
+  // keep the frame inputs and ignore references before validating or uploading them.
+  const activeRefs = framesMode ? [] : refs;
+  const isAssetReference = (value: string) => /^asset:/i.test(value);
+  const isCharacterReference = (value: string) => /^character:/i.test(value);
   const localFileSupported = (file?: string) => {
-    if (!file || /^(?:asset|character):/i.test(file)) return true;
+    if (!file || isAssetReference(file) || isCharacterReference(file)) return true;
     try {
       const info = statSync(file);
       return [".png", ".jpg", ".jpeg", ".webp"].includes(extname(file).toLowerCase()) && info.isFile() && info.size > 0 && info.size <= 25 * 1024 * 1024;
     } catch { return false; }
   };
-  if (refs.length > 3 || !refs.every(localFileSupported) || !localFileSupported(s.first_frame) || !localFileSupported(s.last_frame)) {
+  const frameInputSupported = (file?: string) => !file || (!isCharacterReference(file) && localFileSupported(file));
+  if ((!framesMode && (refs.length > 3 || !activeRefs.every(localFileSupported))) || !frameInputSupported(s.first_frame) || !frameInputSupported(s.last_frame)) {
     throw Object.assign(new Error("Generation accepts up to three references and PNG/JPG/JPEG/WebP local inputs up to 25 MiB each."), { code: "NATIVE_CAPABILITY_UNSUPPORTED", retryable: true });
   }
   requireCapabilities(
     "flow.native.generation.submit", "flow.native.generation.observe", "flow.native.asset.download",
   );
-  if (refs.length) requireCapabilities("flow.native.references.attach");
+  if (activeRefs.length) requireCapabilities("flow.native.references.attach");
   const localInputs = [
-    ...(s.first_frame && !s.first_frame.startsWith(ASSET_PREFIX) ? [{ path: s.first_frame, slot: "start" }] : []),
-    ...(s.last_frame && !s.last_frame.startsWith(ASSET_PREFIX) ? [{ path: s.last_frame, slot: "end" }] : []),
-    ...refs.flatMap((file, index) => /^(?:asset|character):/i.test(file) ? [] : [{ path: file, slot: `ref${index + 1}` }]),
+    ...(s.first_frame && !isAssetReference(s.first_frame) ? [{ path: s.first_frame, slot: "start" }] : []),
+    ...(s.last_frame && !isAssetReference(s.last_frame) ? [{ path: s.last_frame, slot: "end" }] : []),
+    ...activeRefs.flatMap((file, index) => isAssetReference(file) || isCharacterReference(file) ? [] : [{ path: file, slot: `ref${index + 1}` }]),
   ];
   if (localInputs.length) requireCapabilities("flow.native.generation.upload.preflight");
 
@@ -274,16 +286,15 @@ export async function runGeneration(job: Job): Promise<string[]> {
     }
   }
 
-  const frame = (value?: string, slot?: string) => !value ? undefined : value.startsWith(ASSET_PREFIX)
+  const frame = (value?: string, slot?: string) => !value ? undefined : isAssetReference(value)
     ? { assetName: value.slice(ASSET_PREFIX.length).trim() }
     : { assetName: uploadedAssetByPath.get(value)!, slot };
 
-  const attachments = refs.map((value, index) => /^character:/i.test(value) ? { assetName: value }
-    : value.startsWith(ASSET_PREFIX)
+  const attachments = activeRefs.map((value, index) => isCharacterReference(value) ? { assetName: value }
+    : isAssetReference(value)
     ? { assetName: value.slice(ASSET_PREFIX.length).trim() }
     : { assetName: uploadedAssetByPath.get(value)!, slot: `ref${index + 1}` });
 
-  const framesMode = s.type === "video" && Boolean(s.first_frame || s.last_frame);
   if (framesMode && refs.length) {
     job.note = [job.note, `first/last frames were set, so ${refs.length} reference image(s) were skipped — Flow allows one or the other.`].filter(Boolean).join(" · ");
   }
@@ -360,6 +371,7 @@ export function rememberCharacter(name: string, look: string): void {
 
 export async function createCharacter(c: CharacterParams, job?: Job): Promise<{ name: string; url: string; portrait?: string }> {
   if (!c.image && !c.describe) throw new Error("Pass either an image or a description for the character.");
+  const flowContext = job ?? ({} as Job);
   const localImage = Boolean(c.image && !c.image.startsWith(ASSET_PREFIX));
   if (localImage) {
     try {
@@ -379,16 +391,16 @@ export async function createCharacter(c: CharacterParams, job?: Job): Promise<{ 
     let character = c;
     if (localImage) {
       requireCapabilities("flow.native.generation.upload.preflight");
-      await nativeOperation("flow.generation.upload.preflight", {}, "flow.native.generation.upload.preflight", job, 10_000);
-      const staged = await stageNativeMedia(c.image!, `fm-${randomUUID().replace(/-/g, "").slice(0, 12)}-character${extname(c.image!).toLowerCase()}`, stagedDirs, job);
+      await nativeOperation("flow.generation.upload.preflight", {}, "flow.native.generation.upload.preflight", flowContext, 10_000);
+      const staged = await stageNativeMedia(c.image!, `fm-${randomUUID().replace(/-/g, "").slice(0, 12)}-character${extname(c.image!).toLowerCase()}`, stagedDirs, flowContext);
       stagedTransferId = staged.transferId;
       character = { ...c, image: staged } as unknown as CharacterParams;
     }
-    const result = await nativeOperation<{ name: string; url: string; portraitMedia?: NativeMedia }>("flow.character.create", { character }, "flow.native.character.create", job, 10 * 60_000);
+    const result = await nativeOperation<{ name: string; url: string; portraitMedia?: NativeMedia }>("flow.character.create", { character }, "flow.native.character.create", flowContext, 10 * 60_000);
     let portrait: string | undefined;
     if (result.portraitMedia) {
       const dir = join(process.env.FLOW_MCP_OUTPUT ?? join(homedir(), "flow-mcp-out"), "_cast");
-      try { portrait = (await downloadNativeResults([result.portraitMedia], dir, c.name.replace(/[^\w.-]+/g, "_"), "original", job))[0]; }
+      try { portrait = (await downloadNativeResults([result.portraitMedia], dir, c.name.replace(/[^\w.-]+/g, "_"), "original", flowContext))[0]; }
       catch { /* The character is saved in Flow; its portrait can be fetched with the edit tool. */ }
     } else if (localImage) {
       const dir = join(process.env.FLOW_MCP_OUTPUT ?? join(homedir(), "flow-mcp-out"), "_cast");
@@ -400,16 +412,17 @@ export async function createCharacter(c: CharacterParams, job?: Job): Promise<{ 
     if (job) job.progress = undefined;
     return { name: result.name, url: result.url, portrait };
   } finally {
-    if (stagedTransferId) await nativeOperation("flow.file.upload.abort", { transferId: stagedTransferId }, "flow.native.file.upload.abort", job, 10_000).catch(() => {});
+    if (stagedTransferId) await nativeOperation("flow.file.upload.abort", { transferId: stagedTransferId }, "flow.native.file.upload.abort", flowContext, 10_000).catch(() => {});
     cleanStagedFiles(stagedDirs);
   }
 }
 
 export async function editCharacter(name: string, change?: string, job?: Job): Promise<{ name: string; portrait?: string; note?: string }> {
   requireCapabilities("flow.native.character.edit");
+  const flowContext = job ?? ({} as Job);
   const before = await nativeDownloadIds();
   const result = await nativeOperation<{ name: string; downloadTriggered?: boolean; note?: string }>(
-    "flow.character.edit", { name, change, timeoutMs: 4 * 60_000 }, "flow.native.character.edit", job, 5 * 60_000,
+    "flow.character.edit", { name, change, timeoutMs: 4 * 60_000 }, "flow.native.character.edit", flowContext, 5 * 60_000,
   );
   let portrait: string | undefined;
   let note = result.note;
@@ -483,42 +496,120 @@ export async function runAgentBatch(job: Job): Promise<string[]> {
   const scenes = job.params.agent_scenes ?? [];
   requireCapabilities("flow.native.agent.batch", "flow.native.asset.download");
   if (!scenes.length) return [];
+  job.failed_scenes = undefined;
   const state = await getFlowState(true);
   if (!state.signedIn || !state.inProject) throw new Error(state.hint || "Open a signed-in Flow project first.");
   const balance = state.credits_remaining;
-  step(job, `generating ${scenes.length} scene(s) with Flow Agent`);
-  const result = await nativeOperation<{ media: NativeMedia[]; prompts?: string[] }>(
-    "flow.agent.batch", { job: { id: job.id, params: job.params } }, "flow.native.agent.batch", job, 30 * 60_000,
-  );
-  if (!Array.isArray(result?.media) || result.media.length !== scenes.length || result.media.some(item => item.kind !== "image")) {
-    throw Object.assign(new Error("Flow Agent returned no usable image result. Check the project before retrying."), { code: "FLOW_AGENT_RESULT_INVALID", retryable: false, outcome_unknown: true });
-  }
   const base = Number(job.params.file_stem.match(/\d+/)?.[0] ?? 1);
-  const matched = Array.isArray(result.prompts) && result.prompts.length === result.media.length ? matchScenes(scenes, result.prompts) : [];
-  const sceneForMedia = new Map<number, number>();
-  const usedScenes = new Set<number>();
-  matched.forEach((mediaIndexes, sceneIndex) => {
-    const mediaIndex = mediaIndexes.find(index => !sceneForMedia.has(index));
-    if (mediaIndex !== undefined) { sceneForMedia.set(mediaIndex, sceneIndex); usedScenes.add(sceneIndex); }
-  });
-  for (let mediaIndex = 0; mediaIndex < result.media.length; mediaIndex++) {
-    if (sceneForMedia.has(mediaIndex)) continue;
-    const sceneIndex = scenes.findIndex((_, index) => !usedScenes.has(index));
-    if (sceneIndex >= 0) { sceneForMedia.set(mediaIndex, sceneIndex); usedScenes.add(sceneIndex); }
+  const sceneNumbers = scenes.map((_, index) => job.params.agent_numbers?.[index] ?? base + index);
+  const sceneMedia = new Map<number, NativeMedia>();
+  const confirmedGenerationFailure = (error: unknown): boolean => {
+    const value = error as { code?: unknown; outcome_unknown?: unknown } | null;
+    return value?.code === "FLOW_GENERATION_FAILED" && value.outcome_unknown === false;
+  };
+  const collectAgentPass = (requested: number[], result: { media: NativeMedia[]; prompts?: string[]; partial?: boolean; failedMedia?: unknown[] }) => {
+    if (!Array.isArray(result?.media) || result.media.some(item => item.kind !== "image") || result.media.length > requested.length) {
+      throw Object.assign(new Error("Flow Agent returned an invalid image result. Check the project before retrying."), { code: "FLOW_AGENT_RESULT_INVALID", retryable: false, outcome_unknown: true });
+    }
+    if (result.media.length < requested.length && (result.partial !== true || !Array.isArray(result.failedMedia)
+      || result.failedMedia.length < requested.length - result.media.length)) {
+      throw Object.assign(new Error("Flow Agent returned an incomplete result without a confirmed failure. Check the project before retrying."), { code: "FLOW_AGENT_RESULT_INVALID", retryable: false, outcome_unknown: true });
+    }
+    const passScenes = requested.map(index => scenes[index]);
+    const matched = Array.isArray(result.prompts) && result.prompts.length === result.media.length ? matchScenes(passScenes, result.prompts) : [];
+    const sceneForMedia = new Map<number, number>();
+    const usedScenes = new Set<number>();
+    matched.forEach((mediaIndexes, localSceneIndex) => {
+      const mediaIndex = mediaIndexes.find(index => !sceneForMedia.has(index));
+      if (mediaIndex !== undefined) { sceneForMedia.set(mediaIndex, localSceneIndex); usedScenes.add(localSceneIndex); }
+    });
+    for (let mediaIndex = 0; mediaIndex < result.media.length; mediaIndex++) {
+      if (sceneForMedia.has(mediaIndex)) continue;
+      const localSceneIndex = passScenes.findIndex((_, index) => !usedScenes.has(index));
+      if (localSceneIndex >= 0) { sceneForMedia.set(mediaIndex, localSceneIndex); usedScenes.add(localSceneIndex); }
+    }
+    for (const [mediaIndex, localSceneIndex] of sceneForMedia) {
+      const sceneIndex = requested[localSceneIndex];
+      if (sceneIndex !== undefined && !sceneMedia.has(sceneIndex)) sceneMedia.set(sceneIndex, result.media[mediaIndex]);
+    }
+  };
+
+  // Flow explicitly marks partial Agent batches as safe to continue. Limit Agent work to
+  // three total passes, and submit only scene prompts that still lack a confirmed image.
+  for (let pass = 0; pass < 3; pass++) {
+    const missing = scenes.map((_, index) => index).filter(index => !sceneMedia.has(index));
+    if (!missing.length) break;
+    step(job, `Flow Agent pass ${pass + 1}/3 for ${missing.length} remaining scene(s)`);
+    const passParams = {
+      ...job.params,
+      agent_scenes: missing.map(index => scenes[index]),
+      agent_numbers: missing.map(index => sceneNumbers[index]),
+    };
+    try {
+      const result = await nativeOperation<{ media: NativeMedia[]; prompts?: string[]; partial?: boolean; failedMedia?: unknown[] }>(
+        "flow.agent.batch", { job: { id: job.id, params: passParams } }, "flow.native.agent.batch", job, 30 * 60_000,
+      );
+      collectAgentPass(missing, result);
+    } catch (error) {
+      if (error && (error as { outcome_unknown?: unknown }).outcome_unknown === true) throw error;
+      if (!confirmedGenerationFailure(error)) throw error;
+      // Flow confirmed the render failed and nothing was charged; the next bounded pass
+      // may safely try the scenes that remain unmatched.
+    }
   }
+
   mkdirSync(job.params.output_dir, { recursive: true });
   const files: string[] = [];
   let downloadError: unknown;
-  for (const [index, media] of result.media.entries()) {
-    const sceneIndex = sceneForMedia.get(index) ?? index;
-    const sceneNumber = job.params.agent_numbers?.[sceneIndex] ?? base + sceneIndex;
+  for (const [sceneIndex, media] of sceneMedia) {
+    const sceneNumber = sceneNumbers[sceneIndex];
     try {
       files.push(...await downloadNativeResults([media], job.params.output_dir, `scene-${String(sceneNumber).padStart(2, "0")}`, job.params.download_quality ?? "original", job));
+      job.files = [...files];
     } catch (error) { downloadError = error; break; }
   }
   if (!files.length && downloadError) throw Object.assign(new Error(`Flow generated images but they could not be downloaded. Inspect Flow before retrying. ${String((downloadError as Error).message || downloadError)}`), { code: "FLOW_AGENT_DOWNLOAD_FAILED", retryable: false, outcome_unknown: true });
-  if (downloadError) job.note = `Downloaded ${files.length} of ${result.media.length} Agent results; the remaining media is still in Flow.`;
-  else job.note = `${new Set(sceneForMedia.values()).size} of ${scenes.length} scenes came from the agent`;
+
+  const remaining = scenes.map((_, index) => index).filter(index => !sceneMedia.has(index));
+  const originalParams = job.params;
+  const failedSceneIndexes = new Set<number>();
+  for (const sceneIndex of remaining) {
+    const sceneNumber = sceneNumbers[sceneIndex];
+    let generated = false;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      job.params = {
+        ...originalParams,
+        type: "image",
+        prompt: scenes[sceneIndex],
+        variants: 1,
+        agent_scenes: undefined,
+        agent_numbers: undefined,
+        file_stem: `scene-${String(sceneNumber).padStart(2, "0")}`,
+      };
+      try {
+        files.push(...await runGeneration(job));
+        job.files = [...files];
+        generated = true;
+        break;
+      } catch (error) {
+        if (!confirmedGenerationFailure(error)) throw error;
+        if (attempt === 1) break;
+        step(job, `Flow confirmed scene ${sceneNumber} failed; retrying once`);
+      } finally {
+        job.params = originalParams;
+      }
+    }
+    if (!generated) {
+      // Persist failed scene numbers so flow_retry can enqueue only the missing scenes.
+      failedSceneIndexes.add(sceneIndex);
+    }
+  }
+  job.params = originalParams;
+  const failedNumbers = [...failedSceneIndexes].map(index => sceneNumbers[index]);
+  job.failed_scenes = failedNumbers.length ? failedNumbers : undefined;
+  if (downloadError) job.note = `Downloaded ${files.length} result(s); additional Agent media remains in Flow and could not be downloaded.`;
+  else if (job.failed_scenes?.length) job.note = `${scenes.length - job.failed_scenes.length} of ${scenes.length} scenes generated; still failed: ${job.failed_scenes.map(number => `scene ${number}`).join(", ")}`;
+  else job.note = `${scenes.length} of ${scenes.length} scenes generated`;
   const after = await getFlowState(true).then(value => value.credits_remaining).catch(() => undefined);
   if (balance !== undefined && after !== undefined) job.credits = balance - after;
   step(job, undefined);
