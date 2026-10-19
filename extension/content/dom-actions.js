@@ -8,6 +8,27 @@ function accessibleName(el) {
   const labelledBy = (el.getAttribute("aria-labelledby") || "").split(/\s+/).filter(Boolean).map(id => document.getElementById(id)?.innerText || document.getElementById(id)?.textContent || "").join(" ").trim();
   return el.getAttribute("aria-label") || labelledBy || el.getAttribute("title") || el.getAttribute("alt") || labels || el.getAttribute("placeholder") || el.innerText || el.textContent || "";
 }
+function semanticActionText(el) {
+  const labels = el.labels ? [...el.labels].map(label => label.innerText || label.textContent || "").join(" ").trim() : "";
+  const labelledBy = (el.getAttribute("aria-labelledby") || "").split(/\s+/).filter(Boolean)
+    .map(id => document.getElementById(id)?.innerText || document.getElementById(id)?.textContent || "").join(" ").trim();
+  const explicit = el.getAttribute("aria-label") || labelledBy || el.getAttribute("title") || labels || el.getAttribute("alt");
+  if (explicit) return explicit;
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  const text = [];
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    let parent = node.parentElement;
+    let hidden = false;
+    while (parent && el.contains(parent)) {
+      if (parent.getAttribute("aria-hidden") === "true") { hidden = true; break; }
+      if (parent === el) break;
+      parent = parent.parentElement;
+    }
+    if (!hidden) text.push(node.nodeValue || "");
+  }
+  return text.join(" ").replace(/\s+/g, " ").trim();
+}
 function matchesName(value, expected, regex, exact) {
   if (regex?.__regexp || regex?.source) { try { return new RegExp(regex.source, regex.flags).test(value); } catch {} }
   return expected === undefined || (exact ? value === expected : value.toLowerCase().includes(String(expected).toLowerCase()));
@@ -334,7 +355,7 @@ function flowError(code, message, retryable = false, outcomeUnknown = false) {
 }
 function flowButton(name, root = document) {
   return [...root.querySelectorAll('button,[role="button"]')].find(el =>
-    visible(el) && matchesName(accessibleName(el).replace(/\s+/g, " ").trim(), name, null, true));
+    visible(el) && matchesName(semanticActionText(el).replace(/\s+/g, " ").trim(), name, null, true));
 }
 async function waitForEnabledFlowButton(name, timeoutMs = 8000) {
   const deadline = Date.now() + timeoutMs;
