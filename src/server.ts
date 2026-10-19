@@ -5,25 +5,16 @@ import { basename, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { WebSocketServer } from "ws";
-import { HOME_DIR } from "./chrome.js";
+import { HOME_DIR } from "./paths.js";
 import { OUTPUT_ROOT, shapes, type Core } from "./core.js";
 import { extensionConnected, extensionStatus, extensionSetWebSocket } from "./extension.js";
-import { officialExtensionStatus } from "./playwright-extension.js";
 
-export const PORT = Number(process.env.FLOW_MCP_PORT ?? 8799);
+export const PORT = Number(process.env.FLOW_MCP_PORT ?? 18899);
 export const TOKEN_FILE = join(HOME_DIR, "token");
 const isExtensionOrigin = (origin: string | undefined): origin is string => /^chrome-extension:\/\/[a-p]{32}$/.test(origin ?? "");
-const hasConnectorHeader = (req: IncomingMessage) => req.headers["x-flow-connector"] === "flow-mcp-extension";
-const requestsConnectorHeader = (req: IncomingMessage) => String(req.headers["access-control-request-headers"] ?? "").toLowerCase().split(/\s*,\s*/).includes("x-flow-connector");
 const UPLOAD_DIR = join(HOME_DIR, "uploads");
 const STUDIO_HTML = fileURLToPath(new URL("../studio/index.html", import.meta.url));
 const MAX_UPLOAD = 200 * 1024 * 1024;
-let bridgeLastPollAt: string | null = null;
-let bridgeLastAuthFailureAt: string | null = null;
-let bridgeLastRequestAt: string | null = null;
-let bridgeLastOrigin: string | null = null;
-let bridgeLastAuthFailurePath: string | null = null;
-let bridgeLastAuthFailureHasMarker: boolean | null = null;
 
 const MIME: Record<string, string> = {
   ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime", ".gif": "image/gif",
@@ -81,23 +72,13 @@ export async function startServer(core: Core): Promise<ServerRole> {
 
   const server = createServer(async (req, res) => {
     try {
-      const origin = req.headers.origin;
-      const bridgeRequest = (req.url ?? "").startsWith("/api/bridge/");
-      if (bridgeRequest && isExtensionOrigin(origin)) res.setHeader("access-control-allow-origin", origin);
-      if (req.method === "OPTIONS") {
-        if (!bridgeRequest || (!isExtensionOrigin(origin) && !(origin == null && requestsConnectorHeader(req)))) return json(res, 403, { error: "Untrusted extension origin." });
-        res.setHeader("access-control-allow-headers", "content-type,x-flow-connector");
-        res.setHeader("access-control-allow-methods", "GET,POST,OPTIONS");
-        return void res.writeHead(204).end();
-      }
-      // The Host check blocks DNS rebinding. Bridge calls require the connector marker when Chrome omits Origin; Studio's API uses its token.
+      if (req.method === "OPTIONS") return json(res, 404, { error: "Not found." });
+      // The Host check blocks DNS rebinding. Studio API calls require the per-run token.
       if (!allowedHosts.has(req.headers.host ?? "")) return json(res, 403, { error: "Bad host." });
       const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
 
       if (req.method === "GET" && url.pathname === "/api/health") {
-        const driver = process.env.FLOW_MCP_DRIVER ?? "extension";
-        const official = officialExtensionStatus();
-        return json(res, 200, { name: "flow-mcp", driver, extension_connected: driver === "playwright-official" ? official.connected : extensionConnected(), ...(driver === "playwright-official" ? { playwright_extension: official } : { connector: extensionStatus() }), bridge_last_poll_at: bridgeLastPollAt, bridge_last_auth_failure_at: bridgeLastAuthFailureAt, bridge_last_request_at: bridgeLastRequestAt, bridge_last_origin: bridgeLastOrigin, bridge_last_auth_failure_path: bridgeLastAuthFailurePath, bridge_last_auth_failure_has_marker: bridgeLastAuthFailureHasMarker });
+        return json(res, 200, { name: "flow-mcp", driver: "native", extension_connected: extensionConnected(), connector: extensionStatus() });
       }
       if (url.pathname === "/favicon.ico") return void res.writeHead(204).end();
       if (req.method === "GET" && url.pathname === "/") {
@@ -105,36 +86,8 @@ export async function startServer(core: Core): Promise<ServerRole> {
         return res.end(readFileSync(STUDIO_HTML, "utf8").replace("__FLOW_TOKEN__", token));
       }
 
-      if (url.pathname.startsWith("/api/bridge/")) {
-        bridgeLastRequestAt = new Date().toISOString();
-        bridgeLastOrigin = origin ?? null;
-        if (url.pathname === "/api/bridge/next") bridgeLastPollAt = bridgeLastRequestAt;
-        if (!isExtensionOrigin(origin) && !(origin == null && hasConnectorHeader(req))) {
-          bridgeLastAuthFailureAt = new Date().toISOString();
-          bridgeLastAuthFailurePath = url.pathname;
-          bridgeLastAuthFailureHasMarker = hasConnectorHeader(req);
-          return json(res, 403, { error: "Untrusted extension origin." });
-        }
-      } else {
-        const given = req.headers["x-flow-token"] ?? url.searchParams.get("token");
-        if (given !== token) return json(res, 401, { error: "Missing or wrong token." });
-      }
-
-      if (req.method === "GET" && url.pathname === "/api/bridge/next") {
-        return json(res, 426, { error: "HTTP polling has been removed. Reload Flow MCP Connector 0.4.0+ to connect via WebSocket." });
-      }
-      if (req.method === "POST" && url.pathname === "/api/bridge/result") {
-        return json(res, 426, { error: "Use the connector WebSocket." });
-      }
-      if (req.method === "POST" && url.pathname === "/api/bridge/event") {
-        return json(res, 426, { error: "Use the connector WebSocket." });
-      }
-      if (req.method === "GET" && url.pathname === "/api/bridge/file") {
-        const path = url.searchParams.get("path") ?? "";
-        if (!path || !existsSync(path) || !statSync(path).isFile()) return json(res, 404, { error: "Upload source file not found." });
-        res.writeHead(200, { "content-type": "application/octet-stream", "content-length": statSync(path).size, "cache-control": "no-store" });
-        return createReadStream(path).pipe(res);
-      }
+      const given = req.headers["x-flow-token"] ?? url.searchParams.get("token");
+      if (given !== token) return json(res, 401, { error: "Missing or wrong token." });
 
       if (req.method === "GET" && url.pathname === "/media") return sendMedia(req, res, url.searchParams.get("path") ?? "");
 
@@ -189,7 +142,7 @@ export async function startServer(core: Core): Promise<ServerRole> {
   // The port is taken. Who has it matters enormously: becoming a second LOCAL core means two processes drive the same
   // Flow tab with separate queues, which is how a shot got generated and charged twice while flow_status reported an
   // empty queue (2026-09-20). Claude Desktop starts several of these at once and the owner is often still booting, or
-  // busy inside a Playwright call, so one 2 s health check timing out proves nothing.
+  // still booting, so one 2 s health check timing out proves nothing.
   for (let attempt = 0; attempt < 8; attempt++) {
     const other = (await fetch(`http://127.0.0.1:${PORT}/api/health`, { signal: AbortSignal.timeout(3000) }).then(
       (r) => r.json(),

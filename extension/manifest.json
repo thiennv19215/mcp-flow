@@ -1,14 +1,13 @@
 {
   "manifest_version": 3,
   "name": "Flow MCP Native Automation",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "minimum_chrome_version": "116",
   "description": "Flow MCP with browser-side automation handlers in a Chrome extension.",
   "permissions": [
     "storage",
     "tabs",
     "alarms",
-    "debugger",
     "downloads",
     "scripting"
   ],
@@ -31,8 +30,22 @@
         "https://flow.google.com/*",
         "https://labs.google/fx/*"
       ],
+      "js": ["content/flow-submit-main.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://flow.google.com/*",
+        "https://labs.google/fx/*"
+      ],
       "js": [
-        "content/activity-overlay.js"
+        "content/activity-overlay.js",
+        "content/native-file-transfer.js",
+        "content/flow-page-driver.js",
+        "content/flow-driver-registry.js",
+        "content/flow-v2-driver.js",
+        "content/dom-actions.js"
       ],
       "run_at": "document_idle"
     }

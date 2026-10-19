@@ -5,7 +5,7 @@ $hasLaunchLock = $false
 try {
     $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
     $studioEntry = Join-Path $repoRoot 'dist\studio.js'
-    $flowPort = 8799
+    $flowPort = 18899
     if ($env:FLOW_MCP_PORT) { $flowPort = [int]$env:FLOW_MCP_PORT }
     if ($flowPort -lt 1 -or $flowPort -gt 65535) { throw 'Invalid FLOW_MCP_PORT.' }
     # Serialize simultaneous double-clicks, including the build and readiness wait.

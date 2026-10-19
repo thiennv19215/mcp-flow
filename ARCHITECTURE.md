@@ -1,19 +1,23 @@
-# Native Flow MCP architecture
+# Flow MCP architecture
 
-This repository is an isolated experimental fork of Flow MCP Connector. It preserves the current MCP tools, queue, Studio, and local file handling while separating browser integration into extension layers.
+MCP tools, validation, job queue, retries, local file handling, media assembly, and the Studio API run in the backend. The Chrome extension owns every interaction with the Flow page.
 
 ## Layout
 
-- `src/` — existing MCP server, job orchestration, Flow workflow logic, and local media processing. The current Playwright-backed driver is preserved as a working baseline.
-- `extension/background/` — Manifest V3 service worker and localhost WebSocket command router.
-- `extension/content/` — scripts injected into Flow pages. The activity overlay is retained; future Flow-specific command handlers belong here.
-- `extension/ui/` — popup and options pages.
-- `studio/` — local control panel.
+- `src/` contains MCP tools, job orchestration, backend file transfer, Chrome download collection, and local media processing.
+- `extension/background/` selects the Flow tab and keeps a localhost WebSocket connection to the backend.
+- `extension/content/` resolves the Flow route to a page driver and implements Flow operations.
+- `extension/ui/` contains the connector popup and settings.
+- `studio/` contains the local control panel.
 
-## Migration direction
+## Command path
 
-The target architecture keeps MCP schemas and job orchestration in the backend. The backend will send high-level Flow commands over the existing localhost WebSocket. The extension will execute page-specific operations and return progress/results. Playwright/CDP remains the fallback baseline until each operation has an equivalent implementation.
+An MCP tool creates or queues a backend job. The backend sends a capability-gated command with a request ID and deadline over WebSocket. The extension routes it to the selected tab, where the Flow V2 content driver checks the project context and executes the operation. Progress and structured results return over the same socket.
 
-Migration should proceed incrementally: status and library reads, basic generation, download/file transfer, uploads/references, then agent/edit/continue flows. Keep backend-owned filesystem work (queue, retries, media assembly, output paths) in the server.
+The backend retains credit policy, retries, job state, output naming, local file access, and media assembly. Uploads move in bounded checksummed chunks to the extension. Chrome owns browser downloads; the backend collects completed files and materializes the requested outputs. State-changing operations that time out are marked as uncertain and are never automatically replayed.
 
-This repository has not yet replaced Playwright automation. It is a clean, separately initialized workspace for that implementation.
+Native Flow handlers cover session and library reads, generation, asset download/rename/trash, character create/edit, video edit/continue, and Agent batches. Unsupported routes, capabilities, or inputs fail before operation dispatch.
+
+## Limits
+
+Asset and character scans have bounded virtualized-grid traversal. Local file selection is synthetic and may not satisfy every Flow upload state. Long-running commands depend on the Flow tab, extension service worker, backend, and WebSocket remaining available. After an uncertain submit or disconnect, inspect the Flow project before retrying.

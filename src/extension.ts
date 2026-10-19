@@ -1,35 +1,67 @@
-import { chromium, type Browser, type ConnectOverCDPTransport, type Page } from "playwright-core";
 import type { WebSocket } from "ws";
-import { ExtensionProtocolV2 } from "./vendor/playwright/cdpRelayV2.js";
-import { VERSION } from "./vendor/playwright/protocol.js";
+import { EventEmitter } from "node:events";
 
-type Result = { ok: boolean; value?: unknown; error?: string };
-type Pending = { resolve(value: any): void; reject(error: Error): void; timer: NodeJS.Timeout };
+type ExtensionError = { code?: string; message?: string; retryable?: boolean; outcome_unknown?: boolean };
+type ExtensionResult = { ok: boolean; value?: unknown; error?: string | ExtensionError };
+type Pending = { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout };
 type Connection = {
-  ws: WebSocket; protocol: ExtensionProtocolV2; pending: Map<string, Pending>;
-  ready: boolean; version?: string; nextId: number;
-  tabId?: number; interactionEnabled?: boolean;
-  transport?: ConnectOverCDPTransport; browser?: Browser; connecting?: Promise<Browser>;
+  ws: WebSocket;
+  pending: Map<string, Pending>;
+  ready: boolean;
+  version?: string;
+  capabilities: string[];
+  nextId: number;
 };
+
 let current: Connection | undefined;
 let lastError: string | undefined;
+const events = new EventEmitter();
+
+export function onExtensionProgress(listener: (progress: { requestId: string; tabId?: number; progress: unknown }) => void): () => void {
+  events.on("progress", listener);
+  return () => events.off("progress", listener);
+}
+
+export function extensionConnected(): boolean {
+  return Boolean(current?.ready && current.ws.readyState === 1);
+}
+
+export function extensionSupportsCapability(capability: string): boolean {
+  return Boolean(current?.ready && current.capabilities.includes(capability));
+}
+
+export function extensionStatus() {
+  return { connected: extensionConnected(), transport: "websocket", protocol: 2, extension_version: current?.version, error: lastError };
+}
 
 export async function extensionDownloads(): Promise<Array<{ id: number; filename: string; state: string; error?: string; bytesReceived: number; totalBytes: number }>> {
   if (!current?.ready) throw new Error("Flow connector is offline.");
   return call(current, "flow.downloads.recent");
 }
 
-export function extensionConnected(): boolean { return Boolean(current?.ready && current.ws.readyState === 1); }
-export function extensionStatus() {
-  return { connected: extensionConnected(), transport: "websocket", protocol: VERSION, extension_version: current?.version, interaction_enabled: current?.interactionEnabled, error: lastError };
-}
-
-export async function setExtensionInteraction(enabled: boolean): Promise<void> {
+export async function executeFlowDom<T = unknown>(
+  command: Record<string, unknown>,
+  options: { timeoutMs?: number; onProgress?: (value: unknown) => void } = {},
+): Promise<T> {
   const connection = current;
-  if (!connection?.browser?.isConnected() || connection.tabId === undefined) return;
-  if (connection.interactionEnabled === enabled) return;
-  await call(connection, "chrome.debugger.sendCommand", [{ tabId: connection.tabId }, "Emulation.setFocusEmulationEnabled", { enabled }]);
-  connection.interactionEnabled = enabled;
+  if (!connection?.ready) throw new Error("Flow extension is offline.");
+  const capability = String(command.capability ?? "");
+  if (!connection.capabilities.includes(capability)) {
+    throw Object.assign(new Error(`The installed extension does not support ${capability}. Reload this repository's extension.`), {
+      code: "NATIVE_CAPABILITY_UNSUPPORTED", retryable: true, outcome_unknown: false,
+    });
+  }
+  const requestId = String(++connection.nextId);
+  const timeoutMs = options.timeoutMs ?? (Number(command.timeoutMs ?? command.timeout_ms) || 5 * 60_000);
+  const progressListener = (value: { requestId: string; progress: unknown }) => {
+    if (value.requestId === requestId) options.onProgress?.(value.progress);
+  };
+  if (options.onProgress) events.on("progress", progressListener);
+  try {
+    return await call(connection, "flow.dom.execute", [{ ...command, requestId }], timeoutMs) as T;
+  } finally {
+    events.off("progress", progressListener);
+  }
 }
 
 function dispose(connection: Connection, reason: string): void {
@@ -37,29 +69,29 @@ function dispose(connection: Connection, reason: string): void {
   current = undefined;
   lastError = reason;
   connection.ready = false;
-  connection.protocol.onExtensionDisconnect(reason);
   for (const pending of connection.pending.values()) {
     clearTimeout(pending.timer);
     pending.reject(new Error(reason));
   }
   connection.pending.clear();
-  connection.transport?.onclose?.(reason);
-  if (connection.ws.readyState < 2) connection.ws.close(1000, reason.slice(0, 100));
 }
 
-function call(connection: Connection, method: string, args: unknown[] = []): Promise<any> {
+function call(connection: Connection, method: string, args: unknown[] = [], timeoutMs = 5 * 60_000): Promise<any> {
   if (current !== connection || connection.ws.readyState !== 1) return Promise.reject(new Error("Flow extension disconnected. No command was sent."));
   const id = String(++connection.nextId);
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       connection.pending.delete(id);
-      const message = `Extension command ${method} timed out; its outcome is unknown. Check Flow before retrying a submit.`;
-      reject(new Error(message));
-      dispose(connection, message);
-    }, 60_000);
+      reject(Object.assign(new Error(`Extension command ${method} timed out after ${timeoutMs}ms; its outcome may be unknown.`), {
+        code: "EXTENSION_TIMEOUT", retryable: false, outcome_unknown: true,
+      }));
+    }, timeoutMs);
     connection.pending.set(id, { resolve, reject, timer });
-    try { connection.ws.send(JSON.stringify({ type: "command", id, method, args })); }
-    catch (error) { dispose(connection, String(error)); }
+    try {
+      connection.ws.send(JSON.stringify({ type: "command", id, method, args, timeout_ms: timeoutMs }));
+    } catch (error) {
+      dispose(connection, String(error));
+    }
   });
 }
 
@@ -68,10 +100,10 @@ export function extensionSetWebSocket(ws: WebSocket): void {
     ws.close(1008, "Another Flow connector is already connected");
     return;
   }
-  const connection: Connection = { ws, protocol: undefined!, pending: new Map(), ready: false, nextId: 0 };
-  connection.protocol = new ExtensionProtocolV2((method, args) => call(connection, method, args));
+  const connection: Connection = { ws, pending: new Map(), ready: false, capabilities: [], nextId: 0 };
   current = connection;
-  const initTimer = setTimeout(() => dispose(connection, "Extension handshake timed out. Reload Flow MCP Connector 0.4.0 or newer."), 10_000);
+  const initTimer = setTimeout(() => dispose(connection, "Extension handshake timed out. Reload Flow MCP Connector."), 10_000);
+
   ws.on("message", data => {
     if (current !== connection) return;
     try {
@@ -82,82 +114,42 @@ export function extensionSetWebSocket(ws: WebSocket): void {
         if (!item) return;
         connection.pending.delete(String(message.id));
         clearTimeout(item.timer);
-        const result = message.result as Result;
+        const result = message.result as ExtensionResult;
         if (result?.ok) item.resolve(result.value);
-        else item.reject(new Error(result?.error || "Extension command failed"));
+        else {
+          const detail = typeof result?.error === "string" ? { message: result.error } : result?.error || {};
+          item.reject(Object.assign(new Error(detail.message || "Extension command failed"), {
+            code: detail.code || "EXTENSION_COMMAND_FAILED",
+            retryable: Boolean(detail.retryable),
+            outcome_unknown: Boolean(detail.outcome_unknown),
+          }));
+        }
         return;
       }
-      if (message.type !== "event" || !Array.isArray(message.params)) return;
-      if (message.method === "chrome.tabs.onCreated") connection.tabId = message.params[0]?.id;
-      if (message.method === "extension.initialized") {
-        const info = message.params[0];
-        if (info?.protocol !== VERSION) throw new Error("Incompatible connector protocol; reload Flow MCP Connector.");
-        connection.version = info.version;
-        connection.ready = true;
-        lastError = undefined;
-        clearTimeout(initTimer);
+      if (message.type === "event" && Array.isArray(message.params)) {
+        if (message.method === "extension.progress") {
+          const progress = message.params[0];
+          if (progress && connection.pending.has(String(progress.requestId))) events.emit("progress", progress);
+        } else if (message.method === "extension.initialized") {
+          const info = message.params[0];
+          if (info?.protocol !== 2) throw new Error("Incompatible connector protocol. Reload Flow MCP Connector.");
+          connection.version = info.version;
+          connection.capabilities = Array.isArray(info.capabilities) ? info.capabilities : [];
+          connection.ready = true;
+          lastError = undefined;
+          clearTimeout(initTimer);
+        }
       }
-      connection.protocol.handleExtensionEvent(message.method, message.params);
-    } catch (error) { dispose(connection, `Invalid connector message: ${String(error)}`); }
-  });
-  ws.on("close", () => { clearTimeout(initTimer); dispose(connection, "Flow extension WebSocket disconnected. Reconnect before starting another operation."); });
-  ws.on("error", error => { clearTimeout(initTimer); dispose(connection, `Flow extension socket error: ${error.message}`); });
-}
-
-async function connectBrowser(): Promise<Browser> {
-  const connection = current;
-  if (!connection) throw new Error("Flow MCP Connector is offline. Start this backend and reload the connector extension (0.4.0+) in Chrome.");
-  if (connection.browser?.isConnected()) return connection.browser;
-  if (connection.connecting) return connection.connecting;
-  connection.connecting = (async () => {
-    await connection.protocol.ready();
-    if (current !== connection) throw new Error("Connector changed during initialization. Retry the read operation.");
-    const protocol = connection.protocol;
-    const transport: ConnectOverCDPTransport = {
-      send(message: any) {
-        const { id, sessionId, method, params } = message;
-        // Commands may be in flight together. A Runtime promise must not block
-        // delivery of the input/navigation command needed to settle it.
-        void (async () => {
-          if (method === "Browser.getVersion") return { protocolVersion: "1.3", product: "Chrome/Extension-Bridge", revision: "", userAgent: "CDP-Bridge-Server/1.0.0" };
-          if (method === "Browser.setDownloadBehavior" || method === "Browser.close") return {};
-          const handled = await protocol.handleCDPCommand(method, params, sessionId);
-          return handled ? handled.result : protocol.forwardToExtension(method, params, sessionId);
-        })().then(
-          result => { if (current === connection) transport.onmessage?.({ id, sessionId, result: result ?? {} }); },
-          error => { if (current === connection) transport.onmessage?.({ id, sessionId, error: { code: -32000, message: String(error?.message || error) } }); },
-        );
-      },
-      close() { dispose(connection, "Playwright closed the extension connection"); },
-    };
-    connection.transport = transport;
-    protocol.connectOverCDP(message => { if (current === connection) transport.onmessage?.(message); });
-    try {
-      // Match the original CDP driver: retain Playwright's focus emulation and
-      // actionability defaults. Disabling them can stall RAF-based stability
-      // checks when Studio has become the foreground tab.
-      const browser = await chromium.connectOverCDP(transport, { isLocal: true, timeout: 30_000 });
-      connection.browser = browser;
-      await setExtensionInteraction(false);
-      browser.on("disconnected", () => dispose(connection, "Playwright disconnected; the tab session must be initialized again."));
-      return browser;
     } catch (error) {
-      dispose(connection, String(error));
-      throw error;
+      dispose(connection, `Invalid connector message: ${String(error)}`);
     }
-  })();
-  return connection.connecting;
-}
-
-export async function getExtensionPage(interactive = true): Promise<Page> {
-  const browser = await connectBrowser();
-  const pages = browser.contexts().flatMap(context => context.pages()).filter(page => !page.isClosed() && /^https:\/\/(flow\.google\.com|labs\.google\/fx)\//.test(page.url()));
-  if (pages.length !== 1) throw new Error("Select one Flow tab using the connector popup, then reconnect. Flow MCP will not guess between projects.");
-  const page = pages[0];
-  // Selecting a Page is not a request to activate its Chrome tab. Studio polls
-  // status repeatedly, including while generation is waiting. Focus emulation
-  // supports background actions without taking the user's foreground tab.
-  await page.waitForLoadState("domcontentloaded", { timeout: 30_000 });
-  if (interactive) await setExtensionInteraction(true);
-  return page;
+  });
+  ws.on("close", (_code, reason) => {
+    clearTimeout(initTimer);
+    dispose(connection, `Flow extension WebSocket disconnected${reason?.toString() ? `: ${reason.toString()}` : ". Reconnect before starting another operation."}`);
+  });
+  ws.on("error", error => {
+    clearTimeout(initTimer);
+    dispose(connection, `Flow extension socket error: ${error.message}`);
+  });
 }

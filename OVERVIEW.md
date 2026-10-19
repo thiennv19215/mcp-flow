@@ -20,9 +20,6 @@ Three abbreviations you'll see, spelled out once:
   outside tools. Claude uses it, and so does Codex, OpenAI's coding assistant.
   The program on your computer speaks it, which is how either one can operate
   Flow on your behalf.
-- **CDP: Chrome DevTools Protocol.** A remote-control channel that Chrome
-  already ships with, normally used by developers to inspect pages. The program
-  uses it to move the mouse and click inside that private Chrome window.
 - **API: application programming interface.** Google sells one for video
   generation, billed per use. **We deliberately do not touch it.** Everything
   here spends Flow's own credits: 50 free a day with any Google account, more with a paid Google AI plan.

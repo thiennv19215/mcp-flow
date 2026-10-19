@@ -1,15 +1,171 @@
-const defaults = { bridge: "http://127.0.0.1:8799" };
-const protocol = 2;
+const defaults = { bridge: "http://127.0.0.1:18899" };
 const flowUrl = url => /^https:\/\/(flow\.google\.com|labs\.google\/fx)\//.test(url || "");
+const nativeFlowOperations = new Set([
+  "flow.context", "flow.state", "flow.projects.list", "flow.project.open", "flow.assets.list", "flow.characters.list",
+  "flow.generation.submit", "flow.generation.observe",
+  "flow.generation.upload.preflight",
+  "flow.file.upload.begin", "flow.file.upload.chunk", "flow.file.upload.finish", "flow.file.upload.abort",
+  "flow.asset.download",
+  "flow.asset.rename", "flow.asset.trash",
+  "flow.character.create", "flow.character.edit", "flow.edit.run",
+  "flow.continue.run", "flow.agent.batch",
+]);
 let socket = null;
 let opening = false;
 let reconnectTimer;
+let reconnectAttempt = 0;
 let heartbeat;
 let selectedTabId;
 let lastError = "";
 let interactionActive = false;
 async function ensureActivityOverlay(tabId) {
   await chrome.scripting.executeScript({ target: { tabId }, files: ["content/activity-overlay.js"] });
+}
+async function ensureFlowSubmitBridge(tabId) {
+  await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["content/flow-submit-main.js"] });
+  const readBridge = () => chrome.scripting.executeScript({
+    target: { tabId },
+    world: "MAIN",
+    func: () => ({
+      version: window.__flowMcpSubmitBridge?.version,
+      installedReadyState: window.__flowMcpSubmitBridge?.installedReadyState,
+    }),
+  }).then(results => results?.[0]?.result || {});
+  let bridge = await readBridge();
+  if (bridge.version === 3 && bridge.installedReadyState === "loading") return;
+
+  // Extension updates do not run document_start scripts inside already-open tabs.
+  // Reload once so Flow registers its click handlers after our MAIN-world hook.
+  const loaded = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      reject(new Error("Flow did not finish reloading to initialize its submit bridge. Keep the project tab open and retry."));
+    }, 30_000);
+    const onUpdated = (updatedTabId, changeInfo) => {
+      if (updatedTabId !== tabId || changeInfo.status !== "complete") return;
+      clearTimeout(timer);
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      resolve();
+    };
+    chrome.tabs.onUpdated.addListener(onUpdated);
+  });
+  await chrome.tabs.reload(tabId);
+  await loaded;
+  bridge = await readBridge();
+  if (bridge.version !== 3 || bridge.installedReadyState !== "loading") {
+    throw new Error("Flow submit bridge did not initialize at document_start. Reload the Flow tab and reconnect the extension.");
+  }
+}
+async function sendFlowCommand(tabId, message) {
+  try {
+    return await chrome.tabs.sendMessage(tabId, message);
+  } catch (error) {
+    if (!/Receiving end does not exist|Could not establish connection/i.test(String(error?.message || error))) throw error;
+    const tab = await chrome.tabs.get(tabId);
+    if (!flowUrl(tab.url)) throw error;
+    // A Flow tab can predate extension installation/reload, leaving no content
+    // script listener in that tab. Inject the declared scripts in manifest order
+    // and retry once instead of making the user reload the whole Flow page.
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: [
+        "content/activity-overlay.js",
+        "content/native-file-transfer.js",
+        "content/flow-page-driver.js",
+        "content/flow-driver-registry.js",
+        "content/flow-v2-driver.js",
+        "content/dom-actions.js",
+      ],
+    });
+    return chrome.tabs.sendMessage(tabId, message);
+  }
+}
+async function waitForTabComplete(tabId, timeoutMs = 45_000) {
+  const existing = await chrome.tabs.get(tabId).catch(() => null);
+  if (existing?.status === "complete") return existing;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      reject(new Error("Flow did not finish loading its project page."));
+    }, timeoutMs);
+    const onUpdated = (updatedTabId, changeInfo, tab) => {
+      if (updatedTabId !== tabId || changeInfo.status !== "complete") return;
+      clearTimeout(timer);
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      resolve(tab);
+    };
+    chrome.tabs.onUpdated.addListener(onUpdated);
+  });
+}
+async function listFlowProjects() {
+  const selected = await chrome.tabs.get(selectedTabId);
+  if (!flowUrl(selected.url)) throw new Error("The selected tab is no longer a Flow tab. Reconnect the extension.");
+  const scan = async tabId => {
+    const response = await sendFlowCommand(tabId, { type: "flow-mcp:execute", command: { op: "flowOperation", name: "flow.projects.list", payload: {} } });
+    if (!response?.ok) {
+      const error = new Error(response?.error?.message || response?.error || "Could not scan Flow projects.");
+      error.code = response?.error?.code || "FLOW_PROJECT_SCAN_FAILED";
+      error.retryable = Boolean(response?.error?.retryable);
+      throw error;
+    }
+    return response.value;
+  };
+  if (!/\/project\/[0-9a-f-]{36}(?:\/|$)/i.test(new URL(selected.url).pathname)) {
+    return scan(selectedTabId);
+  }
+  const tab = await chrome.tabs.create({ url: "https://flow.google.com/?hl=en", active: false });
+  try {
+    await waitForTabComplete(tab.id);
+    await new Promise(resolve => setTimeout(resolve, 700));
+    return await scan(tab.id);
+  } finally {
+    await chrome.tabs.remove(tab.id).catch(() => {});
+  }
+}
+async function openFlowProject(projectId) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(projectId || ""))) {
+    throw new Error("Invalid Flow project id.");
+  }
+  const url = `https://flow.google.com/project/${projectId}?hl=en`;
+  await chrome.tabs.update(selectedTabId, { url });
+  await waitForTabComplete(selectedTabId);
+  return { opened: true, id: projectId, url };
+}
+async function ensureEnglishFlowTab(tabId) {
+  const tab = await chrome.tabs.get(tabId);
+  if (!flowUrl(tab.url)) return;
+  const currentLanguage = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => document.documentElement.lang,
+  }).then(results => String(results?.[0]?.result || "")).catch(() => "");
+  const url = new URL(tab.url);
+  if (url.searchParams.get("hl") === "en" && /^en\b/i.test(currentLanguage)) return;
+  url.searchParams.set("hl", "en");
+  const loaded = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      reject(new Error("Flow did not finish reloading in English. Keep the project tab open and retry."));
+    }, 30_000);
+    const onUpdated = (updatedTabId, changeInfo, updatedTab) => {
+      if (updatedTabId !== tabId || changeInfo.status !== "complete") return;
+      clearTimeout(timer);
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      resolve(updatedTab);
+    };
+    chrome.tabs.onUpdated.addListener(onUpdated);
+  });
+  if (url.href === tab.url) await chrome.tabs.reload(tabId);
+  else await chrome.tabs.update(tabId, { url: url.href });
+  await loaded;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const language = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => document.documentElement.lang,
+    }).then(results => String(results?.[0]?.result || "")).catch(() => "");
+    if (/^en\b/i.test(language)) return;
+    await new Promise(resolve => setTimeout(resolve, 300));
+  }
+  throw new Error("Flow reloaded, but its interface is not in English. Check the Flow language setting and retry.");
 }
 function showActivity(active) {
   interactionActive = active;
@@ -21,10 +177,14 @@ function showActivity(active) {
     })().catch(() => {});
   }
 }
-let cleanup = Promise.resolve();
-const attached = new Set();
-const attaching = new Map();
-const config = async () => ({ ...defaults, ...(await chrome.storage.local.get(defaults)) });
+const config = async () => {
+  const stored = await chrome.storage.local.get(defaults);
+  if (["http://127.0.0.1:8799", "http://localhost:8799"].includes(stored.bridge)) {
+    stored.bridge = defaults.bridge;
+    await chrome.storage.local.set({ bridge: stored.bridge });
+  }
+  return { ...defaults, ...stored };
+};
 
 function endpoint(value) {
   const url = new URL(value);
@@ -36,47 +196,81 @@ function endpoint(value) {
 }
 function send(ws, message) { if (ws === socket && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message)); }
 function event(method, params) { if (socket) send(socket, { type: "event", method, params }); }
-async function release() {
-  showActivity(false);
-  const tabs = [...attached];
-  attached.clear();
-  await Promise.allSettled(tabs.map(tabId => chrome.debugger.detach({ tabId })));
-}
 async function chooseTab() {
   const tabs = await chrome.tabs.query({ url: ["https://flow.google.com/*", "https://labs.google/fx/*"] });
   const saved = (await chrome.storage.session.get("selectedFlowTabId")).selectedFlowTabId;
   const active = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-  const tab = tabs.find(tab => tab.id === saved) || tabs.find(tab => active.some(item => item.id === tab.id)) || (tabs.length === 1 ? tabs[0] : null);
-  if (!tab) throw new Error("Open a Flow project, keep that tab active, then click Connect in this popup.");
+  // Prefer the Flow tab the user is looking at. A saved tab is only a fallback;
+  // it may have been closed or left behind after a browser/extension restart.
+  const tab = tabs.find(tab => active.some(item => item.id === tab.id))
+    || tabs.find(tab => tab.id === saved)
+    || tabs.find(tab => tab.id === selectedTabId)
+    || tabs.find(tab => /\/project\/[0-9a-f-]{36}(?:\/|$)/i.test(new URL(tab.url).pathname))
+    || tabs[0];
+  if (!tab) throw new Error("Open a Google Flow tab to connect Flow MCP.");
   selectedTabId = tab.id;
   await chrome.storage.session.set({ selectedFlowTabId: tab.id });
+  await ensureEnglishFlowTab(tab.id);
+  await ensureFlowSubmitBridge(tab.id);
   return tab;
 }
-async function attach(ws, target, version) {
-  if (target?.tabId !== selectedTabId) throw new Error("Debugger target is not the selected Flow tab");
-  if (attached.has(target.tabId)) return;
-  if (attaching.has(target.tabId)) return attaching.get(target.tabId);
-  const task = (async () => {
-    try {
-      await chrome.debugger.attach(target, version);
-    } catch (error) {
-      // Reclaim only an attachment that this extension can already command.
-      // Detaching it resets old Runtime contexts before Playwright initializes.
-      if (!/already attached|another debugger/i.test(String(error?.message || error))) throw error;
-      await chrome.debugger.sendCommand(target, "Target.getTargetInfo", {});
-      await chrome.debugger.detach(target);
-      await chrome.debugger.attach(target, version);
-    }
-    if (socket !== ws || ws.readyState !== WebSocket.OPEN) {
-      await chrome.debugger.detach(target).catch(() => {});
-      throw new Error("Connection closed during debugger attach");
-    }
-    attached.add(target.tabId);
-  })().finally(() => attaching.delete(target.tabId));
-  attaching.set(target.tabId, task);
-  return task;
+async function adoptFlowTab(tab, prepare = false) {
+  if (!tab?.id || !flowUrl(tab.url)) return false;
+  selectedTabId = tab.id;
+  await chrome.storage.session.set({ selectedFlowTabId: tab.id });
+  if (prepare) {
+    await ensureEnglishFlowTab(tab.id);
+    await ensureFlowSubmitBridge(tab.id);
+  }
+  if (socket?.readyState === WebSocket.OPEN) lastError = "";
+  if (socket?.readyState !== WebSocket.OPEN && socket?.readyState !== WebSocket.CONNECTING) void connect();
+  return true;
 }
 async function execute(ws, method, args = []) {
+  if (method === "flow.dom.execute") {
+    const [command] = args;
+    if (!command || typeof command !== "object" || typeof command.op !== "string") throw new Error("Invalid Flow DOM command");
+    if (command.op !== "flowOperation" || !nativeFlowOperations.has(command.name)) {
+      const error = new Error(`Native operation is not supported: ${String(command.name || command.op)}`);
+      error.code = "NATIVE_CAPABILITY_UNSUPPORTED";
+      error.retryable = true;
+      throw error;
+    }
+    const requestedTabId = command.tabId ?? command.tab_id;
+    let tabId = requestedTabId === undefined ? selectedTabId : requestedTabId;
+    if (tabId === undefined) tabId = (await chooseTab()).id;
+    else {
+      const selectedTab = await chrome.tabs.get(tabId).catch(() => null);
+      if (!selectedTab || !flowUrl(selectedTab.url)) {
+        if (requestedTabId !== undefined) throw new Error("Native Flow command targets a tab that is no longer open.");
+        tabId = (await chooseTab()).id;
+      }
+    }
+    if (tabId !== selectedTabId) throw new Error("Native Flow command targets a tab other than the selected Flow tab");
+    if (tabId === undefined) throw new Error("No Flow tab is selected");
+    const operation = command.name;
+    if (operation === "flow.projects.list") return listFlowProjects();
+    if (operation === "flow.project.open") return openFlowProject(command.payload?.projectId);
+    const interactive = !["flow.state", "flow.assets.list", "flow.characters.list", "flow.generation.observe", "flow.generation.upload.preflight", "flow.file.upload.begin", "flow.file.upload.chunk", "flow.file.upload.finish", "flow.file.upload.abort"].includes(operation);
+    if (interactive) showActivity(true);
+    let response;
+    try {
+      response = await sendFlowCommand(tabId, {
+        type: "flow-mcp:execute",
+        command: { ...command, id: command.requestId ?? command.request_id ?? command.id, jobId: command.jobId ?? command.job_id },
+      });
+    } finally {
+      if (interactive) showActivity(false);
+    }
+    if (!response?.ok) {
+      const error = new Error(response?.error?.message || response?.error || "Flow DOM command failed");
+      error.code = response?.error?.code || "FLOW_DOM_FAILED";
+      error.retryable = Boolean(response?.error?.retryable);
+      error.outcome_unknown = Boolean(response?.error?.outcome_unknown);
+      throw error;
+    }
+    return response.value;
+  }
   if (method === "flow.downloads.recent") {
     if (!chrome.downloads) throw new Error("Reload Flow MCP Connector 0.4.1 to enable download tracking.");
     const items = await chrome.downloads.search({ orderBy: ["-startTime"], limit: 100 });
@@ -85,56 +279,25 @@ async function execute(ws, method, args = []) {
       bytesReceived: item.bytesReceived, totalBytes: item.totalBytes,
     }));
   }
-  if (method === "chrome.debugger.attach") return attach(ws, ...args);
-  if (method === "chrome.debugger.sendCommand") {
-    if (args[0]?.tabId !== selectedTabId || !attached.has(selectedTabId)) throw new Error("Debugger session is no longer attached. Reconnect the connector before retrying.");
-    if (interactionActive && ["Input.dispatchMouseEvent", "Input.dispatchKeyEvent", "Input.dispatchTouchEvent", "Input.insertText", "Input.imeSetComposition"].includes(args[1])) {
-      await ensureActivityOverlay(selectedTabId);
-      const timed = args[1].startsWith("Input.dispatch");
-      // A historical timestamp distinguishes our CDP event from current
-      // physical input without changing its coordinates, key, or modifiers.
-      const timestamp = timed ? (Date.now() - 60_000) / 1000 : undefined;
-      const ack = await chrome.tabs.sendMessage(selectedTabId, {
-        type:"flow-mcp:allow-input", timestamp,
-        text:["Input.dispatchKeyEvent", "Input.insertText", "Input.imeSetComposition"].includes(args[1]),
-      });
-      if (!ack?.ok) throw new Error("Input guard is unavailable. Reload the Flow tab before continuing.");
-      if (timed) args = [args[0], args[1], { ...args[2], timestamp }];
-    }
-    const result = await chrome.debugger.sendCommand(...args);
-    if (args[1] === "Emulation.setFocusEmulationEnabled" && !args[0]?.sessionId) showActivity(Boolean(args[2]?.enabled));
-    return result;
-  }
-  if (method === "chrome.debugger.detach") {
-    if (args[0]?.tabId !== selectedTabId) throw new Error("Invalid target");
-    showActivity(false);
-    attached.delete(selectedTabId);
-    return chrome.debugger.detach(...args);
-  }
-  if (method === "chrome.tabs.remove") {
-    if (args[0] !== selectedTabId) throw new Error("Invalid target");
-    return chrome.tabs.remove(args[0]);
-  }
   throw new Error(`Unsupported connector method: ${method}`);
 }
-function scheduleReconnect() {
+function scheduleReconnect(delayMs) {
   if (reconnectTimer) return;
-  reconnectTimer = setTimeout(() => { reconnectTimer = undefined; void connect(); }, 1500);
+  const backoff = Math.min(1500 * (2 ** reconnectAttempt++), 30_000);
+  reconnectTimer = setTimeout(() => { reconnectTimer = undefined; void connect(); }, delayMs ?? backoff);
 }
 async function connect() {
   if (opening || socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return;
   opening = true;
   try {
-    await cleanup;
-    const tab = await chooseTab();
+    await chooseTab();
     const ws = new WebSocket(endpoint((await config()).bridge));
     socket = ws;
     ws.onopen = () => {
       if (socket !== ws) return;
+      reconnectAttempt = 0;
       lastError = "";
-      // Seed the official tab model before it starts Playwright auto-attach.
-      send(ws, { type: "event", method: "chrome.tabs.onCreated", params: [tab] });
-      send(ws, { type: "event", method: "extension.initialized", params: [{ protocol, version: chrome.runtime.getManifest().version }] });
+      send(ws, { type: "event", method: "extension.initialized", params: [{ protocol: 2, version: chrome.runtime.getManifest().version, capabilities: [...nativeFlowOperations].map(name => `flow.native.${name.slice(5)}`) }] });
       heartbeat = setInterval(() => send(ws, { type: "ping" }), 20_000);
     };
     ws.onmessage = message => {
@@ -142,11 +305,12 @@ async function connect() {
       let command;
       try { command = JSON.parse(message.data); } catch { ws.close(1002, "Invalid JSON"); return; }
       if (command.type !== "command") return;
-      // Do not await a CDP command in a receive loop. Events and other commands
-      // must continue while Runtime.callFunctionOn awaits a page promise.
+      const commandId = command.id ?? command.request_id ?? command.requestId;
+      if (commandId === undefined || commandId === null) { ws.close(1002, "Command is missing request id"); return; }
+      // Keep the socket receive loop responsive while a page operation waits.
       void execute(ws, command.method, command.args).then(
-        value => send(ws, { type: "result", id: command.id, result: { ok: true, value } }),
-        error => send(ws, { type: "result", id: command.id, result: { ok: false, error: String(error?.message || error) } }),
+        value => send(ws, { type: "result", id: commandId, result: { ok: true, value } }),
+        error => send(ws, { type: "result", id: commandId, result: { ok: false, error: { code: error?.code || "EXTENSION_COMMAND_FAILED", message: String(error?.message || error), retryable: Boolean(error?.retryable), outcome_unknown: Boolean(error?.outcome_unknown) } } }),
       );
     };
     ws.onclose = close => {
@@ -154,24 +318,39 @@ async function connect() {
       socket = null;
       clearInterval(heartbeat);
       lastError = close.reason || "Backend disconnected";
-      cleanup = release();
-      if (close.code !== 1008) scheduleReconnect();
+      showActivity(false);
+      // Retry slowly when another connector temporarily owns the backend socket.
+      scheduleReconnect(close.code === 1008 ? 10_000 : undefined);
     };
     ws.onerror = () => { lastError = "Cannot connect to the local backend"; ws.close(); };
   } catch (error) { lastError = String(error?.message || error); scheduleReconnect(); }
   finally { opening = false; }
 }
-chrome.debugger.onEvent.addListener((source, method, params) => {
-  if (source.tabId === selectedTabId) event("chrome.debugger.onEvent", [source, method, params]);
-});
-chrome.debugger.onDetach.addListener((source, reason) => {
-  if (source.tabId === selectedTabId) showActivity(false);
-  attached.delete(source.tabId);
-  if (source.tabId === selectedTabId) event("chrome.debugger.onDetach", [source, reason]);
-});
 chrome.tabs.onRemoved.addListener((tabId, info) => {
-  attached.delete(tabId);
-  if (tabId === selectedTabId) { event("chrome.tabs.onRemoved", [tabId, info]); selectedTabId = undefined; }
+  if (tabId === selectedTabId) {
+    showActivity(false);
+    selectedTabId = undefined;
+    void chrome.storage.session.remove("selectedFlowTabId");
+    // Keep the WebSocket alive and attach it to another remaining Flow tab.
+    void chooseTab().catch(error => { lastError = String(error?.message || error); });
+  }
+});
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+  void chrome.tabs.get(tabId).then(tab => adoptFlowTab(tab, true)).catch(() => {});
+});
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.url && tabId === selectedTabId && !flowUrl(changeInfo.url)) {
+    selectedTabId = undefined;
+    void chrome.storage.session.remove("selectedFlowTabId");
+    void chooseTab().catch(error => { lastError = String(error?.message || error); });
+    return;
+  }
+  if (flowUrl(tab.url) && (tab.active || selectedTabId === undefined)) {
+    void adoptFlowTab(tab, tab.active).catch(error => { lastError = String(error?.message || error); });
+  }
+});
+chrome.tabs.onCreated.addListener(tab => {
+  if (tab.active && flowUrl(tab.url)) void adoptFlowTab(tab, true).catch(error => { lastError = String(error?.message || error); });
 });
 chrome.runtime.onInstalled.addListener(() => { chrome.alarms.create("flow-mcp-connect", { periodInMinutes: 0.5 }); void connect(); });
 chrome.runtime.onStartup.addListener(() => { chrome.alarms.create("flow-mcp-connect", { periodInMinutes: 0.5 }); void connect(); });
@@ -183,6 +362,23 @@ chrome.storage.onChanged.addListener((changes, area) => {
   else void connect();
 });
 chrome.runtime.onMessage.addListener((message, _sender, respond) => {
+  if (message?.type === "flow-mcp:ensure-active-tab") {
+    void (async () => {
+      const tabId = _sender.tab?.id;
+      if (tabId === undefined || tabId !== selectedTabId) throw new Error("The download request did not come from the selected Flow tab.");
+      await chrome.tabs.update(tabId, { active: true });
+      respond({ ok: true });
+    })().catch(error => respond({ ok: false, error: String(error?.message || error) }));
+    return true;
+  }
+  if (message?.type === "flow-mcp:progress") {
+    const requestId = message.requestId ?? message.request_id ?? message.commandId ?? message.command_id;
+    const tabId = _sender.tab?.id;
+    const ok = tabId === selectedTabId && (typeof requestId === "string" || typeof requestId === "number");
+    if (ok) event("extension.progress", [{ requestId: String(requestId), jobId: message.jobId ?? message.job_id, tabId, progress: message.progress }]);
+    respond({ ok });
+    return;
+  }
   if (message?.type === "flow-mcp:preview") {
     void (async () => {
       if (selectedTabId === undefined) throw new Error("Connect a Flow tab first.");
@@ -193,7 +389,7 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
     return true;
   }
   if (message?.type === "flow-mcp:activity-state") {
-    respond({ active: _sender.tab?.id === selectedTabId && attached.has(selectedTabId) && socket?.readyState === WebSocket.OPEN && interactionActive });
+    respond({ active: _sender.tab?.id === selectedTabId && socket?.readyState === WebSocket.OPEN && interactionActive });
     return;
   }
   if (message?.type === "flow-mcp:status") {

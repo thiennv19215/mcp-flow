@@ -57,20 +57,14 @@
   let previewUntil = 0;
   let locked = false;
   let lockDeadline = 0;
-  let textInputUntil = 0;
-  const allowedInput = [];
   const display = active => {
     locked = Boolean(active);
     lockDeadline = active ? Date.now() + 6000 : 0;
     frame.classList.toggle("active", locked || Date.now() < previewUntil);
   };
-  // Both physical and CDP events are trusted. Match the timestamp stamped by
-  // our worker rather than isTrusted, which would block Playwright as well.
+  // Pause direct user input while the content driver owns the Flow page.
   function guard(event) {
     if (!locked || Date.now() > lockDeadline || !event.isTrusted) return;
-    if ((event.type === "beforeinput" || event.type === "input") && Date.now() < textInputUntil) return;
-    const absoluteTime = performance.timeOrigin + event.timeStamp;
-    if (allowedInput.some(item => Date.now() < item.expires && Math.abs(item.time - absoluteTime) < 2)) return;
     if (event.cancelable) event.preventDefault();
     event.stopImmediatePropagation();
   }
@@ -81,16 +75,6 @@
     window.addEventListener(type, guard, { capture:true, passive:false });
   }
   chrome.runtime.onMessage.addListener((message, _sender, respond) => {
-    if (message?.type === "flow-mcp:allow-input") {
-      display(true);
-      while (allowedInput.length && (allowedInput[0].expires < Date.now() || allowedInput.length >= 128)) allowedInput.shift();
-      if (typeof message.timestamp === "number") allowedInput.push({ time:message.timestamp * 1000, expires:Date.now() + 3000 });
-      // Text editing events follow an authorized key command or insertText;
-      // the originating physical key/click/paste is still blocked separately.
-      if (message.text) textInputUntil = Date.now() + 1000;
-      respond({ ok:true });
-      return;
-    }
     if (message?.type === "flow-mcp:activity-preview") {
       previewUntil = Date.now() + 5000;
       display(locked);
@@ -103,7 +87,7 @@
     if (checking) return;
     checking = true;
     try { display((await chrome.runtime.sendMessage({ type: "flow-mcp:activity-state" }))?.active); }
-    catch { display(false); allowedInput.length = 0; }
+    catch { display(false); }
     finally { checking = false; }
   }
   // Also clears the border if the service worker is stopped or reloaded.

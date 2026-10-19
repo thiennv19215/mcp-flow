@@ -12,170 +12,1265 @@ function matchesName(value, expected, regex, exact) {
   if (regex?.__regexp || regex?.source) { try { return new RegExp(regex.source, regex.flags).test(value); } catch {} }
   return expected === undefined || (exact ? value === expected : value.toLowerCase().includes(String(expected).toLowerCase()));
 }
-function select(root, spec) {
-  let nodes = [...root.querySelectorAll(spec.css || "*")];
-  if (spec.role) nodes = nodes.filter(e => {
-    const implicit={BUTTON:"button",A:"link",OPTION:"option",SELECT:"combobox",TEXTAREA:"textbox",NAV:"navigation",IMG:"img",DIALOG:"dialog",H1:"heading",H2:"heading",H3:"heading",H4:"heading",H5:"heading",H6:"heading"};
-    const role=e.getAttribute("role") || (e.tagName==="INPUT" ? (e.type==="radio"?"radio":e.type==="checkbox"?"checkbox":"textbox") : (e.isContentEditable?"textbox":implicit[e.tagName]));
-    return role===spec.role && matchesName(accessibleName(e),spec.name,spec.regex,spec.exact);
-  });
-  if (spec.label !== undefined) nodes = nodes.filter(e => { const id=e.id; return [...document.querySelectorAll("label")].some(l => (id && l.htmlFor===id || l.contains(e)) && matchesName(l.innerText.trim(), spec.name, spec.regex, spec.exact)); });
-  if (spec.placeholder !== undefined) nodes = nodes.filter(e => matchesName(e.getAttribute("placeholder") || "", spec.name, spec.regex, spec.exact));
-  if (spec.text !== undefined) nodes = nodes.filter(e => matchesName((e.innerText || e.textContent || "").trim(), spec.text, spec.regex, spec.exact));
-  if (spec.hasText !== undefined) nodes = nodes.filter(e => new RegExp(spec.hasText.source, spec.hasText.flags).test(e.innerText || e.textContent || ""));
-  if (spec.has) nodes = nodes.filter(e => select(e, spec.has).length > 0);
-  if (spec.visible) nodes = nodes.filter(visible);
-  if (spec.index !== undefined) { const i = spec.index < 0 ? nodes.length + spec.index : spec.index; return nodes[i] ? [nodes[i]] : []; }
-  return nodes;
-}
-function resolve(spec) {
-  let root = document;
-  for (const step of spec.chain || []) {
-    const found = select(root, step);
-    root = found[step.index ?? 0];
-    if (!root) return [];
-  }
-  return select(root, spec.query || {});
-}
 function mediaId(tile) {
-  const media = tile.querySelector("img[data-media-id], video[data-media-id], img[src], video[src]");
-  const id = media && (media.getAttribute("data-media-id") || media.getAttribute("src")?.match(/[0-9a-f]{8}-[0-9a-f-]{27}/)?.[0]);
+  const mediaNodes = [...tile.querySelectorAll("img,video")];
+  const directId = mediaNodes.map(media => media.getAttribute("data-media-id")).find(Boolean);
+  const sources = mediaNodes.map(media => media.currentSrc || media.getAttribute("src") || "").filter(Boolean);
+  const asbId = sources.map(src => {
+    try {
+      const url = new URL(src, location.href);
+      if (url.origin !== location.origin || !url.pathname.startsWith("/asb/")) return null;
+      return url.pathname.slice("/asb/".length).replace(/=(?:s\d+(?:-[a-z]+)*|mm,\d+,\d+)$/i, "");
+    } catch { return null; }
+  }).find(Boolean);
+  const uuid = sources.map(src => src.match(/[0-9a-f]{8}-[0-9a-f-]{27}/i)?.[0]).find(Boolean);
+  const id = directId || (asbId ? `asb:${asbId}` : null) || uuid;
   if (id) return id;
   const title = tile.getAttribute("aria-label");
   return title ? `title:${title}` : undefined;
 }
-function evaluateKnown(name, args) {
-  if (name === "documentLang") return document.documentElement.lang;
-  if (name === "scrollTop") { document.querySelectorAll(".page-container").forEach(e => e.scrollTop = 0); return undefined; }
-  if (name === "mediaIds") return [...document.querySelectorAll("flow-grid-tile-container")].map(mediaId).filter(Boolean);
-  if (name === "newErrorCount") {
-    const seen = new Set(args[0]); let errors = 0;
-    for (const tile of document.querySelectorAll("flow-grid-tile-container")) {
-      const id = mediaId(tile); if (id && seen.has(id)) break;
-      if (tile.querySelector("flow-error-tile")) errors++;
-    }
-    return errors;
-  }
-  if (name === "retryErrorState") {
-    const seen = new Set(args[0]);
-    for (const tile of document.querySelectorAll("flow-grid-tile-container")) {
-      const id = mediaId(tile), title = tile.getAttribute("aria-label");
-      if ((id && seen.has(id)) || (title && seen.has(title))) return "known";
-      if (tile.querySelector("flow-error-tile")) return "error";
-    }
-    return "none";
-  }
-  if (name === "scrollPage") {
-    const el = document.querySelector(".page-container"); if (!el) return false;
-    const top = el.scrollTop; el.scrollTop = top + el.clientHeight * 0.8; return el.scrollTop > top;
-  }
-  if (name === "freshMedia") return [...document.querySelectorAll("flow-grid-tile-container")].map(t => ({
-    id: mediaId(t), kind: t.querySelector("flow-video-tile") ? "video" : t.querySelector("flow-image-tile") ? "image" : "other",
-    label: t.getAttribute("aria-label") ?? "",
-    busy: /\d+%/.test(t.innerText) || (!!t.querySelector("flow-video-tile") && !t.querySelector('img[alt="Generated video thumbnail"], video')),
-  }));
-  if (name === "progressPercentages") return [...document.querySelectorAll("flow-grid-tile-container")].slice(0, 8).map(t => t.innerText.match(/\d+%/)?.[0]).filter(Boolean);
-  if (name === "gridBatch") return [...document.querySelectorAll("flow-grid-tile-container")].map(t => ({
-    name: t.getAttribute("aria-label") ?? "",
-    kind: t.querySelector("flow-scene-tile") ? "scene" : t.querySelector("flow-video-tile") ? "video" : "image",
-    id: mediaId(t),
-  }));
-  if (name === "characterNames") return [...document.querySelectorAll("flow-character-tile")].map(t => t.innerText.replace(/\s+/g, " ").trim()).filter(Boolean);
-  if (name === "titledMediaIds") return [...document.querySelectorAll("flow-grid-tile-container")].filter(t => t.getAttribute("aria-label") === args[1]).map(t => mediaId(t) ?? "");
-  if (name === "blurSideMenu") { const focused = document.activeElement; if (focused?.closest("mat-sidenav")) focused.blur(); return undefined; }
-  if (name === "agentQuestion") return /Would you like to|which you prefer|I2V|R2V/i.test(document.body.innerText);
-  if (name === "bodyHasProgress") return /\d{1,3}%/.test(document.body.innerText);
-  if (name === "menuItemTexts") return args[0].map(m => (m.textContent ?? "").replace(/\s+/g, " ").trim());
-  throw new Error(`Unsupported CSP-safe page operation: ${name}`);
+function isFlowMediaSource(value) {
+  try {
+    const url = new URL(value, location.href);
+    if (url.protocol === "blob:") return url.origin === location.origin;
+    if (url.protocol !== "https:") return false;
+    const host = url.hostname.toLowerCase();
+    return host === "flow.google.com" || host === "flow-content.google" || host === "labs.google" ||
+      host === "aisandbox-pa.googleapis.com" || host === "googleusercontent.com" || host.endsWith(".googleusercontent.com");
+  } catch { return false; }
 }
-let uploadFile;
-async function execute(c) {
-  const args = c.args || [];
-  if (c.op === "evaluate") return evaluateKnown(c.evaluator, args);
-  if (c.op === "evaluateElement" || c.op === "evaluateAll") {
-    const els = resolve(c.spec);
-    if (c.op === "evaluateAll" && c.evaluator === "menuItemTexts") return evaluateKnown(c.evaluator, [els]);
-    if (c.op === "evaluateElement" && c.evaluator === "menuItemTexts") return (els[0]?.textContent ?? "").replace(/\s+/g, " ").trim();
-    throw new Error(`Unsupported CSP-safe locator operation: ${c.evaluator}`);
-  }
-  if (c.op === "page") {
-    if (c.method === "url") return location.href;
-    if (c.method === "goto") { location.href = c.value; return true; }
-    if (c.method === "title") return document.title;
-  }
-  if (c.op === "key") {
-    const target = document.activeElement || document.body;
-    const value = String(c.value);
-    if (c.method === "type") {
-      if (target.isContentEditable) { document.execCommand("insertText", false, value); }
-      else if ("value" in target) { const proto=target instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto,"value")?.set?.call(target,(target.value||"")+value); target.dispatchEvent(new InputEvent("input", {bubbles:true,inputType:"insertText",data:value})); }
-      return true;
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+function cleanCharacterName(value) {
+  return value.replace(/\s+/g, " ").trim()
+    .replace(/\b(accessibility_new|person|movie|image|videocam|mic)\b/g, "")
+    .replace(/\s+/g, " ").trim();
+}
+function clickFlowNavigation(label) {
+  const candidates = [...document.querySelectorAll(
+    'a,button,[role="button"],[role="menuitem"],mat-list-item,button[mat-list-item]'
+  )];
+  const target = candidates.find(el => {
+    const text = (el.getAttribute("aria-label") || el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
+    return text.toLowerCase() === label.toLowerCase() && visible(el) && !el.disabled;
+  });
+  if (!target) return false;
+  target.click();
+  return true;
+}
+function collectAssets() {
+  return [...document.querySelectorAll("flow-grid-tile-container")].map(tile => {
+    const kind = tile.querySelector("flow-scene-tile") ? "scene" : tile.querySelector("flow-video-tile") ? "video" : tile.querySelector("flow-image-tile") ? "image" : null;
+    const name = (tile.getAttribute("aria-label") || "").trim();
+    if (!kind || !name) return null;
+    const id = mediaId(tile);
+    return { ...(id && !id.startsWith("title:") ? { id } : {}), name, kind };
+  }).filter(Boolean);
+}
+function scrollContainer() {
+  const preferred = document.querySelector(".page-container");
+  if (preferred) return preferred;
+  return [...document.querySelectorAll("*" )].find(el => el.scrollHeight > el.clientHeight + 8 && el.clientHeight > 100) || null;
+}
+async function scanNativeAssets() {
+  const originalContainer = scrollContainer();
+  const originalTop = originalContainer?.scrollTop ?? 0;
+  const byName = new Map();
+  try {
+    // From detail/editor views, return to the project library when the Flow navigation is available.
+    if (!document.querySelector("flow-grid-tile-container")) {
+      clickFlowNavigation("All media");
+      await wait(700);
     }
-    if (/^(ControlOrMeta|Control|Meta)\+a$/i.test(value)) {
-      if (target.isContentEditable) document.execCommand("selectAll"); else if ("select" in target) target.select();
-    } else if (value === "Delete" || value === "Backspace") {
-      if (target.isContentEditable) document.execCommand("delete"); else if ("value" in target) { target.value=""; target.dispatchEvent(new InputEvent("input",{bubbles:true,inputType:"deleteContentBackward"})); }
-    } else {
-      const event = new KeyboardEvent("keydown", { key: value, bubbles: true, cancelable: true }); target.dispatchEvent(event);
-      if (value === "Enter") { const form=target.closest?.("form"); if(form) form.requestSubmit(); else if(target.matches?.("button,[role=button]")) target.click(); }
-      if (value === "Escape" || value === "Enter") target.dispatchEvent(new KeyboardEvent("keyup", { key: value, bubbles: true }));
+    if (!document.querySelector("flow-grid-tile-container")) {
+      throw new Error("Flow's All media grid is not visible. Open the project and try again.");
     }
-    return true;
+    const container = scrollContainer();
+    if (!container) return collectAssets();
+    container.scrollTop = 0;
+    await wait(350);
+    let unchanged = 0;
+    // The grid is virtualized: accumulate each rendered viewport and stop only after the scroll range ends
+    // (or several waits produce no movement). Bound the scan to keep a malformed page from hanging an MCP call.
+    for (let step = 0; step < 160; step++) {
+      for (const asset of collectAssets()) {
+        const known = byName.get(asset.name);
+        if (!known) byName.set(asset.name, asset);
+        else if (!known.id && asset.id) known.id = asset.id;
+      }
+      const before = container.scrollTop;
+      const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
+      if (before >= maxTop - 2) break;
+      container.scrollTop = Math.min(maxTop, before + Math.max(200, container.clientHeight * 0.78));
+      await wait(500);
+      if (container.scrollTop <= before) {
+        unchanged++;
+        if (unchanged >= 3) break;
+      } else unchanged = 0;
+    }
+    // Include the final viewport after reaching the bottom.
+    for (const asset of collectAssets()) {
+      const known = byName.get(asset.name);
+      if (!known) byName.set(asset.name, asset);
+      else if (!known.id && asset.id) known.id = asset.id;
+    }
+    return [...byName.values()];
+  } finally {
+    const current = scrollContainer();
+    if (current && originalContainer === current) current.scrollTop = originalTop;
   }
-  if (c.op === "mouse") { const e=document.elementFromPoint(c.x,c.y); if(c.method === "click") e?.dispatchEvent(new MouseEvent("click",{bubbles:true,clientX:c.x,clientY:c.y,view:window})); else e?.dispatchEvent(new MouseEvent("mouseover",{bubbles:true,clientX:c.x,clientY:c.y,view:window})); return true; }
-  if (c.op === "setFile") {
-    const input = [...document.querySelectorAll('input[type="file"]')].find(e => e.isConnected);
-    if (!input) throw new Error("Flow's upload file input is not available. Try the upload again.");
-    const binary=atob(c.data), bytes=new Uint8Array(binary.length); for(let i=0;i<binary.length;i++) bytes[i]=binary.charCodeAt(i);
-    const file=new File([bytes],c.name,{type:({".png":"image/png",".jpg":"image/jpeg",".jpeg":"image/jpeg",".webp":"image/webp",".mp4":"video/mp4",".mov":"video/quicktime",".mp3":"audio/mpeg",".wav":"audio/wav"}[c.mime]||"application/octet-stream")});
-    const dt=new DataTransfer(); dt.items.add(file); input.files=dt.files; input.dispatchEvent(new Event("change",{bubbles:true})); input.dispatchEvent(new Event("input",{bubbles:true})); return true;
+}
+async function scanNativeCharacters() {
+  const clicked = clickFlowNavigation("Characters");
+  if (!clicked && !document.querySelector("flow-character-tile")) {
+    throw new Error("Flow's Characters section is not available in the current view. Open the project navigation and try again.");
   }
-  if (c.op === "locator") {
-    const els = resolve(c.spec);
-    if (c.method === "count") return els.length;
-    if (c.method === "allInnerTexts") return els.map(e => e.innerText || e.textContent || "");
-    if (c.method === "innerText") return els[0]?.innerText ?? "";
-    if (c.method === "textContent") return els[0]?.textContent ?? null;
-    if (c.method === "getAttribute") return els[0]?.getAttribute(c.value) ?? null;
-    if (c.method === "isVisible") return Boolean(els[0] && visible(els[0]));
-    if (c.method === "isEnabled") return Boolean(els[0] && !els[0].disabled && els[0].getAttribute("aria-disabled") !== "true");
-    if (c.method === "isChecked") return Boolean(els[0]?.checked);
-    if (c.method === "boundingBox") { const r = els[0]?.getBoundingClientRect(); return r ? { x:r.x, y:r.y, width:r.width, height:r.height } : null; }
-    if (c.method === "waitFor") return Boolean(els.length);
-    const el = els[0];
-    if (!el) throw new Error("Locator resolved to no element");
-    if (c.method === "click") {
-      el.scrollIntoView({block:"center"});
-      if (c.fileChooserArmed) { const input=document.querySelector('input[type="file"]'); if(!input) throw new Error("Flow's upload input is not available yet."); return true; }
-      if (c.value?.button === "right") { el.dispatchEvent(new MouseEvent("contextmenu", {bubbles:true,cancelable:true,button:2,view:window})); return true; }
-      el.click(); return true;
+  if (clicked) await wait(700);
+  const names = new Set();
+  const container = scrollContainer();
+  const originalTop = container?.scrollTop ?? 0;
+  try {
+    if (container) container.scrollTop = 0;
+    for (let step = 0; step < 100; step++) {
+      for (const tile of document.querySelectorAll("flow-character-tile")) {
+        const name = cleanCharacterName(tile.innerText || tile.textContent || "");
+        if (name && name !== "Me") names.add(name);
+      }
+      if (!container) break;
+      const before = container.scrollTop;
+      const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
+      if (before >= maxTop - 2) break;
+      container.scrollTop = Math.min(maxTop, before + Math.max(200, container.clientHeight * 0.78));
+      await wait(400);
+      if (container.scrollTop <= before) break;
     }
-    if (c.method === "hover") { const r=el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent("mouseover",{bubbles:true,clientX:r.x+r.width/2,clientY:r.y+r.height/2,view:window})); return true; }
-    if (c.method === "fill" || c.method === "type") {
-      el.focus();
-      if (el.isContentEditable) { el.focus(); el.textContent = c.value; }
-      else { const proto=el instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto,"value")?.set?.call(el,c.method === "fill"?c.value:(el.value||"")+c.value); }
-      el.dispatchEvent(new InputEvent("input", { bubbles:true, inputType:"insertText", data:c.value }));
-      el.dispatchEvent(new Event("change", { bubbles:true })); return true;
+    for (const tile of document.querySelectorAll("flow-character-tile")) {
+      const name = cleanCharacterName(tile.innerText || tile.textContent || "");
+      if (name && name !== "Me") names.add(name);
     }
-    if (c.method === "press") { el.focus(); el.dispatchEvent(new KeyboardEvent("keydown", {key:c.value,bubbles:true})); if(c.value === "Enter" && el.form) el.form.requestSubmit(); return true; }
-    if (c.method === "scrollIntoViewIfNeeded") { el.scrollIntoView({block:"center"}); return true; }
+    return [...names];
+  } finally {
+    if (container) container.scrollTop = originalTop;
+    // Restore the user's main library view after reading the separate Characters section.
+    if (clicked && clickFlowNavigation("All media")) await wait(500);
+  }
+}
+function nativeRead(name) {
+  if (name === "flowState") {
+    const url = location.href;
+    const signedIn = !/\/about|accounts\.google\.com/.test(url);
+    const inProject = /\/project\//.test(url);
+    const state = { url, signedIn, inProject };
+    if (!signedIn) state.hint = "Not signed in. Sign in to Google in the Flow Chrome tab.";
+    else if (!inProject) state.hint = "Signed in, but no project is open. Open or create a Flow project.";
+    return state;
+  }
+  if (name === "assets") return scanNativeAssets();
+  if (name === "characters") return scanNativeCharacters();
+  throw new Error(`Unsupported native read: ${name}`);
+}
+
+async function scanNativeProjects() {
+  const homeUrl = location.href;
+  const projectLinks = () => [...document.querySelectorAll('a[href*="/project/"]')]
+    .filter(link => {
+      try { return new URL(link.href).origin === location.origin && /\/project\/[0-9a-f-]{36}(?:[/?#]|$)/i.test(new URL(link.href).pathname + new URL(link.href).search); }
+      catch { return false; }
+    });
+  // Flow's home shell often reaches `complete` before React has rendered the
+  // project cards. TobyFlow waits on its home-page observer before scanning;
+  // give this route the same settling window instead of returning a false empty list.
+  const cardsDeadline = Date.now() + 15_000;
+  while (!projectLinks().length && Date.now() < cardsDeadline) {
+    if (location.href !== homeUrl) throw flowError("FLOW_EXECUTION_TARGET_CHANGED", "Flow navigated while project cards were loading.", true);
+    await wait(250);
+  }
+  const first = projectLinks()[0];
+  let scroller = null;
+  for (let parent = first?.parentElement, depth = 0; parent && parent !== document.body && depth < 12; parent = parent.parentElement, depth++) {
+    const style = getComputedStyle(parent);
+    if ((style.overflowY === "auto" || style.overflowY === "scroll") && parent.scrollHeight > parent.clientHeight + 4) { scroller = parent; break; }
+  }
+  const scrolling = document.scrollingElement || document.documentElement;
+  const top = () => scroller ? scroller.scrollTop : window.scrollY || scrolling.scrollTop || 0;
+  const max = () => scroller ? scroller.scrollHeight - scroller.clientHeight : scrolling.scrollHeight - window.innerHeight;
+  const scrollTo = value => scroller ? (scroller.scrollTop = value) : window.scrollTo(0, value);
+  const originalTop = top();
+  let lastCount = projectLinks().length, stable = 0;
+  for (let step = 0; step < 20; step++) {
+    if (location.href !== homeUrl) throw flowError("FLOW_EXECUTION_TARGET_CHANGED", "Flow navigated while project cards were loading.", true);
+    const before = top();
+    scrollTo(max() + 1000);
+    await wait(400);
+    const count = projectLinks().length;
+    const moved = top() > before + 2;
+    if (count <= lastCount && !moved) { if (++stable >= 2) break; } else stable = 0;
+    lastCount = count;
+  }
+  scrollTo(originalTop);
+  await wait(120);
+  const seen = new Set();
+  const projects = [];
+  for (const link of projectLinks()) {
+    const url = new URL(link.href);
+    const match = url.pathname.match(/\/project\/([0-9a-f-]{36})(?:\/|$)/i);
+    const id = match?.[1];
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const card = link.closest("article,[role=article],li") || link.parentElement;
+    const title = card?.querySelector("h1,h2,h3,[data-testid*=title]")?.textContent?.trim();
+    const excluded = /^(open project|edit project title|delete project|more options)$/i;
+    let direct = "";
+    for (let ancestor = link.parentElement, depth = 0; ancestor && ancestor !== document.body && depth < 20 && !direct; ancestor = ancestor.parentElement, depth++) {
+      const lines = (ancestor.innerText || ancestor.textContent || "").split(/\n+/).map(text => text.replace(/\s+/g, " ").trim());
+      direct = lines.find(text => text && text.length <= 100 && !/^\d+$/.test(text) && !excluded.test(text)) || "";
+      if (direct) break;
+      direct = [...ancestor.querySelectorAll("span,p,div")]
+        .filter(el => !el.closest("a,button,[role=button]"))
+        .map(el => [...el.childNodes].filter(node => node.nodeType === Node.TEXT_NODE).map(node => node.textContent).join("").replace(/\s+/g, " ").trim())
+        .find(text => text && text.length <= 100 && !/^\d+$/.test(text) && !excluded.test(text)) || "";
+    }
+    const aria = link.getAttribute("aria-label") || card?.getAttribute("aria-label");
+    const name = (title || direct || (!excluded.test(aria || "") ? aria : "") || link.textContent || "").replace(/\s+/g, " ").trim();
+    projects.push({ id, name: name.slice(0, 100) || `Flow project ${projects.length + 1}`, url: `${url.origin}${url.pathname}`, active: false });
+  }
+  return projects;
+}
+
+// Native Flow operations deliberately return project media handles, never local paths. The
+// backend owns files and downloads; this layer only drives the page and reports what Flow did.
+function flowError(code, message, retryable = false, outcomeUnknown = false) {
+  const error = new Error(message);
+  error.code = code;
+  error.retryable = retryable;
+  error.outcome_unknown = outcomeUnknown;
+  return error;
+}
+function flowButton(name, root = document) {
+  return [...root.querySelectorAll('button,[role="button"]')].find(el =>
+    visible(el) && matchesName(accessibleName(el).replace(/\s+/g, " ").trim(), name, null, true));
+}
+function flowTileOptionsButton(tile) {
+  return [...tile.querySelectorAll('button,[role="button"]')].find(el => {
+    const label = accessibleName(el).replace(/\s+/g, " ").trim().toLowerCase();
+    return !el.disabled && el.getAttribute("aria-disabled") !== "true" && (label === "more options" || label.startsWith("more options "));
+  });
+}
+function flowMenuLabel(el) {
+  const label = el.querySelector(".label,.item-text");
+  if (label) return (label.innerText || label.textContent || "").replace(/\s+/g, " ").trim();
+  const clone = el.cloneNode(true);
+  clone.querySelectorAll("mat-icon,.mat-icon,.google-symbols,svg,[aria-hidden='true']").forEach(icon => icon.remove());
+  return (clone.innerText || clone.textContent || accessibleName(el)).replace(/\s+/g, " ").trim();
+}
+function flowMenuItems(root = document) {
+  return [...root.querySelectorAll('[role="menuitem"],button')].filter(visible);
+}
+function flowDownloadChoice(items, quality, kind) {
+  const wanted = kind === "video"
+    ? quality === "upscaled" ? /1080p|upscaled/i : /720p|original/i
+    : quality === "upscaled" ? /upscaled|2x|4x|2k/i : /original|1k/i;
+  return items.find(item => !item.disabled && item.getAttribute("aria-disabled") !== "true" && wanted.test(flowMenuLabel(item)));
+}
+async function revealFlowSubmenu(trigger, parentMenu, quality, kind) {
+  const rect = trigger.getBoundingClientRect();
+  const point = { bubbles: true, cancelable: true, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
+  const pointer = { ...point, pointerId: 1, pointerType: "mouse", relatedTarget: parentMenu };
+  const mouse = { ...point, relatedTarget: parentMenu };
+  const knownMenus = new Set(document.querySelectorAll('[role="menu"],mat-menu-panel'));
+  const find = () => {
+    for (const id of [trigger.getAttribute("aria-controls"), trigger.getAttribute("aria-owns")].filter(Boolean)) {
+      const target = document.getElementById(id);
+      if (target && target !== parentMenu && visible(target)) return target;
+    }
+    const candidates = [...document.querySelectorAll('[role="menu"],mat-menu-panel')].filter(menu => menu !== parentMenu && visible(menu));
+    return candidates.find(menu => flowDownloadChoice(flowMenuItems(menu), quality, kind)) || candidates.find(menu => !knownMenus.has(menu));
+  };
+  for (const event of ["pointerover", "pointerenter", "pointermove", "pointerdown", "pointerup"]) {
+    trigger.dispatchEvent(new PointerEvent(event, { ...pointer, ...(event.endsWith("down") || event.endsWith("up") ? { button: 0 } : {}) }));
+  }
+  for (const event of ["mouseover", "mouseenter", "mousemove"]) trigger.dispatchEvent(new MouseEvent(event, mouse));
+  trigger.focus();
+  for (let attempt = 0; attempt < 6; attempt++) {
+    await wait(150);
+    const submenu = find();
+    if (submenu) return submenu;
+    if (attempt === 2) {
+      trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    }
+  }
+  // Some Flow builds open Angular Material submenus on activation instead of hover.
+  trigger.click();
+  for (let attempt = 0; attempt < 6; attempt++) {
+    await wait(150);
+    const submenu = find();
+    if (submenu) return submenu;
   }
   return null;
 }
-chrome.runtime.onMessage.addListener((message, _sender, respond) => {
-  if (message?.type === "flow-mcp:file-start") { uploadFile={name:message.name,mime:message.mime,parts:[],size:0}; respond({ok:true}); return; }
-  if (message?.type === "flow-mcp:file-chunk") { if(uploadFile){const part=new Uint8Array(message.data);uploadFile.parts.push(part);uploadFile.size+=part.length;} respond({ok:true}); return; }
-  if (message?.type === "flow-mcp:file-end") {
-    try {
-      const input=document.querySelector('input[type="file"]'); if(!input||!uploadFile) throw new Error("Flow's upload input is not available.");
-      const bytes=new Uint8Array(uploadFile.size); let offset=0; for(const part of uploadFile.parts){bytes.set(part,offset);offset+=part.length;}
-      const file=new File([bytes],uploadFile.name,{type:({".png":"image/png",".jpg":"image/jpeg",".jpeg":"image/jpeg",".webp":"image/webp",".mp4":"video/mp4",".mov":"video/quicktime",".mp3":"audio/mpeg",".wav":"audio/wav"}[uploadFile.mime]||"application/octet-stream")});
-      const dt=new DataTransfer();dt.items.add(file);input.files=dt.files;input.dispatchEvent(new Event("change",{bubbles:true}));input.dispatchEvent(new Event("input",{bubbles:true}));uploadFile=undefined;respond({ok:true,value:true});
-    } catch(error) { uploadFile=undefined;respond({ok:false,error:String(error?.message||error)}); }
-    return;
+async function revealFlowTileOptions(tile) {
+  tile.scrollIntoView({ behavior: "instant", block: "center" });
+  const target = tile.querySelector("img,video,[role=img]") || tile;
+  const rect = target.getBoundingClientRect();
+  const point = { bubbles: true, cancelable: true, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
+  for (const event of ["pointerover", "pointerenter", "pointermove", "mouseover", "mouseenter", "mousemove"]) {
+    const Ctor = event.startsWith("pointer") ? PointerEvent : MouseEvent;
+    target.dispatchEvent(new Ctor(event, { ...point, pointerId: 1, pointerType: "mouse" }));
   }
+  // The Flow V2 button exists in the tile DOM while CSS hides it until hover.
+  // Synthetic hover does not update Chromium's :hover state, so activate that
+  // tile-scoped control directly before falling back to Flow's context menu.
+  const button = flowTileOptionsButton(tile);
+  if (button) return button;
+  const deadline = Date.now() + 1800;
+  while (Date.now() < deadline) {
+    const revealed = flowTileOptionsButton(tile);
+    if (revealed) return revealed;
+    await wait(100);
+  }
+  return null;
+}
+async function waitForFlowTileMedia(tile, title, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastState = "media element missing";
+  while (Date.now() < deadline) {
+    if (!tile.isConnected) throw flowError("FLOW_ASSET_CHANGED", `The tile for "${title}" changed while preparing its download.`, true);
+    const errorTile = tile.querySelector("flow-error-tile");
+    const retryControl = [...tile.querySelectorAll('button,[role="button"]')].find(el => /^(retry|try again)$/i.test(flowMenuLabel(el) || accessibleName(el).replace(/\s+/g, " ").trim()));
+    if (errorTile || retryControl) {
+      const reason = (errorTile?.innerText || errorTile?.textContent || flowMenuLabel(retryControl) || "").replace(/\s+/g, " ").trim();
+      throw flowError("FLOW_GENERATION_FAILED", `Flow marked "${title}" as failed${reason ? `: ${reason}` : ""}.`, false, true);
+    }
+    const media = [...tile.querySelectorAll("video,img")];
+    for (const element of media) {
+      const src = element.currentSrc || element.getAttribute("src") || "";
+      const placeholder = !src || src.includes("media.html") || src.endsWith(".html") || src.startsWith("chrome-extension://");
+      const validSource = !placeholder && (isFlowMediaSource(src) || element.getAttribute("src")?.startsWith("/fx/"));
+      const ready = element instanceof HTMLVideoElement
+        ? validSource
+        : validSource && (element.complete && element.naturalWidth > 0 || mediaId(tile)?.startsWith("asb:"));
+      lastState = `media found (valid source: ${validSource}, ready: ${ready})`;
+      if (ready) return element;
+    }
+    await wait(200);
+  }
+  throw flowError("FLOW_MEDIA_NOT_READY", `Flow has not finished loading media for "${title}" (${lastState}).`, true);
+}
+function flowRadio(name) {
+  return [...document.querySelectorAll('[role="radio"],mat-radio-button')].find(el =>
+    visible(el) && matchesName(accessibleName(el).replace(/\s+/g, " ").trim(), name, null, true));
+}
+function flowOption(name) {
+  const expected = String(name).replace(/\s+/g, " ").trim().toLowerCase();
+  return [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')].find(el => {
+    const label = accessibleName(el).replace(/\s+/g, " ").trim().toLowerCase();
+    return visible(el) && (label === expected || label.endsWith(` ${expected}`));
+  });
+}
+async function activateFlowSubmitButton(button) {
+  if (!(button instanceof HTMLButtonElement) || !button.isConnected) {
+    throw flowError("FLOW_SUBMIT_BUTTON_MISSING", "Flow's Start generation button disappeared before activation.", true);
+  }
+  const token = crypto.randomUUID();
+  button.setAttribute("data-flow-mcp-submit-token", token);
+  try {
+    button.removeAttribute("data-flow-mcp-submit-result");
+    button.setAttribute("data-flow-mcp-submit-request", token);
+    const deadline = Date.now() + 5000;
+    let activation;
+    while (Date.now() < deadline) {
+      const raw = button.getAttribute("data-flow-mcp-submit-result");
+      if (raw) {
+        try {
+          const result = JSON.parse(raw);
+          if (result?.token === token) { activation = result; break; }
+        } catch { /* The main-world bridge may still be writing the result. */ }
+      }
+      await wait(50);
+    }
+    button.removeAttribute("data-flow-mcp-submit-request");
+    button.removeAttribute("data-flow-mcp-submit-result");
+    if (!activation) throw flowError("FLOW_SUBMIT_BRIDGE_TIMEOUT", "The Flow main-world submit bridge did not answer. Refresh the Flow tab and retry.", true);
+    if (!activation?.success && !activation?.clickDelivered && !activation?.controlAccepted) {
+      const detail = activation?.error || "no matching Flow listener";
+      const bridge = activation?.bridgeReadyState && ` Bridge started at document.readyState=${activation.bridgeReadyState}; captured ${activation.capturedClickRegistrations || 0} click listener(s).`;
+      throw flowError("FLOW_SUBMIT_ACTIVATION_FAILED", `Flow's submit listener was not activated: ${detail}.${bridge || ""} Nothing was confirmed submitted.`, !activation?.clickDelivered, Boolean(activation?.clickDelivered));
+    }
+    return activation;
+  } finally {
+    button.removeAttribute("data-flow-mcp-submit-token");
+  }
+}
+function nativeRadioMatching(predicate) {
+  return [...document.querySelectorAll('[role="radio"],mat-radio-button')].find(el =>
+    visible(el) && predicate(accessibleName(el).replace(/\s+/g, " ").trim()));
+}
+function nativeRadioSelected(radio) {
+  return radio?.getAttribute("aria-checked") === "true" ||
+    radio?.getAttribute("aria-pressed") === "true" ||
+    radio?.getAttribute("aria-selected") === "true" ||
+    radio?.getAttribute("data-state") === "checked" ||
+    radio?.classList.contains("mat-radio-checked") ||
+    radio?.classList.contains("mdc-radio--checked") ||
+    radio?.classList.contains("selected") ||
+    radio?.classList.contains("active") ||
+    Boolean(radio?.querySelector('input[type="radio"]:checked'));
+}
+async function setNativeAgentSettings(confirm, aspect) {
+  const composer = document.querySelector("flow-base-prompt-box");
+  const settings = composer && [...composer.querySelectorAll('button,[role="button"]')].find(el =>
+    visible(el) && accessibleName(el).replace(/\s+/g, " ").trim() === "Settings");
+  if (!settings) throw flowError("NATIVE_CAPABILITY_UNSUPPORTED", "Flow Agent settings are not available in this view; nothing was submitted.", true);
+  settings.click(); await wait(350);
+  const confirmRadio = nativeRadioMatching(name => new RegExp(`^${confirm}(?:\\b|\\s)`, "i").test(name));
+  if (!confirmRadio) throw flowError("NATIVE_CAPABILITY_UNSUPPORTED", "Flow Agent confirmation settings are unavailable; nothing was submitted.", true);
+  if (!nativeRadioSelected(confirmRadio)) confirmRadio.click();
+  if (aspect) {
+    const aspectRadio = flowRadio(aspect);
+    const variantRadio = flowRadio("x1");
+    if (!aspectRadio || !variantRadio) throw flowError("NATIVE_CAPABILITY_UNSUPPORTED", "Flow Agent aspect or variant settings are unavailable; nothing was submitted.", true);
+    if (!nativeRadioSelected(aspectRadio)) aspectRadio.click();
+    if (!nativeRadioSelected(variantRadio)) variantRadio.click();
+  }
+  await wait(250);
+  const save = flowButton("Save");
+  if (!save) throw flowError("NATIVE_CAPABILITY_UNSUPPORTED", "Flow Agent settings could not be saved; nothing was submitted.", true);
+  save.click(); await wait(700);
+}
+async function setNativeAgentMode(on) {
+  const agent = flowButton("Agent");
+  if (!agent) throw flowError("NATIVE_CAPABILITY_UNSUPPORTED", "Flow Agent mode is unavailable; nothing was submitted.", true);
+  if ((agent.getAttribute("aria-pressed") === "true") !== on) agent.click();
+  await wait(500);
+  const updated = flowButton("Agent");
+  if ((updated?.getAttribute("aria-pressed") === "true") !== on) throw flowError("FLOW_AGENT_MODE_FAILED", `Could not switch Flow Agent mode ${on ? "on" : "off"}.`, true);
+}
+async function pickNativeAgentImageModel() {
+  const root = document.querySelector("flow-agent-panel") || document;
+  const button = flowButton("Image generation default model", root);
+  if (!button) return;
+  button.click(); await wait(300);
+  const items = [...document.querySelectorAll('[role="menuitem"]')].filter(visible);
+  const candidates = items.map((el, index) => ({ el, index, name: accessibleName(el).replace(/\s+/g, " ").trim() }))
+    .filter(item => /nano banana\s+\d/i.test(item.name) && !/\blite\b/i.test(item.name));
+  const version = item => /nano banana\s+(\d+(?:\.\d+)*)/i.exec(item.name)?.[1].split(".").map(Number) || [];
+  candidates.sort((a, b) => {
+    const av = version(a), bv = version(b);
+    for (let i = 0; i < Math.max(av.length, bv.length); i++) if ((av[i] || 0) !== (bv[i] || 0)) return (bv[i] || 0) - (av[i] || 0);
+    return a.index - b.index;
+  });
+  if (candidates.length) candidates[0].el.click();
+  else document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  await wait(350);
+}
+async function chooseRadio(name) {
+  let radio = flowRadio(name) || flowOption(name);
+  if (!radio && flowButton("Settings trigger")) { flowButton("Settings trigger").click(); await wait(350); radio = flowRadio(name) || flowOption(name); }
+  if (!radio) {
+    const options = [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')]
+      .filter(visible).map(el => accessibleName(el).replace(/\s+/g, " ").trim()).filter(Boolean);
+    throw flowError("FLOW_OPTION_NOT_FOUND", `Flow has no visible "${name}" option for the current settings. Visible options: ${[...new Set(options)].slice(0, 30).join(", ") || "none"}.`);
+  }
+  if (!nativeRadioSelected(radio)) radio.click();
+  const deadline = Date.now() + 1200;
+  while (Date.now() < deadline) {
+    const current = flowRadio(name) || flowOption(name);
+    if (nativeRadioSelected(current)) return;
+    // Some Flow versions close the settings popover immediately after accepting a radio.
+    if (!current && (!radio.isConnected || !visible(radio))) return;
+    await wait(100);
+  }
+  throw flowError("FLOW_OPTION_SELECTION_FAILED", `Flow did not confirm that "${name}" was selected. Nothing was submitted.`, true);
+}
+async function closeFlowSettings() {
+  // Flow keeps its quantity/settings popover open after some radio selections.
+  // Collapse it before submitting so the next action is not intercepted by the panel.
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  await wait(150);
+}
+async function chooseNativeModel(model, type) {
+  if (!model) return;
+  const legacyImage = type === "image" && /^\s*(nano banana( 2)?|latest)?\s*$/i.test(model);
+  const button = flowButton("Select model family") || flowButton("Model");
+  if (!button) throw flowError("NATIVE_CAPABILITY_UNSUPPORTED", "Flow's model selector is unavailable; nothing was submitted.", true);
+  const current = accessibleName(button).replace(/\s+/g, " ").trim();
+  if (!legacyImage && current.toLowerCase().includes(model.toLowerCase())) return;
+  button.click(); await wait(300);
+  const items = [...document.querySelectorAll('[role="menuitem"]')].filter(visible);
+  const names = items.map(accessibleName).map(name => name.replace(/\s+/g, " ").trim());
+  let index = legacyImage ? names.reduce((best, name, i) => {
+    const match = /nano banana\s+(\d+(?:\.\d+)*)(?!.*\blite\b)/i.exec(name);
+    if (!match || /\blite\b/i.test(name)) return best;
+    const version = match[1].split(".").map(Number);
+    const score = version.reduce((value, part) => value * 1000 + part, 0);
+    return score > best.score ? { index: i, score } : best;
+  }, { index: -1, score: -1 }).index : names.findIndex(name => name.toLowerCase().includes(model.toLowerCase()));
+  if (index < 0) {
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    throw flowError("FLOW_MODEL_NOT_FOUND", `Model "${model}" was not found in Flow. Available: ${names.join(", ")}`, true);
+  }
+  items[index].click(); await wait(500);
+}
+async function chooseNativePickerAsset(assetName, slot) {
+  const openerName = slot === "start" ? "Start" : slot === "end" ? "End" : "Add ingredients to the prompt box";
+  let opener = flowButton(openerName);
+  if (!opener) throw flowError("NATIVE_CAPABILITY_UNSUPPORTED", `Flow's ${slot || "reference"} picker is unavailable; nothing was submitted.`, true);
+  let list;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    opener.click(); await wait(350);
+    list = document.querySelector('[role="listbox"]');
+    if (visible(list)) break;
+    if (attempt < 2) { document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); await wait(400); opener = flowButton(openerName); }
+  }
+  if (!visible(list)) throw flowError("FLOW_ASSET_PICKER_MISSING", `Flow's ${slot || "reference"} asset picker did not open.`, true);
+  const tabs = [...document.querySelectorAll('[role="tab"]')].filter(visible);
+  const allTab = tabs.find(tab => accessibleName(tab).trim() === "All");
+  if (allTab && allTab.getAttribute("aria-selected") !== "true") { allTab.click(); await wait(300); }
+  const findOption = () => [...document.querySelectorAll('[role="option"]')].find(option => visible(option) && accessibleName(option).toLowerCase().startsWith(assetName.toLowerCase()));
+  let option = findOption();
+  if (!option) for (const tabName of ["Characters", "Avatars", "Uploads"]) {
+    const tab = tabs.find(candidate => accessibleName(candidate).trim() === tabName);
+    if (!tab) continue;
+    tab.click(); await wait(350); option = findOption(); if (option) break;
+  }
+  if (!option) throw flowError("FLOW_ASSET_NOT_FOUND", `Flow's picker does not contain "${assetName}".`, true);
+  option.click(); await wait(300);
+  const add = flowButton("Add to prompt");
+  if (!slot && add) { add.click(); await wait(300); }
+  return true;
+}
+function collectNativeMedia() {
+  return [...document.querySelectorAll("flow-grid-tile-container")].map(tile => {
+    const kind = tile.querySelector("flow-video-tile") ? "video" : tile.querySelector("flow-image-tile") ? "image" : tile.querySelector("flow-scene-tile") ? "scene" : null;
+    const title = (tile.getAttribute("aria-label") || "").trim();
+    const id = mediaId(tile);
+    const image = tile.querySelector("flow-image-tile img, img[src]");
+    const imageLoaded = Boolean(image?.complete && image.naturalWidth > 0 && (image.currentSrc || image.getAttribute("src")));
+    const videoLoaded = Boolean(tile.querySelector('img[alt="Generated video thumbnail"], video'));
+    const failedTile = tile.querySelector("flow-error-tile");
+    const retryControl = [...tile.querySelectorAll('button,[role="button"]')].find(el =>
+      visible(el) && /^(retry|try again)$/i.test(accessibleName(el).replace(/\s+/g, " ").trim()));
+    const failed = Boolean(failedTile || retryControl);
+    const busy = /\d+%/.test(tile.innerText || "") || (kind === "image" && !failed && !imageLoaded) || (kind === "video" && !failed && !videoLoaded);
+    const failureReason = failedTile ? (failedTile.innerText || failedTile.textContent || "").replace(/\s+/g, " ").trim() : "";
+    return kind && title ? { id, title, kind, busy, failed, failureReason } : null;
+  }).filter(Boolean);
+}
+function currentFlowSubmitErrors() {
+  const errorWords = /(?:error|failed|could not|couldn't|unable|insufficient|not enough|quota|credit limit|try again)/i;
+  return [...document.querySelectorAll('[role="alert"], [aria-live="assertive"], mat-error, .mat-mdc-form-field-error')]
+    .filter(visible)
+    .map(el => (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim())
+    .filter(text => text && errorWords.test(text));
+}
+function emitFlowProgress(command, progress) {
+  try { chrome.runtime.sendMessage({ type: "flow-mcp:progress", commandId: command.id || command.commandId, jobId: command.job_id || command.jobId, progress }).catch(() => {}); } catch {}
+}
+async function findFlowTile(title, maxSteps = 180) {
+  const scroller = scrollContainer();
+  if (scroller) scroller.scrollTop = 0;
+  await wait(300);
+  for (let step = 0; step <= maxSteps; step++) {
+    const tile = [...document.querySelectorAll("flow-grid-tile-container")].find(el => el.getAttribute("aria-label") === title);
+    if (tile) return tile;
+    if (!scroller) break;
+    const top = scroller.scrollTop, max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    if (top >= max - 2) break;
+    scroller.scrollTop = Math.min(max, top + Math.max(200, scroller.clientHeight * 0.78));
+    await wait(300);
+  }
+  return null;
+}
+async function countFlowTitleAcrossGrid(title) {
+  if (!document.querySelector("flow-grid-tile-container")) await scanNativeAssets();
+  const scroller = scrollContainer();
+  if (!scroller) return [...document.querySelectorAll("flow-grid-tile-container")].filter(el => el.getAttribute("aria-label") === title).length;
+  const originalTop = scroller.scrollTop, ids = new Set();
+  let together = 0;
+  try {
+    scroller.scrollTop = 0; await wait(250);
+    for (let step = 0; step < 200; step++) {
+      const matched = [...document.querySelectorAll("flow-grid-tile-container")].filter(el => el.getAttribute("aria-label") === title);
+      together = Math.max(together, matched.length);
+      for (const tile of matched) { const id = mediaId(tile); if (id && !id.startsWith("title:")) ids.add(id); }
+      const top = scroller.scrollTop, max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      if (top >= max - 2) break;
+      scroller.scrollTop = Math.min(max, top + Math.max(200, scroller.clientHeight * 0.78));
+      await wait(350);
+    }
+    const last = [...document.querySelectorAll("flow-grid-tile-container")].filter(el => el.getAttribute("aria-label") === title);
+    together = Math.max(together, last.length);
+    for (const tile of last) { const id = mediaId(tile); if (id && !id.startsWith("title:")) ids.add(id); }
+    return Math.max(ids.size, together);
+  } finally { scroller.scrollTop = originalTop; }
+}
+function setEditable(el, value) {
+  el.focus();
+  if (el.isContentEditable) el.textContent = value;
+  else {
+    const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(proto, "value")?.set?.call(el, value);
+  }
+  el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
+  el.dispatchEvent(new Event("change", { bubbles: true }));
+}
+function descriptor(item) { return { id: item.id, title: item.title, kind: item.kind }; }
+async function waitForProgressResult(command, before, expected, kind, timeoutMs, selector = "flow-grid-tile-container") {
+  const until = Date.now() + timeoutMs;
+  let hadProgress = false, last = "";
+  while (Date.now() < until) {
+    const fresh = collectNativeMedia().filter(item => !before.includes(item.id || `title:${item.title}`) && (!kind || item.kind === kind));
+    const ready = fresh.filter(item => !item.busy && !item.failed);
+    if (ready.length >= expected) return ready.slice(0, expected).map(descriptor);
+    const pct = [...document.querySelectorAll(selector)].slice(0, 10).map(el => (el.innerText || "").match(/\d+%/)?.[0]).filter(Boolean);
+    if (pct.length) hadProgress = true;
+    const text = pct.join(", ") || (hadProgress ? "Flow is finishing the result" : "Waiting for Flow");
+    if (text !== last) { emitFlowProgress(command, text); last = text; }
+    const failed = fresh.find(item => item.failed);
+    if (failed) throw flowError("FLOW_GENERATION_FAILED", `Flow failed while processing "${failed.title}"${failed.failureReason ? `: ${failed.failureReason}` : ""}. No retry was submitted.`, false, true);
+    await wait(2500);
+  }
+  throw flowError("FLOW_OPERATION_TIMEOUT", "Timed out waiting for Flow. The operation may have completed; inspect Flow before retrying.", false, true);
+}
+function triggerFlowDownload(title, quality = "original", mediaHandle) {
+  return (async () => {
+    if (document.visibilityState === "hidden") {
+      const activated = await chrome.runtime.sendMessage({ type: "flow-mcp:ensure-active-tab" });
+      if (!activated?.ok) throw flowError("FLOW_TAB_ACTIVATION_FAILED", activated?.error || "Flow tab could not be activated for its download menu.", true);
+      await wait(300);
+    }
+    let tile;
+    if (mediaHandle) {
+      const scroller = scrollContainer();
+      if (scroller) scroller.scrollTop = 0;
+      for (let step = 0; step < 180 && !tile; step++) {
+        tile = [...document.querySelectorAll("flow-grid-tile-container")].find(candidate => mediaId(candidate) === mediaHandle);
+        if (tile || !scroller) break;
+        const top = scroller.scrollTop, max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+        if (top >= max - 2) break;
+        scroller.scrollTop = Math.min(max, top + Math.max(200, scroller.clientHeight * 0.78)); await wait(300);
+      }
+      if (!tile) throw flowError("FLOW_ASSET_NOT_FOUND", `Could not find media id "${mediaHandle}" in the project library; refusing to substitute another tile named "${title}".`, true);
+    }
+    if (!tile) tile = await findFlowTile(title);
+    if (!tile) throw flowError("FLOW_ASSET_NOT_FOUND", `Could not find "${title}" in the project library.`, true);
+    const scene = Boolean(tile.querySelector("flow-scene-tile"));
+    const kind = tile.querySelector("flow-video-tile") ? "video" : "image";
+    if (!scene) await waitForFlowTileMedia(tile, title);
+    if (!tile.isConnected || mediaHandle && mediaId(tile) !== mediaHandle) {
+      tile = mediaHandle
+        ? [...document.querySelectorAll("flow-grid-tile-container")].find(candidate => mediaId(candidate) === mediaHandle)
+        : await findFlowTile(title);
+      if (!tile) throw flowError("FLOW_ASSET_CHANGED", `The selected Flow tile for "${title}" changed before its menu opened.`, true);
+      tile.scrollIntoView({ behavior: "instant", block: "center" });
+      if (!scene) await waitForFlowTileMedia(tile, title);
+    }
+    if (scene) {
+      tile.click(); await wait(1200);
+      const download = flowButton("Download scene");
+      if (!download) throw flowError("FLOW_SCENE_DOWNLOAD_MISSING", "Scene view opened but Download scene is unavailable.", true);
+      download.click();
+    } else {
+      const more = await revealFlowTileOptions(tile);
+      let entries;
+      if (more) {
+        more.click(); await wait(400);
+        entries = flowMenuItems();
+      } else {
+        // Flow V2 exposes its media actions through the media context menu. TobyFlow
+        // uses this path because the tile's overflow button can remain hidden.
+        const media = tile.querySelector("img,video") || tile;
+        const rect = media.getBoundingClientRect();
+        media.dispatchEvent(new MouseEvent("contextmenu", {
+          bubbles: true, cancelable: true, clientX: rect.left + rect.width / 2,
+          clientY: rect.top + rect.height / 2, button: 2,
+        }));
+        const menuDeadline = Date.now() + 1800;
+        do {
+          entries = flowMenuItems();
+          if (entries.some(el => /^Download( image| video)?$/i.test(flowMenuLabel(el)))) break;
+          await wait(100);
+        } while (Date.now() < menuDeadline);
+      }
+      const download = entries.find(el => /^Download( image| video)?$/i.test(flowMenuLabel(el)));
+      if (download) {
+        if (download.getAttribute("aria-haspopup") === "menu") {
+          const parentMenu = download.closest('[role="menu"],mat-menu-panel') || download.parentElement;
+          const submenu = await revealFlowSubmenu(download, parentMenu, quality, kind);
+          if (!submenu) throw flowError("FLOW_DOWNLOAD_SUBMENU_MISSING", `Flow opened the media menu but did not reveal download choices for "${title}".`, true);
+          const choice = flowDownloadChoice(flowMenuItems(submenu), quality, kind);
+          if (!choice) {
+            const available = flowMenuItems(submenu).map(flowMenuLabel).filter(Boolean).join(", ") || "none";
+            throw flowError("FLOW_DOWNLOAD_QUALITY_MISSING", `Flow's download menu for "${title}" has no ${quality} option. Available: ${available}.`, true);
+          }
+          choice.click();
+        } else {
+          download.click();
+        }
+      } else throw flowError("FLOW_TILE_MENU_MISSING", `Could not open options for "${title}".`, true);
+    }
+    return { title, kind: scene ? "scene" : tile.querySelector("flow-video-tile") ? "video" : "image", downloadTriggered: true, trustedGesture: false };
+  })();
+}
+async function executeFlowOperation(name, payload = {}, command = {}) {
+  if (name === "flow.projects.list") {
+    if (/\/project\/[0-9a-f-]{36}(?:\/|$)/i.test(location.pathname)) {
+      throw flowError("FLOW_HOMEPAGE_REQUIRED", "Project discovery needs the Flow home page. The connector should open a temporary home tab.", true);
+    }
+    return scanNativeProjects();
+  }
+  if (name === "flow.generation.upload.preflight") {
+    const state = nativeRead("flowState");
+    if (!state.signedIn || !state.inProject) throw flowError("FLOW_NOT_READY", state.hint || "Open a signed-in Flow project first.", true);
+    if (!document.querySelector(".ProseMirror")) throw flowError("FLOW_COMPOSER_UNAVAILABLE", "Flow's generation composer is not visible.", true);
+    const uploadInput = document.querySelector('input[type="file"]');
+    if (!flowButton("Add media menu") || !flowButton("Add ingredients to the prompt box") || !uploadInput || (uploadInput.accept && !/image\/(?:\*|png|jpeg|webp)/i.test(uploadInput.accept))) {
+      throw flowError("FLOW_UPLOAD_UNAVAILABLE", "Flow's upload menu or file input is unavailable.", true);
+    }
+    return { ready: true, trustedFileSelection: false };
+  }
+  if (name === "flow.file.upload.begin") {
+    const t = payload.transfer;
+    if (!t || typeof t !== "object") throw flowError("FLOW_INVALID_ARGUMENT", "Upload metadata is required.");
+    const assembler = new FlowNativeFileTransfer.UploadAssembler(t, { maxBytes: 25 * 1024 * 1024, chunkBytes: 256 * 1024, maxChunks: 100 });
+    if (stagedNativeFiles.has(assembler.transferId)) throw flowError("FLOW_TRANSFER_DUPLICATE", "Upload transfer id is already staged.");
+    nativeUploadAssemblers.set(assembler.transferId, assembler);
+    return { transferId: assembler.transferId, ready: true };
+  }
+  if (name === "flow.file.upload.chunk") {
+    const chunk = payload.chunk;
+    const assembler = nativeUploadAssemblers.get(chunk?.transferId);
+    if (!assembler) throw flowError("FLOW_TRANSFER_UNKNOWN", "Upload transfer is not active.");
+    try { return await assembler.accept(chunk); }
+    catch (error) { nativeUploadAssemblers.delete(chunk.transferId); throw error; }
+  }
+  if (name === "flow.file.upload.finish") {
+    const transferId = String(payload.transferId || "");
+    const assembler = nativeUploadAssemblers.get(transferId);
+    if (!assembler) throw flowError("FLOW_TRANSFER_UNKNOWN", "Upload transfer is not active.");
+    try {
+      const file = await assembler.finish();
+      nativeUploadAssemblers.delete(transferId);
+      stagedNativeFiles.set(transferId, file);
+      return { transferId, staged: true, size: file.size, trustedGesture: false };
+    } catch (error) { nativeUploadAssemblers.delete(transferId); throw error; }
+  }
+  if (name === "flow.file.upload.abort") {
+    const transferId = String(payload.transferId || "");
+    nativeUploadAssemblers.get(transferId)?.abort();
+    nativeUploadAssemblers.delete(transferId);
+    stagedNativeFiles.delete(transferId);
+    return { transferId, aborted: true };
+  }
+  if (name === "flow.asset.download") {
+    const prefix = String(payload.name || "").toLowerCase();
+    if (!prefix && !payload.id) throw flowError("FLOW_INVALID_ARGUMENT", "Asset name or media id is required.");
+    if (payload.id) return triggerFlowDownload(String(payload.name || ""), payload.quality, String(payload.id));
+    const assets = await scanNativeAssets();
+    const candidates = assets.filter(asset => asset.name.toLowerCase().startsWith(prefix));
+    const matches = [];
+    for (const asset of candidates) {
+      const count = await countFlowTitleAcrossGrid(asset.name);
+      for (let i = 0; i < count; i++) matches.push(asset);
+      if (matches.length > 1) break;
+    }
+    if (!matches.length) throw flowError("FLOW_ASSET_NOT_FOUND", `No asset title begins with "${payload.name}".`, true);
+    if (matches.length > 1) throw flowError("FLOW_AMBIGUOUS_ASSET", `${matches.length} assets begin with "${payload.name}"; no download was started.`, true);
+    return triggerFlowDownload(matches[0].name, payload.quality);
+  }
+  if (name === "flow.character.create") {
+    const c = payload.character || payload.job?.params || payload;
+    if (!c.name) throw flowError("FLOW_INVALID_ARGUMENT", "Character name is required.");
+    const localImage = c.image && typeof c.image === "object" ? c.image : null;
+    if (c.image && !localImage && !String(c.image).startsWith("asset:")) throw flowError("FLOW_INVALID_ARGUMENT", "Character image must be a project asset or a staged local image.");
+    if (!c.image && !c.describe) throw flowError("FLOW_INVALID_ARGUMENT", "Pass an existing project image with image='asset:<title>' or provide describe.");
+    let sourceTitle = c.image && !localImage ? String(c.image).replace(/^asset:/, "").trim() : "";
+    let portraitMedia;
+    if (localImage) {
+      const file = stagedNativeFiles.get(localImage.transferId);
+      if (!file || file.name !== localImage.name) throw flowError("FLOW_TRANSFER_UNKNOWN", "The local character image is no longer staged.", true);
+      const uploadButton = flowButton("Add media menu");
+      if (!uploadButton) throw flowError("FLOW_UPLOAD_UNAVAILABLE", "Flow's upload menu is unavailable before selecting the character image.", false);
+      uploadButton.click(); await wait(250);
+      const uploadItem = [...document.querySelectorAll('[role="menuitem"],button')].find(el => visible(el) && accessibleName(el).trim() === "Upload");
+      const input = document.querySelector('input[type="file"]');
+      if (!uploadItem || !input) throw flowError("FLOW_UPLOAD_INPUT_MISSING", "Flow's character image upload control is unavailable.", false);
+      uploadItem.click();
+      try { FlowNativeFileTransfer.assignFileToInput(input, file); }
+      catch (error) { throw flowError("FLOW_UPLOAD_SELECTION_FAILED", String(error?.message || error), false, true); }
+      const until = Date.now() + 90_000;
+      let uploaded = false;
+      while (Date.now() < until) {
+        uploaded = [...document.querySelectorAll("flow-grid-tile-container")].some(tile => tile.getAttribute("aria-label") === localImage.name && tile.querySelector("img[data-media-id]"));
+        if (uploaded) break;
+        await wait(500);
+      }
+      if (!uploaded) throw flowError("FLOW_UPLOAD_TIMEOUT", "Flow did not confirm the character image upload. Inspect Flow before retrying.", false, true);
+      stagedNativeFiles.delete(localImage.transferId);
+      sourceTitle = localImage.name;
+    }
+    if (!c.image) {
+      // Match the backend's description-first behavior: make one portrait image, then
+      // use that project asset to create the reusable character. Require a zero-credit
+      // quote because the existing flow_character contract treats this portrait as free.
+      const box = document.querySelector(".ProseMirror");
+      if (!box) throw flowError("NATIVE_CAPABILITY_UNSUPPORTED", "Flow's image composer is unavailable for description-based character creation.", true);
+      const before = collectNativeMedia().map(item => item.id || `title:${item.title}`);
+      const variants = Math.max(1, Math.min(4, Number(c.variants || 1)));
+      const agent = flowButton("Agent"); if (agent?.getAttribute("aria-pressed") === "true") agent.click();
+      if (flowButton("Clear prompt")) flowButton("Clear prompt").click();
+      await chooseRadio("Image");
+      await chooseRadio(c.aspect_ratio || "3:4");
+      await chooseNativeModel("Nano Banana", "image");
+      await chooseRadio(`x${variants}`);
+      await closeFlowSettings();
+      const quote = [...document.querySelectorAll("a")].find(a => visible(a) && /^\s*\d[\d,.\s]*credits?\s*$/i.test((a.innerText || a.textContent || "").trim()));
+      const quoteText = (quote?.innerText || quote?.textContent || "").trim();
+      const creditCost = quote ? Number(quoteText.match(/[\d,]+/)?.[0]?.replace(/,/g, "")) : NaN;
+      if (!Number.isFinite(creditCost)) throw flowError("FLOW_CREDIT_QUOTE_UNAVAILABLE", "Flow did not show the portrait's credit quote. Nothing was submitted.", true);
+      if (creditCost > 0) throw flowError("NATIVE_CAPABILITY_UNSUPPORTED", `Flow quotes ${creditCost} credits for the portrait; the established character workflow only proceeds when it is free. Nothing was submitted.`, true);
+      setEditable(box, String(c.describe)); await wait(300);
+      const start = flowButton("Start generation");
+      if (!start || start.disabled) throw flowError("FLOW_SUBMIT_DISABLED", "Flow's portrait generation button is disabled; nothing was submitted.", true);
+      await activateFlowSubmitButton(start);
+      const generated = await waitForProgressResult(command, before, variants, "image", Number(payload.timeoutMs || 180000), "main");
+      sourceTitle = generated[0].title;
+      portraitMedia = generated[0];
+    }
+    const nav = clickFlowNavigation("Characters"); if (!nav && !document.querySelector("flow-character-tile")) throw flowError("FLOW_NAV_UNAVAILABLE", "Flow's Characters navigation is unavailable.", true);
+    await wait(700);
+    const create = flowButton("New character"); if (create) create.click();
+    await wait(800);
+    const add = flowButton("Add from project"); if (!add) throw flowError("FLOW_CHARACTER_CREATE_MISSING", "Flow's new character page is not ready.", true);
+    add.click(); await wait(300);
+    const list = document.querySelector('[role="listbox"]');
+    if (!list) throw flowError("FLOW_ASSET_PICKER_MISSING", "Flow's project asset picker did not open.", true);
+    const title = sourceTitle;
+    let option = [...list.querySelectorAll('[role="option"]')].find(el => visible(el) && accessibleName(el).toLowerCase().startsWith(title.toLowerCase()));
+    if (!option) {
+      const uploads = [...document.querySelectorAll('[role="tab"]')].find(el => accessibleName(el).trim() === "Uploads");
+      if (uploads) { uploads.click(); await wait(300); option = [...list.querySelectorAll('[role="option"]')].find(el => visible(el) && accessibleName(el).toLowerCase().startsWith(title.toLowerCase())); }
+    }
+    if (!option) throw flowError("FLOW_ASSET_NOT_FOUND", `No project image titled "${title}" is available for the character.`);
+    option.click(); await wait(250);
+    const addMedia = flowButton("Add media"); if (!addMedia) throw flowError("FLOW_ADD_MEDIA_MISSING", "Flow did not show Add media.", true);
+    addMedia.click(); await wait(900);
+    const nameInput = [...document.querySelectorAll('input,[role="textbox"]')].find(el => visible(el) && /Character name/i.test(accessibleName(el)));
+    if (!nameInput) throw flowError("FLOW_CHARACTER_FORM_MISSING", "Flow's character name field is not visible.", false, true);
+    setEditable(nameInput, c.name); nameInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    if (c.personality) {
+      const personality = [...document.querySelectorAll('textarea,input,[role="textbox"]')].find(el => visible(el) && /Character personality/i.test(accessibleName(el)));
+      if (personality) setEditable(personality, c.personality);
+    }
+    if (c.voice) {
+      const selectVoice = flowButton("Select a voice");
+      if (!selectVoice) throw flowError("FLOW_VOICE_SELECTOR_MISSING", "The character editor does not show Select a voice; character may be partially created.", false, true);
+      selectVoice.click(); await wait(350);
+      const voices = document.querySelector('[role="listbox"]');
+      if (!visible(voices)) throw flowError("FLOW_VOICE_PICKER_MISSING", "Flow's voice picker did not open; character may be partially created.", false, true);
+      const voiceOption = [...voices.querySelectorAll('[role="option"]')].find(el => visible(el) && accessibleName(el).toLowerCase().startsWith(String(c.voice).toLowerCase()));
+      if (!voiceOption) {
+        const available = [...voices.querySelectorAll('[role="option"]')].filter(visible).map(el => accessibleName(el).replace(/\s+/g, " ").trim());
+        const close = [...document.querySelectorAll('[role="dialog"] button')].find(el => visible(el) && accessibleName(el).trim() === "Close");
+        if (close) close.click();
+        throw flowError("FLOW_VOICE_NOT_FOUND", `Voice "${c.voice}" not found. Character may be created without a voice. Available: ${available.join("; ")}`, false, true);
+      }
+      voiceOption.click(); await wait(250);
+      const addVoice = flowButton("Add to character");
+      if (!addVoice) throw flowError("FLOW_VOICE_ADD_MISSING", "Flow did not show Add to character; character may be partially created.", false, true);
+      addVoice.click(); await wait(500);
+    }
+    const done = [...document.querySelectorAll("button,[role=button]")].find(el => visible(el) && /^Done( editing)?$/i.test(accessibleName(el).trim()));
+    if (!done) throw flowError("FLOW_CHARACTER_SAVE_MISSING", "Flow has not presented a Done button; character may be partially created.", false, true);
+    done.click(); await wait(700);
+    return { name: c.name, url: location.href, portraitMedia, trustedGesture: false };
+  }
+  if (name === "flow.character.edit") {
+    const characterName = String(payload.name || "");
+    const card = [...document.querySelectorAll("flow-character-tile")].find(el => visible(el) && (el.innerText || "").includes(characterName));
+    if (!card) { clickFlowNavigation("Characters"); await wait(600); }
+    const target = card || [...document.querySelectorAll("flow-character-tile")].find(el => visible(el) && (el.innerText || "").includes(characterName));
+    if (!target) throw flowError("FLOW_CHARACTER_NOT_FOUND", `No visible character named "${characterName}".`, true);
+    target.click(); await wait(800);
+    let portrait = document.querySelector('img[aria-label="Generated character image"]');
+    if (payload.change) {
+      const box = [...document.querySelectorAll(".ProseMirror")].at(-1);
+      if (!box) throw flowError("FLOW_CHARACTER_EDITOR_MISSING", "Character editor prompt is not visible.", true);
+      const beforeSrc = portrait?.getAttribute("src");
+      const prompt = `${String(payload.change).replace(/[.\s]*$/, ".")} Exactly one ${characterName} in the picture; never add copies or extra poses side by side.`;
+      setEditable(box, prompt); const start = flowButton("Start generation");
+      if (!start || start.disabled) throw flowError("FLOW_SUBMIT_DISABLED", "Flow's character edit button is disabled.", true);
+      await activateFlowSubmitButton(start);
+      const deadline = Date.now() + Number(payload.timeoutMs || 300000);
+      while (Date.now() < deadline) {
+        await wait(2500); portrait = document.querySelector('img[aria-label="Generated character image"]');
+        const pct = (document.querySelector("main")?.innerText || "").match(/\d+%/)?.[0];
+        emitFlowProgress(command, pct || "Waiting for character portrait");
+        if (portrait?.getAttribute("src") && portrait.getAttribute("src") !== beforeSrc && !pct) break;
+      }
+      if (!portrait?.getAttribute("src") || portrait.getAttribute("src") === beforeSrc) throw flowError("FLOW_CHARACTER_EDIT_TIMEOUT", "Timed out waiting for the character portrait. Check Flow before retrying.", false, true);
+    }
+    let downloadTriggered = false;
+    const picture = document.querySelector('img[aria-label="Generated character image"]');
+    if (picture) {
+      picture.scrollIntoView({ block: "center" });
+      picture.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })); await wait(250);
+      const download = flowButton("Download image");
+      if (download) { download.click(); downloadTriggered = true; }
+    }
+    const done = [...document.querySelectorAll("button,[role=button]")].find(el => visible(el) && /^Done( editing)?$/i.test(accessibleName(el).trim()));
+    if (done) done.click();
+    return { name: characterName, downloadTriggered, note: downloadTriggered ? undefined : "The character was saved in Flow, but its portrait download button was unavailable.", trustedGesture: false };
+  }
+  if (name === "flow.edit.run") {
+    const params = payload.job?.params || payload.params || {};
+    const source = String(params.edit_asset || "");
+    const tile = await findFlowTile(source) || [...document.querySelectorAll("flow-grid-tile-container")].find(el => (el.getAttribute("aria-label") || "").toLowerCase().startsWith(source.toLowerCase()));
+    if (!tile || !tile.querySelector("flow-video-tile")) throw flowError("FLOW_VIDEO_NOT_FOUND", `No video beginning "${source}" is visible in the project.`, true);
+    const before = collectNativeMedia().map(item => item.id || `title:${item.title}`);
+    tile.click(); await wait(1000);
+    if (!/\/edit\//.test(location.pathname)) throw flowError("FLOW_EDIT_VIEW_MISSING", "Flow did not open the video editor.", true);
+    const boxes = [...document.querySelectorAll(".ProseMirror")];
+    if (!boxes.length) throw flowError("FLOW_COMPOSER_MISSING", "Flow's edit prompt is not visible.", true);
+    setEditable(boxes[boxes.length - 1], String(params.prompt || "")); await wait(300);
+    const start = flowButton("Start generation");
+    if (!start || start.disabled) throw flowError("FLOW_SUBMIT_DISABLED", "Flow's edit action is unavailable; nothing was submitted.", true);
+    await activateFlowSubmitButton(start);
+    const results = await waitForProgressResult(command, before, 1, "video", Number(params.timeout_ms || 600000), "main");
+    const back = flowButton("Back button to go to previous page"); if (back) back.click();
+    return { media: results, trustedGesture: false };
+  }
+  if (name === "flow.agent.batch") {
+    const params = payload.job?.params || payload.params || {};
+    const scenes = params.agent_scenes || [];
+    if (!scenes.length) throw flowError("FLOW_INVALID_ARGUMENT", "agent_scenes is required.");
+    const before = collectNativeMedia().map(item => item.id || `title:${item.title}`);
+    let submitted = false;
+    let outcomeUnknown = false;
+    try {
+      await setNativeAgentMode(true);
+      await setNativeAgentSettings("Never", params.aspect_ratio || "16:9");
+      await pickNativeAgentImageModel();
+      const box = document.querySelector(".ProseMirror");
+      if (!box) throw flowError("FLOW_AGENT_COMPOSER_MISSING", "Flow's Agent composer is not visible.", true);
+      const sceneText = scenes.map((scene, index) => `Scene ${index + 1}: ${String(scene).replace(/\s+/g, " ").trim()}`).join("\n");
+      const script = `Generate exactly ${scenes.length} separate images: one image for each scene below, in the listed scene order. Do not combine scenes into a collage or a single image. Images only, never video. ${params.aspect_ratio || "16:9"} aspect ratio. Do not ask questions; generate them now.\n${sceneText}`;
+      setEditable(box, script); await wait(300);
+      const start = flowButton("Start generation");
+      if (!start || start.disabled) throw flowError("FLOW_SUBMIT_DISABLED", "Flow's Agent Start generation button is disabled; nothing was submitted.", true);
+      await activateFlowSubmitButton(start);
+      submitted = true;
+      const media = await waitForProgressResult(command, before, scenes.length, "image", Number(params.timeout_ms || 1800000), "main");
+      const prompts = [];
+      for (const item of media) {
+        const scroller = scrollContainer();
+        if (scroller) scroller.scrollTop = 0;
+        await wait(250);
+        let tile;
+        for (let step = 0; step < 160 && !tile; step++) {
+          tile = [...document.querySelectorAll("flow-grid-tile-container")].find(candidate =>
+            item.id && !item.id.startsWith("title:")
+              ? mediaId(candidate) === item.id
+              : candidate.getAttribute("aria-label") === item.title);
+          if (!tile && scroller) {
+            const top = scroller.scrollTop, max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+            if (top >= max - 2) break;
+            scroller.scrollTop = Math.min(max, top + Math.max(200, scroller.clientHeight * 0.78)); await wait(250);
+          }
+        }
+        if (!tile) { prompts.push(""); continue; }
+        tile.scrollIntoView({ block: "center" }); tile.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })); await wait(250);
+        const reuse = flowButton("Reuse prompt", tile);
+        if (!reuse) { prompts.push(""); continue; }
+        reuse.click(); await wait(550);
+        prompts.push(document.querySelector(".ProseMirror")?.innerText || "");
+        const close = flowButton("Close");
+        if (close && flowButton("Start new session")) { close.click(); await wait(350); }
+      }
+      const clear = flowButton("Clear prompt"); if (clear) clear.click();
+      return { media, prompts, trustedGesture: false };
+    } catch (error) {
+      outcomeUnknown = Boolean(error?.outcome_unknown) || submitted;
+      throw error;
+    } finally {
+      // Do not alter a potentially still-running task after an uncertain result.
+      if (!outcomeUnknown) {
+        const session = flowButton("Start new session");
+        if (session) { const close = flowButton("Close"); if (close) { close.click(); await wait(500); } }
+        try { await setNativeAgentSettings("Always"); } catch {}
+        await setNativeAgentMode(false).catch(() => {});
+        const clear = flowButton("Clear prompt"); if (clear) clear.click();
+      }
+    }
+  }
+  if (name === "flow.continue.run") {
+    const params = payload.job?.params || payload.params || {};
+    const sourceName = String(params.continue_from || "");
+    const likeness = params.continue_mode === "likeness";
+    if (likeness && (!Array.isArray(params.attach) || !params.attach.length)) throw flowError("FLOW_INVALID_ARGUMENT", "Likeness continuation requires at least one character or avatar attachment.", true);
+    const tile = [...document.querySelectorAll("flow-grid-tile-container")].find(el => (el.getAttribute("aria-label") || "").toLowerCase().startsWith(sourceName.toLowerCase()) && el.querySelector("flow-video-tile"));
+    if (!tile) throw flowError("FLOW_VIDEO_NOT_FOUND", `No video beginning "${sourceName}" is visible.`, true);
+    tile.click(); await wait(900);
+    if (!/\/edit\//.test(location.pathname)) throw flowError("FLOW_EDIT_VIEW_MISSING", "Flow did not open the source video editor.", true);
+    const next = flowButton("Skip to next clip"); if (!next) throw flowError("FLOW_TIMELINE_MISSING", "The source video timeline is not ready.", true);
+    next.click(); await wait(900);
+    const save = flowButton("Save frame"); if (!save) throw flowError("FLOW_SAVE_FRAME_MISSING", "Flow did not show Save frame.", true);
+    save.click(); await wait(1600);
+    const back = flowButton("Back button to go to previous page"); if (back) back.click(); await wait(900);
+    const frameTitle = `Saved frame from ${sourceName}`;
+    const frame = await findFlowTile(frameTitle);
+    if (!frame) throw flowError("FLOW_FRAME_NOT_FOUND", `Flow did not add the saved frame "${frameTitle}".`, false, true);
+    const more = flowButton("More options", frame); if (!more) throw flowError("FLOW_TILE_MENU_MISSING", "Could not open the saved frame menu.", true);
+    more.click(); await wait(250);
+    const animate = [...document.querySelectorAll('[role="menuitem"]')].find(el => visible(el) && accessibleName(el).trim() === "Animate");
+    if (!animate) throw flowError("FLOW_ANIMATE_MISSING", "Flow did not show Animate for the saved frame.", true);
+    animate.click(); await wait(900);
+    const box = document.querySelector(".ProseMirror"); if (!box) throw flowError("FLOW_COMPOSER_MISSING", "Flow's continuation composer is not visible.", true);
+    if (likeness) {
+      await setNativeAgentMode(true);
+      await setNativeAgentSettings("Never", params.aspect_ratio || "16:9");
+      for (const reference of params.attach || []) {
+        const value = String(reference || "").replace(/^asset:/i, "").trim();
+        if (!value) throw flowError("FLOW_INVALID_ARGUMENT", "Likeness continuation contains an empty attachment; nothing was submitted.", true);
+        await chooseNativePickerAsset(value, undefined);
+      }
+    }
+    const cast = (params.attach || []).join(" and ");
+    const prompt = `${likeness
+      ? `Use R2V, reference-to-video, with the attached frame and ${cast || "the attached reference"} both as references, so the look and person stay consistent through the clip. Open as close to the attached frame as possible.`
+      : "Use I2V, Flow's first frame animation tool. The attached frame is the FIRST FRAME of this clip: begin exactly on it, preserve framing and scene, and continue with no cut. Do not use any other reference."} ${params.prompt || ""}`;
+    setEditable(box, prompt);
+    const before = collectNativeMedia().map(item => item.id || `title:${item.title}`);
+    const start = flowButton("Start generation"); if (!start || start.disabled) throw flowError("FLOW_SUBMIT_DISABLED", "Flow's continuation Start generation button is disabled.", true);
+    await activateFlowSubmitButton(start);
+    try {
+      const media = await waitForProgressResult(command, before, 1, "video", Number(params.timeout_ms || 720000), "main");
+      const session = flowButton("Start new session");
+      if (session) { const close = flowButton("Close"); if (close) { close.click(); await wait(350); } }
+      try { await setNativeAgentSettings("Always"); } catch {}
+      try { await setNativeAgentMode(false); } catch {}
+      const clear = flowButton("Clear prompt"); if (clear) clear.click();
+      return { media, trustedGesture: false };
+    } catch (error) {
+      error.outcome_unknown = true;
+      throw error;
+    }
+  }
+  if (name === "flow.state") {
+    const state = nativeRead("flowState");
+    const settingsButton = flowButton("Settings trigger");
+    if (settingsButton) state.composer = (settingsButton.innerText || accessibleName(settingsButton)).replace(/\s+/g, " ").trim();
+    if (payload.detailed && state.signedIn) {
+      const account = flowButton("Account details");
+      if (account) {
+        account.click(); await wait(500);
+        const creditLink = [...document.querySelectorAll("a")].find(a => /Google Flow credits/i.test(accessibleName(a)) && visible(a));
+        const creditText = creditLink ? accessibleName(creditLink) : "";
+        const n = Number(creditText.replace(/[^\d]/g, ""));
+        state.credits_remaining = Number.isFinite(n) && creditText ? n : undefined;
+        state.plan = [...document.querySelectorAll("button")].find(b => /Account details/i.test(accessibleName(b)))?.innerText?.split("\n")[0];
+        const close = flowButton("Close account panel"); if (close) close.click();
+      }
+    }
+    return state;
+  }
+  if (name === "flow.assets.list") return scanNativeAssets();
+  if (name === "flow.characters.list") return scanNativeCharacters();
+  if (name === "flow.generation.submit") {
+    const state = nativeRead("flowState");
+    if (!state.signedIn || !state.inProject) throw flowError("FLOW_NOT_READY", state.hint || "Open a signed-in Flow project first.", true);
+    const attachments = Array.isArray(payload.attachments) ? payload.attachments : [];
+    const variants = Math.max(1, Math.min(4, Number(payload.variants || 1)));
+    const frameValue = value => {
+      if (typeof value === "string" && value.trim()) return { assetName: value.replace(/^asset:/i, "").trim() };
+      if (!value || typeof value !== "object") return undefined;
+      if (typeof value.assetName === "string" && value.assetName.trim()) return { assetName: value.assetName.trim() };
+      if (/^[A-Za-z0-9_-]{1,32}$/.test(value.transferId || "") && /^fm-[A-Za-z0-9_-]{1,32}-(?:start|end)\.(png|jpe?g|webp)$/i.test(value.name || "") && stagedNativeFiles.get(value.transferId)?.name === value.name) return value;
+      return null;
+    };
+    const firstFrame = frameValue(payload.firstFrame), lastFrame = frameValue(payload.lastFrame);
+    if (firstFrame === null || lastFrame === null || attachments.some(item => {
+      if (typeof item === "string") return !item.trim();
+      if (!item || typeof item !== "object") return true;
+      if (typeof item.assetName === "string") return !item.assetName.trim();
+      return !/^[A-Za-z0-9_-]{1,32}$/.test(item.transferId || "") || !/^fm-[A-Za-z0-9_-]{1,32}-(?:ref[1-3]|attach[1-3])\.(png|jpe?g|webp)$/i.test(item.name || "") || stagedNativeFiles.get(item.transferId)?.name !== item.name;
+    })) throw flowError("NATIVE_CAPABILITY_UNSUPPORTED", "Native generation accepts project asset names or staged local image attachments only; nothing was submitted.", true);
+    const framesMode = Boolean(firstFrame || lastFrame);
+    const referenceAttachments = framesMode ? [] : attachments;
+    const box = document.querySelector(".ProseMirror");
+    if (!box) throw flowError("FLOW_COMPOSER_MISSING", "Flow's generation composer is not visible.", true);
+    const before = collectNativeMedia().map(item => item.id || `title:${item.title}`);
+    const agent = flowButton("Agent"); if (agent?.getAttribute("aria-pressed") === "true") agent.click();
+    const clear = flowButton("Clear prompt"); if (clear) clear.click();
+    if (payload.type) await chooseRadio(payload.type === "image" ? "Image" : "Video");
+    if (payload.type === "video") await chooseRadio(framesMode ? "Frames" : "Ingredients");
+    if (payload.aspectRatio) await chooseRadio(payload.aspectRatio);
+    if (payload.duration && payload.type === "video") await chooseRadio(`${payload.duration}s`);
+    if (payload.resolution && payload.type === "video") await chooseRadio(String(payload.resolution));
+    await chooseNativeModel(payload.model, payload.type);
+    if (payload.model) {
+      // Selecting a model can dismiss Flow's settings popover, so re-open it before choosing remaining options.
+      if (payload.type === "video" && payload.duration) await chooseRadio(`${payload.duration}s`);
+      if (payload.type === "video" && payload.resolution) await chooseRadio(String(payload.resolution));
+    }
+    await chooseRadio(`x${variants}`);
+    await closeFlowSettings();
+    const quoteLink = [...document.querySelectorAll("a")].find(a => visible(a) && /^\s*\d[\d,.\s]*credits?\s*$/i.test((a.innerText || a.textContent || "").trim()));
+    const quoteText = (quoteLink?.innerText || quoteLink?.textContent || "").trim();
+    const credits = quoteLink ? Number(quoteText.match(/[\d,]+/)?.[0]?.replace(/,/g, "")) : undefined;
+    if (!Number.isFinite(credits)) throw flowError("FLOW_CREDIT_QUOTE_UNAVAILABLE", "Flow did not show a numeric generation credit quote. Nothing was submitted.", true, false);
+    if (payload.maxCredits !== undefined && credits > Number(payload.maxCredits)) throw flowError("FLOW_MAX_CREDITS_EXCEEDED", `Flow quotes ${credits} credits, above max_credits=${payload.maxCredits}. Nothing was submitted.`, false, false);
+
+    const uploadAndResolve = async (attachment, slot) => {
+      const file = stagedNativeFiles.get(attachment.transferId);
+      const uploadButton = flowButton("Add media menu");
+      if (!file || !uploadButton) throw flowError("FLOW_UPLOAD_UNAVAILABLE", "Flow's upload control is unavailable before file selection.", false, Boolean(slot));
+      uploadButton.click(); await wait(250);
+      const uploadItem = [...document.querySelectorAll('[role="menuitem"],button')].find(el => visible(el) && accessibleName(el).trim() === "Upload");
+      if (!uploadItem) throw flowError("FLOW_UPLOAD_MENU_MISSING", "Flow did not show its Upload menu item; no generation was submitted.", false, Boolean(slot));
+      const input = document.querySelector('input[type="file"]');
+      if (!input) throw flowError("FLOW_UPLOAD_INPUT_MISSING", "Flow's file input disappeared; the upload outcome is uncertain.", false, true);
+      uploadItem.click();
+      try { FlowNativeFileTransfer.assignFileToInput(input, file); }
+      catch (error) { throw flowError("FLOW_UPLOAD_SELECTION_FAILED", String(error?.message || error), false, true); }
+      const uploadDeadline = Date.now() + 90_000;
+      let readyTile;
+      while (Date.now() < uploadDeadline) {
+        readyTile = [...document.querySelectorAll("flow-grid-tile-container")].find(tile => tile.getAttribute("aria-label") === attachment.name && tile.querySelector("img[data-media-id],video[data-media-id]"));
+        if (readyTile) break;
+        await wait(500);
+      }
+      if (!readyTile) throw flowError("FLOW_UPLOAD_TIMEOUT", `Flow did not confirm that image "${attachment.name}" finished uploading. Inspect Flow before retrying.`, false, true);
+      await chooseNativePickerAsset(attachment.name, slot);
+      stagedNativeFiles.delete(attachment.transferId);
+    };
+    const resolveValue = async (value, slot) => {
+      if (!value) return;
+      if (value.assetName) return chooseNativePickerAsset(value.assetName, slot);
+      await uploadAndResolve(value, slot);
+    };
+    if (firstFrame) await resolveValue(firstFrame, "start");
+    if (lastFrame) await resolveValue(lastFrame, "end");
+    for (const item of referenceAttachments) {
+      const attachment = typeof item === "string" ? { assetName: item.replace(/^asset:/i, "").trim() } : item;
+      await resolveValue(attachment, undefined);
+    }
+    const expectedRefs = referenceAttachments.length;
+    const attachedCount = [...document.querySelectorAll("button,[role=button]")].filter(el => visible(el) && /^Ingredient\b/i.test(accessibleName(el).trim())).length;
+    if (attachedCount < expectedRefs) throw flowError("FLOW_REFERENCE_ATTACH_UNCONFIRMED", `Flow shows ${attachedCount} of ${expectedRefs} reference attachment(s); no generation was submitted. Inspect Flow before retrying.`, false, true);
+    const activeBox = document.querySelector(".ProseMirror");
+    if (!activeBox) throw flowError("FLOW_COMPOSER_MISSING", "Flow's composer disappeared while preparing references; no generation was submitted.", false, Boolean(attachments.length));
+    activeBox.focus(); activeBox.textContent = String(payload.prompt || "");
+    activeBox.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: String(payload.prompt || "") }));
+    await wait(300);
+    const start = flowButton("Start generation");
+    if (!start || start.disabled || start.getAttribute("aria-disabled") === "true") throw flowError("FLOW_SUBMIT_DISABLED", "Flow's Start generation button is disabled; nothing was submitted.", true);
+    const errorsBeforeSubmit = new Set(currentFlowSubmitErrors());
+    const activation = await activateFlowSubmitButton(start);
+
+    // Follow TobyFlow's submit contract: a delivered click is only an attempt.
+    // Require a changed control/editor or a new tile before starting the render wait.
+    const submitDeadline = Date.now() + 30_000;
+    let acknowledged = false;
+    let lastSubmitProgress = "";
+    while (Date.now() < submitDeadline) {
+      const newError = currentFlowSubmitErrors().find(message => !errorsBeforeSubmit.has(message));
+      if (newError) throw flowError("FLOW_SUBMIT_REJECTED", `Flow rejected the submit: ${newError}`, false, Boolean(activation.clickDelivered));
+      const currentStart = flowButton("Start generation");
+      const currentBox = document.querySelector(".ProseMirror");
+      const freshMedia = collectNativeMedia().filter(item => !before.includes(item.id || `title:${item.title}`));
+      if (!currentStart || currentStart.disabled || currentStart.getAttribute("aria-disabled") === "true" ||
+          currentBox?.textContent?.trim() !== String(payload.prompt || "").trim() || freshMedia.length) {
+        acknowledged = true;
+        break;
+      }
+      const progress = freshMedia.some(item => item.busy) ? "Flow accepted the submit and is rendering" : "Waiting for Flow to accept the submit";
+      if (progress !== lastSubmitProgress) {
+        emitFlowProgress(command, progress);
+        lastSubmitProgress = progress;
+      }
+      await wait(250);
+    }
+    if (!acknowledged && !activation.controlAccepted) {
+      const newError = currentFlowSubmitErrors().find(message => !errorsBeforeSubmit.has(message));
+      if (newError) throw flowError("FLOW_SUBMIT_REJECTED", `Flow rejected the submit: ${newError}`, false, Boolean(activation.clickDelivered));
+      throw flowError("FLOW_SUBMIT_UNCONFIRMED", `Flow did not confirm the submit within 30 seconds (${activation.invoked || 0} listener(s), click delivered: ${Boolean(activation.clickDelivered)}). No render wait or download was started.`, false, true);
+    }
+    return {
+      submitted: true,
+      before,
+      type: payload.type === "image" ? "image" : "video",
+      expectedCount: variants,
+      credits,
+      activation: activation.strategy || "flow-main-world",
+      acceptanceObserved: acknowledged || Boolean(activation.controlAccepted),
+    };
+  }
+  if (name === "flow.generation.observe") {
+    const before = Array.isArray(payload.before) ? payload.before : [];
+    const kind = payload.kind === "image" ? "image" : payload.kind === "video" ? "video" : undefined;
+    const expected = Math.max(1, Math.min(20, Number(payload.expectedCount || 1)));
+    const deadline = Date.now() + Math.max(1000, Math.min(15 * 60_000, Number(payload.timeoutMs || 12 * 60_000)));
+    let priorProgress = "";
+    while (Date.now() < deadline) {
+      const fresh = collectNativeMedia().filter(item => !before.includes(item.id || `title:${item.title}`) && !item.title.startsWith("fm-") && (!kind || item.kind === kind));
+      const failed = fresh.filter(item => item.failed);
+      if (failed.length) {
+        const details = failed.map(item => `${item.title}${item.failureReason ? `: ${item.failureReason}` : ""}`).join("; ");
+        throw flowError("FLOW_GENERATION_FAILED", `Flow reported ${failed.length} failed generation tile(s): ${details}. No automatic retry was attempted.`, false, true);
+      }
+      const ready = fresh.filter(item => !item.busy);
+      if (ready.length >= expected) return { media: ready.slice(0, expected).map(({ id, title, kind: mediaKind }) => ({ id, title, kind: mediaKind })) };
+      const percentages = [...document.querySelectorAll("flow-grid-tile-container")].slice(0, 8).map(tile => (tile.innerText || "").match(/\d+%/)?.[0]).filter(Boolean);
+      const progress = percentages.join(", ") || (fresh.length ? "Flow is finishing the result" : "Waiting for Flow to start rendering");
+      if (progress !== priorProgress) { emitFlowProgress(command, progress); priorProgress = progress; }
+      await wait(2000);
+    }
+    throw flowError("FLOW_GENERATION_TIMEOUT", "Timed out waiting for Flow. The command may have been accepted; inspect the project before retrying.", false, true);
+  }
+  if (name === "flow.asset.rename" || name === "flow.asset.trash") {
+    const title = String(payload.name || "");
+    if (!title) throw flowError("FLOW_INVALID_ARGUMENT", "Asset name is required.");
+    const copies = await countFlowTitleAcrossGrid(title);
+    if (copies !== 1) throw flowError(copies > 1 ? "FLOW_AMBIGUOUS_ASSET" : "FLOW_ASSET_NOT_FOUND", copies > 1 ? `${copies} assets are named "${title}"; no mutation was performed.` : `Could not find asset "${title}".`, true);
+    const tile = await findFlowTile(title);
+    if (!tile) throw flowError("FLOW_ASSET_NOT_FOUND", `Could not find asset "${title}" after scanning the project grid.`, true);
+    tile.scrollIntoView({ block: "center" }); await wait(150);
+    const more = flowButton("More options", tile); if (!more) throw flowError("FLOW_TILE_MENU_MISSING", `Could not open options for "${title}".`, true);
+    more.click(); await wait(200);
+    const action = name === "flow.asset.trash" ? "Move to trash" : "Rename";
+    const menu = [...document.querySelectorAll('[role="menuitem"]')].find(item => visible(item) && accessibleName(item).trim() === action);
+    if (!menu) throw flowError("FLOW_MENU_ITEM_MISSING", `Flow did not show "${action}" for "${title}".`, true);
+    menu.click(); await wait(250);
+    if (name === "flow.asset.trash") return { trashed: title };
+    const input = [...document.querySelectorAll('input:not([type="file"]),[contenteditable="true"]')].find(el => visible(el));
+    if (!input) throw flowError("FLOW_RENAME_INPUT_MISSING", "Flow opened rename but no editable title field is visible.", false, true);
+    const newName = String(payload.newName || "");
+    if (!newName) throw flowError("FLOW_INVALID_ARGUMENT", "newName is required.");
+    if (input.isContentEditable) input.textContent = newName;
+    else { input.value = newName; input.dispatchEvent(new Event("input", { bubbles: true })); }
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true }));
+    await wait(400);
+    return { renamed: title, name: newName };
+  }
+  throw flowError("NATIVE_CAPABILITY_UNSUPPORTED", `Native Flow operation "${name}" is not implemented.`, true);
+}
+async function flowOperation(name, payload = {}, command = {}) {
+  const operation = name;
+  const resolved = FlowDriverRegistry.resolveForUrl(location.href, { operationHandler: executeFlowOperation });
+  if (!resolved?.driver) {
+    throw flowError("FLOW_UNSUPPORTED_ROUTE", "This Flow page route is not supported by the installed Flow driver.", true);
+  }
+  return resolved.driver.invoke(operation, payload, command);
+}
+const nativeUploadAssemblers = new Map();
+const stagedNativeFiles = new Map();
+async function execute(c) {
+  if (c.op === "flowOperation") return flowOperation(c.name, c.payload || {}, c);
+  throw flowError("NATIVE_CAPABILITY_UNSUPPORTED", `Unsupported native Flow command: ${String(c.op || "unknown")}`, true);
+}
+chrome.runtime.onMessage.addListener((message, _sender, respond) => {
   if (message?.type !== "flow-mcp:execute") return;
-  execute(message.command).then(result => respond({ ok:true, value:result }), error => respond({ ok:false, error:String(error?.message || error) }));
+  execute(message.command).then(result => respond({ ok:true, value:result }), error => respond({ ok:false, error:{ code:error?.code || "FLOW_DOM_FAILED", message:String(error?.message || error), retryable:Boolean(error?.retryable), outcome_unknown:Boolean(error?.outcome_unknown) } }));
   return true;
 });

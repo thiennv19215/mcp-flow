@@ -9,13 +9,14 @@ const I18N = {
     tabNone: "Chưa chọn tab",
     tabsCount: (n) => `${n} tab đang mở`,
     tabsNone: "Chưa mở tab Flow",
-    btnConnect: "Kết nối tab Flow hiện tại",
+    btnConnect: "Kết nối lại tab Flow",
     btnPreview: "Xem viền (5s)",
     btnOptions: "Cài đặt",
     reconnecting: "Đang kết nối lại tab Flow hiện tại...",
     previewTriggered: "Đang hiển thị viền xanh trên tab Flow...",
-    errNoFlowTab: "Vui lòng mở tab flow.google.com và giữ active trước khi bấm kết nối.",
-    errBackendDown: "Chưa bật Flow MCP backend (cổng 8799). Hãy chạy Start Flow.cmd.",
+    errNoFlowTab: "Mở Google Flow; tiện ích sẽ tự kết nối với tab đang hoạt động.",
+    selectingTab: "Đang tự chọn tab Flow…",
+    errBackendDown: "Chưa bật Flow MCP backend (cổng 18899). Hãy chạy Start Flow.cmd.",
     errGeneric: "Lỗi kết nối:",
   },
   en: {
@@ -28,13 +29,14 @@ const I18N = {
     tabNone: "Not selected",
     tabsCount: (n) => `${n} open tab${n === 1 ? "" : "s"}`,
     tabsNone: "No Flow tab open",
-    btnConnect: "Connect active Flow tab",
+    btnConnect: "Reconnect Flow tab",
     btnPreview: "Preview border (5s)",
     btnOptions: "Settings",
     reconnecting: "Reconnecting to the active Flow tab...",
     previewTriggered: "Displaying activity border on Flow tab...",
-    errNoFlowTab: "Open a Flow project, keep that tab active, then click Connect.",
-    errBackendDown: "Cannot connect to Flow MCP backend (port 8799). Run Start Flow.cmd.",
+    errNoFlowTab: "Open Google Flow; the extension connects to the active Flow tab automatically.",
+    selectingTab: "Selecting a Flow tab automatically…",
+    errBackendDown: "Cannot connect to Flow MCP backend (port 18899). Run Start Flow.cmd.",
     errGeneric: "Connector error:",
   }
 };
@@ -125,6 +127,9 @@ function renderStatus(s) {
   } else if (count === 0) {
     alertBox.className = "alert-box warn show";
     alertText.textContent = t("errNoFlowTab");
+  } else if (!s.selectedTabId) {
+    alertBox.className = "alert-box warn show";
+    alertText.textContent = t("selectingTab");
   } else {
     alertBox.className = "alert-box";
     alertText.textContent = "";
@@ -154,7 +159,7 @@ chrome.storage.local.get({ lang: "vi" }).then(data => {
     wsConnected: false,
     flowTabs: 0,
     selectedTabId: null,
-    bridge: "http://127.0.0.1:8799",
+    bridge: "http://127.0.0.1:18899",
     error: err.message
   });
 });

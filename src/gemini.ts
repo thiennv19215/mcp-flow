@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
-import { HOME_DIR } from "./chrome.js";
+import { HOME_DIR } from "./paths.js";
 
 const run = promisify(execFile);
 const FFMPEG = process.env.FLOW_MCP_FFMPEG ?? "ffmpeg";

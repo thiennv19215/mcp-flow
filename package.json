@@ -6,7 +6,6 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "tsc",
-    "test:bridge": "npm run build && node --test tests/*.test.mjs",
     "start": "node dist/index.js",
     "login": "node dist/login.js",
     "studio": "node dist/studio.js"
@@ -20,7 +19,6 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "playwright-core": "1.63.0",
     "ws": "^8.22.0",
     "zod": "^4.6.5"
   },

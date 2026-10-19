@@ -5,11 +5,10 @@ import { z } from "zod";
 import { assemble, localVoices, speakLocally } from "./assemble.js";
 import { GEMINI_VOICES, geminiKey, saveGeminiKey, speakWithGemini } from "./gemini.js";
 import { extractLastFrame } from "./chain.js";
-import { characterLook, createCharacter, downloadAsset, trashAsset, editCharacter, getFlowState, listAssets, listCharacters, rememberCharacter, runAgentBatch, runContinue, runEdit, runGeneration } from "./flow.js";
+import { characterLook, createCharacter, downloadAsset, trashAsset, editCharacter, getFlowState, listAssets, listCharacters, listFlowProjects, openFlowProject, rememberCharacter, runAgentBatch, runContinue, runEdit, runGeneration } from "./flow.js";
 import { JobQueue, type Job } from "./queue.js";
 import { BIN, COMPUTER, IS_MAC, IS_WIN, moveToBin } from "./platform.js";
 import { TECHNIQUES, techniqueById } from "./techniques.js";
-import { setFlowInteraction } from "./chrome.js";
 
 export const OUTPUT_ROOT = process.env.FLOW_MCP_OUTPUT ?? join(homedir(), "flow-mcp-out");
 const words = (s: string) => s.split(/[^a-z0-9]+/i).filter((w) => w.length > 3).map((w) => w.toLowerCase());
@@ -64,6 +63,8 @@ export const shapes = {
   cancel: { job_id: z.string() },
   retry: { job_ids: z.array(z.string()).optional().describe("Jobs to re-queue. Default: every failed job.") },
   assets: { kind: z.enum(["image", "video", "scene"]).optional() },
+  projects: {},
+  open_project: { project_id: z.string().uuid() },
   download: {
     project: z.string().min(1).describe("Local folder name under the output root."),
     assets: z.array(z.string().min(1)).min(1).max(30).describe("Titles (or title prefixes) from flow_assets, in the order they should be numbered."),
@@ -173,6 +174,7 @@ export const shapes = {
       .min(1)
       .optional()
       .describe("Existing picture instead of `describe`: absolute path, or 'asset:<title>' of an image already in the Flow project."),
+    variants: z.number().int().min(1).max(4).default(1).describe("Portrait options to generate when using `describe`; the first option is used to save the character."),
     aspect_ratio: z.enum(["3:4", "1:1", "9:16", "16:9", "4:3"]).optional().describe("Frame for the drawn portrait when using `describe`. Default 3:4."),
     personality: z.string().max(500).optional().describe("How the character acts; Flow uses it when crafting scenes."),
     voice: z.string().optional().describe("Flow voice name, e.g. 'Charon' (male, informative) or 'Aoede' (female, breezy)."),
@@ -205,6 +207,8 @@ export interface Core {
   cancel(a: Args<"cancel">): Promise<unknown>;
   retry(a: Args<"retry">): Promise<unknown>;
   assets(a: Args<"assets">): Promise<unknown>;
+  projects(): Promise<unknown>;
+  open_project(a: Args<"open_project">): Promise<unknown>;
   download(a: Args<"download">): Promise<unknown>;
   assemble(a: Args<"assemble">): Promise<unknown>;
   techniques(a: Args<"techniques">): Promise<unknown>;
@@ -246,7 +250,6 @@ const BUSY = "A generation is running in the Flow tab. Wait for it to finish (fl
 export class LocalCore implements Core {
   private detailedState: ReturnType<typeof getFlowState> | undefined;
   private queue: JobQueue = new JobQueue(async (job) => {
-    try {
     const { chain_from, reference_from } = job.params;
     if (reference_from) {
       const still = this.queue.get(reference_from)?.files.find((f) => /\.(jpe?g|png|webp)$/i.test(f));
@@ -262,17 +265,19 @@ export class LocalCore implements Core {
     if (job.params.agent_scenes) return await runAgentBatch(job);
     if (job.params.edit_asset) return await runEdit(job);
     return await runGeneration(job);
-    } finally {
-      await setFlowInteraction(false).catch(() => {});
-    }
   });
 
   async status({ detailed }: Args<"status">) {
     // Studio and MCP can poll at once. Share the account-panel read so one
     // request cannot release focus/close a panel another request is using.
-    const flow = detailed && !this.queue.busy
-      ? await (this.detailedState ??= getFlowState(true).finally(() => { this.detailedState = undefined; }))
-      : await getFlowState(false);
+    let flow;
+    try {
+      flow = detailed && !this.queue.busy
+        ? await (this.detailedState ??= getFlowState(true).finally(() => { this.detailedState = undefined; }))
+        : await getFlowState(false);
+    } catch (error) {
+      flow = { url: "", signedIn: false, inProject: false, available: false, hint: `Flow extension did not return its status: ${error instanceof Error ? error.message : String(error)}` };
+    }
     return { flow, pacing: this.queue.pausedReason, output_root: OUTPUT_ROOT, jobs: this.queue.list().map(jobView) };
   }
 
@@ -375,7 +380,16 @@ export class LocalCore implements Core {
 
   async assets({ kind }: Args<"assets">) {
     if (this.queue.busy) throw new Error(BUSY);
-    return (await listAssets().finally(() => setFlowInteraction(false).catch(() => {}))).filter((a) => !kind || a.kind === kind).map(({ name, kind }) => ({ name, kind }));
+    return (await listAssets()).filter((a) => !kind || a.kind === kind).map(({ name, kind }) => ({ name, kind }));
+  }
+
+  async projects() {
+    return listFlowProjects();
+  }
+
+  async open_project({ project_id }: Args<"open_project">) {
+    if (this.queue.busy) throw new Error(BUSY);
+    return openFlowProject(project_id);
   }
 
   async download({ project, assets, quality }: Args<"download">) {
@@ -388,7 +402,7 @@ export class LocalCore implements Core {
     let next = Math.max(0, ...readdirSync(dir).map((f) => Number(f.match(/^clip-(\d+)/)?.[1] ?? 0))) + 1;
     for (const name of assets) {
       try {
-        files.push(...(await downloadAsset(name, join(dir, `clip-${String(next++).padStart(2, "0")}`), quality).finally(() => setFlowInteraction(false).catch(() => {}))));
+        files.push(...(await downloadAsset(name, join(dir, `clip-${String(next++).padStart(2, "0")}`), quality)));
       } catch (err) {
         throw new Error(`${err instanceof Error ? err.message : err} (downloaded so far: ${files.length})`);
       }
@@ -494,20 +508,20 @@ export class LocalCore implements Core {
 
   async trash({ name }: Args<"trash">) {
     if (this.queue.busy) throw new Error(BUSY);
-    return trashAsset(name).finally(() => setFlowInteraction(false).catch(() => {}));
+    return trashAsset(name);
   }
 
   async character(a: Args<"character">) {
     if (this.queue.busy) throw new Error(BUSY);
     if (!a.image && !a.describe) throw new Error("Pass either `describe` (Flow draws the portrait) or `image`.");
-    const made = await createCharacter(a).finally(() => setFlowInteraction(false).catch(() => {}));
+    const made = await createCharacter(a);
     if (a.describe) rememberCharacter(a.name, a.describe);
     return { ...made, use_as: `asset:${a.name}` };
   }
 
   async character_edit({ name, change, look }: Args<"character_edit">) {
     if (this.queue.busy) throw new Error(BUSY);
-    const out = await editCharacter(name, change).finally(() => setFlowInteraction(false).catch(() => {}));
+    const out = await editCharacter(name, change);
     // Every scene that references the character quotes this description in its character lock, so it has to describe
     // the NEW look - "deep navy coat" left in it would argue with a portrait whose coat is now red.
     if (look) rememberCharacter(name, look);
@@ -517,7 +531,7 @@ export class LocalCore implements Core {
 
   async characters() {
     if (this.queue.busy) throw new Error(BUSY);
-    return (await listCharacters().finally(() => setFlowInteraction(false).catch(() => {}))).map((name) => ({ name, use_as: `asset:${name}` }));
+    return (await listCharacters()).map((name) => ({ name, use_as: `asset:${name}` }));
   }
 
   // Panel only: deliberately NOT registered as an MCP tool, so a key typed into Flow Studio never reaches Claude.

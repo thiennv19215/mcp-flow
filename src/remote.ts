@@ -20,6 +20,8 @@ export class RemoteCore implements Core {
   cancel = (a: unknown) => call("cancel", a);
   retry = (a: unknown) => call("retry", a);
   assets = (a: unknown) => call("assets", a);
+  projects = () => call("projects", {});
+  open_project = (a: unknown) => call("open_project", a);
   download = (a: unknown) => call("download", a);
   assemble = (a: unknown) => call("assemble", a);
   techniques = (a: unknown) => call("techniques", a);

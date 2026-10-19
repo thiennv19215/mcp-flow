@@ -51,7 +51,7 @@ It asks your permission before each step. Say yes.
 - **Your computer password**, if it asks for one. Installing some helpers needs it, and the assistant never
   types it for you.
 - **Install the connector** from the repo's `extension` folder in Chrome (`chrome://extensions` → Developer
-  mode → Load unpacked). In its Settings, enter `http://127.0.0.1:8799` and the token from
+  mode → Load unpacked). In its Settings, enter `http://127.0.0.1:18899` and the token from
   `~/.flow-mcp/token` (Windows: `%USERPROFILE%\.flow-mcp\token`). Then sign in to Google in Chrome and open a
   Flow project. The tool never sees or types your Google password.
 
@@ -166,7 +166,7 @@ Nothing needs to run all the time.
 | | Starts | Stops |
 |---|---|---|
 | **The Flow tools in your assistant** | By themselves, when the assistant app opens | When you quit the app |
-| **Flow Studio, the control panel** | While your assistant is open: go to **http://127.0.0.1:8799** in your browser. Without one: double-click **Flow Studio.command** (Mac) or **Flow Studio.cmd** (Windows) in the `flow-mcp` folder, and it opens the panel for you | When you quit the assistant, or close the Flow Studio window you started |
+| **Flow Studio, the control panel** | While your assistant is open: go to **http://127.0.0.1:18899** in your browser. Without one: double-click **Flow Studio.command** (Mac) or **Flow Studio.cmd** (Windows) in the `flow-mcp` folder, and it opens the panel for you | When you quit the assistant, or close the Flow Studio window you started |
 | **The Flow tab in Chrome** | `npm run login`, or open it yourself | Keep the tab open while something is being made |
 
 So Flow Studio is only running while your assistant is open, or while its own window is. If the panel says

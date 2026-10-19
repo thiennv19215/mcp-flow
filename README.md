@@ -1,16 +1,16 @@
 # Flow MCP Native Automation
 
-This is a separate experimental repository for moving Flow page operations into Chrome content scripts while preserving MCP/backend orchestration. See [ARCHITECTURE.md](ARCHITECTURE.md). The current Playwright driver remains the baseline; native extension automation is not wired in yet.
+MCP tools and job orchestration stay in the backend while the Chrome extension executes every Flow page operation through its content driver. Unsupported inputs fail before dispatch. See [ARCHITECTURE.md](ARCHITECTURE.md) and [NATIVE-MIGRATION-RUNBOOK.md](NATIVE-MIGRATION-RUNBOOK.md) for operation coverage and limitations.
 
-Windows: double-click **Start Flow.cmd** to build and start Studio in the background. Double-click **Stop Flow.cmd** to stop that Studio and release port **8799** (or `FLOW_MCP_PORT`). Logs are saved under `%LOCALAPPDATA%\FlowMCP\port-8799`. If another launcher already owns the port, close it first so both shortcuts can manage the same process.
+Windows: double-click **Start Flow.cmd** to build and start Studio in the background. Double-click **Stop Flow.cmd** to stop that Studio and release port **18899** (or `FLOW_MCP_PORT`). Logs are saved under `%LOCALAPPDATA%\FlowMCP\port-18899`. If another launcher already owns the port, close it first so both shortcuts can manage the same process.
 
 Drive **Google Flow** (flow.google.com) from Claude, Codex or any other MCP app, or from a local control
 panel, using Flow's own credits (free with any Google account: 50 a day), not the pay-per-use video API.
 
-It runs on your machine and uses this repo's Flow MCP Connector to control an existing, signed-in Chrome Flow tab with real Playwright. See [EXTENSION-PORT.md](EXTENSION-PORT.md) for setup.
+It runs on your machine and uses this repo's Flow MCP Connector to control an existing, signed-in Chrome Flow tab with the native content-script driver by default. See [EXTENSION-PORT.md](EXTENSION-PORT.md) for setup.
 
 ```
-Claude / Codex → flow-mcp → Playwright → Flow MCP Connector (WebSocket) → existing Chrome → Flow
+Claude / Codex → flow-mcp job queue → native extension commands → selected Chrome tab → Flow
 ```
 
 **MCP** = Model Context Protocol, the standard that lets Claude use outside tools.
@@ -57,7 +57,7 @@ Then sign in, once:
 npm run login
 ```
 
-That opens Flow in your regular browser. Load this repository's extension folder in Chrome (Developer mode → Load unpacked). For an existing installation, click Reload and confirm version 0.4.0. Open your Flow project and click Connect active Flow tab in the connector popup. No token entry is required.
+That opens Flow in your regular browser. Load this repository's extension folder in Chrome (Developer mode → Load unpacked). For an existing installation, click Reload and confirm version 0.2.0. The extension connects automatically to the active Flow tab and follows when you switch to another Flow tab. The popup's reconnect button is only a recovery fallback. No token entry is required.
 You sign in yourself; the program never handles your Google password.
 
 ---
@@ -138,14 +138,14 @@ Nothing below costs a credit until step 4, and the assistant asks before spendin
 The same features, without an AI assistant in the loop:
 
 ```bash
-npm run studio     # then open http://127.0.0.1:8799
+npm run studio     # then open http://127.0.0.1:18899
 ```
 
 ### Chrome extension driver
 
 The Flow MCP Connector driver is the default. Build the project, start `npm start` (or `npm run studio`), and load/reload this repo's extension in your existing Flow Chrome profile. See [setup and maintenance notes](EXTENSION-PORT.md).
 
-`FLOW_MCP_DRIVER=extension` uses this repo's connector. `FLOW_MCP_DRIVER=playwright-official` is an optional comparison mode requiring Microsoft's extension. `FLOW_MCP_DRIVER=cdp` explicitly uses the original dedicated Chrome profile.
+The backend uses the selected Flow tab through this repository's extension. There is no driver setting or separate Chrome profile.
 
 or double-click **Flow Studio.command** (Mac) or **Flow Studio.cmd** (Windows).
 
@@ -231,8 +231,8 @@ key → Save key**. It's checked with Google before it's saved, and stored only 
 - Any Google account language works. The server finds Flow's buttons by their English names, so its
   Chrome window always shows Flow in English (it adds `?hl=en` to the address). Your account's own
   language setting is never changed, and prompts can be written in any language.
-- Environment variables: `GEMINI_API_KEY`, `FLOW_MCP_PORT` (8799), `FLOW_MCP_OUTPUT`,
-  `FLOW_MCP_HOME`, `FLOW_MCP_CDP_PORT` (9333), `FLOW_MCP_CHROME`, `FLOW_MCP_PAUSE_MIN_S`,
+- Environment variables: `GEMINI_API_KEY`, `FLOW_MCP_PORT` (18899), `FLOW_MCP_OUTPUT`,
+  `FLOW_MCP_HOME`, `FLOW_MCP_PAUSE_MIN_S`,
   `FLOW_MCP_PAUSE_MAX_S`.
 
 ## If something goes wrong
