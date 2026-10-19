@@ -18,11 +18,12 @@
       throw flowError(code, `Flow does not offer the exact ${name} mode for the selected model. Nothing was submitted.`, true, false);
     }
     if (!isSelected(control)) control.click();
+    const hasFrameControls = () => Boolean(flowButton("Start") && flowButton("End"));
     const deadline = Date.now() + 5000;
     let confirmed = false;
     while (Date.now() < deadline) {
       control = exactModeControl(name);
-      if (control && isSelected(control)) { confirmed = true; break; }
+      if (control && (isSelected(control) || (framesMode && hasFrameControls()))) { confirmed = true; break; }
       if (!flowSettingsPanelVisible()) await openFlowSettings();
       await wait(100);
     }
@@ -32,8 +33,8 @@
     }
     if (framesMode) {
       const controlsDeadline = Date.now() + 4000;
-      while (Date.now() < controlsDeadline && !(flowButton("Start") && flowButton("End"))) await wait(100);
-      if (!flowButton("Start") || !flowButton("End")) {
+      while (Date.now() < controlsDeadline && !hasFrameControls()) await wait(100);
+      if (!hasFrameControls()) {
         throw flowError("FLOW_FRAMES_CONTROLS_UNAVAILABLE", "Flow selected Frames but did not show both Start and End frame controls. Nothing was submitted.", true, false);
       }
     }

@@ -153,8 +153,10 @@ async function ensureFlowLibrarySection(label) {
     const text = cleanCharacterName(tile.innerText || tile.textContent || "").toLowerCase();
     return addIcon && (/character/.test(text) || /nhân vật/.test(text));
   });
+  const hasEmptyCharacterChooser = () => /\/character\/?$/i.test(location.pathname) &&
+    (flowButton("Go back") || flowButton("Add from project"));
   const hasSectionMarker = () => label === "Characters"
-    ? hasCharacterAction()
+    ? hasCharacterAction() || hasEmptyCharacterChooser()
     : label === "All media" && [...document.querySelectorAll("flow-grid-tile-container")].some(visible);
   while (Date.now() < deadline) {
     const loading = [...document.querySelectorAll('[role="progressbar"],[aria-busy="true"]')].some(visible);
@@ -259,6 +261,13 @@ async function scanNativeCharacters() {
   } finally {
     if (container) container.scrollTop = originalTop;
     // Restore the user's main library view after reading the separate Characters section.
+    if (/\/character\/?$/i.test(location.pathname)) {
+      const back = flowButton("Go back");
+      if (back) {
+        back.click();
+        await waitForFlowRoute(path => !/\/character\/?$/i.test(path), 5000, "Flow did not leave the empty character chooser.").catch(() => {});
+      }
+    }
     if (clickFlowNavigation("All media")) await wait(500);
   }
 }
@@ -1880,7 +1889,7 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
     return state;
   }
   if (name === "flow.assets.list") return scanNativeAssets();
-  if (name === "flow.characters.list") return globalThis.FlowReferenceActions.listCharacters();
+  if (name === "flow.characters.list") return scanNativeCharacters();
   if (name === "flow.references.attach") {
     const references = payload.references;
     if (!Array.isArray(references) || !references.length || references.length > 3) throw flowError("FLOW_INVALID_ARGUMENT", "Provide one to three named references.");
@@ -2094,7 +2103,7 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
 }
 function validStagedLocalImage(value, suffixPattern) {
   return Boolean(value && typeof value.transferId === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(value.transferId) && stagedNativeFiles.has(value.transferId) &&
-    typeof value.name === "string" && new RegExp(`^fm-[A-Za-z0-9_-]{1,32}-${suffixPattern.source}\\.(?:png|jpe?g|webp)$`, "i").test(value.name));
+    typeof value.name === "string" && new RegExp(`^fm-[A-Za-z0-9_-]{1,32}-${suffixPattern.source}\\.(?:png|jpe?g|webp|gif|heic|heif|avif)$`, "i").test(value.name));
 }
 async function flowOperation(name, payload = {}, command = {}) {
   const operation = name;

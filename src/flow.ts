@@ -256,12 +256,12 @@ export async function runGeneration(job: Job): Promise<string[]> {
     if (!file || isAssetReference(file) || isCharacterReference(file)) return true;
     try {
       const info = statSync(file);
-      return [".png", ".jpg", ".jpeg", ".webp"].includes(extname(file).toLowerCase()) && info.isFile() && info.size > 0 && info.size <= 25 * 1024 * 1024;
+      return [".png", ".jpg", ".jpeg", ".webp", ".gif", ".heic", ".heif", ".avif"].includes(extname(file).toLowerCase()) && info.isFile() && info.size > 0 && info.size <= 25 * 1024 * 1024;
     } catch { return false; }
   };
   const frameInputSupported = (file?: string) => !file || (!isCharacterReference(file) && localFileSupported(file));
   if ((!framesMode && (refs.length > 3 || !activeRefs.every(localFileSupported))) || !frameInputSupported(s.first_frame) || !frameInputSupported(s.last_frame)) {
-    throw Object.assign(new Error("Generation accepts up to three references and PNG/JPG/JPEG/WebP local inputs up to 25 MiB each."), { code: "NATIVE_CAPABILITY_UNSUPPORTED", retryable: true });
+    throw Object.assign(new Error("Generation accepts up to three references and PNG/JPG/JPEG/WebP/GIF/HEIC/HEIF/AVIF local inputs up to 25 MiB each."), { code: "NATIVE_CAPABILITY_UNSUPPORTED", retryable: true });
   }
   requireCapabilities(
     "flow.native.generation.submit", "flow.native.generation.observe", "flow.native.asset.download",
@@ -376,8 +376,8 @@ export async function createCharacter(c: CharacterParams, job?: Job): Promise<{ 
   if (localImage) {
     try {
       const info = statSync(c.image!);
-      if (!info.isFile() || info.size < 1 || info.size > 25 * 1024 * 1024 || ![".png", ".jpg", ".jpeg", ".webp"].includes(extname(c.image!).toLowerCase())) {
-        throw new Error("Character images must be PNG, JPG, JPEG or WebP files up to 25 MiB.");
+      if (!info.isFile() || info.size < 1 || info.size > 25 * 1024 * 1024 || ![".png", ".jpg", ".jpeg", ".webp", ".gif", ".heic", ".heif", ".avif"].includes(extname(c.image!).toLowerCase())) {
+        throw new Error("Character images must be PNG, JPG, JPEG, WebP, GIF, HEIC, HEIF or AVIF files up to 25 MiB.");
       }
     } catch (error) {
       if (error instanceof Error && error.message.startsWith("Character images")) throw error;
@@ -582,6 +582,7 @@ export async function runAgentBatch(job: Job): Promise<string[]> {
         type: "image",
         prompt: scenes[sceneIndex],
         variants: 1,
+        max_credits: 0,
         agent_scenes: undefined,
         agent_numbers: undefined,
         file_stem: `scene-${String(sceneNumber).padStart(2, "0")}`,
