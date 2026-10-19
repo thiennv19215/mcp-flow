@@ -494,9 +494,14 @@ function isFlowProjectNavigationControl(el) {
 }
 function flowOption(name) {
   const expected = String(name).replace(/\s+/g, " ").trim().toLowerCase();
+  // The closed settings trigger carries a summary such as "Video · 720p · 10s x1".
+  // It is a button, but never an option; allowing it here makes x1 falsely imply
+  // that the settings panel is open and can also toggle the panel during selection.
+  const settingsTrigger = flowButton("Settings trigger");
   return [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')].find(el => {
     const label = accessibleName(el).replace(/\s+/g, " ").trim().toLowerCase();
-    return visible(el) && !isFlowProjectNavigationControl(el) && (label === expected || label.endsWith(` ${expected}`));
+    return visible(el) && el !== settingsTrigger && !isFlowProjectNavigationControl(el) &&
+      (label === expected || label.endsWith(` ${expected}`));
   });
 }
 async function activateFlowSubmitButton(button) {
@@ -653,9 +658,9 @@ async function pickNativeAgentImageModel() {
   await wait(350);
 }
 function flowSettingsPanelVisible() {
-  return Boolean(flowRadio("x1") || flowOption("x1") || flowRadio("Image") || flowOption("Image") ||
-    flowRadio("Video") || flowOption("Video") || flowRadio("Ingredients") || flowOption("Ingredients") ||
-    flowRadio("Frames") || flowOption("Frames") || flowButton("Select model family") || flowButton("Model"));
+  const hasTypeOption = Boolean(flowRadio("Image") || flowOption("Image")) && Boolean(flowRadio("Video") || flowOption("Video"));
+  const hasVariantOption = [1, 2, 3, 4].some(count => flowRadio(`x${count}`) || flowOption(`x${count}`));
+  return hasTypeOption && hasVariantOption;
 }
 async function openFlowSettings() {
   if (flowSettingsPanelVisible()) return true;
