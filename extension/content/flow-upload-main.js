@@ -1,11 +1,11 @@
 (() => {
   "use strict";
 
-  if (window.__flowMcpUploadBridge?.version === 4) return;
+  if (window.__flowMcpUploadBridge?.version === 8) return;
 
-  // Keep this protocol separate from v2: already-open Flow tabs may still have
+  // Keep this protocol separate from prior versions: already-open Flow tabs may still have
   // the old listener installed, and both versions must not answer one request.
-  const source = "flow-mcp-upload-v4";
+  const source = "flow-mcp-upload-v8";
   let activeTrap = null;
   let fired = null;
 
@@ -34,7 +34,7 @@
       try { input.files = transfer.files; } catch { return false; }
     }
     const selected = input.files?.length === 1 && input.files[0].name === file.name &&
-      input.files[0].size === file.size && input.files[0].type === file.type;
+      input.files[0].size === file.size;
     if (!selected) return false;
     fired = { owner, method, name: file.name, size: file.size, type: file.type, at: Date.now() };
     const trap = activeTrap;
@@ -135,7 +135,10 @@
       const file = event.data.file;
       const owner = event.data.owner;
       if (!(file instanceof File) || typeof owner !== "string") { reply(requestId, { success: false, error: "Invalid media drop payload." }); return; }
-      const target = document.querySelector("flow-grid-tile-container") || document.querySelector("main") || document.body;
+      const gridTile = document.querySelector("flow-grid-tile-container");
+      const target = gridTile?.parentElement ||
+        document.querySelector("flow-view, flow-scroller, [data-testid='virtuoso-item-list'], [data-testid='virtuoso-scroller'], main") ||
+        document.body;
       const rect = target.getBoundingClientRect?.();
       const init = { bubbles: true, cancelable: true, composed: true, dataTransfer: new DataTransfer(), clientX: rect ? rect.left + rect.width / 2 : innerWidth / 2, clientY: rect ? rect.top + rect.height / 2 : innerHeight / 2 };
       init.dataTransfer.items.add(file);
@@ -157,5 +160,5 @@
     }
   });
 
-  window.__flowMcpUploadBridge = { version: 4 };
+  window.__flowMcpUploadBridge = { version: 8 };
 })();

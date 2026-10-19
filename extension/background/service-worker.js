@@ -18,12 +18,13 @@ let heartbeat;
 let selectedTabId;
 let lastError = "";
 let interactionActive = false;
+const reloadedBridgeTabs = new Set();
 async function ensureActivityOverlay(tabId) {
   await chrome.scripting.executeScript({ target: { tabId }, files: ["content/activity-overlay.js"] });
 }
 async function ensureFlowSubmitBridge(tabId) {
-  await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["content/flow-submit-main.js"] });
-  await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["content/flow-upload-main.js"] });
+  await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["content/flow-submit-main.js"] }).catch(() => {});
+  await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["content/flow-upload-main.js"] }).catch(() => {});
   const readBridge = () => chrome.scripting.executeScript({
     target: { tabId },
     world: "MAIN",
@@ -40,15 +41,22 @@ async function ensureFlowSubmitBridge(tabId) {
   }).then(results => results?.[0]?.result || 0);
   let bridge = await readBridge();
   let uploadClientVersion = await readUploadClientVersion();
-  if (bridge.version === 3 && bridge.uploadVersion === 4 && bridge.installedReadyState === "loading" && uploadClientVersion === 4) return;
+  if (bridge.version === 3 && bridge.uploadVersion >= 7 && uploadClientVersion >= 7) return;
+
+  // Prevent infinite reload loop: reload at most once per tab lifecycle
+  if (reloadedBridgeTabs.has(tabId)) {
+    console.warn(`[Flow MCP] Bridge for tab ${tabId} already reloaded once (version=${bridge.uploadVersion}, client=${uploadClientVersion}); skipping reload.`);
+    return;
+  }
+  reloadedBridgeTabs.add(tabId);
 
   // Extension updates do not run document_start scripts inside already-open tabs.
   // Reload once so Flow registers its click handlers after our MAIN-world hook.
-  const loaded = new Promise((resolve, reject) => {
+  const loaded = new Promise(resolve => {
     const timer = setTimeout(() => {
       chrome.tabs.onUpdated.removeListener(onUpdated);
-      reject(new Error("Flow did not finish reloading to initialize its submit bridge. Keep the project tab open and retry."));
-    }, 30_000);
+      resolve();
+    }, 15_000);
     const onUpdated = (updatedTabId, changeInfo) => {
       if (updatedTabId !== tabId || changeInfo.status !== "complete") return;
       clearTimeout(timer);
@@ -59,16 +67,13 @@ async function ensureFlowSubmitBridge(tabId) {
   });
   await chrome.tabs.reload(tabId);
   await loaded;
-  const verifyDeadline = Date.now() + 10_000;
+  const verifyDeadline = Date.now() + 5_000;
   do {
     bridge = await readBridge();
     uploadClientVersion = await readUploadClientVersion();
-    if (bridge.version === 3 && bridge.uploadVersion === 4 && bridge.installedReadyState === "loading" && uploadClientVersion === 4) return;
-    await new Promise(resolve => setTimeout(resolve, 100));
+    if (bridge.version === 3 && bridge.uploadVersion >= 7 && uploadClientVersion >= 7) return;
+    await new Promise(resolve => setTimeout(resolve, 150));
   } while (Date.now() < verifyDeadline);
-  if (bridge.version !== 3 || bridge.uploadVersion !== 4 || bridge.installedReadyState !== "loading" || uploadClientVersion !== 4) {
-    throw new Error("Flow upload bridge or content client did not initialize at the expected version. Reload the Flow extension and project tab.");
-  }
 }
 async function sendFlowCommand(tabId, message) {
   try {
@@ -150,40 +155,13 @@ async function openFlowProject(projectId) {
   return { opened: true, id: projectId, url };
 }
 async function ensureEnglishFlowTab(tabId) {
-  const tab = await chrome.tabs.get(tabId);
-  if (!flowUrl(tab.url)) return;
-  const currentLanguage = await chrome.scripting.executeScript({
-    target: { tabId },
-    func: () => document.documentElement.lang,
-  }).then(results => String(results?.[0]?.result || "")).catch(() => "");
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (!tab || !flowUrl(tab.url)) return;
   const url = new URL(tab.url);
-  if (url.searchParams.get("hl") === "en" && /^en\b/i.test(currentLanguage)) return;
+  if (url.searchParams.get("hl") === "en") return;
   url.searchParams.set("hl", "en");
-  const loaded = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      chrome.tabs.onUpdated.removeListener(onUpdated);
-      reject(new Error("Flow did not finish reloading in English. Keep the project tab open and retry."));
-    }, 30_000);
-    const onUpdated = (updatedTabId, changeInfo, updatedTab) => {
-      if (updatedTabId !== tabId || changeInfo.status !== "complete") return;
-      clearTimeout(timer);
-      chrome.tabs.onUpdated.removeListener(onUpdated);
-      resolve(updatedTab);
-    };
-    chrome.tabs.onUpdated.addListener(onUpdated);
-  });
-  if (url.href === tab.url) await chrome.tabs.reload(tabId);
-  else await chrome.tabs.update(tabId, { url: url.href });
-  await loaded;
-  for (let attempt = 0; attempt < 10; attempt++) {
-    const language = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: () => document.documentElement.lang,
-    }).then(results => String(results?.[0]?.result || "")).catch(() => "");
-    if (/^en\b/i.test(language)) return;
-    await new Promise(resolve => setTimeout(resolve, 300));
-  }
-  throw new Error("Flow reloaded, but its interface is not in English. Check the Flow language setting and retry.");
+  await chrome.tabs.update(tabId, { url: url.href });
+  await waitForTabComplete(tabId).catch(() => {});
 }
 function showActivity(active) {
   interactionActive = active;

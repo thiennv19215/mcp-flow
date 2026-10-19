@@ -1,7 +1,7 @@
 import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { homedir, tmpdir } from "node:os";
-import { dirname, extname, join } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 import type { Job } from "./queue.js";
 import { extractZip } from "./platform.js";
 import { executeFlowDom, extensionSupportsCapability } from "./extension.js";
@@ -157,7 +157,7 @@ async function stageNativeMedia(
   }
 }
 
-export async function uploadFlowMediaToProject(filePath: string): Promise<{ name: string; kind: "image" | "video" }> {
+export async function uploadFlowMediaToProject(filePath: string, job?: Job): Promise<{ name: string; kind: "image" | "video" }> {
   const type = uploadMimeType(filePath);
   const kind = type.startsWith("video/") ? "video" : "image";
   const prefix = `fm-${randomUUID().replace(/-/g, "").slice(0, 12)}-upload`;
@@ -165,7 +165,7 @@ export async function uploadFlowMediaToProject(filePath: string): Promise<{ name
   const name = `${prefix}${extname(basename).toLowerCase()}`;
   const stagedDirs: string[] = [];
   let staged: { transferId: string; name: string } | undefined;
-  const transferContext = {} as Job;
+  const transferContext = job ?? ({} as Job);
   try {
     requireCapabilities("flow.native.generation.upload.preflight", "flow.native.media.upload");
     await nativeOperation("flow.generation.upload.preflight", {}, "flow.native.generation.upload.preflight", transferContext, 10_000);
@@ -261,41 +261,35 @@ export async function runGeneration(job: Job): Promise<string[]> {
   ];
   if (localInputs.length) requireCapabilities("flow.native.generation.upload.preflight");
 
-  const stagedDirs: string[] = [];
-  const stagedTransferIds: string[] = [];
-  let submitted: { submitted: boolean; before: string[]; type: MediaKind; expectedCount: number; credits?: number };
-  try {
-    const stagedByPath = new Map<string, { transferId: string; name: string }>();
-    if (localInputs.length) {
-      await nativeOperation("flow.generation.upload.preflight", {}, "flow.native.generation.upload.preflight", job, 10_000);
-      for (const { path: filePath, slot } of localInputs) {
-        const name = `fm-${randomUUID().replace(/-/g, "").slice(0, 12)}-${slot}${extname(filePath).toLowerCase()}`;
-        const staged = await stageNativeMedia(filePath, name, stagedDirs, job);
-        stagedByPath.set(filePath, staged);
-        stagedTransferIds.push(staged.transferId);
+  // Pre-upload all local reference/frame files so they become project assets on Flow FIRST
+  const uploadedAssetByPath = new Map<string, string>();
+  if (localInputs.length) {
+    for (const { path: filePath } of localInputs) {
+      if (!uploadedAssetByPath.has(filePath)) {
+        job.note = `Uploading reference "${basename(filePath)}" to Flow project...`;
+        const uploaded = await uploadFlowMediaToProject(filePath, job);
+        uploadedAssetByPath.set(filePath, uploaded.name);
       }
     }
-    const frame = (value?: string, slot?: string) => !value ? undefined : value.startsWith(ASSET_PREFIX)
-      ? { assetName: value.slice(ASSET_PREFIX.length).trim() }
-      : { ...stagedByPath.get(value)!, slot };
-    const attachments = refs.map((value, index) => value.startsWith(ASSET_PREFIX)
-      ? { assetName: value.slice(ASSET_PREFIX.length).trim() }
-      : { ...stagedByPath.get(value)!, slot: `ref${index + 1}` });
-    const framesMode = s.type === "video" && Boolean(s.first_frame || s.last_frame);
-    if (framesMode && refs.length) {
-      job.note = [job.note, `first/last frames were set, so ${refs.length} reference image(s) were skipped — Flow allows one or the other.`].filter(Boolean).join(" · ");
-    }
-    submitted = await nativeOperation("flow.generation.submit", {
-      prompt: s.prompt, type: s.type, model: s.model, aspectRatio: s.aspect_ratio, duration: s.duration,
-      resolution: s.resolution, variants: s.variants, maxCredits: s.max_credits,
-      firstFrame: frame(s.first_frame, "start"), lastFrame: frame(s.last_frame, "end"), attachments,
-    }, "flow.native.generation.submit", job, 120_000);
-  } finally {
-    await Promise.all(stagedTransferIds.map(transferId => nativeOperation(
-      "flow.file.upload.abort", { transferId }, "flow.native.file.upload.abort", job, 10_000,
-    ).catch(() => undefined)));
-    cleanStagedFiles(stagedDirs);
   }
+
+  const frame = (value?: string, slot?: string) => !value ? undefined : value.startsWith(ASSET_PREFIX)
+    ? { assetName: value.slice(ASSET_PREFIX.length).trim() }
+    : { assetName: uploadedAssetByPath.get(value)!, slot };
+
+  const attachments = refs.map((value, index) => value.startsWith(ASSET_PREFIX)
+    ? { assetName: value.slice(ASSET_PREFIX.length).trim() }
+    : { assetName: uploadedAssetByPath.get(value)!, slot: `ref${index + 1}` });
+
+  const framesMode = s.type === "video" && Boolean(s.first_frame || s.last_frame);
+  if (framesMode && refs.length) {
+    job.note = [job.note, `first/last frames were set, so ${refs.length} reference image(s) were skipped — Flow allows one or the other.`].filter(Boolean).join(" · ");
+  }
+  const submitted = await nativeOperation<{ submitted: boolean; before: string[]; type: MediaKind; expectedCount: number; credits?: number }>("flow.generation.submit", {
+    prompt: s.prompt, type: s.type, model: s.model, aspectRatio: s.aspect_ratio, duration: s.duration,
+    resolution: s.resolution, variants: s.variants, maxCredits: s.max_credits,
+    firstFrame: frame(s.first_frame, "start"), lastFrame: frame(s.last_frame, "end"), attachments,
+  }, "flow.native.generation.submit", job, 120_000);
 
   if (typeof submitted.credits !== "number") throw new Error("Native generation did not return its credit quote after submission. The outcome may be unknown; inspect Flow before retrying.");
   job.credits = submitted.credits;
@@ -303,7 +297,7 @@ export async function runGeneration(job: Job): Promise<string[]> {
   if (!submitted.submitted) throw new Error("Native Flow submit did not confirm that generation started.");
   const observed = await nativeOperation<{ media: NativeMedia[] }>("flow.generation.observe", {
     before: submitted.before, kind: submitted.type, expectedCount: submitted.expectedCount,
-    timeoutMs: s.type === "image" ? IMAGE_TIMEOUT_MS : VIDEO_TIMEOUT_MS,
+    timeoutMs: s.type === "image" ? IMAGE_TIMEOUT_MS : VIDEO_TIMEOUT_MS, retries: s.retries ?? 1,
   }, "flow.native.generation.observe", job, s.type === "image" ? IMAGE_TIMEOUT_MS : VIDEO_TIMEOUT_MS);
   job.progress = undefined;
   return downloadNativeResults(observed.media, s.output_dir, s.file_stem, s.download_quality ?? "original", job);
