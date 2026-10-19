@@ -1,35 +1,14 @@
-import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { randomUUID } from "node:crypto";
-import { homedir, tmpdir } from "node:os";
+import { copyFileSync, mkdirSync, statSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import type { Job } from "./queue.js";
-import { extractZip } from "./platform.js";
 import { executeFlowDom, extensionSupportsCapability } from "./extension.js";
-import { streamFileChunks, type FileChunk } from "./native-file-transfer.js";
-import { HOME_DIR } from "./paths.js";
-import { nativeDownloadIds, waitForNativeDownload } from "./native-downloads.js";
+import { nativeDownloadIds, waitForNativeDownload, downloadNativeResults, extensionOf, unpackTakes } from "./native-downloads.js";
+import { uploadFlowMediaToProject } from "./flow-transfer.js";
+import type { FlowState, FlowAsset, FlowProject, DownloadQuality, MediaKind, NativeMedia, CharacterParams } from "./types.js";
 
-export interface FlowState {
-  url: string;
-  signedIn: boolean;
-  inProject: boolean;
-  plan?: string;
-  credits_remaining?: number;
-  composer?: string;
-  hint?: string;
-}
-
-export interface FlowAsset {
-  name: string;
-  kind: "image" | "video" | "scene";
-  id?: string;
-}
-
-export interface FlowProject { id: string; name: string; url: string; active?: boolean; }
-
-export type DownloadQuality = "original" | "upscaled";
-type MediaKind = "image" | "video";
-type NativeMedia = { id?: string; title: string; kind: MediaKind };
+export type { FlowState, FlowAsset, FlowProject, DownloadQuality, MediaKind, NativeMedia, CharacterParams };
+export { characterLook, rememberCharacter, createCharacter, editCharacter } from "./characters.js";
+export { uploadFlowMediaToProject } from "./flow-transfer.js";
 
 const IMAGE_TIMEOUT_MS = 3 * 60_000;
 const VIDEO_TIMEOUT_MS = 12 * 60_000;
@@ -52,7 +31,7 @@ async function nativeTarget(job?: Job): Promise<NativeFlowTarget> {
   return target;
 }
 
-async function nativeOperation<T>(
+export async function nativeOperation<T>(
   op: string,
   payload: Record<string, unknown>,
   capability: string,
@@ -76,7 +55,7 @@ async function nativeOperation<T>(
   });
 }
 
-function requireCapabilities(...capabilities: string[]): void {
+export function requireCapabilities(...capabilities: string[]): void {
   const missing = capabilities.filter(capability => !extensionSupportsCapability(capability));
   if (missing.length) throw Object.assign(new Error(`The connected Flow extension is missing ${missing.join(", ")}. Reload the repository's extension.`), {
     code: "NATIVE_CAPABILITY_UNSUPPORTED", retryable: true, outcome_unknown: false,
@@ -99,148 +78,6 @@ export async function openFlowProject(projectId: string): Promise<{ opened: bool
   return executeFlowDom({
     op: "flowOperation", name: "flow.project.open", payload: { projectId }, capability: "flow.native.project.open", timeoutMs: 60_000,
   }, { timeoutMs: 65_000 });
-}
-
-function uploadMimeType(name: string): string {
-  const extension = extname(name).toLowerCase();
-  const types: Record<string, string> = {
-    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
-    ".gif": "image/gif", ".heic": "image/heic", ".heif": "image/heif", ".avif": "image/avif",
-    ".mp4": "video/mp4", ".m4v": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime",
-    ".avi": "video/x-msvideo", ".mkv": "video/x-matroska", ".3gp": "video/3gpp",
-  };
-  const type = types[extension];
-  if (!type) throw new Error(`Flow cannot upload media with extension ${extension || "(none)"}. Use PNG, JPG, WebP, GIF, HEIC, HEIF, AVIF, MP4, MOV, WebM, AVI, MKV or 3GP.`);
-  return type;
-}
-
-async function stageNativeMedia(
-  filePath: string,
-  name: string,
-  stagedDirs: string[],
-  job?: Job,
-): Promise<{ transferId: string; name: string }> {
-  const extension = extname(filePath).toLowerCase();
-  const type = uploadMimeType(filePath);
-  const isVideo = type.startsWith("video/");
-  const maxBytes = isVideo ? 200 * 1024 * 1024 : 25 * 1024 * 1024;
-  const uploadName = /\.jpe?g$/i.test(name) ? name.replace(/\.jpeg$/i, ".jpg") : name;
-  const dir = mkdtempSync(join(tmpdir(), "flow-native-upload-"));
-  stagedDirs.push(dir);
-  const stagedPath = join(dir, uploadName);
-  copyFileSync(filePath, stagedPath);
-  const stagedSize = statSync(stagedPath).size;
-  if (stagedSize < 1 || stagedSize > maxBytes) throw new Error(`${isVideo ? "Videos" : "Images"} must be non-empty and no larger than ${isVideo ? 200 : 25} MiB.`);
-  const transferId = randomUUID();
-  requireCapabilities("flow.native.file.upload.begin", "flow.native.file.upload.chunk", "flow.native.file.upload.finish", "flow.native.file.upload.abort");
-  let began = false;
-  try {
-    let first = true;
-    let batch: FileChunk[] = [];
-    const sendBatch = async () => {
-      if (!batch.length) return;
-      await nativeOperation("flow.file.upload.chunk", { chunks: batch }, "flow.native.file.upload.chunk", job, 60_000);
-      batch = [];
-    };
-    for await (const chunk of streamFileChunks(stagedPath, transferId, { maxBytes, maxChunks: isVideo ? 800 : 100 })) {
-      if (first) {
-        await nativeOperation("flow.file.upload.begin", { transfer: {
-          transferId, name: uploadName, type, size: chunk.size, sha256: chunk.sha256,
-        } }, "flow.native.file.upload.begin", job, 30_000);
-        began = true;
-        first = false;
-      }
-      batch.push(chunk);
-      if (batch.length === 4) await sendBatch();
-    }
-    await sendBatch();
-    await nativeOperation("flow.file.upload.finish", { transferId }, "flow.native.file.upload.finish", job, 30_000);
-    return { transferId, name: uploadName };
-  } catch (error) {
-    if (began) await nativeOperation("flow.file.upload.abort", { transferId }, "flow.native.file.upload.abort", job, 10_000).catch(() => {});
-    throw error;
-  }
-}
-
-export async function uploadFlowMediaToProject(filePath: string, job?: Job): Promise<{ name: string; kind: "image" | "video" }> {
-  const type = uploadMimeType(filePath);
-  const kind = type.startsWith("video/") ? "video" : "image";
-  const prefix = `fm-${randomUUID().replace(/-/g, "").slice(0, 12)}-upload`;
-  const basename = filePath.split(/[\\/]/).pop() || "media";
-  const name = `${prefix}${extname(basename).toLowerCase()}`;
-  const stagedDirs: string[] = [];
-  let staged: { transferId: string; name: string } | undefined;
-  const transferContext = job ?? ({} as Job);
-  try {
-    requireCapabilities("flow.native.generation.upload.preflight", "flow.native.media.upload");
-    await nativeOperation("flow.generation.upload.preflight", {}, "flow.native.generation.upload.preflight", transferContext, 10_000);
-    staged = await stageNativeMedia(filePath, name, stagedDirs, transferContext);
-    return await nativeOperation("flow.media.upload", { ...staged, kind }, "flow.native.media.upload", transferContext, 180_000);
-  } finally {
-    if (staged) await nativeOperation("flow.file.upload.abort", { transferId: staged.transferId }, "flow.native.file.upload.abort", transferContext, 10_000).catch(() => {});
-    cleanStagedFiles(stagedDirs);
-  }
-}
-
-function cleanStagedFiles(dirs: string[]): void {
-  for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
-  dirs.length = 0;
-}
-
-function extensionOf(file: string): string {
-  const head = Buffer.alloc(12);
-  const fd = openSync(file, "r");
-  try { readSync(fd, head, 0, 12, 0); } finally { closeSync(fd); }
-  if (head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) return ".jpeg";
-  if (head[0] === 0x89 && head.subarray(1, 4).toString("latin1") === "PNG") return ".png";
-  if (head.subarray(0, 4).toString("latin1") === "RIFF" && head.subarray(8, 12).toString("latin1") === "WEBP") return ".webp";
-  if (head.subarray(4, 8).toString("latin1") === "ftyp") return ".mp4";
-  if (head.subarray(0, 4).toString("latin1") === "GIF8") return ".gif";
-  if (head[0] === 0x50 && head[1] === 0x4b && head[2] === 0x03 && head[3] === 0x04) return ".zip";
-  return ".bin";
-}
-
-function unpackTakes(zip: string, targetStem: string): string[] {
-  const work = mkdtempSync(join(tmpdir(), "flow-takes-"));
-  const takes = extractZip(zip, work).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-  const out: string[] = [];
-  for (const [i, path] of takes.entries()) {
-    const destination = `${targetStem}${i ? `-v${i + 1}` : ""}${extensionOf(path)}`;
-    renameSync(path, destination);
-    out.push(destination);
-  }
-  renameSync(zip, `${targetStem}-takes.zip`);
-  if (!out.length) throw new Error("Flow sent a ZIP with nothing usable inside it.");
-  return out;
-}
-
-async function downloadNativeResults(
-  media: NativeMedia[],
-  outputDir: string,
-  fileStem: string,
-  quality: DownloadQuality,
-  job?: Job,
-): Promise<string[]> {
-  mkdirSync(outputDir, { recursive: true });
-  const files: string[] = [];
-  for (const [index, item] of media.entries()) {
-    const stem = join(outputDir, media.length > 1 ? `${fileStem}-v${index + 1}` : fileStem);
-    const before = await nativeDownloadIds();
-    const triggered = await nativeOperation<{ downloadTriggered: boolean }>("flow.asset.download", {
-      id: item.id, name: item.title, quality,
-    }, "flow.native.asset.download", job, 30_000);
-    if (!triggered?.downloadTriggered) throw new Error(`Flow did not confirm the download for "${item.title}".`);
-    const download = await waitForNativeDownload(before, quality === "upscaled" ? 12 * 60_000 : 3 * 60_000, progress => {
-      if (job) job.progress = progress;
-    });
-    if (extname(download.filename).toLowerCase() === ".zip") files.push(...unpackTakes(download.filename, stem));
-    else {
-      const destination = `${stem}${extensionOf(download.filename)}`;
-      copyFileSync(download.filename, destination);
-      files.push(destination);
-    }
-  }
-  return files;
 }
 
 export async function runGeneration(job: Job): Promise<string[]> {
@@ -298,6 +135,7 @@ export async function runGeneration(job: Job): Promise<string[]> {
   if (framesMode && refs.length) {
     job.note = [job.note, `first/last frames were set, so ${refs.length} reference image(s) were skipped — Flow allows one or the other.`].filter(Boolean).join(" · ");
   }
+
   function normalizeAspectRatio(input?: string): string | undefined {
     if (!input) return undefined;
     const lower = String(input).trim().toLowerCase();
@@ -360,98 +198,6 @@ export async function downloadAsset(name: string, targetStem: string, quality: D
 
 export async function trashAsset(name: string): Promise<{ trashed: string }> {
   return nativeOperation("flow.asset.trash", { name }, "flow.native.asset.trash", undefined, 30_000);
-}
-
-export interface CharacterParams {
-  name: string;
-  image?: string;
-  describe?: string;
-  variants?: number;
-  aspect_ratio?: string;
-  personality?: string;
-  voice?: string;
-}
-
-const LOOKS_FILE = join(HOME_DIR, "characters.json");
-const loadLooks = (): Record<string, string> => {
-  try { return JSON.parse(readFileSync(LOOKS_FILE, "utf8")) as Record<string, string>; } catch { return {}; }
-};
-export const characterLook = (name: string): string | undefined => loadLooks()[name.toLowerCase()];
-export function rememberCharacter(name: string, look: string): void {
-  mkdirSync(HOME_DIR, { recursive: true });
-  writeFileSync(LOOKS_FILE, JSON.stringify({ ...loadLooks(), [name.toLowerCase()]: look.trim() }, null, 2));
-}
-
-export async function createCharacter(c: CharacterParams, job?: Job): Promise<{ name: string; url: string; portrait?: string }> {
-  if (!c.image && !c.describe) throw new Error("Pass either an image or a description for the character.");
-  const flowContext = job ?? ({} as Job);
-  const localImage = Boolean(c.image && !c.image.startsWith(ASSET_PREFIX));
-  if (localImage) {
-    try {
-      const info = statSync(c.image!);
-      if (!info.isFile() || info.size < 1 || info.size > 25 * 1024 * 1024 || ![".png", ".jpg", ".jpeg", ".webp", ".gif", ".heic", ".heif", ".avif"].includes(extname(c.image!).toLowerCase())) {
-        throw new Error("Character images must be PNG, JPG, JPEG, WebP, GIF, HEIC, HEIF or AVIF files up to 25 MiB.");
-      }
-    } catch (error) {
-      if (error instanceof Error && error.message.startsWith("Character images")) throw error;
-      throw new Error(`Character image file not found or unreadable: ${c.image}`);
-    }
-  }
-  requireCapabilities("flow.native.character.create");
-  const stagedDirs: string[] = [];
-  let stagedTransferId: string | undefined;
-  try {
-    let character = c;
-    if (localImage) {
-      requireCapabilities("flow.native.generation.upload.preflight");
-      await nativeOperation("flow.generation.upload.preflight", {}, "flow.native.generation.upload.preflight", flowContext, 10_000);
-      const staged = await stageNativeMedia(c.image!, `fm-${randomUUID().replace(/-/g, "").slice(0, 12)}-character${extname(c.image!).toLowerCase()}`, stagedDirs, flowContext);
-      stagedTransferId = staged.transferId;
-      character = { ...c, image: staged } as unknown as CharacterParams;
-    }
-    const result = await nativeOperation<{ name: string; url: string; portraitMedia?: NativeMedia }>("flow.character.create", { character }, "flow.native.character.create", flowContext, 10 * 60_000);
-    let portrait: string | undefined;
-    if (result.portraitMedia) {
-      const dir = join(process.env.FLOW_MCP_OUTPUT ?? join(homedir(), "flow-mcp-out"), "_cast");
-      try { portrait = (await downloadNativeResults([result.portraitMedia], dir, c.name.replace(/[^\w.-]+/g, "_"), "original", flowContext))[0]; }
-      catch { /* The character is saved in Flow; its portrait can be fetched with the edit tool. */ }
-    } else if (localImage) {
-      const dir = join(process.env.FLOW_MCP_OUTPUT ?? join(homedir(), "flow-mcp-out"), "_cast");
-      mkdirSync(dir, { recursive: true });
-      portrait = join(dir, `${c.name.replace(/[^\w.-]+/g, "_")}${extname(c.image!).toLowerCase()}`);
-      copyFileSync(c.image!, portrait);
-    }
-    if (c.describe) rememberCharacter(c.name, c.describe);
-    if (job) job.progress = undefined;
-    return { name: result.name, url: result.url, portrait };
-  } finally {
-    if (stagedTransferId) await nativeOperation("flow.file.upload.abort", { transferId: stagedTransferId }, "flow.native.file.upload.abort", flowContext, 10_000).catch(() => {});
-    cleanStagedFiles(stagedDirs);
-  }
-}
-
-export async function editCharacter(name: string, change?: string, job?: Job): Promise<{ name: string; portrait?: string; note?: string }> {
-  requireCapabilities("flow.native.character.edit");
-  const flowContext = job ?? ({} as Job);
-  const before = await nativeDownloadIds();
-  const result = await nativeOperation<{ name: string; downloadTriggered?: boolean; note?: string }>(
-    "flow.character.edit", { name, change, timeoutMs: 4 * 60_000 }, "flow.native.character.edit", flowContext, 5 * 60_000,
-  );
-  let portrait: string | undefined;
-  let note = result.note;
-  if (result.downloadTriggered) {
-    try {
-      const file = await waitForNativeDownload(before, 90_000, progress => { if (job) job.progress = progress; });
-      const dir = join(process.env.FLOW_MCP_OUTPUT ?? join(homedir(), "flow-mcp-out"), "_cast");
-      mkdirSync(dir, { recursive: true });
-      portrait = join(dir, `${name.replace(/[^\w.-]+/g, "_")}${extensionOf(file.filename)}`);
-      copyFileSync(file.filename, portrait);
-    } catch (error) {
-      note = `${change ? `${name} was changed in Flow, but the new` : "The"} portrait could not be saved (${error instanceof Error ? error.message : String(error)}). Call flow_character_edit with just the name to save it.`;
-    }
-  }
-  if (job) job.progress = undefined;
-  return { name, portrait, note };
 }
 
 const EDIT_TIMEOUT_MS = 10 * 60_000;

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Flow MCP Native Automation",
-  "version": "0.2.12",
+  "version": "0.2.13",
   "minimum_chrome_version": "116",
   "description": "Flow MCP with browser-side automation handlers in a Chrome extension.",
   "permissions": [
@@ -37,15 +37,22 @@
         "https://flow.google.com/*"
       ],
       "js": [
+        "content/dom-utils.js",
         "content/activity-overlay.js",
         "content/native-file-transfer.js",
         "content/flow-page-driver.js",
         "content/flow-driver-registry.js",
         "content/flow-v2-driver.js",
+        "content/settings-actions.js",
+        "content/asset-actions.js",
+        "content/upload-actions.js",
+        "content/download-actions.js",
+        "content/reference-actions.js",
         "content/character-actions.js",
         "content/image-actions.js",
         "content/video-actions.js",
-        "content/reference-actions.js",
+        "content/submit-actions.js",
+        "content/agent-actions.js",
         "content/dom-actions.js"
       ],
       "run_at": "document_idle"

@@ -22,7 +22,9 @@ function harness({ names = ['MCP Test Mug'], addedKind = 'character', hideAttach
   const opener = { getAttribute: () => open ? 'true' : 'false', click: () => { open = !open; } };
   const tab = { name: 'Characters', getAttribute: () => 'true' };
   const tile = { getAttribute: () => 'MCP Test Mug', querySelector: selector => selector === 'flow-character-tile' ? {} : image('https://flow-content.google/image/different-thumbnail') };
-  const document = { body: { innerText: '' }, querySelectorAll(selector) {
+  const document = { body: { innerText: '' },
+    querySelector(selector) { return this.querySelectorAll(selector)[0] || (selector === '.ProseMirror' ? {} : null); },
+    querySelectorAll(selector) {
     if (selector === '[role="listbox"]') return open ? [list] : [];
     if (selector === '[role="progressbar"]') return [];
     if (selector === '[role="tab"]') return [tab];
@@ -30,7 +32,7 @@ function harness({ names = ['MCP Test Mug'], addedKind = 'character', hideAttach
     if (selector === 'flow-grid-tile-container') return [tile];
     return [];
   } };
-  const context = vm.createContext({ document, Date: { now: () => ticks += 500 }, visible: () => true,
+  const context = vm.createContext({ document, location: { href: 'https://flow.google.com/project/test', pathname: '/project/test' }, Date: { now: () => ticks += 500 }, visible: () => true,
     accessibleName: el => el.name || '', flowButton: name => name === 'Add ingredients to the prompt box' ? opener : null,
     wait: async () => {}, flowError: (code, message) => Object.assign(new Error(message), { code }),
   });
@@ -81,14 +83,14 @@ test('generation transports character:<name> as a named reference, not a local f
       this.sent.push(command);
       const operation = command.args[0];
       const result = operation.name === 'flow.context'
-        ? { ok: true, value: { driverKey: 'flow_v2', origin: 'https://flow.google.com', projectId: 'test-project', routePrefix: '', isProjectEditor: true } }
+        ? { ok: true, value: { driverKey: 'flow_v2', origin: 'https://flow.google.com', projectId: 'test-project', routePrefix: '', isProjectEditor: true, tabId: 101 } }
         : { ok: false, error: { message: 'Stopped at submit boundary for test', outcome_unknown: false } };
       queueMicrotask(() => this.emit('message', JSON.stringify({ type: 'result', id: command.id, result })));
     }
   }
   const connector = new Connector();
   extensionSetWebSocket(connector);
-  connector.emit('message', JSON.stringify({ type: 'event', method: 'extension.initialized', params: [{ protocol: 2, version: '0.2.5', capabilities: ['context', 'generation.submit', 'generation.observe', 'asset.download', 'references.attach'].map(name => `flow.native.${name}`) }] }));
+  connector.emit('message', JSON.stringify({ type: 'event', method: 'extension.initialized', params: [{ protocol: 2, version: '0.2.13', capabilities: ['context', 'generation.submit', 'generation.observe', 'asset.download', 'references.attach'].map(name => `flow.native.${name}`) }] }));
   try {
     await assert.rejects(runGeneration({ params: { type: 'image', prompt: 'Test character', reference_images: ['character:MCP Test Mug'], max_credits: 0 } }), /Stopped at submit boundary/);
     assert.deepEqual(connector.sent.map(command => command.args[0].name), ['flow.context', 'flow.generation.submit']);
