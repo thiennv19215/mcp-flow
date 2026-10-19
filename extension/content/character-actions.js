@@ -28,6 +28,21 @@
     throw flowError("FLOW_PICKER_LOADING", `Flow's ${label} picker did not finish loading. Nothing was selected.`, true);
   }
 
+  async function waitForCharacterCreateButton(timeoutMs = 10_000) {
+    const deadline = Date.now() + timeoutMs;
+    const isCreateAction = el => {
+      const label = normalize(cleanCharacterName(accessibleName(el).replace(/\s+/g, " ").trim()));
+      return /^(?:new character|create character|create new character|add character|add a character)$/.test(label);
+    };
+    while (Date.now() < deadline) {
+      const button = [...document.querySelectorAll('button,[role="button"],a[href]')].find(el =>
+        visible(el) && isCreateAction(el) && !el.disabled && el.getAttribute("aria-disabled") !== "true");
+      if (button) return button;
+      await wait(150);
+    }
+    return null;
+  }
+
   function pickerScroller(list) {
     return [list, ...list.querySelectorAll("*")].find(el => el.clientHeight > 0 && el.scrollHeight > el.clientHeight + 5) || null;
   }
@@ -177,7 +192,7 @@
         await ensureFlowLibrarySection("Characters");
         let newPage = newCharacterRoute(location.pathname);
         if (!newPage) {
-          const create = await waitForEnabledFlowButton("New character", 10_000);
+          const create = await waitForCharacterCreateButton(10_000);
           if (!create) throw flowError("FLOW_CHARACTER_CREATE_MISSING", "Flow's Characters library does not show New character.", true);
           create.click();
           await waitForFlowRoute(path => newCharacterRoute(path), 15_000, "Flow did not open the New character page.");

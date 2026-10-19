@@ -73,7 +73,7 @@ function cleanCharacterName(value) {
     .replace(/\b(accessibility_new|person|movie|image|videocam|mic)\b/g, "")
     .replace(/\s+/g, " ").trim();
 }
-function clickFlowNavigation(label) {
+function flowNavigationItem(label) {
   const normalize = value => cleanCharacterName(String(value || "").replace(/\s+/g, " ").trim()).toLowerCase();
   const navigation = [...document.querySelectorAll('nav,[role="navigation"]')].find(el =>
     /project navigation/i.test(accessibleName(el)) || /project navigation/i.test(el.getAttribute("aria-label") || ""));
@@ -82,13 +82,35 @@ function clickFlowNavigation(label) {
     'a,button,[role="button"],[role="menuitem"],mat-list-item,button[mat-list-item]'
   )]);
   const wanted = normalize(label);
-  const target = candidates.find(el => {
+  return candidates.find(el => {
     if (!visible(el) || el.disabled || el.getAttribute("aria-disabled") === "true") return false;
     const text = normalize(el.getAttribute("aria-label") || el.innerText || el.textContent || "");
     // The collapsed Flow drawer leaves Material icon ligatures in the accessible text
     // (for example "image All media"). Match the navigation label at the end.
     return text === wanted || text.endsWith(` ${wanted}`);
   });
+}
+function flowNavigationSelected(item) {
+  if (!item) return undefined;
+  const roots = [item, item.closest('a,button,[role="button"],[role="menuitem"],mat-list-item')].filter(Boolean);
+  let explicitlyUnselected = false;
+  for (const el of roots) {
+    for (const attr of ["aria-current", "aria-selected", "aria-pressed"]) {
+      const value = el.getAttribute(attr);
+      if (value !== null) {
+        if (value === "true" || value === "page") return true;
+        explicitlyUnselected = true;
+      }
+    }
+    const state = el.getAttribute("data-state");
+    if (state === "active" || state === "selected") return true;
+    if (state !== null) explicitlyUnselected = true;
+    if (el.classList.contains("selected") || el.classList.contains("active")) return true;
+  }
+  return explicitlyUnselected ? false : undefined;
+}
+function clickFlowNavigation(label) {
+  const target = flowNavigationItem(label);
   if (!target) return false;
   target.click();
   return true;
@@ -114,19 +136,36 @@ async function leaveFlowDetailView() {
 }
 async function ensureFlowLibrarySection(label) {
   await leaveFlowDetailView();
-  const alreadyVisible = label === "All media"
-    ? [...document.querySelectorAll("flow-grid-tile-container")].some(visible)
-    : label === "Characters" ? [...document.querySelectorAll("flow-character-tile")].some(visible) : false;
-  if (!alreadyVisible && !clickFlowNavigation(label)) {
+  const target = flowNavigationItem(label);
+  if (!target) {
     throw flowError("FLOW_NAV_UNAVAILABLE", `Flow's project navigation could not open "${label}" from this view.`, true);
   }
-  await wait(700);
-  if (label === "Characters") {
-    const deadline = Date.now() + 10_000;
-    while (Date.now() < deadline && !document.querySelector("flow-character-tile") && !flowButton("New character")) await wait(200);
-  } else if (label === "All media") {
-    const deadline = Date.now() + 5000;
-    while (Date.now() < deadline && !document.querySelector("flow-grid-tile-container")) await wait(200);
+  const selectedBefore = flowNavigationSelected(target);
+  if (selectedBefore !== true) target.click();
+  const deadline = Date.now() + (label === "Characters" ? 10_000 : 5000);
+  let settledEmptySince = 0;
+  const hasCharacterAction = () => [...document.querySelectorAll('button,[role="button"],a[href]')].some(el => {
+    if (!visible(el)) return false;
+    const name = cleanCharacterName(accessibleName(el).replace(/\s+/g, " ").trim()).toLowerCase();
+    return /^(?:new character|create character|create new character|add character|add a character)$/.test(name);
+  });
+  const hasSectionMarker = selected => label === "Characters"
+    ? hasCharacterAction() || selected === true && [...document.querySelectorAll("flow-character-tile")].some(visible)
+    : label === "All media" && [...document.querySelectorAll("flow-grid-tile-container")].some(visible);
+  while (Date.now() < deadline) {
+    const selected = flowNavigationSelected(flowNavigationItem(label));
+    const loading = [...document.querySelectorAll('[role="progressbar"],[aria-busy="true"]')].some(visible);
+    const marker = hasSectionMarker(selected);
+    if (!loading && marker) break;
+    if (selected === true && !loading && !marker) {
+      if (!settledEmptySince) settledEmptySince = Date.now();
+      if (Date.now() - settledEmptySince >= 700) break;
+    } else settledEmptySince = 0;
+    await wait(150);
+  }
+  const selected = flowNavigationSelected(flowNavigationItem(label));
+  if (selected !== true && !hasSectionMarker(selected)) {
+    throw flowError("FLOW_LIBRARY_LOADING", `Flow's "${label}" library did not become ready after navigation.`, true);
   }
   blurFlowNavigationFocus();
 }
