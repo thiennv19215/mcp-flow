@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import { EventEmitter } from 'node:events';
 import { extensionSetWebSocket } from '../dist/extension.js';
 import { runGeneration } from '../dist/flow.js';
+import { getCachedProjectMedia, cacheProjectMedia } from '../dist/flow-transfer.js';
 
 const source = readFileSync(new URL('../extension/content/reference-actions.js', import.meta.url), 'utf8');
 function harness({ names = ['MCP Test Mug'], addedKind = 'character', hideAttached = false } = {}) {
@@ -96,4 +97,46 @@ test('generation transports character:<name> as a named reference, not a local f
     assert.deepEqual(connector.sent.map(command => command.args[0].name), ['flow.context', 'flow.generation.submit']);
     assert.deepEqual(connector.sent[1].args[0].payload.attachments, [{ assetName: 'character:MCP Test Mug' }]);
   } finally { connector.emit('close', 1000, Buffer.from('test complete')); }
+});
+
+test('classifyFlowError identifies quota, unusual activity, policy, and rate limits correctly', () => {
+  const domUtilsSource = readFileSync(new URL('../extension/content/dom-utils.js', import.meta.url), 'utf8');
+  const context = vm.createContext({ window: {}, document: {}, location: { href: 'https://flow.google.com' } });
+  vm.runInContext(domUtilsSource, context);
+  const classify = context.classifyFlowError;
+
+  const quota = classify('Error: PUBLIC_ERROR_USER_QUOTA_REACHED');
+  assert.equal(quota.category, 'quota');
+  assert.equal(quota.code, 'FLOW_QUOTA_EXCEEDED');
+  assert.equal(quota.retryable, false);
+
+  const unusual = classify('We noticed some unusual activity and blocked this request.');
+  assert.equal(unusual.category, 'captcha');
+  assert.equal(unusual.code, 'FLOW_UNUSUAL_ACTIVITY');
+  assert.equal(unusual.retryable, false);
+
+  const policy = classify('Prompt rejected: CONTENT_BLOCKED by safety guidelines');
+  assert.equal(policy.category, 'policy');
+  assert.equal(policy.code, 'FLOW_POLICY_VIOLATION');
+  assert.equal(policy.retryable, false);
+
+  const rateLimit = classify('Server returned RATE_LIMIT: too many requests');
+  assert.equal(rateLimit.category, 'rate_limit');
+  assert.equal(rateLimit.code, 'FLOW_RATE_LIMIT');
+  assert.equal(rateLimit.retryable, true);
+
+  assert.equal(classify('A normal unknown error occurred'), null);
+});
+
+test('getCachedProjectMedia reuses previously uploaded asset by sha256', () => {
+  const filePath = new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1');
+  const projectId = 'proj-123';
+  assert.equal(getCachedProjectMedia(projectId, filePath), undefined);
+
+  cacheProjectMedia(projectId, filePath, { name: 'fm-cached-asset', kind: 'image' });
+  const hit = getCachedProjectMedia(projectId, filePath);
+  assert.deepEqual(hit, { name: 'fm-cached-asset', kind: 'image' });
+
+  // Different project should not hit
+  assert.equal(getCachedProjectMedia('other-proj', filePath), undefined);
 });

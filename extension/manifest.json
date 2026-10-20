@@ -9,8 +9,18 @@
     "tabs",
     "alarms",
     "downloads",
-    "scripting"
+    "scripting",
+    "declarativeNetRequest"
   ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "flow_media_headers",
+        "enabled": true,
+        "path": "rules/flow-media-headers.json"
+      }
+    ]
+  },
   "host_permissions": [
     "https://flow.google.com/*",
     "http://127.0.0.1/*",

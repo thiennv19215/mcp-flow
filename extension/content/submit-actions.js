@@ -186,8 +186,8 @@ async function waitForGenerationSubmitButton(expectedPrompt, timeoutMs = 8000) {
 }
 
 function currentFlowSubmitErrors() {
-  const errorWords = /(?:error|failed|could not|couldn't|unable|insufficient|not enough|quota|credit limit|try again)/i;
-  return [...document.querySelectorAll('[role="alert"], [aria-live="assertive"], mat-error, .mat-mdc-form-field-error')]
+  const errorWords = /(?:error|failed|could not|couldn't|unable|insufficient|not enough|quota|credit limit|try again|unusual activity|suspicious activity|safety guidelines|blocked|something went wrong)/i;
+  return [...document.querySelectorAll('[role="alert"], [aria-live="assertive"], mat-error, .mat-mdc-form-field-error, snack-bar-container, .cdk-overlay-pane [class*="error"], .cdk-overlay-pane [class*="alert"]')]
     .filter(visible)
     .map(el => (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim())
     .filter(text => text && errorWords.test(text));
@@ -243,6 +243,11 @@ async function waitForProgressResult(command, before, expected, kind, timeoutMs,
     const fresh = collectNativeMedia().filter(item => !before.includes(item.id || `title:${item.title}`) && (!kind || item.kind === kind));
     const failed = fresh.filter(item => item.failed);
     if (failed.length) {
+      const failureReason = failed[0]?.failureReason || "";
+      const classified = classifyFlowError(failureReason);
+      if (classified && !classified.retryable) {
+        throw flowError(classified.code, classified.message, false, false);
+      }
       if (retriesLeft > 0 && await retryNativeErrorTile(failed[0])) {
         retriesLeft--;
         emitFlowProgress(command, `Flow failed this render; retrying its failed tile (${retriesLeft} retries remaining)`);

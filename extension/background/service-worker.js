@@ -409,7 +409,12 @@ async function connect() {
       reconnectAttempt = 0;
       lastError = "";
       send(ws, { type: "event", method: "extension.initialized", params: [{ protocol: 2, version: chrome.runtime.getManifest().version, capabilities: [...nativeFlowOperations].map(name => `flow.native.${name.slice(5)}`) }] });
-      heartbeat = setInterval(() => send(ws, { type: "ping" }), 20_000);
+      heartbeat = setInterval(() => {
+        send(ws, { type: "ping" });
+        if (selectedTabId) {
+          chrome.tabs.get(selectedTabId).catch(() => {});
+        }
+      }, 20_000);
     };
     ws.onmessage = message => {
       if (socket !== ws) return;

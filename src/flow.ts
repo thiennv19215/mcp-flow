@@ -3,7 +3,7 @@ import { basename, dirname, extname, join } from "node:path";
 import type { Job } from "./queue.js";
 import { executeFlowDom, extensionSupportsCapability } from "./extension.js";
 import { nativeDownloadIds, waitForNativeDownload, downloadNativeResults, extensionOf, unpackTakes } from "./native-downloads.js";
-import { uploadFlowMediaToProject } from "./flow-transfer.js";
+import { uploadFlowMediaToProject, getCachedProjectMedia, cacheProjectMedia } from "./flow-transfer.js";
 import type { FlowState, FlowAsset, FlowProject, DownloadQuality, MediaKind, NativeMedia, CharacterParams } from "./types.js";
 
 export type { FlowState, FlowAsset, FlowProject, DownloadQuality, MediaKind, NativeMedia, CharacterParams };
@@ -114,10 +114,18 @@ export async function runGeneration(job: Job): Promise<string[]> {
   // Pre-upload all local reference/frame files so they become project assets on Flow FIRST
   const uploadedAssetByPath = new Map<string, string>();
   if (localInputs.length) {
+    const target = await nativeTarget(job);
+    const projectId = target.projectId || "default";
     for (const { path: filePath } of localInputs) {
       if (!uploadedAssetByPath.has(filePath)) {
+        const cached = getCachedProjectMedia(projectId, filePath);
+        if (cached) {
+          uploadedAssetByPath.set(filePath, cached.name);
+          continue;
+        }
         job.note = `Uploading reference "${basename(filePath)}" to Flow project...`;
         const uploaded = await uploadFlowMediaToProject(filePath, job);
+        cacheProjectMedia(projectId, filePath, uploaded);
         uploadedAssetByPath.set(filePath, uploaded.name);
       }
     }

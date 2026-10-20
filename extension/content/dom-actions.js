@@ -426,17 +426,29 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
     let lastSubmitProgress = "";
     while (Date.now() < submitDeadline) {
       const newError = currentFlowSubmitErrors().find(message => !errorsBeforeSubmit.has(message));
-      if (newError) throw flowError("FLOW_SUBMIT_REJECTED", `Flow rejected the submit: ${newError}`, false, false);
+      if (newError) {
+        const classified = classifyFlowError(newError);
+        if (classified) throw flowError(classified.code, classified.message, classified.retryable, false);
+        throw flowError("FLOW_SUBMIT_REJECTED", `Flow rejected the submit: ${newError}`, false, false);
+      }
       const currentStart = getFlowSubmitButton(payload.prompt) || flowButton("Start generation");
       const currentBox = document.querySelector(".ProseMirror");
       const freshMedia = collectNativeMedia().filter(item => !before.includes(item.id || `title:${item.title}`));
-      if (!currentStart || currentStart.disabled || currentStart.getAttribute("aria-disabled") === "true" ||
-          currentBox?.textContent?.trim() !== String(payload.prompt || "").trim() || freshMedia.length) {
+
+      // TobyFlow 3 Confirmation Signals:
+      // 1. Submit button becomes disabled
+      const buttonDisabled = !currentStart || currentStart.disabled || currentStart.getAttribute("aria-disabled") === "true";
+      // 2. Editor prompt cleared (Flow accepted the prompt)
+      const editorCleared = currentBox && !currentBox.textContent?.trim();
+      // 3. New media tile appeared in grid
+      const tileAppeared = freshMedia.length > 0;
+
+      if (buttonDisabled || editorCleared || tileAppeared) {
         acknowledged = true;
         break;
       }
-      // If after 1s the submit hasn't triggered, try TobyFlow's Enter press fallback on editor
-      if (Date.now() - (submitDeadline - 30_000) > 1000 && !acknowledged && currentBox) {
+      // If after 1.2s the submit hasn't triggered, try TobyFlow's Enter press fallback on editor
+      if (Date.now() - (submitDeadline - 30_000) > 1200 && !acknowledged && currentBox) {
         pressFlowEditorSubmit(currentBox);
       }
       const progress = freshMedia.some(item => item.busy) ? "Flow accepted the submit and is rendering" : "Waiting for Flow to accept the submit";
@@ -448,7 +460,11 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
     }
     if (!acknowledged && !activation.controlAccepted) {
       const newError = currentFlowSubmitErrors().find(message => !errorsBeforeSubmit.has(message));
-      if (newError) throw flowError("FLOW_SUBMIT_REJECTED", `Flow rejected the submit: ${newError}`, false, false);
+      if (newError) {
+        const classified = classifyFlowError(newError);
+        if (classified) throw flowError(classified.code, classified.message, classified.retryable, false);
+        throw flowError("FLOW_SUBMIT_REJECTED", `Flow rejected the submit: ${newError}`, false, false);
+      }
       throw flowError("FLOW_SUBMIT_UNCONFIRMED", `Flow did not confirm the trusted submit within 30 seconds (click delivered: ${Boolean(activation.clickDelivered)}). No render wait or download was started.`, false, true);
     }
     return {
@@ -472,6 +488,11 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
       const fresh = collectNativeMedia().filter(item => !before.includes(item.id || `title:${item.title}`) && !item.title.startsWith("fm-") && (!kind || item.kind === kind));
       const failed = fresh.filter(item => item.failed);
       if (failed.length) {
+        const failureDetails = failed[0]?.failureReason || "";
+        const classified = classifyFlowError(failureDetails);
+        if (classified && !classified.retryable) {
+          throw flowError(classified.code, classified.message, false, false);
+        }
         const retryable = failed.find(item => item);
         if (retryable && retriesLeft > 0 && await retryNativeErrorTile(retryable)) {
           retriesLeft--;

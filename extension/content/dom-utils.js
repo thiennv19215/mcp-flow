@@ -78,6 +78,53 @@ function flowError(code, message, retryable = false, outcomeUnknown = false) {
   return error;
 }
 
+function classifyFlowError(rawText) {
+  if (!rawText || typeof rawText !== "string") return null;
+  const text = rawText.trim();
+
+  // 1. Quota / Credits
+  if (/(?:PUBLIC_ERROR_USER_QUOTA_REACHED|quota_exceeded|per_model_daily|tier_restricted|credit limit|insufficient credits|not enough credits|out of credits|daily generation limit)/i.test(text)) {
+    return {
+      category: "quota",
+      code: "FLOW_QUOTA_EXCEEDED",
+      message: `Flow quota/credits exceeded: ${text}`,
+      retryable: false,
+    };
+  }
+
+  // 2. Unusual Activity / Captcha / Bot Detection
+  if (/(?:PUBLIC_ERROR_UNUSUAL_ACTIVITY|UNUSUAL_ACTIVITY|bot_detected|captcha_failed|unusual activity|extensions that modify the page|suspicious activity)/i.test(text)) {
+    return {
+      category: "captcha",
+      code: "FLOW_UNUSUAL_ACTIVITY",
+      message: `Flow detected unusual activity or requires captcha verification: "${text}". Automatic retries halted to protect your account. Please complete verification directly on the Flow tab.`,
+      retryable: false,
+    };
+  }
+
+  // 3. Safety / Policy Violation
+  if (/(?:SEXUALLY_EXPLICIT|CHILD_SAFETY|CONTENT_BLOCKED|policy violation|safety guidelines|harmful content|unable to generate this prompt)/i.test(text)) {
+    return {
+      category: "policy",
+      code: "FLOW_POLICY_VIOLATION",
+      message: `Flow safety policy blocked this generation: ${text}. Retrying with the same prompt will fail.`,
+      retryable: false,
+    };
+  }
+
+  // 4. Rate limit
+  if (/(?:RATE_LIMIT|RESOURCE_EXHAUSTED|too many requests|try again in a few moments)/i.test(text)) {
+    return {
+      category: "rate_limit",
+      code: "FLOW_RATE_LIMIT",
+      message: `Flow rate limited: ${text}. Please wait before submitting again.`,
+      retryable: true,
+    };
+  }
+
+  return null;
+}
+
 function flowButton(name, root = document) {
   return [...root.querySelectorAll('button,[role="button"]')].find(el =>
     visible(el) && matchesName(semanticActionText(el).replace(/\s+/g, " ").trim(), name, null, true));
