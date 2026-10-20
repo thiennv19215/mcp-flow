@@ -12,6 +12,12 @@
     return tune || root.flowButton?.("Settings trigger");
   }
 
+  function flowComposerRoot() {
+    const editor = document.querySelector(".ProseMirror[contenteditable='true']");
+    return editor?.closest("flow-base-prompt-box, .flow-composer, form, [class*='composer']") ||
+      [...document.querySelectorAll("flow-base-prompt-box, .flow-composer, [class*='composer']")].find(el => root.visible?.(el)) || null;
+  }
+
   const OPTION_ALIASES = {
     video: ["video", "clip"],
     image: ["image", "hình ảnh", "ảnh", "photo"],
@@ -296,9 +302,30 @@
     throw root.flowError("FLOW_OPTION_SELECTION_FAILED", `Flow did not confirm that "${name}" was selected. Nothing was submitted.", true`);
   }
 
-  async function chooseNativeVariantCount(count) {
+  async function chooseNativeVariantCount(count, options = {}) {
     const variants = Math.max(1, Math.min(4, Number(count) || 1));
     const name = `x${variants}`;
+    const composer = options.composerOnly ? flowComposerRoot() : null;
+    if (composer) {
+      const modelButton = findModelPickerButton(composer);
+      const currentName = normalizeModelLabel(modelButton?.innerText || modelButton?.textContent || root.accessibleName?.(modelButton) || "");
+      const currentCount = currentName.match(/(?:^|\s)x([1-4])(?:\s|$)/)?.[1];
+      if (currentCount === String(variants)) return variants;
+      const countControl = [...composer.querySelectorAll('[role="radio"],[role="option"],[role="tab"],button,[role="button"]')]
+        .find(el => root.visible?.(el) && !isNavControl(el) &&
+          new RegExp(`^(?:x${variants}|${variants}|${variants}\\s+(?:ảnh|hình ảnh|video|kết quả))$`, "i")
+            .test(normalizeModelLabel(root.accessibleName?.(el) || el.innerText || el.textContent || "")));
+      if (!countControl) {
+        throw root.flowError("FLOW_VARIANT_OPTION_MISSING", `Flow's composer does not expose ${name}; no generation was submitted.`, true);
+      }
+      countControl.click();
+      await root.wait?.(350);
+      const updatedName = normalizeModelLabel(modelButton?.innerText || modelButton?.textContent || root.accessibleName?.(modelButton) || "");
+      if (!new RegExp(`(?:^|\\s)x${variants}(?:\\s|$)`).test(updatedName) && !nativeRadioSelected(countControl)) {
+        throw root.flowError("FLOW_VARIANT_SELECTION_UNCONFIRMED", `Flow did not confirm ${name} in its composer. Nothing was submitted.`, true);
+      }
+      return variants;
+    }
     await openFlowSettings();
     let option = flowRadio(name) || flowOption(name);
     if (!option) throw root.flowError("FLOW_VARIANT_OPTION_MISSING", `Flow did not show the ${name} output option. Nothing was submitted.`, true);
@@ -358,12 +385,14 @@
     return [...new Set(list)];
   }
 
-  function findModelPickerButton() {
-    let button = root.flowButton?.("Select model family") || root.flowButton?.("Model") || root.flowButton?.("Model family") ||
-      root.flowButton?.("Chọn dòng mô hình") || root.flowButton?.("Chọn mô hình") || root.flowButton?.("Dòng mô hình") || root.flowButton?.("Mô hình");
+  function findModelPickerButton(scope = document) {
+    let button = root.flowButton?.("Select model family", scope) || root.flowButton?.("Model", scope) || root.flowButton?.("Model family", scope) ||
+      root.flowButton?.("Chọn dòng mô hình", scope) || root.flowButton?.("Chọn mô hình", scope) || root.flowButton?.("Dòng mô hình", scope) || root.flowButton?.("Mô hình", scope);
     if (button) return button;
 
-    const panel = flowSettingsPanelVisible() ? (document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane') || document) : document;
+    const panel = scope === document && flowSettingsPanelVisible()
+      ? (document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane') || document)
+      : scope;
     const candidates = [...panel.querySelectorAll('button, [role="button"], [role="combobox"]')].filter(el => root.visible?.(el) && !isNavControl(el));
 
     const isExcluded = el => {
@@ -389,8 +418,11 @@
     const legacyImage = type === "image" && /^\s*(nano banana( 2)?|latest)?\s*$/i.test(model);
     const aliases = getModelAliases(model);
 
-    await openFlowSettings();
     let button = findModelPickerButton();
+    if (!button) {
+      await openFlowSettings();
+      button = findModelPickerButton();
+    }
     if (!button) {
       const deadline = Date.now() + 2500;
       while (Date.now() < deadline && !button) {
@@ -503,21 +535,31 @@
   async function prepareNativeImageSettings(payload, variants) {
     const aspectRatio = payload?.aspectRatio || payload?.aspect_ratio;
     const requestedModel = payload?.model || "Nano Banana";
+    const composer = flowComposerRoot();
+    const composerModel = composer && findModelPickerButton(composer);
+    const modernComposer = Boolean(composer && composerModel);
 
-    await openFlowSettings();
-    await chooseRadio("Image");
-    if (aspectRatio) await chooseAspectRatio(aspectRatio);
-
-    if (requestedModel) {
-      await chooseNativeModel(requestedModel, "image");
+    if (!modernComposer) {
       await openFlowSettings();
       await chooseRadio("Image");
       if (aspectRatio) await chooseAspectRatio(aspectRatio);
     }
 
-    await chooseNativeVariantCount(variants);
+    if (requestedModel) {
+      await chooseNativeModel(requestedModel, "image");
+      if (!modernComposer) {
+        await openFlowSettings();
+        await chooseRadio("Image");
+        if (aspectRatio) await chooseAspectRatio(aspectRatio);
+      }
+    }
+
+    if (modernComposer && aspectRatio && root.normalizeAspectRatio?.(aspectRatio) !== "16:9") {
+      throw root.flowError("FLOW_ASPECT_RATIO_UNAVAILABLE", "This Flow composer does not expose aspect-ratio controls yet. Choose 16:9 or use the standard Flow settings page. Nothing was submitted.", true);
+    }
+    await chooseNativeVariantCount(variants, { composerOnly: modernComposer });
     const settingsCredits = await (root.FlowEditor?.waitForGenerationCreditQuote?.(2000) || root.waitForGenerationCreditQuote?.(2000));
-    await closeFlowSettings();
+    if (!modernComposer) await closeFlowSettings();
     return settingsCredits;
   }
 
