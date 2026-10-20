@@ -163,6 +163,7 @@ function nativeRadioSelected(radio) {
     control.getAttribute("aria-selected") === "true" ||
     control.getAttribute("data-selected") === "true" ||
     control.getAttribute("data-state") === "checked" ||
+    control.getAttribute("data-state") === "active" ||
     [...control.classList].some(className => /(?:^|[-_])(?:checked|selected|active|activated)(?:$|[-_])/i.test(className))
   ) || Boolean(stateControl.querySelector('input[type="radio"]:checked,input[type="checkbox"]:checked,[aria-checked="true"],[aria-pressed="true"],[aria-selected="true"],[data-state="checked"]'));
 }

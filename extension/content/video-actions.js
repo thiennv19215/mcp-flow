@@ -69,8 +69,6 @@
       const requestedModel = payload.model;
       const modeName = framesMode ? "Frames" : "Ingredients";
 
-      const durationStr = payload.duration ? (String(payload.duration).endsWith("s") ? String(payload.duration) : `${payload.duration}s`) : null;
-
       await openFlowSettings();
       await chooseRadio("Video");
       if (payload.aspectRatio) await chooseRadio(payload.aspectRatio);
@@ -78,12 +76,15 @@
       // Flow may dismiss the settings popover as soon as a model is selected.
       // Apply the model before the settings that depend on it, then reopen and
       // reapply those settings against the model's actual controls.
-      await chooseNativeModel(requestedModel, type);
-      await openFlowSettings();
-      await chooseRadio("Video");
-      if (payload.aspectRatio) await chooseRadio(payload.aspectRatio);
-      if (durationStr) await chooseRadio(durationStr);
-      if (payload.resolution) await chooseRadio(String(payload.resolution));
+      if (requestedModel) {
+        await chooseNativeModel(requestedModel, type);
+        await openFlowSettings();
+        await chooseRadio("Video");
+        if (payload.aspectRatio) await chooseRadio(payload.aspectRatio);
+      }
+
+      if (payload.duration) await chooseDuration(payload.duration);
+      if (payload.resolution) await chooseResolution(payload.resolution);
       await chooseNativeVariantCount(variants);
 
       // Mode must be the final model-dependent setting. Confirm the selected

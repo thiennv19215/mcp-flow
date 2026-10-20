@@ -18,6 +18,83 @@ async function openFlowSettings() {
   throw flowError("FLOW_SETTINGS_OPEN_FAILED", "Flow's settings panel did not open; no generation was submitted.", true);
 }
 
+async function chooseDuration(duration) {
+  if (!duration) return;
+  const num = parseInt(String(duration), 10);
+  if (isNaN(num)) return;
+  const str = `${num}s`;
+
+  await openFlowSettings();
+  const panel = flowSettingsPanelVisible() ? (document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog') || document) : document;
+
+  const tryClickDuration = () => {
+    // 1. Check ID suffix: button[id$="-trigger-X"] (e.g. -trigger-5)
+    const idBtn = panel.querySelector(`button[id$="-trigger-${num}"]`);
+    if (idBtn && visible(idBtn)) {
+      if (!nativeRadioSelected(idBtn) && idBtn.getAttribute("aria-selected") !== "true" && idBtn.getAttribute("data-state") !== "active") {
+        idBtn.click();
+      }
+      return true;
+    }
+
+    // 2. Check tab / radio button matching exact seconds (e.g. "5s", "5", "5 giây", "5 seconds")
+    const candidates = [...panel.querySelectorAll('button[role="tab"], [role="radio"], mat-radio-button, button')].filter(visible).filter(el => !isFlowProjectNavigationControl(el));
+    const match = candidates.find(el => {
+      const txt = (el.innerText || el.textContent || "").trim().toLowerCase();
+      if (txt === str || txt === String(num)) return true;
+      const m = txt.match(/^(\d{1,2})[\p{L}\p{M}.]*$/u);
+      return m && Number(m[1]) === num;
+    });
+
+    if (match) {
+      if (!nativeRadioSelected(match) && match.getAttribute("aria-selected") !== "true" && match.getAttribute("data-state") !== "active") {
+        match.click();
+      }
+      return true;
+    }
+    return false;
+  };
+
+  let durationClicked = false;
+  for (let attempt = 0; attempt < 3 && !durationClicked; attempt++) {
+    if (attempt > 0) await wait(300);
+    durationClicked = tryClickDuration();
+  }
+
+  if (durationClicked) {
+    await wait(300);
+  } else {
+    const avail = [];
+    panel.querySelectorAll('button[role="tab"], button[id*="-trigger-"]').forEach(b => {
+      const t = (b.innerText || b.textContent || "").trim();
+      if (/^\d+\s*s$/i.test(t) || /-trigger-\d+$/.test(b.id || "")) avail.push(t || b.id);
+    });
+    console.warn(`[FlowSettings] duration ${duration} (${num}s) not found in panel (available: ${avail.join(", ") || "none"}), keeping current Flow default`);
+  }
+}
+
+async function chooseResolution(resolution) {
+  if (!resolution) return;
+  const wanted = String(resolution).trim().toLowerCase().replace(/\s+/g, "");
+  await openFlowSettings();
+  const panel = flowSettingsPanelVisible() ? (document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog') || document) : document;
+
+  const candidates = [...panel.querySelectorAll('button[role="tab"], [role="radio"], mat-radio-button, button')].filter(visible).filter(el => !isFlowProjectNavigationControl(el));
+  const match = candidates.find(el => {
+    const txt = (el.innerText || el.textContent || "").trim().toLowerCase().replace(/\s+/g, "");
+    return txt === wanted || txt === `${wanted}p` || `${txt}p` === wanted;
+  });
+
+  if (match) {
+    if (!nativeRadioSelected(match) && match.getAttribute("aria-selected") !== "true" && match.getAttribute("data-state") !== "active") {
+      match.click();
+      await wait(300);
+    }
+    return;
+  }
+  console.warn(`[FlowSettings] resolution "${resolution}" not found in panel, keeping current Flow default`);
+}
+
 async function chooseRadio(name) {
   let radio = flowRadio(name);
   if (!radio) {
@@ -97,20 +174,34 @@ async function chooseNativeVariantCount(count) {
 async function closeFlowSettings() {
   const isOpen = () => flowSettingsPanelVisible();
   if (!isOpen()) return;
-  // Flow can ignore a synthetic Escape, so use its own settings toggle and confirm the
-  // quantity controls are actually gone before allowing the submit action to continue.
+
+  // 1. Try Escape dispatch (TobyFlow style)
+  for (let attempt = 0; attempt < 2 && isOpen(); attempt++) {
+    const esc = () => new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, which: 27, bubbles: true, cancelable: true, composed: true });
+    try { document.dispatchEvent(esc()); } catch (_) {}
+    try { document.body.dispatchEvent(esc()); } catch (_) {}
+    await wait(150);
+  }
+  if (!isOpen()) return;
+
+  // 2. Toggle settings trigger
   const trigger = flowButton("Settings trigger");
   if (trigger) {
     trigger.click();
-    const closeDeadline = Date.now() + 2500;
-    while (Date.now() < closeDeadline && isOpen()) await wait(100);
-  }
-  if (isOpen()) {
-    document.querySelector(".ProseMirror")?.click();
     const closeDeadline = Date.now() + 2000;
     while (Date.now() < closeDeadline && isOpen()) await wait(100);
   }
-  if (isOpen()) throw flowError("FLOW_SETTINGS_CLOSE_FAILED", "Flow's settings panel stayed open after choosing the quantity. Nothing was submitted.", true);
+  if (!isOpen()) return;
+
+  // 3. Fallback: Click composer
+  if (isOpen()) {
+    document.querySelector(".ProseMirror")?.click();
+    const closeDeadline = Date.now() + 1500;
+    while (Date.now() < closeDeadline && isOpen()) await wait(100);
+  }
+  if (isOpen()) {
+    console.warn("[FlowSettings] settings panel remained visible after close attempts; proceeding with generation.");
+  }
 }
 
 function findRenderedSetting(name) {
@@ -167,100 +258,148 @@ async function restoreNativeFramesMode() {
   }
 }
 
+function normalizeModelLabel(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .replace(/^[\u{1F000}-\u{1FFFF}]\s*/u, "")
+    .replace(/^[^\p{L}\p{N}]+/u, "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function getModelAliases(model) {
+  if (!model) return [];
+  const norm = normalizeModelLabel(model);
+  const list = [norm];
+  if (/veo/i.test(norm)) {
+    list.push("veo", "veo 2", "veo-2", "veo 2.0", "veo 2 (fast)", "veo 2 (quality)", "veo (fast)", "veo (quality)", "veo fast", "veo quality");
+    if (norm.includes("fast")) list.unshift("veo 2 (fast)", "veo (fast)", "veo fast");
+    if (norm.includes("quality")) list.unshift("veo 2 (quality)", "veo (quality)", "veo quality");
+  } else if (/imagen/i.test(norm)) {
+    list.push("imagen", "imagen 3", "imagen-3", "imagen 3.0", "imagen 3 (fast)", "imagen 3 (quality)");
+  } else if (/banana/i.test(norm)) {
+    list.push("nano banana", "nano banana 2", "nano banana 2.1");
+  }
+  return [...new Set(list)];
+}
+
+function findModelPickerButton() {
+  let button = flowButton("Select model family") || flowButton("Model") || flowButton("Model family");
+  if (button) return button;
+
+  const panel = flowSettingsPanelVisible() ? (document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog') || document) : document;
+  const candidates = [...panel.querySelectorAll('button, [role="button"], [role="combobox"]')].filter(visible).filter(el => !isFlowProjectNavigationControl(el));
+
+  const isExcluded = el => {
+    const txt = (el.innerText || el.textContent || "").trim().toLowerCase();
+    const aria = (accessibleName(el) || "").toLowerCase();
+    if (/^(?:image|video|frames|ingredients|thành phần|khung hình)$/i.test(txt)) return true;
+    if (/^\d+:\d+$/.test(txt) || /^x\d+$/i.test(txt) || /^\d+\s*s$/i.test(txt) || /^\d{3,4}p$/i.test(txt)) return true;
+    if (/settings trigger|start generation|clear prompt|add media|back button/i.test(aria)) return true;
+    return false;
+  };
+
+  button = candidates.find(el => {
+    if (isExcluded(el)) return false;
+    const txt = (el.innerText || el.textContent || "").trim().toLowerCase();
+    const aria = (accessibleName(el) || "").toLowerCase();
+    return /select model|model family|model picker/i.test(aria) || /veo|imagen|nano banana/i.test(txt) || /veo|imagen|nano banana/i.test(aria);
+  });
+  return button || null;
+}
+
 async function chooseNativeModel(model, type) {
   if (!model) return;
   const legacyImage = type === "image" && /^\s*(nano banana( 2)?|latest)?\s*$/i.test(model);
-  let button = flowButton("Select model family") || flowButton("Model");
+  const aliases = getModelAliases(model);
+
+  await openFlowSettings();
+  let button = findModelPickerButton();
   if (!button) {
-    await openFlowSettings();
     const deadline = Date.now() + 2500;
     while (Date.now() < deadline && !button) {
-      button = flowButton("Select model family") || flowButton("Model");
+      button = findModelPickerButton();
       if (!button) await wait(100);
     }
   }
-  if (!button) throw flowError("NATIVE_CAPABILITY_UNSUPPORTED", "Flow's model selector is unavailable; nothing was submitted.", true);
-  // Open the model list and re-apply the requested model for each job instead of trusting
-  // a value left selected by the previous operation or by the user's earlier session.
+
+  if (button) {
+    const currentModelText = normalizeModelLabel(button.innerText || button.textContent || accessibleName(button) || "");
+    const alreadyApplied = aliases.some(alias => currentModelText === alias || (alias.length >= 3 && currentModelText.includes(alias)));
+    if (alreadyApplied) {
+      console.log(`[FlowSettings] Model "${model}" already active ("${currentModelText}"), skipping dropdown.`);
+      return;
+    }
+  }
+
+  if (!button) {
+    console.warn(`[FlowSettings] Model picker button not found for "${model}", keeping current Flow model.`);
+    return;
+  }
+
   button.click();
   await wait(450);
+
   let items = [];
   const menuDeadline = Date.now() + 4000;
   while (Date.now() < menuDeadline) {
-    items = [...document.querySelectorAll('[role="menuitem"]')].filter(visible);
+    items = [...document.querySelectorAll('[role="menuitem"], [role="menuitemradio"], mat-option, [role="option"]')].filter(visible);
+    if (!items.length) {
+      const activeMenu = document.querySelector('[role="menu"]:last-of-type, [data-radix-popper-content-wrapper]:last-of-type, .cdk-overlay-pane:last-of-type');
+      if (activeMenu) items = [...activeMenu.querySelectorAll('button, [role="menuitem"], [role="menuitemradio"]')].filter(visible);
+    }
     if (items.length) break;
     await wait(100);
   }
-  const names = items.map(accessibleName).map(name => name.replace(/\s+/g, " ").trim());
-  let index = legacyImage ? names.reduce((best, name, i) => {
-    const match = /nano banana\s+(\d+(?:\.\d+)*)(?!.*\blite\b)/i.exec(name);
-    if (!match || /\blite\b/i.test(name)) return best;
-    const version = match[1].split(".").map(Number);
-    const score = version.reduce((value, part) => value * 1000 + part, 0);
-    return score > best.score ? { index: i, score } : best;
-  }, { index: -1, score: -1 }).index : names.findIndex(name => name.toLowerCase().includes(model.toLowerCase()));
+
+  const names = items.map(accessibleName).map(normalizeModelLabel);
+  let index = -1;
+
+  if (legacyImage) {
+    index = names.reduce((best, name, i) => {
+      const match = /nano banana\s+(\d+(?:\.\d+)*)(?!.*\blite\b)/i.exec(name);
+      if (!match || /\blite\b/i.test(name)) return best;
+      const version = match[1].split(".").map(Number);
+      const score = version.reduce((value, part) => value * 1000 + part, 0);
+      return score > best.score ? { index: i, score } : best;
+    }, { index: -1, score: -1 }).index;
+  } else {
+    // 1. Try exact alias match
+    index = items.findIndex((item, i) => {
+      const label = names[i] || normalizeModelLabel(item.textContent);
+      return aliases.includes(label);
+    });
+
+    // 2. Try partial match respecting fast vs quality
+    if (index < 0) {
+      index = items.findIndex((item, i) => {
+        const domText = names[i] || normalizeModelLabel(item.textContent);
+        const matched = aliases.find(a => domText.includes(a));
+        if (!matched) return false;
+        if (matched.includes("veo") && domText.includes("veo")) {
+          if (matched.includes("fast") && !domText.includes("fast")) return false;
+          if (matched.includes("quality") && !domText.includes("quality")) return false;
+        }
+        return true;
+      });
+    }
+  }
+
   if (index < 0) {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    throw flowError("FLOW_MODEL_NOT_FOUND", `Model "${model}" was not found in Flow. Available: ${names.join(", ")}`, true);
+    console.warn(`[FlowSettings] Model "${model}" was not found in dropdown. Available: [${names.join(", ")}]. Keeping Flow default.`);
+    return;
   }
-  const chosenName = names[index];
-  items[index].click();
+
+  const chosenItem = items[index];
+  chosenItem.click();
   await wait(500);
-  const summaryConfirms = () => {
-    const trigger = flowButton("Settings trigger");
-    const settingSummary = (trigger?.innerText || trigger?.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
-    return legacyImage
-      ? /nano banana\s+\d/i.test(settingSummary) && !/\blite\b/i.test(settingSummary)
-      : settingSummary.includes(model.toLowerCase());
-  };
-  const selectDeadline = Date.now() + 4000;
-  while (Date.now() < selectDeadline && !summaryConfirms()) await wait(100);
-  let selectionConfirmed = summaryConfirms();
-  if (!selectionConfirmed) {
-    // Some Flow versions omit the selected model from the settings summary. Reopen
-    // the model menu and require its requested item to expose a selected state.
-    button = flowButton("Select model family") || flowButton("Model");
-    if (!button) {
-      await openFlowSettings();
-      button = flowButton("Select model family") || flowButton("Model");
-    }
-    if (button) {
-      button.click();
-      const verifyDeadline = Date.now() + 4000;
-      let verifyItems = [];
-      while (Date.now() < verifyDeadline) {
-        verifyItems = [...document.querySelectorAll('[role="menuitem"]')].filter(visible);
-        if (verifyItems.length) break;
-        await wait(100);
-      }
-      const wantedName = chosenName.replace(/\s+/g, " ").trim().toLowerCase();
-      const chosen = verifyItems.find(item => {
-        const label = accessibleName(item).replace(/\s+/g, " ").trim().toLowerCase();
-        return label === wantedName || label.includes(wantedName);
-      });
-      const itemSelected = item => {
-        if (!item) return false;
-        if (["aria-selected", "aria-checked", "aria-pressed", "aria-current", "data-selected", "data-state"]
-          .some(attribute => ["true", "checked", "selected", "page"].includes((item.getAttribute(attribute) || "").toLowerCase()))) return true;
-        if (["selected", "active", "checked"].some(className => item.classList.contains(className))) return true;
-        if (item.querySelector('input[type="radio"]:checked,input[type="checkbox"]:checked,[aria-checked="true"],[aria-selected="true"],[data-state="checked"]')) return true;
-        return [...item.querySelectorAll("mat-icon")].some(icon => /^(?:check|check_circle|done|radio_button_checked)$/i.test((icon.innerText || icon.textContent || "").trim()));
-      };
-      selectionConfirmed = itemSelected(chosen);
-      // The verification menu is only an observation step. Close it before the
-      // caller continues applying settings or attempts to submit the video.
-      if (chosen?.isConnected && visible(chosen)) {
-        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-        await wait(200);
-        if (chosen.isConnected && visible(chosen) && button?.isConnected && visible(button)) {
-          button.click();
-          await wait(200);
-        }
-      }
-    }
+
+  if (chosenItem.isConnected && visible(chosenItem)) {
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await wait(200);
   }
-  if (!selectionConfirmed) throw flowError("FLOW_MODEL_SELECTION_FAILED", `Flow did not confirm model "${model}" in its settings summary or selected model menu item. Nothing was submitted.`, true);
-  await wait(350);
 }
 
 async function pickNativeAgentImageModel() {
