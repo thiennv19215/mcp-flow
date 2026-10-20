@@ -169,8 +169,37 @@
     return false;
   }
 
+  function findTileErrorElement(tile) {
+    if (!tile) return null;
+    const explicit = (typeof root.flowQuery === "function" ? root.flowQuery("tiles.error", tile, { checkVisible: false }) : null) ||
+      tile.querySelector("flow-error-tile, [class*='error-tile'], [class*='error'], [class*='failed'], [class*='warning-tile'], [role='alert']");
+    if (explicit) return explicit;
+
+    const errorIcon = [...tile.querySelectorAll("mat-icon, .mat-icon, .google-symbols")].find(i => {
+      const txt = (i.textContent || "").trim().toLowerCase();
+      return /^(?:error|error_outline|warning|report|report_problem|refresh)$/i.test(txt);
+    });
+    if (errorIcon) return errorIcon.closest('button, [role="button"], div, p') || errorIcon;
+
+    const retryBtn = [...tile.querySelectorAll('button, [role="button"]')].find(b => {
+      const label = (b.getAttribute("aria-label") || b.innerText || b.textContent || "").trim();
+      return /^(?:retry|try again|thử lại|tạo lại)$/i.test(label);
+    });
+    if (retryBtn) return retryBtn;
+
+    const tileText = (tile.innerText || tile.textContent || "").toLowerCase();
+    if (/(?:failed to generate|generation failed|could not generate|something went wrong|try again|không thể tạo|không tạo được|thất bại|đã xảy ra lỗi|thử lại|bị từ chối)/i.test(tileText)) {
+      return tile;
+    }
+
+    return null;
+  }
+
   function isTileBusy(tile) {
     if (!tile) return false;
+    const hasError = Boolean(findTileErrorElement(tile));
+    if (hasError) return false;
+
     const pct = getTileProgressText(tile);
     const progressBar = hasTileProgressBar(tile);
     const spinner = hasTileSpinner(tile);
@@ -180,17 +209,13 @@
       Boolean(tile.querySelector('flow-progress-tile, flow-rendering-tile, flow-generating-tile, flow-placeholder-tile, [class*="rendering"], [class*="generating"], [class*="placeholder"]'));
     const hasActiveProgress = Boolean(pct || progressBar || spinner || genText || ariaBusy || placeholderTile);
     const rendered = hasRenderedMedia(tile);
-    const hasError = (typeof root.flowQuery === "function" && Boolean(root.flowQuery("tiles.error", tile, { checkVisible: false }))) ||
-      Boolean(tile.querySelector("flow-error-tile, [class*='error-tile']"));
 
-    return hasActiveProgress || (!rendered && !hasError);
+    return hasActiveProgress || !rendered;
   }
 
   function isTileMediaReady(tile) {
     if (!tile) return false;
-    const hasError = (typeof root.flowQuery === "function" && Boolean(root.flowQuery("tiles.error", tile, { checkVisible: false }))) ||
-      Boolean(tile.querySelector("flow-error-tile, [class*='error-tile']"));
-    if (hasError) return false;
+    if (Boolean(findTileErrorElement(tile))) return false;
     return !isTileBusy(tile) && hasRenderedMedia(tile);
   }
 
@@ -198,18 +223,18 @@
     const tileContainers = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", document, { checkVisible: false }) : null) ||
       [...document.querySelectorAll("flow-grid-tile-container")];
     return tileContainers.map(tile => {
-      const busy = isTileBusy(tile);
-      const mediaReady = isTileMediaReady(tile);
-      const error = (typeof root.flowQuery === "function" ? root.flowQuery("tiles.error", tile, { checkVisible: false }) : null) ||
-        tile.querySelector("flow-error-tile, [class*='error-tile']");
+      const error = findTileErrorElement(tile);
+      const failed = Boolean(error);
+      const busy = !failed && isTileBusy(tile);
+      const mediaReady = !failed && isTileMediaReady(tile);
       const kind = (typeof root.flowQuery === "function" && root.flowQuery("tiles.video", tile, { checkVisible: false }))
         ? (tile.querySelector("flow-scene-tile") ? "scene" : "video")
         : (tile.querySelector("flow-scene-tile") ? "scene" : tile.querySelector("flow-video-tile") ? "video" : "image");
       const id = root.mediaId?.(tile);
       const title = (tile.getAttribute("aria-label") || tile.getAttribute("title") || "").trim();
-      const failureReason = error ? (error.innerText || error.textContent || "").replace(/\s+/g, " ").trim() : undefined;
+      const failureReason = error ? (error.innerText || error.textContent || (typeof error.getAttribute === "function" ? error.getAttribute("aria-label") : "") || "Flow generation failed").replace(/\s+/g, " ").trim() : undefined;
       const progress = getTileProgressText(tile) || (busy ? (hasTileGenerationText(tile) ? "Đang render..." : "") : "");
-      return { ...(id ? { id } : {}), title, busy, mediaReady, failed: Boolean(error), failureReason, kind, progress, element: tile };
+      return { ...(id ? { id } : {}), title, busy, mediaReady, failed, failureReason, kind, progress, element: tile };
     });
   }
 

@@ -876,3 +876,73 @@ test('FlowTiles: isTileBusy and isTileMediaReady correctly distinguish rendering
   assert.equal(isTileBusy(finishedVideoTile), false, 'Finished video tile must NOT be busy');
   assert.equal(isTileMediaReady(finishedVideoTile), true, 'Finished video tile MUST be mediaReady');
 });
+
+test('FlowTiles: Error tile with retry button or Vietnamese failure text is immediately marked failed and not busy', () => {
+  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const tilesSource = readFileSync(new URL('../extension/content/providers/flow/FlowTiles.js', import.meta.url), 'utf8');
+
+  const ctx = vm.createContext({
+    globalThis: {},
+    window: {},
+    document: { querySelectorAll: () => [], querySelector: () => null },
+    location: { href: 'https://flow.google.com/u/0/?hl=vi' },
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+    accessibleName: el => el.innerText || '',
+  });
+  vm.runInContext(domUtilsSource, ctx);
+  vm.runInContext(tilesSource, ctx);
+
+  const { isTileBusy, isTileMediaReady, collectNativeMedia } = ctx.globalThis.FlowTiles;
+
+  const retryTile = {
+    innerText: 'Thử lại',
+    textContent: 'Thử lại',
+    getAttribute: attr => attr === 'aria-label' ? 'Lỗi tạo ảnh' : null,
+    querySelector: () => null,
+    querySelectorAll: sel => sel.includes('button') ? [{
+      getAttribute: a => a === 'aria-label' ? 'Thử lại' : null,
+      innerText: 'Thử lại',
+    }] : [],
+  };
+
+  assert.equal(isTileBusy(retryTile), false, 'Tile with retry button must NOT be marked busy');
+  assert.equal(isTileMediaReady(retryTile), false, 'Tile with retry button must NOT be marked mediaReady');
+
+  ctx.document.querySelectorAll = sel => sel.includes('flow-grid-tile-container') ? [retryTile] : [];
+  const media = collectNativeMedia();
+  assert.equal(media.length, 1);
+  assert.equal(media[0].failed, true, 'Tile with retry button must be marked failed: true');
+  assert.equal(media[0].busy, false, 'Tile with retry button must have busy: false');
+});
+
+test('FlowEditor: currentFlowSubmitErrors detects Angular MDC snackbars and Vietnamese failure toasts', () => {
+  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const editorSource = readFileSync(new URL('../extension/content/providers/flow/FlowEditor.js', import.meta.url), 'utf8');
+
+  const snackbarEl = {
+    innerText: 'Đã xảy ra lỗi. Vui lòng thử lại sau',
+    textContent: 'Đã xảy ra lỗi. Vui lòng thử lại sau',
+    getBoundingClientRect: () => ({ width: 300, height: 48 }),
+  };
+
+  const ctx = vm.createContext({
+    globalThis: {},
+    window: {},
+    document: {
+      querySelectorAll: sel => {
+        if (sel.includes('mat-snack-bar-container') || sel.includes('.mat-mdc-snack-bar-label')) return [snackbarEl];
+        return [];
+      },
+      querySelector: () => null,
+    },
+    location: { href: 'https://flow.google.com/u/0/?hl=vi' },
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+    accessibleName: el => el.innerText || '',
+  });
+  vm.runInContext(domUtilsSource, ctx);
+  vm.runInContext(editorSource, ctx);
+
+  const errors = ctx.globalThis.currentFlowSubmitErrors();
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0], 'Đã xảy ra lỗi. Vui lòng thử lại sau');
+});

@@ -401,11 +401,33 @@
   }
 
   function currentFlowSubmitErrors() {
-    const errorWords = /(?:error|failed|could not|couldn't|unable|insufficient|not enough|quota|credit limit|try again|unusual activity|suspicious activity|safety guidelines|blocked|something went wrong|lỗi|không thể|thất bại|không đủ|hết hạn mức|thử lại|hoạt động bất thường|nguyên tắc an toàn|đã bị chặn|đã xảy ra lỗi)/i;
-    return [...document.querySelectorAll('[role="alert"], [aria-live="assertive"], mat-error, .mat-mdc-form-field-error, snack-bar-container, .cdk-overlay-pane [class*="error"], .cdk-overlay-pane [class*="alert"]')]
+    const errorWords = /(?:error|failed|could not|couldn't|unable|insufficient|not enough|quota|credit limit|daily limit|try again|unusual activity|suspicious activity|safety guidelines|policy violation|blocked|something went wrong|lỗi|không thể|thất bại|không đủ|hết hạn mức|hạn mức|hạn ngạch|thử lại|hoạt động bất thường|nguyên tắc an toàn|chính sách|đã bị chặn|đã xảy ra lỗi|đã xảy ra sự cố|sự cố|vui lòng thử lại|không an toàn|từ chối)/i;
+    const selectors = [
+      '[role="alert"]',
+      '[role="status"]',
+      '[aria-live="assertive"]',
+      '[aria-live="polite"]',
+      'mat-error',
+      '.mat-mdc-form-field-error',
+      'mat-snack-bar-container',
+      '.mat-mdc-snack-bar-container',
+      '.mat-mdc-snack-bar-label',
+      'simple-snack-bar',
+      'flow-banner',
+      'flow-toast',
+      'flow-credit-limit-alert',
+      '[class*="snackbar"]',
+      '[class*="toast"]',
+      '[class*="banner"]',
+      '.cdk-overlay-pane [class*="error"]',
+      '.cdk-overlay-pane [class*="alert"]',
+      '.cdk-overlay-pane mat-snack-bar-container',
+      '.cdk-overlay-pane'
+    ];
+    return [...document.querySelectorAll(selectors.join(","))]
       .filter(el => root.visible?.(el))
       .map(el => (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim())
-      .filter(text => text && errorWords.test(text));
+      .filter(text => text && text.length < 500 && errorWords.test(text));
   }
 
   const FLOW_CREDIT_QUOTE_REGEX = /(?:\b(?:generating\s+)?will\s+use\s+([\d,]+(?:\.\d+)?)\s+credits?\b|(?:quá trình tạo\s+)?(?:sẽ\s+dùng|sẽ\s+sử\s+dụng|tiêu\s+tốn)\s+([\d,]+(?:\.\d+)?)\s+(?:tín\s+dụng|điểm\s+tín\s+dụng|credits?))/i;

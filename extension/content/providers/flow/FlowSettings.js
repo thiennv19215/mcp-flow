@@ -1,7 +1,12 @@
 (function (root) {
   "use strict";
 
-  const isNavControl = el => root.isFlowProjectNavigationControl?.(el) || false;
+  const isNavControl = el => {
+    if (!el || typeof el.closest !== "function") return false;
+    if (root.isFlowProjectNavigationControl?.(el)) return true;
+    if (el.closest('nav, [role="navigation"], header, [role="banner"], mat-toolbar, aside, mat-sidenav, flow-navigation, [class*="sidebar"], [class*="drawer"], flow-library, [class*="media-gallery"], [class*="media-list"]')) return true;
+    return false;
+  };
   const foldLabel = value => root.normalizeFlowUiText?.(value) || String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
 
   function flowSettingsTrigger() {
@@ -28,7 +33,7 @@
     frames: ["frames", "khung hình", "khung ảnh", "khung", "frame"],
   };
 
-  function flowRadio(name) {
+  function flowRadio(name, scope) {
     const wanted = foldLabel(name);
     const normalizedWanted = root.normalizeAspectRatio?.(wanted) || wanted;
     const aliases = OPTION_ALIASES[wanted] || (normalizedWanted ? [wanted, normalizedWanted] : [wanted]);
@@ -36,7 +41,7 @@
     const variantMatch = wanted.match(/^x([1-4])$/);
     const variantNum = variantMatch ? variantMatch[1] : null;
 
-    return [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"]')].find(el => {
+    const findIn = rootEl => [...rootEl.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"]')].find(el => {
       if (!root.visible?.(el) || isNavControl(el)) return false;
       const label = foldLabel(root.accessibleName?.(el));
       const inner = foldLabel(el.innerText || el.textContent || "");
@@ -58,9 +63,24 @@
 
       return root.matchesName?.(label, name, null, true) || root.matchesName?.(inner, name, null, true);
     });
+
+    if (scope) return findIn(scope);
+
+    // Prioritize settings panel / dialog overlay / composer container
+    const panel = document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane, mat-menu-panel');
+    const composer = flowComposerRoot();
+    if (panel) {
+      const match = findIn(panel);
+      if (match) return match;
+    }
+    if (composer) {
+      const match = findIn(composer);
+      if (match) return match;
+    }
+    return findIn(document);
   }
 
-  function flowOption(name) {
+  function flowOption(name, scope) {
     const expected = foldLabel(name);
     const normalizedExpected = root.normalizeAspectRatio?.(expected) || expected;
     const aliases = OPTION_ALIASES[expected] || (normalizedExpected ? [expected, normalizedExpected] : [expected]);
@@ -69,7 +89,7 @@
     const variantMatch = expected.match(/^x([1-4])$/);
     const variantNum = variantMatch ? variantMatch[1] : null;
 
-    return [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')].find(el => {
+    const findIn = rootEl => [...rootEl.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')].find(el => {
       const label = foldLabel(root.accessibleName?.(el));
       const inner = foldLabel(el.innerText || el.textContent || "");
       if (!root.visible?.(el) || el === settingsTrigger || isNavControl(el)) return false;
@@ -91,6 +111,20 @@
 
       return false;
     });
+
+    if (scope) return findIn(scope);
+
+    const panel = document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane, mat-menu-panel');
+    const composer = flowComposerRoot();
+    if (panel) {
+      const match = findIn(panel);
+      if (match) return match;
+    }
+    if (composer) {
+      const match = findIn(composer);
+      if (match) return match;
+    }
+    return findIn(document);
   }
 
   function nativeRadioSelected(radio) {
@@ -278,6 +312,9 @@
   }
 
   async function chooseRadio(name) {
+    if (!flowSettingsPanelVisible()) {
+      await openFlowSettings();
+    }
     let radio = flowRadio(name);
     if (!radio) {
       await openFlowSettings();

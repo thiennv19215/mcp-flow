@@ -316,9 +316,11 @@ async function waitForEnabledFlowButton(name, timeoutMs = 8000) {
 }
 
 function isFlowProjectNavigationControl(el) {
-  if (el.closest?.('nav,[role="navigation"]')) return true;
+  if (!el || typeof el.closest !== "function") return false;
+  if (el.closest('nav, [role="navigation"], header, [role="banner"], mat-toolbar, aside, mat-sidenav, flow-navigation, [class*="sidebar"], [class*="drawer"], flow-library, [class*="media-gallery"], [class*="media-list"]')) return true;
   for (let parent = el; parent && parent !== document.body; parent = parent.parentElement) {
-    if (/project navigation|điều hướng dự án/i.test(parent.getAttribute?.("aria-label") || "")) return true;
+    const aria = parent.getAttribute?.("aria-label") || "";
+    if (/project navigation|điều hướng dự án|thư viện|library|bộ sưu tập|tất cả nội dung|danh sách tệp/i.test(aria)) return true;
   }
   return false;
 }

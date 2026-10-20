@@ -316,6 +316,20 @@
             if (correlationEntry?.interfered) {
               throw this.error("FLOW_GENERATION_INTERFERENCE", "A trusted interaction changed the Flow composer before this generation request was observed. The result cannot be safely attributed; inspect the project before retrying.", false, true);
             }
+
+            const quotaAlert = root.checkFlowCreditLimitAlert?.();
+            if (quotaAlert) {
+              throw this.error("FLOW_QUOTA_EXCEEDED", `Flow credit limit reached: "${quotaAlert}".`, false, false);
+            }
+
+            const currentErrors = editor.currentFlowSubmitErrors();
+            if (currentErrors.length > 0) {
+              const failureText = currentErrors[0];
+              const classified = root.classifyFlowError?.(failureText);
+              if (classified) throw this.error(classified.code, classified.message, classified.retryable, false);
+              throw this.error("FLOW_GENERATION_FAILED", `Flow hiển thị thông báo lỗi: "${failureText}".`, false, false);
+            }
+
             if (correlationEntry && !correlationEntry.requestSeen && Date.now() - correlationEntry.armedAt >= 30000) {
               correlationEntry.useTilesFallback = true;
             }
@@ -352,6 +366,16 @@
               }
               const details = failed.map(item => `${item.title}${item.failureReason ? `: ${item.failureReason}` : ""}`).join("; ");
               throw this.error("FLOW_GENERATION_FAILED", `Flow báo cáo ${failed.length} tile render thất bại: ${details}. Chưa bị trừ tín dụng cho render lỗi này.`, false, false);
+            }
+
+            if (Date.now() - observeStartedAt > 20000 && fresh.length === 0 && !renderObservedInFlight) {
+              const composerBox = (typeof root.flowQuery === "function" ? root.flowQuery("editor") : null) || document.querySelector(".ProseMirror");
+              const submitBtn = editor.getFlowSubmitButton() || root.flowButton?.("Start generation");
+              const hasText = composerBox && Boolean(editor.getEditorUserText(composerBox));
+              const buttonReady = submitBtn && !submitBtn.disabled && submitBtn.getAttribute("aria-disabled") !== "true";
+              if (hasText && buttonReady) {
+                throw this.error("FLOW_SUBMIT_REJECTED", "Flow không tiếp nhận yêu cầu tạo ảnh/video (câu lệnh vẫn còn trong ô nhập và nút Tạo đã mở lại). Vui lòng kiểm tra lại câu lệnh hoặc hạn mức tài khoản.", false, false);
+              }
             }
 
             const busyTiles = fresh.filter(item => item.busy);

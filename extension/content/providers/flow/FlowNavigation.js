@@ -2,10 +2,11 @@
   "use strict";
 
   function isFlowProjectNavigationControl(el) {
-    if (!el) return false;
-    if (el.closest?.('nav,[role="navigation"]')) return true;
+    if (!el || typeof el.closest !== "function") return false;
+    if (el.closest('nav, [role="navigation"], header, [role="banner"], mat-toolbar, aside, mat-sidenav, flow-navigation, [class*="sidebar"], [class*="drawer"], flow-library, [class*="media-gallery"], [class*="media-list"]')) return true;
     for (let parent = el; parent && parent !== document.body; parent = parent.parentElement) {
-      if (/project navigation/i.test(parent.getAttribute?.("aria-label") || "")) return true;
+      const aria = parent.getAttribute?.("aria-label") || "";
+      if (/project navigation|điều hướng dự án|thư viện|library|bộ sưu tập|tất cả nội dung|danh sách tệp/i.test(aria)) return true;
     }
     return false;
   }
@@ -46,7 +47,10 @@
       const text = normalize(el.innerText || el.textContent || root.accessibleName?.(el));
       const iconNames = [...(el.querySelectorAll?.("mat-icon") || [])].map(icon => normalize(icon.innerText || icon.textContent));
       if ((wanted === "characters" || synonyms.includes("nhân vật")) && (iconNames.includes("accessibility_new") || iconNames.includes("person"))) return true;
-      if ((wanted === "all media" || synonyms.includes("tất cả nội dung nghe nhìn")) && iconNames.some(ic => ALL_MEDIA_ICONS.includes(ic))) return true;
+      if (wanted === "all media" || synonyms.includes("tất cả nội dung nghe nhìn")) {
+        if (/(?:^|\s)(?:video|clip|nhân vật|characters|dự án|project|nội dung tải lên|uploads?)(?:$|\s)/i.test(text)) return false;
+        if (iconNames.some(ic => ALL_MEDIA_ICONS.includes(ic))) return true;
+      }
       
       // So khớp an toàn: exact match hoặc prefix/suffix có icon ligature
       return synonyms.some(syn => {

@@ -80,7 +80,11 @@
       error: {
         selectors: [
           "flow-error-tile",
-          "[class*='error-tile']"
+          "[class*='error-tile']",
+          "[class*='error']",
+          "[class*='failed']",
+          "[class*='warning-tile']",
+          "[role='alert']"
         ]
       },
       video: {
