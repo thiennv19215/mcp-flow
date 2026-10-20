@@ -243,6 +243,15 @@
           const currentBox = document.querySelector(".ProseMirror");
           const freshMedia = tiles.collectNativeMedia().filter(item => !before.includes(item.id || `title:${item.title}`));
 
+          const freshFailed = freshMedia.find(item => item.failed);
+          if (freshFailed) {
+            if (correlationAttemptId) tiles.disarmNativeFlowCorrelation(correlationAttemptId);
+            const failureReason = freshFailed.failureReason || "Flow generation failed";
+            const classified = root.classifyFlowError?.(failureReason);
+            if (classified) throw this.error(classified.code, classified.message, classified.retryable, false);
+            throw this.error("FLOW_SUBMIT_REJECTED", `Flow tạo tile lỗi ngay sau khi gửi: ${failureReason}`, false, false);
+          }
+
           const buttonDisabled = currentStart && (currentStart.disabled || currentStart.getAttribute("aria-disabled") === "true");
           const editorCleared = currentBox && !editor.getEditorUserText(currentBox);
           const tileAppeared = freshMedia.length > 0;
@@ -332,6 +341,19 @@
             }
             const strictCorrelation = correlationEntry && !correlationEntry.useTilesFallback;
             const receipt = correlationEntry ? tiles.nativeFlowCorrelationReceipt(correlationAttemptId) : null;
+            if (receipt?.error) {
+              const classified = root.classifyFlowError?.(receipt.error);
+              if (classified) throw this.error(classified.code, classified.message, classified.retryable, false);
+              throw this.error("FLOW_GENERATION_FAILED", `Flow báo cáo lỗi tạo: ${receipt.error}`, false, false);
+            }
+            const failedChild = receipt?.children?.find(c => c?.status === "failed" || c?.error);
+            if (failedChild) {
+              const errText = failedChild.error || failedChild.statusReason || "Generation failed";
+              const classified = root.classifyFlowError?.(errText);
+              if (classified) throw this.error(classified.code, classified.message, classified.retryable, false);
+              throw this.error("FLOW_GENERATION_FAILED", `Flow báo cáo lỗi: ${errText}`, false, false);
+            }
+
             const correlatedIds = new Set([
               ...(receipt?.mediaIds || []),
               ...(receipt?.children || []).flatMap(c => [c?.mediaId, c?.operationId]),
@@ -341,8 +363,8 @@
             const fresh = allMedia.filter(item =>
               !before.includes(item.id || `title:${item.title}`) &&
               !item.title.startsWith("fm-") &&
-              (!kind || item.kind === kind) &&
-              (!strictCorrelation || (item.id && correlatedIds.has(item.id.toLowerCase())))
+              (!kind || item.kind === kind || item.failed) &&
+              (!strictCorrelation || item.failed || (item.id && correlatedIds.has(item.id.toLowerCase())))
             );
 
             const failed = fresh.filter(item => item.failed);
@@ -365,7 +387,7 @@
               throw this.error("FLOW_GENERATION_FAILED", `Flow báo cáo ${failed.length} tile render thất bại: ${details}. Chưa bị trừ tín dụng cho render lỗi này.`, false, false);
             }
 
-            if (Date.now() - observeStartedAt > 20000 && fresh.length === 0 && !renderObservedInFlight) {
+            if (Date.now() - observeStartedAt > 5000 && fresh.length === 0 && !renderObservedInFlight) {
               const composerBox = (typeof root.flowQuery === "function" ? root.flowQuery("editor") : null) || document.querySelector(".ProseMirror");
               const submitBtn = editor.getFlowSubmitButton() || root.flowButton?.("Start generation");
               const hasText = composerBox && Boolean(editor.getEditorUserText(composerBox));

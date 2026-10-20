@@ -28,11 +28,11 @@
         "[role='button']"
       ],
       icons: ["arrow_forward", "arrow_upward", "send", "sparkle", "auto_awesome", "play_arrow", "north", "east"],
-      textRegex: /^(?:start generation|generate|bắt đầu tạo|tạo video|tạo ảnh|tạo hình ảnh)$/i,
-      nearComposerTextRegex: /^(?:create|tạo)$/i,
-      excludedTextRegex: /(?:project|dự án|character|nhân vật|folder|thư mục|settings|cài đặt|tune|clear prompt|xóa câu lệnh|xóa văn bản|quay lại|back|upload|tải lên)/i,
-      excludedComposerIcons: ["tune", "settings", "close", "clear", "add", "add_circle"],
-      excludedComposerAria: /setting|cài đặt|clear|xóa|thành phần|ingredient|add media/i
+      textRegex: /(?:start generation|generate|bắt đầu tạo|tạo video|tạo ảnh|tạo hình ảnh|tạo prompt)/i,
+      nearComposerTextRegex: /(?:create|tạo)/i,
+      excludedTextRegex: /(?:project|dự án|character|nhân vật|folder|thư mục|settings|cài đặt|tune|clear prompt|xóa câu lệnh|xóa văn bản|quay lại|back|upload|tải lên|aspect ratio|tỷ lệ|resolution|độ phân giải|duration|thời lượng|download|tải xuống|share|chia sẻ|ingredient|thành phần)/i,
+      excludedComposerIcons: ["tune", "settings", "close", "clear", "add", "add_circle", "delete", "aspect_ratio", "crop", "download", "share", "fullscreen", "undo", "redo", "history"],
+      excludedComposerAria: /setting|cài đặt|clear|xóa|thành phần|ingredient|add media|thêm|aspect|tỷ lệ|resolution|độ phân giải/i
     },
 
     // 2. Tiles & Media Output

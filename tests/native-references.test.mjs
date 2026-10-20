@@ -946,3 +946,153 @@ test('FlowEditor: currentFlowSubmitErrors detects Angular MDC snackbars and Viet
   assert.equal(errors.length, 1);
   assert.equal(errors[0], 'Đã xảy ra lỗi. Vui lòng thử lại sau');
 });
+
+test('getFlowSubmitButton ignores aspect ratio chip and clear button in ProseMirror parent, choosing Vietnamese submit button with credits', () => {
+  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const selectorsSource = readFileSync(new URL('../extension/content/providers/flow/FlowSelectors.js', import.meta.url), 'utf8');
+  const editorSource = readFileSync(new URL('../extension/content/providers/flow/FlowEditor.js', import.meta.url), 'utf8');
+
+  // Aspect ratio chip inside immediate parent
+  const aspectRatioBtn = {
+    innerText: '16:9',
+    textContent: '16:9',
+    name: 'Tỷ lệ khung hình 16:9',
+    getAttribute: a => a === 'aria-label' ? 'Tỷ lệ khung hình 16:9' : null,
+    getBoundingClientRect: () => ({ width: 60, height: 32, top: 100 }),
+    closest: () => null,
+    querySelector: () => null,
+  };
+
+  // Clear button inside immediate parent
+  const clearBtn = {
+    innerText: 'close',
+    textContent: 'close',
+    name: 'Xóa câu lệnh',
+    getAttribute: a => a === 'aria-label' ? 'Xóa câu lệnh' : null,
+    getBoundingClientRect: () => ({ width: 32, height: 32, top: 100 }),
+    closest: () => null,
+    querySelector: () => ({ textContent: 'close' }),
+  };
+
+  // True submit button with credits
+  const submitBtn = {
+    innerText: 'Bắt đầu tạo (1 credit)',
+    textContent: 'Bắt đầu tạo (1 credit)',
+    name: 'Bắt đầu tạo (1 credit)',
+    getAttribute: a => a === 'type' ? 'button' : null,
+    getBoundingClientRect: () => ({ width: 140, height: 40, top: 100 }),
+    closest: s => s.includes('composer') ? {} : null,
+    querySelector: s => s.includes('mat-icon') ? {
+      getAttribute: a => a === 'fonticon' ? 'arrow_forward' : null,
+      textContent: '',
+    } : null,
+  };
+
+  // Immediate parent containing ProseMirror, aspect ratio, and clear button
+  const innerWrapper = {
+    className: 'ProseMirror-wrapper',
+    tagName: 'DIV',
+    querySelectorAll: s => s.includes('button') ? [aspectRatioBtn, clearBtn] : [],
+    querySelector: s => s.includes('button') ? aspectRatioBtn : null,
+  };
+
+  // Outer composer container containing innerWrapper and submitBtn
+  const composerContainer = {
+    className: 'flow-composer',
+    tagName: 'DIV',
+    querySelectorAll: s => s.includes('button') ? [aspectRatioBtn, clearBtn, submitBtn] : [],
+    querySelector: s => null,
+  };
+  innerWrapper.parentElement = composerContainer;
+
+  const proseMirror = {
+    isContentEditable: true,
+    innerText: 'A cinematic landscape',
+    parentElement: innerWrapper,
+    closest: s => s.includes('composer') ? composerContainer : null,
+    getBoundingClientRect: () => ({ width: 500, height: 80, top: 100 }),
+  };
+
+  const allButtons = [aspectRatioBtn, clearBtn, submitBtn];
+
+  const ctx = vm.createContext({
+    globalThis: {},
+    window: {},
+    document: {
+      querySelectorAll: s => {
+        if (s.includes('.ProseMirror')) return [proseMirror];
+        if (s.includes('button')) return allButtons;
+        return [];
+      },
+      querySelector: s => {
+        if (s.includes('.ProseMirror')) return proseMirror;
+        if (s.includes('composer')) return composerContainer;
+        return null;
+      },
+    },
+    location: { href: 'https://flow.google.com/u/0/?hl=vi' },
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+    accessibleName: el => el.name || el.innerText || '',
+  });
+
+  vm.runInContext(domUtilsSource, ctx);
+  vm.runInContext(selectorsSource, ctx);
+  vm.runInContext(editorSource, ctx);
+
+  const getFlowSubmitButton = ctx.globalThis.getFlowSubmitButton;
+  const picked = getFlowSubmitButton('A cinematic landscape');
+
+  assert.equal(picked, submitBtn, 'getFlowSubmitButton MUST choose the submit button, not the aspect ratio or clear button');
+});
+
+test('getFlowSubmitButton detects submit button via fonticon with empty textContent', () => {
+  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const selectorsSource = readFileSync(new URL('../extension/content/providers/flow/FlowSelectors.js', import.meta.url), 'utf8');
+  const editorSource = readFileSync(new URL('../extension/content/providers/flow/FlowEditor.js', import.meta.url), 'utf8');
+
+  const matIconBtn = {
+    innerText: '',
+    textContent: '',
+    name: '',
+    getAttribute: a => a === 'type' ? 'button' : null,
+    getBoundingClientRect: () => ({ width: 48, height: 48, top: 200 }),
+    closest: () => null,
+    querySelector: s => s.includes('mat-icon') ? {
+      getAttribute: a => a === 'fonticon' ? 'arrow_forward' : null,
+      textContent: '',
+    } : null,
+  };
+
+  const proseMirror = {
+    isContentEditable: true,
+    innerText: 'Modern architecture',
+    parentElement: null,
+    closest: () => null,
+    getBoundingClientRect: () => ({ width: 500, height: 80, top: 190 }),
+  };
+
+  const ctx = vm.createContext({
+    globalThis: {},
+    window: {},
+    document: {
+      querySelectorAll: s => {
+        if (s.includes('.ProseMirror')) return [proseMirror];
+        if (s.includes('button')) return [matIconBtn];
+        return [];
+      },
+      querySelector: s => s.includes('.ProseMirror') ? proseMirror : null,
+    },
+    location: { href: 'https://flow.google.com/u/0/?hl=vi' },
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+    accessibleName: el => el.name || el.innerText || '',
+  });
+
+  vm.runInContext(domUtilsSource, ctx);
+  vm.runInContext(selectorsSource, ctx);
+  vm.runInContext(editorSource, ctx);
+
+  const getFlowSubmitButton = ctx.globalThis.getFlowSubmitButton;
+  const picked = getFlowSubmitButton('Modern architecture');
+
+  assert.equal(picked, matIconBtn, 'Submit button with fonticon="arrow_forward" must be detected even with empty textContent');
+});

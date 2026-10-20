@@ -176,7 +176,7 @@
     if (explicit) return explicit;
 
     const errorIcon = [...tile.querySelectorAll("mat-icon, .mat-icon, .google-symbols")].find(i => {
-      const txt = (i.textContent || "").trim().toLowerCase();
+      const txt = (i.getAttribute?.("fonticon") || i.getAttribute?.("data-mat-icon-name") || i.getAttribute?.("aria-label") || i.textContent || "").trim().toLowerCase();
       return /^(?:error|error_outline|warning|report|report_problem|refresh)$/i.test(txt);
     });
     if (errorIcon) return errorIcon.closest('button, [role="button"], div, p') || errorIcon;
@@ -188,7 +188,7 @@
     if (retryBtn) return retryBtn;
 
     const tileText = (tile.innerText || tile.textContent || "").toLowerCase();
-    if (/(?:failed to generate|generation failed|could not generate|something went wrong|try again|không thể tạo|không tạo được|thất bại|đã xảy ra lỗi|thử lại|bị từ chối)/i.test(tileText)) {
+    if (/(?:failed to generate|generation failed|could not generate|something went wrong|try again|không thể tạo|không tạo được|thất bại|đã xảy ra lỗi|thử lại|bị từ chối|lỗi tạo|không thành công|vi phạm|nội dung không an toàn|chính sách an toàn|bị chặn)/i.test(tileText)) {
       return tile;
     }
 

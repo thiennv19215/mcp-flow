@@ -173,37 +173,70 @@
     throw root.flowError("FLOW_PROMPT_COMPOSER_NOT_READY", "Flow's prompt editor is not visible after closing settings. Nothing was submitted.", true, false);
   }
 
+  const SUBMIT_ICONS = ["arrow_forward", "arrow_upward", "send", "sparkle", "auto_awesome", "play_arrow", "north", "east"];
+  const SUBMIT_TEXTS = ["start generation", "bắt đầu tạo", "generate", "tạo video", "tạo ảnh", "tạo hình ảnh", "tạo prompt"];
+
+  function getElementIconName(el) {
+    if (!el || typeof el.querySelector !== "function") return "";
+    const iconEl = el.matches?.("mat-icon, .mat-icon, .google-symbols, i, svg")
+      ? el
+      : (root.flowFindIcon ? root.flowFindIcon(el) : el.querySelector?.("mat-icon, .mat-icon, .google-symbols, i, svg"));
+    if (!iconEl) return "";
+    const fontIcon = iconEl.getAttribute?.("fonticon") || iconEl.getAttribute?.("data-mat-icon-name") || "";
+    if (fontIcon.trim()) return fontIcon.trim().toLowerCase();
+    const ariaLabel = iconEl.getAttribute?.("aria-label") || "";
+    if (ariaLabel.trim()) return ariaLabel.trim().toLowerCase();
+    const text = (iconEl.textContent || "").trim().toLowerCase();
+    if (text) return text;
+    const svgUse = iconEl.querySelector?.("use")?.getAttribute?.("href") || iconEl.querySelector?.("use")?.getAttribute?.("xlink:href") || "";
+    if (svgUse) {
+      const match = svgUse.match(/#([a-zA-Z0-9_-]+)$/);
+      if (match) return match[1].toLowerCase();
+    }
+    return "";
+  }
+
+  function isExcludedSubmitButton(el) {
+    if (!el || typeof el.getAttribute !== "function") return true;
+    if (root.isFlowProjectNavigationControl?.(el)) return true;
+    if (el.closest?.('nav, [role="navigation"], mat-sidenav, header, mat-toolbar, [role="banner"], flow-navigation, [class*="sidebar"], [class*="drawer"], flow-library, [class*="media-gallery"], [class*="media-list"]')) return true;
+
+    const name = (root.accessibleName?.(el) || "").toLowerCase();
+    const text = (el.innerText || el.textContent || "").toLowerCase();
+    const icon = getElementIconName(el);
+
+    const excludedIcons = ["tune", "settings", "close", "clear", "delete", "add", "add_circle", "help", "info", "more_vert", "more_horiz", "aspect_ratio", "crop", "download", "share", "fullscreen", "undo", "redo", "history"];
+    if (excludedIcons.includes(icon)) return true;
+
+    const excludedPatterns = /(?:project|dự án|character|nhân vật|folder|thư mục|settings|cài đặt|tune|clear prompt|xóa câu lệnh|xóa văn bản|quay lại|back|upload|tải lên|aspect ratio|tỷ lệ|resolution|độ phân giải|duration|thời lượng|download|tải xuống|share|chia sẻ|ingredient|thành phần)/i;
+    if (excludedPatterns.test(name) || excludedPatterns.test(text)) return true;
+
+    return false;
+  }
+
   function isSubmitButtonElement(el) {
-    if (!el || !root.visible?.(el) || root.isFlowProjectNavigationControl?.(el)) return false;
-    if (el.closest?.('nav, [role="navigation"], mat-sidenav, header, mat-toolbar, [role="banner"]')) return false;
+    if (!el || !root.visible?.(el) || isExcludedSubmitButton(el)) return false;
 
-    const name = (root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim().toLowerCase();
-    const text = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+    // 1. Icon match (includes Angular Material fonticon / data-mat-icon-name)
+    const icon = getElementIconName(el);
+    if (SUBMIT_ICONS.includes(icon)) return true;
 
-    const config = root.FlowSelectors?.submitButton;
-    const excludedPatterns = config?.excludedTextRegex || /(?:project|dự án|character|nhân vật|folder|thư mục|settings|cài đặt|tune|clear prompt|xóa câu lệnh|xóa văn bản|quay lại|back|upload|tải lên)/i;
-    if (root.matchesFlowUiRegex?.(name, excludedPatterns) || root.matchesFlowUiRegex?.(text, excludedPatterns)) return false;
+    // 2. Specific submit text (substring match, not exact anchor)
+    const name = (root.accessibleName?.(el) || "").toLowerCase();
+    const text = (el.innerText || el.textContent || "").toLowerCase();
+    if (SUBMIT_TEXTS.some(t => name.includes(t) || text.includes(t))) return true;
 
-    const submitPatterns = config?.textRegex || /^(?:start generation|generate|bắt đầu tạo|tạo video|tạo ảnh|tạo hình ảnh)$/i;
-    if (root.matchesFlowUiRegex?.(name, submitPatterns) || root.matchesFlowUiRegex?.(text, submitPatterns)) return true;
-    if (name.includes("start generation") || name.includes("bắt đầu tạo")) return true;
+    // 3. Submit type or data-action
+    if (el.getAttribute?.("type") === "submit") return true;
+    if (el.getAttribute?.("data-action") === "submit" || el.getAttribute?.("data-action") === "generate") return true;
 
-    // Nếu nhãn là từ đơn "tạo" hoặc "create", CHỈ chấp nhận khi nó thuộc hoặc nằm cạnh composer / ProseMirror
-    const nearComposerRegex = config?.nearComposerTextRegex || /^(?:create|tạo)$/i;
-    if (root.matchesFlowUiRegex?.(name, nearComposerRegex) || root.matchesFlowUiRegex?.(text, nearComposerRegex)) {
+    // 4. Short "tạo" or "create" near composer or with credits
+    if (name.includes("tạo") || text.includes("tạo") || name.includes("create") || text.includes("create")) {
       const isNearComposer = Boolean(el.closest?.(".flow-composer, flow-base-prompt-box, form, [class*='composer']")) ||
-        Boolean(el.parentElement?.querySelector?.(".ProseMirror"));
+        Boolean(document.querySelector(".ProseMirror"));
       if (isNearComposer) return true;
     }
 
-    const icon = root.flowFindIcon ? root.flowFindIcon(el) : el.querySelector?.("mat-icon, .mat-icon, .google-symbols, i, svg");
-    if (icon) {
-      const iconText = (icon.textContent || "").trim();
-      const allowedIcons = config?.icons || ["arrow_forward", "arrow_upward", "send", "sparkle", "auto_awesome", "play_arrow", "north", "east"];
-      if (allowedIcons.some(act => act.toLowerCase() === iconText.toLowerCase())) return true;
-    }
-    if (el.getAttribute?.("type") === "submit") return true;
-    if (el.getAttribute?.("data-action") === "submit" || el.getAttribute?.("data-action") === "generate") return true;
     return false;
   }
 
@@ -212,11 +245,18 @@
       document.querySelector(".ProseMirror[contenteditable='true']") ||
       document.querySelector(".ProseMirror");
     if (editor) {
-      const explicit = editor.closest(".flow-composer, flow-base-prompt-box, form, [class*='composer'], [class*='prompt-box'], [class*='prompt-container']");
+      const explicit = editor.closest(".flow-composer, flow-base-prompt-box, form, [class*='composer'], [class*='prompt-box'], [class*='prompt-container'], [data-testid*='composer']");
       if (explicit) return explicit;
       let parent = editor.parentElement;
       for (let i = 0; i < 6 && parent && parent !== document.body; i++) {
-        if (parent.querySelector('button, [role="button"]')) return parent;
+        if (parent.tagName.toLowerCase().includes("composer") ||
+            (parent.className && typeof parent.className === "string" && /composer|prompt/i.test(parent.className))) {
+          return parent;
+        }
+        const hasSubmitIcon = [...parent.querySelectorAll("mat-icon, .mat-icon, .google-symbols, svg")].some(ic =>
+          SUBMIT_ICONS.includes(getElementIconName(ic))
+        );
+        if (hasSubmitIcon) return parent;
         parent = parent.parentElement;
       }
     }
@@ -225,61 +265,75 @@
   }
 
   function getFlowSubmitButton(expectedPrompt) {
-    // 1. ƯU TIÊN TUYỆT ĐỐI: Tìm nút Submit TRONG Composer Container trước!
-    // Tránh click nhầm vào các nút ở Header, Sidebar, Navigation khi giao diện là tiếng Việt.
+    // 1. Try finding in composer container first if one is identified
     const composer = getFlowComposerContainer();
     if (composer) {
-      const composerButtons = [...composer.querySelectorAll('button,[role="button"]')].filter(el =>
-        root.visible?.(el) && !root.isFlowProjectNavigationControl?.(el));
+      const composerButtons = [...composer.querySelectorAll('button, [role="button"]')].filter(el =>
+        root.visible?.(el) && !isExcludedSubmitButton(el));
 
-      // 1.1 Tìm nút có icon đặc thù của Submit trong Google Flow (KHÔNG loại trừ disabled để nhận diện đúng nút)
-      const submitConfig = root.FlowSelectors?.submitButton;
-      const allowedIcons = submitConfig?.icons || ["arrow_forward", "arrow_upward", "send", "sparkle", "auto_awesome", "play_arrow", "north", "east"];
-      const submitIconBtn = composerButtons.find(b => {
-        const icon = root.flowFindIcon ? root.flowFindIcon(b) : b.querySelector?.("mat-icon, .mat-icon, .google-symbols, i, svg");
-        const iconTxt = (icon?.textContent || "").trim().toLowerCase();
-        return allowedIcons.includes(iconTxt);
-      });
+      // 1.1 Match by submit icon
+      const submitIconBtn = composerButtons.find(b => SUBMIT_ICONS.includes(getElementIconName(b)));
       if (submitIconBtn) return submitIconBtn;
 
-      // 1.2 Tìm nút match pattern submit trong composer
-      const submitMatchedBtn = composerButtons.find(b => isSubmitButtonElement(b));
-      if (submitMatchedBtn) return submitMatchedBtn;
-
-      // 1.3 Nút type="submit" hoặc data-action="submit"
-      const typeSubmitBtn = composerButtons.find(b => b.getAttribute?.("type") === "submit" || b.getAttribute?.("data-action") === "submit");
-      if (typeSubmitBtn) return typeSubmitBtn;
-
-      // 1.4 Nút có text submit
+      // 1.2 Match by submit text (Vietnamese / English substring)
       const submitTextBtn = composerButtons.find(b => {
-        const txt = (b.innerText || b.textContent || "").trim();
-        return /^(?:start generation|generate|bắt đầu tạo|tạo video|tạo ảnh|tạo hình ảnh|tạo|create)$/i.test(txt);
+        const name = (root.accessibleName?.(b) || "").toLowerCase();
+        const text = (b.innerText || b.textContent || "").toLowerCase();
+        return SUBMIT_TEXTS.some(t => name.includes(t) || text.includes(t));
       });
       if (submitTextBtn) return submitTextBtn;
 
-      // 1.5 Fallback trong composer: Nút cuối cùng không phải settings hay clear hay add
-      const excludedIcons = submitConfig?.excludedComposerIcons || ["tune", "settings", "close", "clear", "add", "add_circle"];
-      const excludedAria = submitConfig?.excludedComposerAria || /setting|cài đặt|clear|xóa|thành phần|ingredient|add media/i;
-      const candidateButtons = composerButtons.filter(b => {
-        const aria = (root.accessibleName?.(b) || "").toLowerCase();
-        const icon = (root.flowFindIcon ? root.flowFindIcon(b) : b.querySelector?.("mat-icon, .mat-icon, .google-symbols"))?.textContent?.trim()?.toLowerCase() || "";
-        if (excludedIcons.includes(icon) || excludedAria.test(aria)) return false;
-        return true;
+      // 1.3 Match type="submit" or data-action="submit"
+      const typeSubmitBtn = composerButtons.find(b => b.getAttribute?.("type") === "submit" || b.getAttribute?.("data-action") === "submit" || b.getAttribute?.("data-action") === "generate");
+      if (typeSubmitBtn) return typeSubmitBtn;
+
+      // 1.4 Match short "tạo" or "create"
+      const shortTextBtn = composerButtons.find(b => {
+        const name = (root.accessibleName?.(b) || "").toLowerCase();
+        const text = (b.innerText || b.textContent || "").toLowerCase();
+        return name.includes("tạo") || text.includes("tạo") || name.includes("create") || text.includes("create");
       });
-      if (candidateButtons.length > 0) {
-        return candidateButtons[candidateButtons.length - 1];
-      }
+      if (shortTextBtn) return shortTextBtn;
+      // Note: Never blindly fallback to candidateButtons[last] - that clicks aspect ratio or chips!
     }
 
-    // 2. Fallback tìm trên toàn trang (chỉ khi không có composer DOM thông thường)
-    const allButtons = [...document.querySelectorAll('button,[role="button"]')].filter(el => {
-      if (!root.visible?.(el)) return false;
-      if (root.isFlowProjectNavigationControl?.(el)) return false;
-      if (el.closest?.('nav, [role="navigation"], mat-sidenav, header, mat-toolbar, [role="banner"]')) return false;
-      return isSubmitButtonElement(el);
-    });
+    // 2. Global search across the document (TobyFlow content.js lines 2974-3000 pattern)
+    const allButtons = [...document.querySelectorAll('button, [role="button"]')].filter(el =>
+      root.visible?.(el) && !isExcludedSubmitButton(el));
 
-    return allButtons[0] || null;
+    // 2.1 By submit icon
+    const docIconBtn = allButtons.find(b => SUBMIT_ICONS.includes(getElementIconName(b)));
+    if (docIconBtn) return docIconBtn;
+
+    // 2.2 By submit text
+    const docTextBtn = allButtons.find(b => {
+      const name = (root.accessibleName?.(b) || "").toLowerCase();
+      const text = (b.innerText || b.textContent || "").toLowerCase();
+      return SUBMIT_TEXTS.some(t => name.includes(t) || text.includes(t));
+    });
+    if (docTextBtn) return docTextBtn;
+
+    // 2.3 By type="submit"
+    const docTypeSubmit = allButtons.find(b => b.getAttribute?.("type") === "submit" || b.getAttribute?.("data-action") === "submit" || b.getAttribute?.("data-action") === "generate");
+    if (docTypeSubmit) return docTypeSubmit;
+
+    // 2.4 By short "tạo" or "create" near ProseMirror
+    const editor = document.querySelector(".ProseMirror");
+    if (editor) {
+      const eRect = editor.getBoundingClientRect();
+      const docShortBtn = allButtons.find(b => {
+        const name = (root.accessibleName?.(b) || "").toLowerCase();
+        const text = (b.innerText || b.textContent || "").toLowerCase();
+        if (name.includes("tạo") || text.includes("tạo") || name.includes("create") || text.includes("create")) {
+          const bRect = b.getBoundingClientRect();
+          return Math.abs(bRect.top - eRect.top) < 400;
+        }
+        return false;
+      });
+      if (docShortBtn) return docShortBtn;
+    }
+
+    return null;
   }
 
   function inspectFlowSubmitTarget(button, expectedPrompt) {
@@ -492,7 +546,7 @@
   }
 
   function currentFlowSubmitErrors() {
-    const errorWords = /(?:error|failed|could not|couldn't|unable|insufficient|not enough|quota|credit limit|daily limit|try again|unusual activity|suspicious activity|safety guidelines|policy violation|blocked|something went wrong|lỗi|không thể|thất bại|không đủ|hết hạn mức|hạn mức|hạn ngạch|thử lại|hoạt động bất thường|nguyên tắc an toàn|chính sách|đã bị chặn|đã xảy ra lỗi|đã xảy ra sự cố|sự cố|vui lòng thử lại|không an toàn|từ chối)/i;
+    const errorWords = /(?:error|failed|could not|couldn't|unable|insufficient|not enough|quota|credit limit|daily limit|try again|unusual activity|suspicious activity|safety guidelines|policy violation|blocked|something went wrong|lỗi|không thể|thất bại|không đủ|hết hạn mức|hạn mức|hạn ngạch|thử lại|hoạt động bất thường|nguyên tắc an toàn|chính sách|đã bị chặn|đã xảy ra lỗi|đã xảy ra sự cố|sự cố|vui lòng thử lại|không an toàn|từ chối|vi phạm|không thành công|bị từ chối)/i;
     const selectors = [
       '[role="alert"]',
       '[role="status"]',
@@ -507,6 +561,8 @@
       'flow-banner',
       'flow-toast',
       'flow-credit-limit-alert',
+      'flow-error-tile',
+      '[class*="error-tile"]',
       '[class*="snackbar"]',
       '[class*="toast"]',
       '[class*="banner"]',
