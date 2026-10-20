@@ -272,7 +272,7 @@ function endInteractiveRequest(key, tabId) {
   }
 }
 const config = async () => {
-  const stored = await chrome.storage.local.get(defaults);
+  const stored = await chrome.storage.local.get(null);
   if (["http://127.0.0.1:8799", "http://localhost:8799", "http://127.0.0.1:18899", "http://localhost:18899"].includes(stored.bridge)) {
     stored.bridge = defaults.bridge;
     await chrome.storage.local.set({ bridge: stored.bridge });
