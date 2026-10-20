@@ -180,7 +180,7 @@ function flowButton(name, root = document) {
     visible(el) && matchesName(semanticActionText(el).replace(/\s+/g, " ").trim(), name, null, true));
   if (direct) return direct;
 
-  const synonyms = BUTTON_SYNONYMS[normName];
+  const synonyms = (globalThis.I18n?.getPatterns?.(normName)?.length ? globalThis.I18n.getPatterns(normName) : BUTTON_SYNONYMS[normName]);
   if (synonyms && synonyms.length) {
     const candidates = [...root.querySelectorAll('button,[role="button"]')].filter(visible);
     const matched = candidates.find(el => {
@@ -256,7 +256,7 @@ var OPTION_ALIASES = {
 function flowRadio(name) {
   const wanted = String(name || "").trim().toLowerCase();
   const normalizedWanted = normalizeAspectRatio(wanted);
-  const aliases = OPTION_ALIASES[wanted] || (normalizedWanted ? [wanted, normalizedWanted] : [wanted]);
+  const aliases = (globalThis.I18n?.getPatterns?.(wanted)?.length ? globalThis.I18n.getPatterns(wanted) : OPTION_ALIASES[wanted]) || (normalizedWanted ? [wanted, normalizedWanted] : [wanted]);
   return [...document.querySelectorAll('[role="radio"],mat-radio-button')].find(el => {
     if (!visible(el) || isFlowProjectNavigationControl(el)) return false;
     const label = accessibleName(el).replace(/\s+/g, " ").trim().toLowerCase();
@@ -269,7 +269,7 @@ function flowRadio(name) {
 function flowOption(name) {
   const expected = String(name).replace(/\s+/g, " ").trim().toLowerCase();
   const normalizedExpected = normalizeAspectRatio(expected);
-  const aliases = OPTION_ALIASES[expected] || (normalizedExpected ? [expected, normalizedExpected] : [expected]);
+  const aliases = (globalThis.I18n?.getPatterns?.(expected)?.length ? globalThis.I18n.getPatterns(expected) : OPTION_ALIASES[expected]) || (normalizedExpected ? [expected, normalizedExpected] : [expected]);
   // The closed settings trigger carries a summary such as "Video · 720p · 10s x1".
   // It is a button, but never an option; allowing it here makes x1 falsely imply
   // that the settings panel is open and can also toggle the panel during selection.
@@ -607,7 +607,7 @@ function flowNavigationItem(label) {
     'a,button,[role="button"],[role="menuitem"],mat-list-item,button[mat-list-item],[role="tab"]'
   )]))];
   const wanted = normalize(label);
-  const synonyms = NAV_SYNONYMS[wanted] || [wanted];
+  const synonyms = (globalThis.I18n?.getPatterns?.(wanted)?.length ? globalThis.I18n.getPatterns(wanted) : NAV_SYNONYMS[wanted]) || [wanted];
   return candidates.find(el => {
     if (!visible(el) || el.disabled || el.getAttribute?.("aria-disabled") === "true") return false;
     const text = normalize(el.innerText || el.textContent || accessibleName(el));

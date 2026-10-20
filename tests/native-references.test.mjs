@@ -532,3 +532,41 @@ test('Vietnamese localization: ensureFlowLibrarySection("All media") succeeds sa
   const result = await ctx.globalThis.ensureFlowLibrarySection('All media');
   assert.equal(result, true);
 });
+
+test('I18n core: translations, plurals, string interpolation and UI pattern lookup work seamlessly', async () => {
+  const i18nSource = readFileSync(new URL('../extension/content/shared/I18n.js', import.meta.url), 'utf8');
+  const ctx = vm.createContext({
+    globalThis: {},
+    self: {},
+    console,
+  });
+  vm.runInContext(i18nSource, ctx);
+
+  const I18n = ctx.globalThis.I18n;
+  assert.ok(I18n, 'I18n class must be exported to globalThis');
+
+  // Default locale is Vietnamese
+  assert.equal(I18n.getLocale(), 'vi');
+  assert.equal(I18n.t('popup.wsConnected'), 'Đã kết nối WebSocket');
+  assert.equal(I18n.t('popup.tabsCount', 3), '3 tab đang mở');
+  assert.equal(I18n.t('errors.navUnavailable', { label: 'All media' }), 'Không thể mở mục "All media" từ giao diện này.');
+
+  // Check pattern lookup in VI
+  const viPatterns = I18n.getPatterns('all_media');
+  assert.ok(viPatterns.includes('tất cả nội dung nghe nhìn'));
+  assert.ok(viPatterns.includes('all media'));
+
+  // Switch to English
+  await I18n.setLocale('en');
+  assert.equal(I18n.getLocale(), 'en');
+  assert.equal(I18n.t('popup.wsConnected'), 'Connected via WebSocket');
+  assert.equal(I18n.t('popup.tabsCount', 1), '1 open tab');
+  assert.equal(I18n.t('popup.tabsCount', 4), '4 open tabs');
+  assert.equal(I18n.t('errors.navUnavailable', { label: 'All media' }), 'Flow\'s project navigation could not open "All media" from this view.');
+
+  // Pattern lookup still works in EN and includes synonyms
+  const enPatterns = I18n.getPatterns('start_generation');
+  assert.ok(enPatterns.includes('start generation'));
+  assert.ok(enPatterns.includes('generate'));
+  assert.ok(enPatterns.includes('tạo'));
+});

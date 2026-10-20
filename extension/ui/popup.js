@@ -1,54 +1,8 @@
-const I18N = {
-  vi: {
-    checking: "Đang kiểm tra…",
-    wsConnected: "Đã kết nối WebSocket",
-    wsDisconnected: "Mất kết nối máy chủ",
-    flowTabs: "Tab Google Flow:",
-    selectedTab: "Tab điều khiển:",
-    bridgeUrl: "Địa chỉ máy chủ:",
-    tabNone: "Chưa chọn tab",
-    tabsCount: (n) => `${n} tab đang mở`,
-    tabsNone: "Chưa mở tab Flow",
-    btnConnect: "Kết nối lại tab Flow",
-    btnPreview: "Xem viền (5s)",
-    btnOptions: "Cài đặt",
-    reconnecting: "Đang kết nối lại tab Flow hiện tại...",
-    previewTriggered: "Đang hiển thị viền xanh trên tab Flow...",
-    errNoFlowTab: "Mở Google Flow; tiện ích sẽ tự kết nối với tab đang hoạt động.",
-    selectingTab: "Đang tự chọn tab Flow…",
-    errBackendDown: "Chưa bật Flow MCP backend (cổng 18899). Hãy chạy Start Flow.cmd.",
-    errGeneric: "Lỗi kết nối:",
-  },
-  en: {
-    checking: "Checking…",
-    wsConnected: "Connected via WebSocket",
-    wsDisconnected: "Disconnected from server",
-    flowTabs: "Google Flow tabs:",
-    selectedTab: "Controlled tab:",
-    bridgeUrl: "Bridge URL:",
-    tabNone: "Not selected",
-    tabsCount: (n) => `${n} open tab${n === 1 ? "" : "s"}`,
-    tabsNone: "No Flow tab open",
-    btnConnect: "Reconnect Flow tab",
-    btnPreview: "Preview border (5s)",
-    btnOptions: "Settings",
-    reconnecting: "Reconnecting to the active Flow tab...",
-    previewTriggered: "Displaying activity border on Flow tab...",
-    errNoFlowTab: "Open Google Flow; the extension connects to the active Flow tab automatically.",
-    selectingTab: "Selecting a Flow tab automatically…",
-    errBackendDown: "Cannot connect to Flow MCP backend (port 18899). Run Start Flow.cmd.",
-    errGeneric: "Connector error:",
-  }
-};
-
-let currentLang = "vi";
 let cachedStatus = null;
 
-function t(key, ...args) {
-  const dict = I18N[currentLang] || I18N.vi;
-  const val = dict[key];
-  if (typeof val === "function") return val(...args);
-  return val || key;
+function t(key, params) {
+  const fullKey = key.includes(".") ? key : `popup.${key}`;
+  return typeof I18n !== "undefined" ? I18n.t(fullKey, params) : key;
 }
 
 function mapErrorMessage(raw) {
@@ -60,6 +14,7 @@ function mapErrorMessage(raw) {
 }
 
 function applyLanguage() {
+  const currentLang = typeof I18n !== "undefined" ? I18n.getLocale() : "vi";
   document.documentElement.lang = currentLang;
   document.querySelector("#langVi").classList.toggle("active", currentLang === "vi");
   document.querySelector("#langEn").classList.toggle("active", currentLang === "en");
@@ -147,10 +102,9 @@ const manifest = chrome.runtime.getManifest();
 document.querySelector("#versionBadge").textContent = `v${manifest.version || "0.4.6"}`;
 
 // Load language and status
-chrome.storage.local.get({ lang: "vi" }).then(data => {
-  currentLang = data.lang === "en" ? "en" : "vi";
+const initLocale = typeof I18n !== "undefined" ? I18n.init() : Promise.resolve();
+initLocale.then(() => {
   applyLanguage();
-
   return chrome.runtime.sendMessage({ type: "flow-mcp:status" });
 }).then(s => {
   if (s) renderStatus(s);
@@ -165,17 +119,19 @@ chrome.storage.local.get({ lang: "vi" }).then(data => {
 });
 
 // Language switch listeners
-document.querySelector("#langVi").onclick = () => {
-  if (currentLang === "vi") return;
-  currentLang = "vi";
-  chrome.storage.local.set({ lang: "vi" });
+document.querySelector("#langVi").onclick = async () => {
+  if (typeof I18n !== "undefined") {
+    if (I18n.getLocale() === "vi") return;
+    await I18n.setLocale("vi");
+  }
   applyLanguage();
 };
 
-document.querySelector("#langEn").onclick = () => {
-  if (currentLang === "en") return;
-  currentLang = "en";
-  chrome.storage.local.set({ lang: "en" });
+document.querySelector("#langEn").onclick = async () => {
+  if (typeof I18n !== "undefined") {
+    if (I18n.getLocale() === "en") return;
+    await I18n.setLocale("en");
+  }
   applyLanguage();
 };
 

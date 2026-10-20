@@ -139,6 +139,7 @@ async function sendFlowCommand(tabId, message) {
     await chrome.scripting.executeScript({
       target: { tabId },
       files: [
+        "content/shared/I18n.js",
         "content/shared/dom-utils.js",
         "content/shared/activity-overlay.js",
         "content/shared/native-file-transfer.js",

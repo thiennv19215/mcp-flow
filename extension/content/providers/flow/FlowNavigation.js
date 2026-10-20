@@ -41,7 +41,7 @@
       'a,button,[role="button"],[role="menuitem"],mat-list-item,button[mat-list-item],[role="tab"]'
     )]))];
     const wanted = normalize(label);
-    const synonyms = NAV_SYNONYMS[wanted] || [wanted];
+    const synonyms = (root.I18n?.getPatterns?.(wanted)?.length ? root.I18n.getPatterns(wanted) : NAV_SYNONYMS[wanted]) || [wanted];
     return candidates.find(el => {
       if (!root.visible?.(el) || el.disabled || el.getAttribute?.("aria-disabled") === "true") return false;
       const text = normalize(el.innerText || el.textContent || root.accessibleName?.(el));
