@@ -310,6 +310,15 @@ body{padding:0;background:var(--ink)}
 .page-title .step{margin:0 0 3px;color:#9db9dc;font-size:10px;letter-spacing:.1em}
 .page-title h1{font-size:27px;line-height:1.1}
 .home-project-picker{margin-top:0}
+.home-project-picker{padding:10px 12px;margin:0 0 12px;border-left-width:3px;border-radius:11px}
+.home-project-head{display:grid;grid-template-columns:auto minmax(180px,1fr) auto;align-items:center;gap:12px}
+.home-project-head>div:first-child{min-width:100px;display:flex;align-items:center;gap:8px}
+.home-project-head .step{margin:0;white-space:nowrap}
+.home-project-head h2{font-size:14px;letter-spacing:0;white-space:nowrap}
+.home-project-head .lede{grid-column:2;grid-row:2;margin:0;min-height:0;font-size:11px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.home-project-picker select#home_projects{grid-column:2;grid-row:1;width:100%;min-width:0;min-height:38px;padding:6px 34px 6px 11px;border:1px solid #40536a;border-radius:9px;background:#131d29;color:var(--bone);font:600 14px var(--body)}
+.home-project-picker select#home_projects:focus-visible{outline:3px solid rgba(139,185,255,.5);outline-offset:2px}
+.home-project-head>#home_project_refresh{grid-column:3;grid-row:1/3;min-height:36px;padding:0 10px;font-size:12px;white-space:nowrap}
 .cols{display:grid;grid-template-columns:minmax(0,1fr);gap:28px;margin-top:0}
 .cols>main{min-width:0}
 .cols>.side{min-width:0}
@@ -336,7 +345,7 @@ body{padding:0;background:var(--ink)}
   .app-sidebar{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"brand footer" "nav nav";padding-left:12px;padding-right:12px}
   .sidebar-label{display:none}.sidebar-brand{padding-bottom:7px}
   .app-content{padding:0 12px 112px}.app-content>header{min-height:60px;margin-bottom:12px;padding:10px 0}
-  .page-title h1{font-size:23px}.home-project-picker{padding:13px}.home-project-head{align-items:flex-start}.home-project-head h2{font-size:21px}.home-project-head .btn{min-height:38px;padding:0 9px;font-size:12px}
+  .page-title h1{font-size:23px}.home-project-picker{padding:10px}.home-project-head{grid-template-columns:minmax(0,1fr) auto;gap:7px 10px}.home-project-head>div:first-child{grid-column:1/-1}.home-project-head .lede{grid-column:1/-1;grid-row:auto}.home-project-picker select#home_projects{grid-column:1;grid-row:2}.home-project-head>#home_project_refresh{grid-column:2;grid-row:2;min-height:38px;padding:0 9px;font-size:12px}
   .cols{gap:20px}.side>section>h2{font-size:19px}
   .sidebar-actions .lang-switch{display:none!important}.sidebar-actions .btn{font-size:12px;padding:0 9px}.sidebar-footer .status .pill{width:26px;min-width:26px;height:26px;min-height:26px;padding:0;justify-content:center;gap:0;font-size:0}.sidebar-footer .status .pill .tally{display:block;flex:none}
   .rollbar{padding:8px 12px calc(8px + env(safe-area-inset-bottom))}.roll{min-height:42px;padding:0 16px}.est b{font-size:16px}.est span{font-size:11px}
@@ -378,10 +387,11 @@ body{padding:0;background:var(--ink)}
 
   <section class="home-project-picker" aria-label="Flow projects">
     <div class="home-project-head">
-      <div><div class="step">Flow</div><h2>Chọn dự án</h2><p class="lede" id="home_project_status">Đang tải danh sách dự án…</p></div>
-      <button type="button" class="btn small" id="home_project_refresh">Làm mới danh sách</button>
+      <div><div class="step">Flow</div><h2>Chọn dự án</h2></div>
+      <select id="home_projects" aria-label="Chọn dự án Flow" disabled><option value="">Đang tải danh sách…</option></select>
+      <p class="lede" id="home_project_status" role="status" aria-live="polite">Đang tải danh sách dự án…</p>
+      <button type="button" class="btn small" id="home_project_refresh">Làm mới</button>
     </div>
-    <div class="lib project-list" id="home_projects"><p class="empty">Đang tìm dự án Flow…</p></div>
   </section>
 
   <div class="cols">
@@ -997,7 +1007,8 @@ async function loadFlowProjects() {
   buttons.forEach(button => { button.disabled = true; });
   $("#home_project_status").textContent = "Đang đọc danh sách dự án từ Flow…";
   $("#l_project_status").textContent = "Đang đọc danh sách dự án từ Flow…";
-  $("#home_projects").innerHTML = `<p class="empty">Đang tìm dự án Flow…</p>`;
+  $("#home_projects").disabled = true;
+  $("#home_projects").innerHTML = `<option value="">Đang tìm dự án Flow…</option>`;
   try {
     FLOW_PROJECTS = await api("projects");
     renderFlowProjects();
@@ -1007,7 +1018,7 @@ async function loadFlowProjects() {
     $("#home_project_status").textContent = status;
     $("#l_project_status").textContent = status;
   } catch (err) {
-    $("#home_projects").innerHTML = `<p class="empty" style="color:var(--bad)">${esc(err.message)}</p>`;
+    $("#home_projects").innerHTML = `<option value="">Không thể tải danh sách dự án</option>`;
     $("#home_project_status").textContent = "Không thể tải danh sách dự án.";
     $("#l_project_status").textContent = err.message;
   }
@@ -1015,15 +1026,16 @@ async function loadFlowProjects() {
 }
 function renderFlowProjects() {
   const selectedId = localStorage.getItem("flow-studio-flow-project") || "";
-  $("#home_projects").innerHTML = FLOW_PROJECTS.map(project => `<button type="button" data-flow-project="${esc(project.id)}" class="${selectedId === project.id ? "on" : ""}"><span>${esc(project.name)}</span><em>${selectedId === project.id ? "Đang chọn" : "Mở"}</em></button>`).join("") || `<p class="empty">Không tìm thấy dự án Flow.</p>`;
+  $("#home_projects").innerHTML = `<option value="">${FLOW_PROJECTS.length ? "Chọn dự án Flow…" : "Không tìm thấy dự án Flow"}</option>` + FLOW_PROJECTS.map(project => `<option value="${esc(project.id)}" ${selectedId === project.id ? "selected" : ""}>${esc(project.name)}${selectedId === project.id ? " · đang mở" : ""}</option>`).join("");
+  $("#home_projects").disabled = !FLOW_PROJECTS.length;
 }
 $("#home_project_refresh").onclick = loadFlowProjects;
 $("#l_refresh_projects").onclick = loadFlowProjects;
-$("#home_projects").addEventListener("click", async e => {
-  const button = e.target.closest("button[data-flow-project]"); if (!button || !guard()) return;
-  const project = FLOW_PROJECTS.find(item => item.id === button.dataset.flowProject); if (!project) return;
+$("#home_projects").addEventListener("change", async e => {
+  const project = FLOW_PROJECTS.find(item => item.id === e.target.value); if (!project) return;
+  if (!guard()) { renderFlowProjects(); return; }
   const setStatus = text => { $("#home_project_status").textContent = text; $("#l_project_status").textContent = text; };
-  $$("#home_projects button").forEach(item => item.disabled = true);
+  $("#home_projects").disabled = true;
   setStatus(`正在 Flow 中打开 ${project.name}…`);
   try {
     await api("open_project", { project_id: project.id });
@@ -1032,7 +1044,7 @@ $("#home_projects").addEventListener("click", async e => {
     setStatus(`已打开 ${project.name}。正在读取媒体…`);
     await loadLibraryAssets();
     setStatus(`${project.name} 已选择。`);
-  } catch (err) { setStatus(err.message); toast(err.message, true); }
+  } catch (err) { setStatus(err.message); toast(err.message, true); renderFlowProjects(); }
   finally { $("#home_projects").disabled = false; }
 });
 async function loadLibraryAssets() {
@@ -1344,7 +1356,8 @@ $("#studioLangEn").onclick = () => {
     $("#offline").innerHTML = `<div class="hint" style="border-color:var(--bad)"><b>This is a static preview — nothing here is connected.</b><br>Start the real panel: double-click <b>Flow Studio.command</b> in the flow-mcp folder, then use <b>http://127.0.0.1:18899</b>.</div>`;
     $("#status").innerHTML = `<span class="pill"><i class="tally down"></i>Not connected</span>`;
     $("#home_project_status").textContent = "Mở Flow Studio từ backend để tải danh sách dự án.";
-    $("#home_projects").innerHTML = `<p class="empty">Danh sách dự án sẽ xuất hiện khi Studio kết nối backend.</p>`;
+    $("#home_projects").innerHTML = `<option value="">Danh sách dự án sẽ xuất hiện khi kết nối backend</option>`;
+    $("#home_projects").disabled = true;
     renderAll(); showTab(S.tab); return;
   }
   fetch("/api/auth/session", { cache: "no-store" }).then(async (response) => {
