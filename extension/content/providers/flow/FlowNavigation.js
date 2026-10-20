@@ -21,8 +21,13 @@
 
   const NAV_SYNONYMS = {
     "characters": ["characters", "nhân vật", "nhan vat"],
-    "all media": ["all media", "tất cả nội dung nghe nhìn", "tất cả phương tiện", "tất cả media", "tất cả"]
+    "all media": [
+      "all media", "tất cả nội dung nghe nhìn", "tất cả phương tiện", "tất cả media", "tất cả",
+      "nội dung nghe nhìn", "nội dung đa phương tiện", "phương tiện", "nội dung", "media", "thư viện", "library", "tất cả tệp"
+    ]
   };
+
+  const ALL_MEDIA_ICONS = ["dashboard", "perm_media", "movie", "video_library", "photo_library", "grid_view", "auto_awesome_motion", "folder", "collections", "video_settings"];
 
   function flowNavigationItem(label) {
     const normalize = value => cleanCharacterName(String(value || "").replace(/\s+/g, " ").trim()).toLowerCase();
@@ -31,10 +36,10 @@
       /project navigation|điều hướng dự án|dự án/i.test(el.getAttribute?.("aria-label") || "") ||
       el.querySelector?.('mat-icon')
     ) || document.querySelector('nav,[role="navigation"],mat-sidenav');
-    const roots = navigation ? [navigation] : [document];
-    const candidates = roots.flatMap(r => [...r.querySelectorAll(
-      'a,button,[role="button"],[role="menuitem"],mat-list-item,button[mat-list-item]'
-    )]);
+    const roots = navigation ? [navigation, document] : [document];
+    const candidates = [...new Set(roots.flatMap(r => [...r.querySelectorAll(
+      'a,button,[role="button"],[role="menuitem"],mat-list-item,button[mat-list-item],[role="tab"]'
+    )]))];
     const wanted = normalize(label);
     const synonyms = NAV_SYNONYMS[wanted] || [wanted];
     return candidates.find(el => {
@@ -42,8 +47,8 @@
       const text = normalize(el.innerText || el.textContent || root.accessibleName?.(el));
       const iconNames = [...(el.querySelectorAll?.("mat-icon") || [])].map(icon => normalize(icon.innerText || icon.textContent));
       if ((wanted === "characters" || synonyms.includes("nhân vật")) && (iconNames.includes("accessibility_new") || iconNames.includes("person"))) return true;
-      if ((wanted === "all media" || synonyms.includes("tất cả nội dung nghe nhìn")) && (iconNames.includes("dashboard") || iconNames.includes("perm_media"))) return true;
-      return synonyms.some(syn => text === syn || text.endsWith(` ${syn}`));
+      if ((wanted === "all media" || synonyms.includes("tất cả nội dung nghe nhìn")) && iconNames.some(ic => ALL_MEDIA_ICONS.includes(ic))) return true;
+      return synonyms.some(syn => text === syn || text.endsWith(` ${syn}`) || text.includes(syn));
     });
   }
 
@@ -257,10 +262,34 @@
 
   async function ensureFlowLibrarySection(label) {
     await leaveFlowDetailView();
-    const target = flowNavigationItem(label);
+
+    const isAtProjectRoot = () => {
+      const desc = (root.ProviderRegistry || root.FlowDriverRegistry)?.describeUrl?.(location.href);
+      if (desc?.isProjectEditor) return true;
+      const notSubRoute = !/\/character|\/edit/i.test(location.pathname);
+      const hasComposer = Boolean(document.querySelector('.ProseMirror, flow-base-prompt-box')) ||
+        Boolean(root.flowButton?.("Start generation"));
+      return notSubRoute && hasComposer;
+    };
+
+    // Nếu mục tiêu là "All media" và giao diện đã ở sẵn màn hình Project Editor chính
+    if (label === "All media" && isAtProjectRoot()) {
+      return true;
+    }
+
+    let target = flowNavigationItem(label);
+    if (!target && label === "All media") {
+      // Thử phục hồi về Project Editor nếu bị kẹt ở sub-route
+      await ensureFlowProjectEditor();
+      if (isAtProjectRoot()) return true;
+      target = flowNavigationItem(label);
+    }
+
     if (!target) {
+      if (label === "All media" && isAtProjectRoot()) return true;
       throw root.flowError("FLOW_NAV_UNAVAILABLE", `Flow's project navigation could not open "${label}" from this view.`, true);
     }
+
     target.click();
     const deadline = Date.now() + (label === "Characters" ? 10000 : 5000);
     const hasCharacterAction = () => [...document.querySelectorAll("flow-custom-tile")].some(tile => {
@@ -274,13 +303,14 @@
       (root.flowButton?.("Go back") || root.flowButton?.("Add from project") || root.flowButton?.("Quay lại") || root.flowButton?.("Thêm từ dự án"));
     const hasSectionMarker = () => label === "Characters"
       ? hasCharacterAction() || hasEmptyCharacterChooser()
-      : label === "All media" && [...document.querySelectorAll("flow-grid-tile-container")].some(el => root.visible?.(el));
+      : isAtProjectRoot() || [...document.querySelectorAll("flow-grid-tile-container")].some(el => root.visible?.(el));
     while (Date.now() < deadline) {
       const loading = [...document.querySelectorAll('[role="progressbar"],[aria-busy="true"]')].some(el => root.visible?.(el));
       if (!loading && hasSectionMarker()) break;
       await root.wait?.(150);
     }
     if (!hasSectionMarker()) {
+      if (label === "All media" && isAtProjectRoot()) return true;
       throw root.flowError("FLOW_LIBRARY_LOADING", `Flow's "${label}" library did not become ready after navigation.`, true);
     }
     blurFlowNavigationFocus();

@@ -506,3 +506,29 @@ test('Vietnamese localization: flowRadio and flowNavigationItem resolve Vietname
   assert.equal(ctx.globalThis.flowNavigationItem('All media'), navItems[0]);
   assert.equal(ctx.globalThis.flowNavigationItem('Characters'), navItems[1]);
 });
+
+test('Vietnamese localization: ensureFlowLibrarySection("All media") succeeds safely when already at project root editor', async () => {
+  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const ctx = vm.createContext({
+    globalThis: {},
+    window: {},
+    document: {
+      querySelectorAll: selector => {
+        if (selector.includes('.ProseMirror')) return [{ innerText: '' }];
+        return [];
+      },
+      querySelector: selector => {
+        if (selector.includes('.ProseMirror')) return { innerText: '' };
+        return null;
+      },
+    },
+    location: { href: 'https://flow.google.com/u/0/project/proj_123', pathname: '/project/proj_123' },
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+    accessibleName: () => '',
+  });
+  vm.runInContext(domUtilsSource, ctx);
+
+  // Even if no navigation item exists in the sidebar, ensureFlowLibrarySection("All media") must not throw
+  const result = await ctx.globalThis.ensureFlowLibrarySection('All media');
+  assert.equal(result, true);
+});
