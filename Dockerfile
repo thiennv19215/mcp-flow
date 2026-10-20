@@ -16,6 +16,8 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --chown=node:node studio ./studio
+COPY --chown=node:node flow-model-capabilities.json ./flow-model-capabilities.json
+COPY --chown=node:node flow-selectors.json ./flow-selectors.json
 RUN mkdir -p /data/.flow-mcp /data/output && chown -R node:node /data
 ENV FLOW_MCP_HOST=0.0.0.0 \
     FLOW_MCP_HOME=/data/.flow-mcp \

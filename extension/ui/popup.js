@@ -84,6 +84,7 @@ function renderStatus(s) {
     }
   }
 
+
   // Error / Alert handling
   const errorMsg = mapErrorMessage(s.error);
   if (errorMsg) {

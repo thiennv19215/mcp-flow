@@ -340,7 +340,7 @@
       for (const key of Object.keys(source)) {
         const val = source[key];
         if (val == null) continue;
-        if (typeof val === "string" && (key.endsWith("Regex") || key.endsWith("Pattern"))) {
+        if (typeof val === "string" && (key.endsWith("Regex") || key.endsWith("Pattern") || target[key] instanceof RegExp)) {
           try {
             target[key] = new RegExp(val, "i");
           } catch (_) {

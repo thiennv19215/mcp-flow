@@ -58,8 +58,10 @@ Then sign in, once:
 npm run login
 ```
 
-That opens Flow in your regular browser. Load this repository's extension folder in Chrome (Developer mode → Load unpacked). For an existing installation, click Reload and confirm version 0.2.8. The extension connects automatically to the active Flow tab and follows when you switch to another Flow tab. The popup's reconnect button is only a recovery fallback. No token entry is required.
+That opens Flow in your regular browser. Load this repository's extension folder in Chrome (Developer mode → Load unpacked). For an existing installation, click Reload and confirm version 0.2.24. The extension connects automatically to the active Flow tab and follows when you switch to another Flow tab. The popup's reconnect button is only a recovery fallback. No token entry is required.
 You sign in yourself; the program never handles your Google password.
+
+With the VPS backend, the extension connects directly to the VPS over HTTPS long polling. The VPS also serves the MCP endpoint, so Codex and other remote MCP clients do not need a local Flow MCP process. The Flow browser tab stays on your computer; generation jobs, queues, uploads and outputs are handled by the VPS. Sign in to the extension first, then configure the MCP client with the device token shown in extension Options (keep it private).
 
 ---
 
@@ -81,15 +83,15 @@ claude mcp add --scope user flow -- node /absolute/path/to/flow-mcp/dist/index.j
 { "mcpServers": { "flow": { "command": "node", "args": ["/absolute/path/to/flow-mcp/dist/index.js"] } } }
 ```
 
-**Codex**: add to `~/.codex/config.toml` (on Windows, `%USERPROFILE%\.codex\config.toml`):
+**Codex**: set the environment variable `FLOW_MCP_DEVICE_TOKEN` to the device token shown in extension Options, then add to `~/.codex/config.toml` (on Windows, `%USERPROFILE%\.codex\config.toml`):
 
 ```toml
 [mcp_servers.flow]
-command = "node"
-args = ["/absolute/path/to/flow-mcp/dist/index.js"]
+url = "https://mcp.shopcongngheso5.io.vn/mcp"
+bearer_token_env_var = "FLOW_MCP_DEVICE_TOKEN"
 ```
 
-Or run `codex mcp add flow -- node /absolute/path/to/flow-mcp/dist/index.js`. No timeout setting is needed:
+Or run `codex mcp add flow --url https://mcp.shopcongngheso5.io.vn/mcp`. Then set `FLOW_MCP_DEVICE_TOKEN` in the environment used by Codex and configure `bearer_token_env_var` as above. No timeout setting is needed:
 Codex, like most MCP apps, gives up on a tool call after 60 seconds, so any call that runs longer than about
 45 seconds (creating a character, a 1080p download) answers with a task id instead and keeps working, and
 `flow_wait` collects the result.
@@ -102,9 +104,7 @@ Codex, like most MCP apps, gives up on a tool call after 60 seconds, so any call
 { "mcpServers": { "flow": { "command": "node", "args": ["/absolute/path/to/flow-mcp/dist/index.js"] } } }
 ```
 
-**Other MCP apps** (Cursor, VS Code and others) take the same command and arguments in their own MCP
-settings. ChatGPT in the browser or the ChatGPT app can't use it: its connectors only reach servers on
-the internet, and this tool has to run on your own computer to drive your Chrome window.
+**Other MCP apps** that support Streamable HTTP can connect to `https://mcp.shopcongngheso5.io.vn/mcp` with the same bearer token. This endpoint requires a signed-in device token and serves that device's own queue.
 
 Developed and tested with Claude. Codex and Antigravity speak the same protocol, so they should work the
 same way, but neither has been tried yet, so please report how it goes. Running two of them at once is safe:

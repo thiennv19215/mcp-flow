@@ -1,11 +1,13 @@
-import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readSync, renameSync, statSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readSync, renameSync, rmSync, statSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { extname, join } from "node:path";
-import { extensionDownloads } from "./extension.js";
+import { extensionDownloadChunk, extensionDownloads } from "./extension.js";
 import { extractZip } from "./platform.js";
 import type { DownloadQuality, NativeMedia } from "./types.js";
 import type { Job } from "./queue.js";
 import { nativeOperation } from "./flow.js";
+import { DEFAULT_TRANSFER_LIMITS, DownloadChunkCollector } from "./native-file-transfer.js";
 
 export type NativeDownload = Awaited<ReturnType<typeof extensionDownloads>>[number];
 
@@ -24,7 +26,7 @@ export async function waitForNativeDownload(
   let lastProgress = "";
   while (Date.now() < deadline) {
     const items = (await extensionDownloads()).filter(item => !before.has(item.id));
-    const complete = items.find(item => item.state === "complete" && item.filename && existsSync(item.filename) && statSync(item.filename).size > 0);
+    const complete = items.find(item => item.state === "complete" && item.filename && (item.totalBytes > 0 || item.bytesReceived > 0) && (!existsSync(item.filename) || statSync(item.filename).size > 0));
     if (complete) return complete;
 
     const failed = items.find(item => item.state === "interrupted");
@@ -42,6 +44,45 @@ export async function waitForNativeDownload(
   throw Object.assign(new Error("Flow started the download but Chrome did not finish it in time. The media remains in Flow."), {
     code: "FLOW_DOWNLOAD_FAILED", retryable: false, outcome_unknown: false,
   });
+}
+
+/** Relay a browser-owned completed download to the backend when Chrome and the backend run on different machines. */
+export async function materializeNativeDownload(
+  download: NativeDownload,
+  outputDir: string,
+  onProgress?: (message: string) => void,
+): Promise<string> {
+  if (existsSync(download.filename) && statSync(download.filename).size > 0) return download.filename;
+  const size = download.totalBytes > 0 ? download.totalBytes : download.bytesReceived;
+  if (!Number.isSafeInteger(size) || size < 1 || size > DEFAULT_TRANSFER_LIMITS.maxBytes) {
+    throw Object.assign(new Error(`The browser download size is unavailable or exceeds ${DEFAULT_TRANSFER_LIMITS.maxBytes / 1024 / 1024} MiB; the file remains in Flow.`), {
+      code: "FLOW_DOWNLOAD_TRANSFER_LIMIT", retryable: false, outcome_unknown: false,
+    });
+  }
+  const transferId = randomUUID();
+  const extension = extname(download.filename).toLowerCase().replace(/[^.a-z0-9]/g, "") || ".bin";
+  const temporaryName = `flow-transfer-${transferId}${extension}`;
+  const collector = new DownloadChunkCollector(outputDir);
+  await collector.begin({ transferId, filename: temporaryName, size });
+  try {
+    let offset = 0;
+    let index = 0;
+    while (offset < size) {
+      const length = Math.min(DEFAULT_TRANSFER_LIMITS.chunkBytes, size - offset);
+      const chunk = await extensionDownloadChunk(download.id, index, offset, length);
+      if (chunk.index !== index || chunk.offset !== offset || chunk.totalBytes !== size) throw new Error("The Flow connector returned a mismatched download range.");
+      await collector.accept({ transferId, index, offset, data: chunk.data, chunkSha256: chunk.chunkSha256 });
+      offset += length;
+      index++;
+      onProgress?.(`Transferring browser download ${Math.min(100, Math.floor(offset * 100 / size))}%`);
+    }
+    return await collector.finish(transferId);
+  } catch (error) {
+    await collector.abort(transferId);
+    throw Object.assign(new Error(`Could not transfer the completed browser download to the backend. ${error instanceof Error ? error.message : String(error)}`), {
+      code: "FLOW_DOWNLOAD_TRANSFER_FAILED", retryable: false, outcome_unknown: false,
+    });
+  }
 }
 
 export function extensionOf(file: string): string {
@@ -92,11 +133,16 @@ export async function downloadNativeResults(
     const download = await waitForNativeDownload(before, quality === "upscaled" ? 12 * 60_000 : 3 * 60_000, progress => {
       if (job) job.progress = progress;
     });
-    if (extname(download.filename).toLowerCase() === ".zip") files.push(...unpackTakes(download.filename, stem));
-    else {
-      const destination = `${stem}${extensionOf(download.filename)}`;
-      copyFileSync(download.filename, destination);
-      files.push(destination);
+    const source = await materializeNativeDownload(download, outputDir, progress => { if (job) job.progress = progress; });
+    try {
+      if (extname(source).toLowerCase() === ".zip") files.push(...unpackTakes(source, stem));
+      else {
+        const destination = `${stem}${extensionOf(source)}`;
+        copyFileSync(source, destination);
+        files.push(destination);
+      }
+    } finally {
+      if (source.startsWith(join(outputDir, `flow-transfer-`))) rmSync(source, { force: true });
     }
   }
   return files;

@@ -1,8 +1,8 @@
-import { copyFileSync, mkdirSync, statSync } from "node:fs";
+import { copyFileSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import type { Job } from "./queue.js";
 import { executeFlowDom, extensionSupportsCapability } from "./extension.js";
-import { nativeDownloadIds, waitForNativeDownload, downloadNativeResults, extensionOf, unpackTakes } from "./native-downloads.js";
+import { nativeDownloadIds, waitForNativeDownload, downloadNativeResults, extensionOf, materializeNativeDownload, unpackTakes } from "./native-downloads.js";
 import { uploadFlowMediaToProject, getCachedProjectMedia, cacheProjectMedia } from "./flow-transfer.js";
 import type { FlowState, FlowAsset, FlowProject, DownloadQuality, MediaKind, NativeMedia, CharacterParams } from "./types.js";
 import { validateFlowSceneCapabilities } from "./flow-capabilities.js";
@@ -200,11 +200,17 @@ export async function downloadAsset(name: string, targetStem: string, quality: D
   const triggered = await nativeOperation<{ downloadTriggered: boolean }>("flow.asset.download", { name, quality }, "flow.native.asset.download", undefined, 30_000);
   if (!triggered?.downloadTriggered) throw new Error(`Flow did not confirm the download for "${name}".`);
   const download = await waitForNativeDownload(before, quality === "upscaled" ? 12 * 60_000 : 3 * 60_000);
-  mkdirSync(dirname(targetStem), { recursive: true });
-  if (extname(download.filename).toLowerCase() === ".zip") return unpackTakes(download.filename, targetStem);
-  const destination = `${targetStem}${extensionOf(download.filename)}`;
-  copyFileSync(download.filename, destination);
-  return [destination];
+  const outputDir = dirname(targetStem);
+  mkdirSync(outputDir, { recursive: true });
+  const source = await materializeNativeDownload(download, outputDir);
+  try {
+    if (extname(source).toLowerCase() === ".zip") return unpackTakes(source, targetStem);
+    const destination = `${targetStem}${extensionOf(source)}`;
+    copyFileSync(source, destination);
+    return [destination];
+  } finally {
+    if (source.startsWith(join(outputDir, "flow-transfer-"))) rmSync(source, { force: true });
+  }
 }
 
 export async function trashAsset(name: string): Promise<{ trashed: string }> {

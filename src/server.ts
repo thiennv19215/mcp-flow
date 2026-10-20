@@ -35,8 +35,8 @@ const MIME: Record<string, string> = {
   ".mp3": "audio/mpeg", ".wav": "audio/wav", ".m4a": "audio/mp4",
 };
 
-const json = (res: ServerResponse, code: number, data: unknown) => {
-  res.writeHead(code, { "content-type": "application/json", "cache-control": "no-store" });
+const json = (res: ServerResponse, code: number, data: unknown, headers: Record<string, string> = {}) => {
+  res.writeHead(code, { "content-type": "application/json", "cache-control": "no-store", ...headers });
   res.end(JSON.stringify(data));
 };
 
@@ -77,7 +77,13 @@ export type ServerRole = "owner" | "client" | "none";
 
 // Serves the Studio panel and a JSON API on localhost. Returns "client" when another flow-mcp process already
 // owns the port (that process owns the Flow tab and the queue), "none" when the port is taken by something else.
-export async function startServer(core: Core, getDeviceCore?: (deviceId: string) => Core, suspendDeviceCore?: (deviceId: string) => void): Promise<ServerRole> {
+export async function startServer(
+  core: Core,
+  getDeviceCore?: (deviceId: string) => Core,
+  suspendDeviceCore?: (deviceId: string) => void,
+  connectRemoteSession?: (baseUrl: string, deviceToken: string) => Promise<{ device_id: string; label: string }>,
+  handleRemoteMcp?: (device: { user_id: string; device_id: string; label: string }, req: IncomingMessage, res: ServerResponse, body: unknown) => Promise<void>,
+): Promise<ServerRole> {
   mkdirSync(HOME_DIR, { recursive: true });
   mkdirSync(UPLOAD_DIR, { recursive: true });
   const token = process.env.FLOW_MCP_TOKEN?.trim() || (existsSync(TOKEN_FILE) ? readFileSync(TOKEN_FILE, "utf8").trim() : randomBytes(24).toString("hex"));
@@ -172,6 +178,22 @@ export async function startServer(core: Core, getDeviceCore?: (deviceId: string)
     const bearer = req.headers.authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
     return bearer ? authenticateDevice(bearer) : undefined;
   };
+  const extensionCors = (origin: string) => ({
+    "access-control-allow-origin": origin,
+    "access-control-allow-methods": "POST, OPTIONS",
+    "access-control-allow-headers": "content-type",
+    "access-control-max-age": "600",
+    "access-control-allow-private-network": "true",
+    vary: "Origin",
+  });
+  const allowedRemoteOrigin = (origin: string): boolean => {
+    const configured = process.env.FLOW_MCP_REMOTE_URL?.trim() || "https://mcp.shopcongngheso5.io.vn";
+    try {
+      const url = new URL(configured);
+      const loopback = ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname.toLowerCase());
+      return url.origin === origin && (url.protocol === "https:" || (loopback && url.protocol === "http:"));
+    } catch { return false; }
+  };
   const suspendDevice = (deviceId: string) => {
     extensionRevokeDeviceConnection(deviceId);
     suspendDeviceCore?.(deviceId);
@@ -179,7 +201,16 @@ export async function startServer(core: Core, getDeviceCore?: (deviceId: string)
 
   const server = createServer(async (req, res) => {
     try {
-      if (req.method === "OPTIONS") return json(res, 404, { error: "Not found." });
+      if (req.method === "OPTIONS") {
+        const host = (req.headers.host ?? "").toLowerCase();
+        const origin = req.headers.origin;
+        const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+        if (localOnly && allowedHosts.has(host) && url.pathname === "/api/extension/remote-session" && isExtensionOrigin(origin)) {
+          res.writeHead(204, extensionCors(origin));
+          return res.end();
+        }
+        return json(res, 404, { error: "Not found." });
+      }
       // The Host check blocks DNS rebinding. Studio API calls require the per-run token.
       if (!allowedHosts.has(req.headers.host ?? "")) return json(res, 403, { error: "Bad host." });
       const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
@@ -189,8 +220,43 @@ export async function startServer(core: Core, getDeviceCore?: (deviceId: string)
           ? { name: "flow-mcp", driver: "native", extension_connected: extensionConnected(), connector: extensionStatus() }
           : { name: "flow-mcp", driver: "native" });
       }
+      if (url.pathname === "/mcp") {
+        if (req.method !== "POST") return json(res, 405, { error: "Use POST for the MCP endpoint." }, { allow: "POST" });
+        const bearer = req.headers.authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+        const device = bearer ? authenticateDevice(bearer) : undefined;
+        if (!device) return json(res, 401, { error: "Valid device bearer token required." }, { "www-authenticate": "Bearer" });
+        if (!handleRemoteMcp) return json(res, 503, { error: "Remote MCP is unavailable on this server." });
+        const raw = await readBody(req, 2 * 1024 * 1024);
+        const body = JSON.parse(raw.toString() || "{}");
+        await runWithDeviceContext({ userId: device.user_id, deviceId: device.device_id }, () => handleRemoteMcp(device, req, res, body));
+        return;
+      }
       if (req.method === "GET" && url.pathname === "/api/flow-selectors") {
         return json(res, 200, getFlowSelectors());
+      }
+      if (req.method === "POST" && url.pathname === "/api/extension/remote-session") {
+        const origin = req.headers.origin;
+        if (!localOnly || !isExtensionOrigin(origin)) return json(res, 403, { error: "A local Flow extension is required." });
+        const headers = extensionCors(origin);
+        if (!connectRemoteSession) return json(res, 503, { error: "The local MCP owner cannot forward remote sessions." }, headers);
+        const body = JSON.parse((await readBody(req, 8192)).toString() || "{}");
+        if (typeof body.backend_url !== "string" || typeof body.device_token !== "string" || body.device_token.length < 20 || body.device_token.length > 512) {
+          return json(res, 400, { error: "A backend URL and valid device token are required." }, headers);
+        }
+        let backendUrl: URL;
+        try { backendUrl = new URL(body.backend_url); }
+        catch { return json(res, 400, { error: "Backend URL is invalid." }, headers); }
+        if (backendUrl.origin !== body.backend_url || !allowedRemoteOrigin(backendUrl.origin)) {
+          return json(res, 400, { error: "Backend URL is not the configured HTTPS Flow MCP server." }, headers);
+        }
+        try {
+          const identity = await connectRemoteSession(backendUrl.origin, body.device_token);
+          return json(res, 200, { ok: true, device_id: identity.device_id }, headers);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          const status = /authentication failed|valid device bearer|disabled/i.test(message) ? 401 : 502;
+          return json(res, status, { error: message }, headers);
+        }
       }
       if (url.pathname.startsWith("/api/extension/")) {
         if (req.method !== "POST" || !["/api/extension/connect", "/api/extension/poll", "/api/extension/result", "/api/extension/progress"].includes(url.pathname)) {
@@ -199,35 +265,37 @@ export async function startServer(core: Core, getDeviceCore?: (deviceId: string)
         const device = deviceFromRequest(req);
         if (!device && !localOnly) return json(res, 401, { error: "Valid device bearer token required." });
         const deviceId = device?.device_id ?? "local";
-        const raw = (await readBody(req, 64 * 1024)).toString() || "{}";
+        const bodyLimit = url.pathname === "/api/extension/result" ? 2 * 1024 * 1024 : 64 * 1024;
+        const raw = (await readBody(req, bodyLimit)).toString() || "{}";
         const body = JSON.parse(raw) as Record<string, unknown>;
         if (url.pathname === "/api/extension/connect") {
           if (typeof body.protocol !== "number" || (body.version !== undefined && typeof body.version !== "string") ||
               (body.capabilities !== undefined && (!Array.isArray(body.capabilities) || body.capabilities.length > 100 || body.capabilities.some((value) => typeof value !== "string" || value.length > 120)))) {
             return json(res, 400, { error: "Invalid connector handshake." });
           }
-          extensionRegisterHttpPoll(deviceId, body as { protocol: number; version?: string; capabilities?: unknown });
-          return json(res, 200, { ok: true, protocol: 3, transport: "http-poll" });
+          const sessionId = extensionRegisterHttpPoll(deviceId, body as { protocol: number; version?: string; capabilities?: unknown });
+          return json(res, 200, { ok: true, protocol: 3, transport: "http-poll", session_id: sessionId });
         }
         if (url.pathname === "/api/extension/poll") {
+          if (typeof body.session_id !== "string" || body.session_id.length > 100) return json(res, 400, { error: "A connector session is required." });
           const controller = new AbortController();
           res.on("close", () => { if (!res.writableEnded) controller.abort(); });
-          const message = await extensionHttpPoll(deviceId, typeof body.wait_ms === "number" ? body.wait_ms : 20_000, controller.signal);
+          const message = await extensionHttpPoll(deviceId, body.session_id, typeof body.wait_ms === "number" ? body.wait_ms : 20_000, controller.signal);
           if (!res.destroyed) return json(res, 200, { message });
           return;
         }
         if (url.pathname === "/api/extension/result") {
-          if (typeof body.id !== "string" || body.id.length > 100 || !body.result || typeof body.result !== "object" || typeof (body.result as { ok?: unknown }).ok !== "boolean") {
+          if (typeof body.session_id !== "string" || body.session_id.length > 100 || typeof body.id !== "string" || body.id.length > 100 || !body.result || typeof body.result !== "object" || typeof (body.result as { ok?: unknown }).ok !== "boolean") {
             return json(res, 400, { error: "Invalid extension result." });
           }
-          extensionHttpResult(deviceId, body.id, body.result as Parameters<typeof extensionHttpResult>[2]);
+          if (!extensionHttpResult(deviceId, body.session_id, body.id, body.result as Parameters<typeof extensionHttpResult>[3])) return json(res, 409, { error: "Connector session was replaced." });
           return json(res, 200, { ok: true });
         }
         if (url.pathname === "/api/extension/progress") {
-          if (body.requestId !== undefined && typeof body.requestId !== "string" && typeof body.requestId !== "number") {
+          if (typeof body.session_id !== "string" || body.session_id.length > 100 || (body.requestId !== undefined && typeof body.requestId !== "string" && typeof body.requestId !== "number")) {
             return json(res, 400, { error: "Invalid extension progress." });
           }
-          extensionHttpProgress(deviceId, { requestId: body.requestId, tabId: typeof body.tabId === "number" ? body.tabId : undefined, progress: body.progress });
+          if (!extensionHttpProgress(deviceId, body.session_id, { requestId: body.requestId, tabId: typeof body.tabId === "number" ? body.tabId : undefined, progress: body.progress })) return json(res, 409, { error: "Connector session was replaced." });
           return json(res, 200, { ok: true });
         }
       }
@@ -418,7 +486,7 @@ export async function startServer(core: Core, getDeviceCore?: (deviceId: string)
         if (given !== token && !device) return json(res, 401, { error: "Missing or wrong token." });
         const originalName = basename(url.searchParams.get("name") ?? "upload");
         const extension = extname(originalName).toLowerCase();
-        const allowed = [".png", ".jpg", ".jpeg", ".webp", ".mp4", ".webm", ".mov", ".gif", ".mp3", ".wav", ".m4a"];
+        const allowed = [".png", ".jpg", ".jpeg", ".webp", ".mp4", ".m4v", ".webm", ".mov", ".gif", ".mp3", ".wav", ".m4a", ".heic", ".heif", ".avif", ".avi", ".mkv", ".3gp"];
         if (!allowed.includes(extension)) return json(res, 415, { error: `Unsupported file type "${extension || "(no extension)"}".` });
         const save = async () => {
           const directory = device ? uploadDirForContext() : UPLOAD_DIR;

@@ -8,9 +8,11 @@ This deploys the HTTP backend and Studio on one Linux VPS behind Caddy-managed H
 - A DNS name pointing to the VPS. Allow inbound TCP 80 and 443 for Caddy's TLS certificate.
 - SSH access to the VPS.
 
-The backend has user and device accounts in SQLite. Device bearer tokens select a separate persisted job queue, Flow WebSocket connection, uploads, and output directory for each device. Keep admin credentials private; users sign in with the account label and a password set by an administrator.
+The backend has user and device accounts in SQLite. Device bearer tokens select a separate persisted job queue, browser connector session, uploads, and output directory for each device. Keep admin credentials private; users sign in with the account label and a password set by an administrator.
 
-The extension signs in to the public HTTPS endpoint with a user account and password. The backend issues a per-profile device token, then accepts its WebSocket connection. The public WebSocket rejects connections without a valid device token or the configured server WebSocket secret.
+The extension signs in to the public HTTPS endpoint with a user account and password. The backend issues a per-profile device token, then accepts authenticated HTTPS long-poll requests for commands, progress, and results. The WebSocket endpoint remains available to older extensions during migration.
+
+The backend also exposes a stateless Streamable HTTP MCP endpoint at `https://<your-domain>/mcp`. MCP clients authenticate with the device token returned during extension sign-in. Each device gets its own queue and output directory; no local MCP process is needed on the desktop.
 
 ## Configure and start
 
@@ -40,7 +42,7 @@ The Compose port is published only on `127.0.0.1`. Do not change it to `0.0.0.0`
 
 ## Cloudflare Tunnel option
 
-You can use a Cloudflare Tunnel instead of Caddy and inbound ports 80/443. Create a public hostname such as `flow.example.com` in Cloudflare Zero Trust and route it to `http://127.0.0.1:18899` on the VPS. Keep `FLOW_MCP_PUBLIC_URL=https://flow.example.com` and include `flow.example.com` in `FLOW_MCP_ALLOWED_HOSTS`. The tunnel forwards WebSocket upgrades. Keep the Compose loopback-only port binding and firewall closed; only `cloudflared` on the VPS should reach the app. `FLOW_MCP_TRUST_PROXY=true` lets login rate limits use Cloudflare's client IP header.
+You can use a Cloudflare Tunnel instead of Caddy and inbound ports 80/443. Create a public hostname such as `flow.example.com` in Cloudflare Zero Trust and route it to `http://127.0.0.1:18899` on the VPS. Keep `FLOW_MCP_PUBLIC_URL=https://flow.example.com` and include `flow.example.com` in `FLOW_MCP_ALLOWED_HOSTS`. The HTTPS long-poll transport works through the standard HTTP proxy path; the existing WebSocket upgrade remains only for older extension versions. Keep the Compose loopback-only port binding and firewall closed; only `cloudflared` on the VPS should reach the app. `FLOW_MCP_TRUST_PROXY=true` lets login rate limits use Cloudflare's client IP header.
 
 ## User and device registry API
 
@@ -70,6 +72,8 @@ docker compose up -d --build
 ## Current limitations
 
 - SQLite persists each device's job queue and output/upload paths are isolated per device. Queued work resumes when the paired extension reconnects and reports status. A job that was already running during a server restart is marked as an unknown outcome and cannot be retried automatically; check Flow first to avoid duplicate generation or charges.
-- VPS sign-in is configured in the extension options: the backend URL is fixed and the user enters their account and password. The extension stores the returned device token and reconnects over WSS. Revoke a lost Chrome profile from the admin UI.
+- VPS sign-in is configured in the extension options: the backend URL is fixed and the user enters their account and password. The extension stores the returned device token and reconnects over authenticated HTTPS long polling. Revoke a lost Chrome profile from the admin UI.
+- Configure Codex with `url = "https://<your-domain>/mcp"` and `bearer_token_env_var = "FLOW_MCP_DEVICE_TOKEN"`; configure that environment variable with the device token returned by extension sign-in. Protect the token like a password and revoke the device in the admin UI if it is exposed.
+- Direct remote MCP calls run on the VPS. Input file paths refer to the VPS filesystem; upload local media from the extension/Flow UI or stage files on the VPS before using path-based tools.
 - A signed-in device represents one browser profile/Flow session. A person using multiple Chrome profiles should sign in on each profile; each gets its own device token and queue.
 - The VPS does not host the user's Google Flow session. The extension stays on the user's computer and sends authenticated browser commands to the backend.

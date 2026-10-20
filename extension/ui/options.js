@@ -4,7 +4,7 @@ const I18N = {
   vi: {
     pageTitle: "Cài đặt Flow MCP Connector",
     title: "Cài đặt Flow MCP Connector",
-    subtitle: "Đăng nhập extension vào backend Flow MCP.",
+    subtitle: "Đăng nhập extension vào backend Flow MCP trên VPS.",
     cardTitle: "Đăng nhập backend",
     txtHelp: `Máy chủ: ${BACKEND_ORIGIN}`,
     lblAccount: "Tài khoản",
@@ -13,18 +13,22 @@ const I18N = {
     btnSave: "Đăng nhập và kết nối",
     savedSuccess: "Đã đăng nhập và kết nối backend. Hãy mở hoặc tải lại tab Google Flow nếu cần.",
     guideTitle: "Hướng dẫn nhanh",
-    step1: "Nhập tài khoản và mật khẩu do quản trị viên cấp.",
-    step2: "Mở <code>flow.google.com</code> và đăng nhập Google Flow.",
-    step3: "Bấm <b>Đăng nhập và kết nối</b> để bắt đầu.",
+    step1: "Mở <code>flow.google.com</code> và đăng nhập Google Flow.",
+    step2: "Nhập tài khoản và mật khẩu backend do quản trị viên cấp.",
+    step3: "Bấm <b>Đăng nhập và kết nối</b>. Extension và MCP sẽ dùng trực tiếp backend VPS.",
     saving: "Đang đăng nhập…",
     credentialsRequired: "Nhập cả tài khoản và mật khẩu.",
     loginRequired: "Hãy đăng nhập tài khoản để kết nối extension này.",
     connectFailed: "Chưa kết nối được backend. Kiểm tra HTTPS trên VPS và phiên bản backend.",
+    mcpTitle: "MCP kết nối trực tiếp tới VPS",
+    mcpToken: "Token thiết bị là bí mật. Chỉ dán vào cấu hình MCP cá nhân của bạn.",
+    tokenLabel: "Device token",
+    configLabel: "Codex config (~/.codex/config.toml)",
   },
   en: {
     pageTitle: "Flow MCP Connector Settings",
     title: "Flow MCP Connector Settings",
-    subtitle: "Sign in to the Flow MCP backend.",
+    subtitle: "Sign in to the Flow MCP VPS backend.",
     cardTitle: "Backend Sign In",
     txtHelp: `Server: ${BACKEND_ORIGIN}`,
     lblAccount: "Account",
@@ -33,13 +37,17 @@ const I18N = {
     btnSave: "Sign in and connect",
     savedSuccess: "Signed in and connected. Open or refresh a Google Flow tab if needed.",
     guideTitle: "Quick Guide",
-    step1: "Enter the account name and password provided by your administrator.",
-    step2: "Open <code>flow.google.com</code> and sign in to Google Flow.",
-    step3: "Select <b>Sign in and connect</b> to continue.",
+    step1: "Open <code>flow.google.com</code> and sign in to Google Flow.",
+    step2: "Enter the backend account and password provided by your administrator.",
+    step3: "Select <b>Sign in and connect</b>. The extension and MCP will use the VPS backend directly.",
     saving: "Signing in…",
     credentialsRequired: "Enter both the account name and password.",
     loginRequired: "Sign in to connect this extension.",
     connectFailed: "Could not connect to the backend. Check VPS HTTPS and the deployed backend version.",
+    mcpTitle: "Connect MCP directly to the VPS",
+    mcpToken: "The device token is secret. Only paste it into your personal MCP configuration.",
+    tokenLabel: "Device token",
+    configLabel: "Codex config (~/.codex/config.toml)",
   },
 };
 
@@ -67,13 +75,26 @@ function applyLanguage() {
   document.querySelector("#step1").textContent = t("step1");
   document.querySelector("#step2").innerHTML = t("step2");
   document.querySelector("#step3").innerHTML = t("step3");
+  document.querySelector("#mcpConfig summary").textContent = t("mcpTitle");
+  document.querySelector("#mcpConfig .help-text").textContent = t("mcpToken");
+  document.querySelector('label[for="deviceToken"]').textContent = t("tokenLabel");
+  document.querySelector('label[for="mcpSnippet"]').textContent = t("configLabel");
   document.querySelector("#langVi").classList.toggle("active", currentLang === "vi");
   document.querySelector("#langEn").classList.toggle("active", currentLang === "en");
 }
 
-chrome.storage.local.get({ lang: "vi", loginAccount: "" }).then((stored) => {
+async function showMcpConfig(token) {
+  const section = document.querySelector("#mcpConfig");
+  if (!token) { section.hidden = true; return; }
+  section.hidden = false;
+  document.querySelector("#deviceToken").value = token;
+  document.querySelector("#mcpSnippet").value = `[mcp_servers.flow]\nurl = "${BACKEND_ORIGIN}/mcp"\nbearer_token_env_var = "FLOW_MCP_DEVICE_TOKEN"`;
+}
+
+chrome.storage.local.get({ lang: "vi", loginAccount: "", deviceToken: "" }).then((stored) => {
   currentLang = stored.lang === "en" ? "en" : "vi";
   accountInput.value = stored.loginAccount || "";
+  void showMcpConfig(stored.deviceToken);
   applyLanguage();
 });
 
@@ -158,6 +179,8 @@ document.querySelector("#save").addEventListener("click", async () => {
     if (!connectionStatus?.connected) {
       throw new Error(connectionStatus?.error || t("connectFailed"));
     }
+
+    await showMcpConfig(token);
 
     statusMsg.className = "status-msg success show";
     statusMsg.textContent = t("savedSuccess");

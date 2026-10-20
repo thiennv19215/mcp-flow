@@ -1,4 +1,5 @@
 import type { WebSocket } from "ws";
+import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { currentDeviceContext } from "./request-context.js";
 
@@ -11,6 +12,7 @@ type Pending = { resolve(value: unknown): void; reject(error: Error): void; time
 type PollWaiter = { resolve(message: OutboundMessage | null): void; timer: NodeJS.Timeout };
 export type Connection = {
   deviceId: string;
+  sessionId: string;
   transport: "websocket" | "http-poll";
   ws?: WebSocket;
   pending: Map<string, Pending>;
@@ -135,10 +137,26 @@ export function extensionRevokeDeviceConnection(deviceId: string): void {
   try { connection.ws?.close(1008, "Device credential revoked"); } catch {}
 }
 
-export async function extensionDownloads(): Promise<Array<{ id: number; filename: string; state: string; error?: string; bytesReceived: number; totalBytes: number }>> {
+export type ExtensionDownload = { id: number; filename: string; state: string; error?: string; bytesReceived: number; totalBytes: number; url?: string; finalUrl?: string; referrer?: string };
+
+export async function extensionDownloads(): Promise<ExtensionDownload[]> {
   const connection = selectedConnection();
   if (!isConnected(connection)) throw new Error("Flow connector is offline.");
   return call(connection, "flow.downloads.recent");
+}
+
+export async function extensionDownloadChunk(id: number, index: number, offset: number, length: number): Promise<{ index: number; offset: number; data: string; chunkSha256: string; totalBytes: number }> {
+  const connection = selectedConnection();
+  if (!isConnected(connection)) throw new Error("Flow connector is offline.");
+  if (!connection.capabilities.includes("flow.native.downloads.read")) {
+    throw Object.assign(new Error("The installed extension cannot transfer downloaded Flow files. Reload the Flow extension."), {
+      code: "NATIVE_CAPABILITY_UNSUPPORTED", retryable: true, outcome_unknown: false,
+    });
+  }
+  if (!Number.isSafeInteger(id) || id < 0 || !Number.isSafeInteger(index) || index < 0 || !Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(length) || length < 1 || length > 1024 * 1024) {
+    throw new Error("Invalid Flow download chunk request.");
+  }
+  return call(connection, "flow.downloads.read", [{ id, index, offset, length }], 60_000);
 }
 
 export async function executeFlowDom<T = unknown>(
@@ -169,7 +187,7 @@ export async function executeFlowDom<T = unknown>(
 }
 
 function makeConnection(deviceId: string, transport: Connection["transport"]): Connection {
-  return { deviceId, transport, pending: new Map(), ready: false, capabilities: [], nextId: 0, outbound: [], pollWaiters: new Set(), lastSeen: Date.now() };
+  return { deviceId, sessionId: randomUUID(), transport, pending: new Map(), ready: false, capabilities: [], nextId: 0, outbound: [], pollWaiters: new Set(), lastSeen: Date.now() };
 }
 
 function replaceConnection(connection: Connection): void {
@@ -232,7 +250,7 @@ function acceptInitialized(connection: Connection, info: { protocol?: number; ve
   }
 }
 
-export function extensionRegisterHttpPoll(deviceId: string, info: { protocol: number; version?: string; capabilities?: unknown }): void {
+export function extensionRegisterHttpPoll(deviceId: string, info: { protocol: number; version?: string; capabilities?: unknown }): string {
   if (info.protocol !== 3) throw new Error("Incompatible HTTP connector protocol. Reload Flow MCP Connector.");
   const connection = makeConnection(deviceId, "http-poll");
   replaceConnection(connection);
@@ -244,11 +262,14 @@ export function extensionRegisterHttpPoll(deviceId: string, info: { protocol: nu
   for (const listener of initListeners) {
     try { listener(connection); } catch (e) { console.warn("[extension] initListener error:", e); }
   }
+  return connection.sessionId;
 }
 
-export function extensionHttpPoll(deviceId: string, waitMs: number, signal?: AbortSignal): Promise<OutboundMessage | null> {
+export function extensionHttpPoll(deviceId: string, sessionId: string, waitMs: number, signal?: AbortSignal): Promise<OutboundMessage | null> {
   const connection = connections.get(deviceId);
-  if (!isConnected(connection) || connection.transport !== "http-poll") return Promise.reject(new Error("HTTP connector is not connected."));
+  if (!isConnected(connection) || connection.transport !== "http-poll" || connection.sessionId !== sessionId) {
+    return Promise.reject(new Error("Connector session was replaced. Reconnect the extension."));
+  }
   connection.lastSeen = Date.now();
   const message = connection.outbound.shift();
   if (message) {
@@ -278,18 +299,20 @@ export function extensionHttpPoll(deviceId: string, waitMs: number, signal?: Abo
   });
 }
 
-export function extensionHttpResult(deviceId: string, id: string, result: ExtensionResult): void {
+export function extensionHttpResult(deviceId: string, sessionId: string, id: string, result: ExtensionResult): boolean {
   const connection = connections.get(deviceId);
-  if (!isConnected(connection) || connection.transport !== "http-poll") return;
+  if (!isConnected(connection) || connection.transport !== "http-poll" || connection.sessionId !== sessionId) return false;
   connection.lastSeen = Date.now();
   acceptResult(connection, id, result);
+  return true;
 }
 
-export function extensionHttpProgress(deviceId: string, progress: { requestId?: unknown; tabId?: number; progress?: unknown }): void {
+export function extensionHttpProgress(deviceId: string, sessionId: string, progress: { requestId?: unknown; tabId?: number; progress?: unknown }): boolean {
   const connection = connections.get(deviceId);
-  if (!isConnected(connection) || connection.transport !== "http-poll") return;
+  if (!isConnected(connection) || connection.transport !== "http-poll" || connection.sessionId !== sessionId) return false;
   connection.lastSeen = Date.now();
   acceptProgress(connection, progress);
+  return true;
 }
 
 function call(connection: Connection, method: string, args: unknown[] = [], timeoutMs = 5 * 60_000): Promise<any> {

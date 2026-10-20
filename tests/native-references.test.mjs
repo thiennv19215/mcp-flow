@@ -1,11 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { createHash, webcrypto } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import vm from 'node:vm';
 import { EventEmitter } from 'node:events';
 import { extensionSetWebSocket } from '../dist/extension.js';
 import { runGeneration } from '../dist/flow.js';
 import { getCachedProjectMedia, cacheProjectMedia } from '../dist/flow-transfer.js';
+import { materializeNativeDownload } from '../dist/native-downloads.js';
+import { readFlowDownloadChunk } from '../extension/background/flow-download-relay.js';
 
 const source = readFileSync(new URL('../extension/content/providers/flow/FlowComponents.js', import.meta.url), 'utf8');
 function harness({ names = ['MCP Test Mug'], addedKind = 'character', hideAttached = false } = {}) {
@@ -75,6 +80,19 @@ test('asset names ending in media decoration are matched without broad substring
   assert.equal(api.exactOption([option], 'Mu'), null);
 });
 
+test('dynamic selector sync keeps regex-valued extension selectors executable', () => {
+  const selectorsSource = readFileSync(new URL('../extension/content/providers/flow/FlowSelectors.js', import.meta.url), 'utf8');
+  const remoteSelectors = JSON.parse(readFileSync(new URL('../flow-selectors.json', import.meta.url), 'utf8'));
+  const context = vm.createContext({ chrome: { storage: {
+    local: { get: (_key, callback) => callback({ flow_remote_selectors: remoteSelectors }) },
+    onChanged: { addListener: () => {} },
+  } } });
+  vm.runInContext(selectorsSource, context);
+  const excludedAria = context.FlowSelectors.submitButton.excludedComposerAria;
+  assert.equal(typeof excludedAria.test, 'function');
+  assert.equal(excludedAria.test('add media'), true);
+});
+
 test('generation transports character:<name> as a named reference, not a local file', async () => {
   class Connector extends EventEmitter {
     readyState = 1;
@@ -97,6 +115,78 @@ test('generation transports character:<name> as a named reference, not a local f
     assert.deepEqual(connector.sent.map(command => command.args[0].name), ['flow.context', 'flow.generation.submit']);
     assert.deepEqual(connector.sent[1].args[0].payload.attachments, [{ assetName: 'character:MCP Test Mug' }]);
   } finally { connector.emit('close', 1000, Buffer.from('test complete')); }
+});
+
+test('remote browser downloads are relayed in ordered, checksum-verified chunks', async () => {
+  const bytes = Buffer.alloc(300_000, 37);
+  const commands = [];
+  class Connector extends EventEmitter {
+    readyState = 1;
+    send(raw) {
+      const command = JSON.parse(raw);
+      commands.push(command);
+      const input = command.args[0];
+      assert.equal(command.method, 'flow.downloads.read');
+      const chunk = bytes.subarray(input.offset, input.offset + input.length);
+      const result = {
+        ok: true,
+        value: {
+          index: input.index,
+          offset: input.offset,
+          data: chunk.toString('base64'),
+          chunkSha256: createHash('sha256').update(chunk).digest('hex'),
+          totalBytes: bytes.length,
+        },
+      };
+      queueMicrotask(() => this.emit('message', JSON.stringify({ type: 'result', id: command.id, result })));
+    }
+  }
+  const connector = new Connector();
+  extensionSetWebSocket(connector);
+  connector.emit('message', JSON.stringify({
+    type: 'event', method: 'extension.initialized',
+    params: [{ protocol: 2, version: '0.2.23', capabilities: ['downloads.read'].map(name => `flow.native.${name}`) }],
+  }));
+  const output = mkdtempSync(join(tmpdir(), 'flow-download-relay-test-'));
+  try {
+    const path = await materializeNativeDownload({
+      id: 17, filename: 'C:\\Users\\test\\Downloads\\flow-result.png', state: 'complete',
+      bytesReceived: bytes.length, totalBytes: bytes.length,
+    }, output);
+    assert.equal(readFileSync(path).length, bytes.length);
+    assert.deepEqual(readFileSync(path), bytes);
+    assert.equal(commands.length, 2);
+    assert.deepEqual(commands.map(command => command.args[0].index), [0, 1]);
+  } finally {
+    connector.emit('close', 1000, Buffer.from('test complete'));
+    rmSync(output, { recursive: true, force: true });
+  }
+});
+
+test('extension download relay accepts only completed Flow downloads and validates HTTP ranges', async () => {
+  const file = Buffer.from('abcde');
+  const calls = [];
+  const downloads = { search: async query => [{
+    id: query.id, state: 'complete', referrer: 'https://flow.google.com/project/test',
+    url: 'https://flow.google.com/download/1', finalUrl: 'https://lh3.googleusercontent.com/media/signed-file', totalBytes: file.length,
+  }] };
+  const chunk = await readFlowDownloadChunk({ id: 3, index: 0, offset: 1, length: 3 }, {
+    downloads,
+    cryptoApi: webcrypto,
+    fetchImpl: async (url, options) => {
+      calls.push({ url, range: options.headers.Range, credentials: options.credentials });
+      return new Response(file.subarray(1, 4), { status: 206, headers: { 'content-range': 'bytes 1-3/5' } });
+    },
+  });
+  assert.equal(Buffer.from(chunk.data, 'base64').toString(), 'bcd');
+  assert.equal(chunk.totalBytes, 5);
+  assert.equal(chunk.chunkSha256, createHash('sha256').update('bcd').digest('hex'));
+  assert.deepEqual(calls, [{ url: 'https://lh3.googleusercontent.com/media/signed-file', range: 'bytes=1-3', credentials: 'omit' }]);
+
+  await assert.rejects(readFlowDownloadChunk({ id: 3, index: 0, offset: 0, length: 2 }, {
+    downloads: { search: async query => [{ id: query.id, state: 'complete', referrer: 'https://flow.google.com/project/test', url: 'https://flow.google.com/download', finalUrl: 'http://127.0.0.1/private', totalBytes: 5 }] },
+    fetchImpl: async () => { throw new Error('must not fetch an untrusted URL'); },
+  }), /approved Google media host/);
 });
 
 test('classifyFlowError identifies quota, unusual activity, policy, and rate limits correctly', () => {

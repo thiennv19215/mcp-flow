@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "defaults": {
+    "maxReferences": 3,
+    "videoAspectRatios": ["16:9", "9:16"],
+    "imageAspectRatios": ["16:9", "9:16", "1:1", "4:3", "3:4"],
+    "frameInputs": 2,
+    "framesAndReferencesMutuallyExclusive": true
+  },
+  "models": [
+    {
+      "match": ["veo 3.1"],
+      "types": ["video"],
+      "fixedDuration": 8,
+      "durations": [8],
+      "resolutions": [],
+      "aspectRatios": ["16:9", "9:16"],
+      "maxReferences": 3,
+      "supportsFrames": true,
+      "framesAndReferencesMutuallyExclusive": true
+    },
+    {
+      "match": ["omni"],
+      "types": ["video"],
+      "durations": [4, 6, 8, 10],
+      "resolutions": ["360p", "720p"],
+      "aspectRatios": ["16:9", "9:16"],
+      "maxReferences": 3,
+      "supportsFrames": true,
+      "framesAndReferencesMutuallyExclusive": true
+    },
+    {
+      "match": ["nano banana", "imagen"],
+      "types": ["image"],
+      "durations": [],
+      "resolutions": [],
+      "aspectRatios": ["16:9", "9:16", "1:1", "4:3", "3:4"],
+      "maxReferences": 3,
+      "supportsFrames": false,
+      "framesAndReferencesMutuallyExclusive": false
+    }
+  ]
+}

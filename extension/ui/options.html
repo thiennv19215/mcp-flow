@@ -328,7 +328,7 @@
         </div>
         <div class="title-wrap">
           <h1 id="txtTitle">Cài đặt Flow MCP Connector</h1>
-        <div class="subtitle" id="txtSubtitle">Kết nối extension với backend Flow MCP trên máy tính hoặc VPS.</div>
+        <div class="subtitle" id="txtSubtitle">Kết nối extension với backend Flow MCP trên VPS.</div>
         </div>
       </div>
       <div class="lang-switch" title="Chuyển đổi ngôn ngữ / Switch language">
@@ -369,6 +369,14 @@
       </button>
 
       <div class="status-msg" id="status"></div>
+      <details id="mcpConfig" hidden style="margin-top: 18px; color: var(--text-main);">
+        <summary style="cursor: pointer; font-weight: 600;">MCP kết nối trực tiếp tới VPS</summary>
+        <p class="help-text" style="margin-top: 10px;">Token thiết bị là bí mật. Chỉ dán vào cấu hình MCP cá nhân của bạn.</p>
+        <label for="deviceToken" style="margin-top: 12px;">Device token</label>
+        <textarea id="deviceToken" readonly rows="3" style="width: 100%; resize: vertical; background: #181818; border: 1px solid var(--card-border); border-radius: 8px; padding: 10px; color: var(--text-primary); font: 12px ui-monospace, Consolas, monospace;"></textarea>
+        <label for="mcpSnippet" style="margin-top: 12px;">Codex config (`~/.codex/config.toml`)</label>
+        <textarea id="mcpSnippet" readonly rows="4" style="width: 100%; resize: vertical; background: #181818; border: 1px solid var(--card-border); border-radius: 8px; padding: 10px; color: var(--text-primary); font: 12px ui-monospace, Consolas, monospace;"></textarea>
+      </details>
     </div>
 
     <!-- Quick Guide Card -->
@@ -386,7 +394,7 @@
         <div class="step-item">
           <div class="step-num">1</div>
           <div class="step-content" id="step1">
-            <b>Khởi động server:</b> Chạy script <code>Start Flow.cmd</code> hoặc lệnh <code>npm run studio</code> để kích hoạt server cổng 18899.
+            <b>Mở Google Flow:</b> Đăng nhập Flow trên tab Chrome để extension kết nối với backend VPS.
           </div>
         </div>
         <div class="step-item">

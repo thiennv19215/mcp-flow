@@ -61,7 +61,7 @@ type ActiveDownload = {
   tempPath: string;
   handle: Awaited<ReturnType<typeof open>>;
   expectedSize: number;
-  expectedSha256: string;
+  expectedSha256?: string;
   nextIndex: number;
   offset: number;
   hash: ReturnType<typeof createHash>;
@@ -85,11 +85,11 @@ export class DownloadChunkCollector {
     if (!Number.isSafeInteger(this.maxChunks) || this.maxChunks < 1) throw new Error("maxChunks must be a positive safe integer");
   }
 
-  async begin(input: { transferId: string; filename: string; size: number; sha256: string }): Promise<void> {
+  async begin(input: { transferId: string; filename: string; size: number; sha256?: string }): Promise<void> {
     const { transferId, size } = input;
     if (!/^[A-Za-z0-9_-]{1,100}$/.test(transferId) || this.transfers.has(transferId)) throw new Error("Invalid or duplicate transfer id");
     if (!Number.isSafeInteger(size) || size < 0 || size > this.maxBytes) throw new Error(`Download size exceeds the ${this.maxBytes}-byte limit`);
-    if (!validDigest(input.sha256)) throw new Error("Invalid download SHA-256");
+    if (input.sha256 !== undefined && !validDigest(input.sha256)) throw new Error("Invalid download SHA-256");
     const name = basename(input.filename);
     if (!name || name === "." || name === ".." || name !== input.filename || /[\\/\0]/.test(name)) throw new Error("Invalid download filename");
     await mkdir(this.outputDir, { recursive: true });
@@ -97,7 +97,7 @@ export class DownloadChunkCollector {
     if (!inside(path, this.outputDir)) throw new Error("Download path escapes output directory");
     const tempPath = join(this.outputDir, `.${transferId}.part`);
     const handle = await open(tempPath, "wx");
-    this.transfers.set(transferId, { path, tempPath, handle, expectedSize: size, expectedSha256: input.sha256.toLowerCase(), nextIndex: 0, offset: 0, hash: createHash("sha256") });
+    this.transfers.set(transferId, { path, tempPath, handle, expectedSize: size, expectedSha256: input.sha256?.toLowerCase(), nextIndex: 0, offset: 0, hash: createHash("sha256") });
   }
 
   async accept(chunk: FileChunk): Promise<{ nextIndex: number; receivedBytes: number }> {
@@ -127,7 +127,8 @@ export class DownloadChunkCollector {
     const active = this.transfers.get(transferId);
     if (!active) throw new Error("Unknown download transfer");
     try {
-      if (active.offset !== active.expectedSize || active.hash.digest("hex") !== active.expectedSha256) throw new Error("Download size or checksum mismatch");
+      const actualSha256 = active.hash.digest("hex");
+      if (active.offset !== active.expectedSize || (active.expectedSha256 && actualSha256 !== active.expectedSha256)) throw new Error("Download size or checksum mismatch");
       await active.handle.sync();
       await active.handle.close();
       // A hard link publishes the verified file atomically and fails if the destination already exists.

@@ -1,3 +1,5 @@
+import { readFlowDownloadChunk } from "./flow-download-relay.js";
+
 const defaults = { bridge: "https://mcp.shopcongngheso5.io.vn" };
 const flowUrl = url => /^https:\/\/flow\.google\.com\//.test(url || "");
 const nativeFlowOperations = new Set([
@@ -6,6 +8,7 @@ const nativeFlowOperations = new Set([
   "flow.generation.upload.preflight",
   "flow.file.upload.begin", "flow.file.upload.chunk", "flow.file.upload.finish", "flow.file.upload.abort", "flow.media.upload",
   "flow.asset.download",
+  "flow.downloads.read",
   "flow.asset.rename", "flow.asset.trash",
   "flow.character.create", "flow.character.edit", "flow.edit.run",
   "flow.continue.run", "flow.agent.batch",
@@ -292,10 +295,9 @@ const config = async () => {
 
 function bridgeUrl(value) {
   const url = new URL(value);
-  const local = ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
   const configuredVps = url.hostname === "mcp.shopcongngheso5.io.vn";
-  if (url.username || url.password || url.search || url.hash || !(local ? ["http:", "https:"].includes(url.protocol) : configuredVps && url.protocol === "https:")) {
-    throw new Error("Use localhost HTTP(S), or https://mcp.shopcongngheso5.io.vn for the VPS.");
+  if (url.username || url.password || url.search || url.hash || !configuredVps || url.protocol !== "https:") {
+    throw new Error("Use https://mcp.shopcongngheso5.io.vn for the VPS backend.");
   }
   return url;
 }
@@ -315,7 +317,7 @@ function bridgeConnected() {
 }
 function event(method, params) {
   if (httpSession && !httpSession.stopped) {
-    void postHttpMessage(httpSession, "/api/extension/progress", { ...params[0], method }).catch(error => {
+    void postHttpMessage(httpSession, "/api/extension/progress", { ...params[0], method, session_id: httpSession.sessionId }).catch(error => {
       if (httpSession) lastError = `Progress could not reach backend: ${String(error?.message || error)}`;
     });
     return;
@@ -437,8 +439,11 @@ async function execute(_ws, method, args = []) {
     const items = await chrome.downloads.search({ orderBy: ["-startTime"], limit: 100 });
     return items.filter(item => flowUrl(item.referrer) || flowUrl(item.url)).map(item => ({
       id: item.id, filename: item.filename, state: item.state, error: item.error,
-      bytesReceived: item.bytesReceived, totalBytes: item.totalBytes,
+      bytesReceived: item.bytesReceived, totalBytes: item.totalBytes, url: item.url, finalUrl: item.finalUrl, referrer: item.referrer,
     }));
+  }
+  if (method === "flow.downloads.read") {
+    return readFlowDownloadChunk(args[0]);
   }
   throw new Error(`Unsupported connector method: ${method}`);
 }
@@ -498,7 +503,7 @@ async function pollHttp(session) {
       const headers = { "content-type": "application/json" };
       if (session.token) headers.authorization = `Bearer ${session.token}`;
       const response = await fetch(`${session.bridge}/api/extension/poll`, {
-        method: "POST", headers, body: JSON.stringify({ wait_ms: 20_000 }), signal: controller.signal, cache: "no-store",
+        method: "POST", headers, body: JSON.stringify({ wait_ms: 20_000, session_id: session.sessionId }), signal: controller.signal, cache: "no-store",
       });
       if (!response.ok) {
         const detail = await response.json().catch(() => ({}));
@@ -508,7 +513,7 @@ async function pollHttp(session) {
       const message = payload?.message;
       if (message?.type === "event") applyBackendEvent(message);
       else if (message?.type === "command") dispatchCommand(message, result => {
-        void postHttpMessage(session, "/api/extension/result", { id: String(result.id), result: result.result }).catch(error => {
+        void postHttpMessage(session, "/api/extension/result", { id: String(result.id), result: result.result, session_id: session.sessionId }).catch(error => {
           if (httpSession === session) lastError = `Command result could not reach backend: ${String(error?.message || error)}`;
         });
       });
@@ -539,7 +544,9 @@ async function connectHttp(settings, token) {
     if (response.status === 401 && detail.error === "Missing or wrong token.") return false;
     throw new Error(detail.error || `Backend connection failed (HTTP ${response.status}).`);
   }
-  const session = { bridge, token, stopped: false, pollAbort: null };
+  const connection = await response.json().catch(() => ({}));
+  if (typeof connection.session_id !== "string" || !connection.session_id) throw new Error("Backend did not return a connector session. Update the backend and try again.");
+  const session = { bridge, token, sessionId: connection.session_id, stopped: false, pollAbort: null };
   httpSession = session;
   bridgeTransport = "http-poll";
   reconnectAttempt = 0;
@@ -669,7 +676,7 @@ chrome.tabs.onCreated.addListener(tab => {
 });
 chrome.runtime.onInstalled.addListener(() => { chrome.alarms.create("flow-mcp-connect", { periodInMinutes: 0.5 }); void connect(); });
 chrome.runtime.onStartup.addListener(() => { chrome.alarms.create("flow-mcp-connect", { periodInMinutes: 0.5 }); void connect(); });
-chrome.alarms.onAlarm.addListener(() => void connect());
+chrome.alarms.onAlarm.addListener(() => { void connect(); });
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local" || !changes.bridge) return;
   clearTimeout(reconnectTimer); reconnectTimer = undefined;
