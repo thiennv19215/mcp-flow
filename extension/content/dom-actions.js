@@ -324,6 +324,7 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
   if (name === "flow.generation.submit") {
     const state = nativeRead("flowState");
     if (!state.signedIn || !state.inProject) throw flowError("FLOW_NOT_READY", state.hint || "Open a signed-in Flow project first.", true);
+    await dismissBlockingOverlays();
     await closeNativeAgentSession();
     await ensureFlowLibrarySection("All media");
     const attachments = Array.isArray(payload.attachments) ? payload.attachments : [];
@@ -438,8 +439,8 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
       // TobyFlow 3 Confirmation Signals:
       // 1. Submit button becomes disabled
       const buttonDisabled = !currentStart || currentStart.disabled || currentStart.getAttribute("aria-disabled") === "true";
-      // 2. Editor prompt cleared (Flow accepted the prompt)
-      const editorCleared = currentBox && !currentBox.textContent?.trim();
+      // 2. Editor prompt cleared (Flow accepted the prompt; preserves character chips)
+      const editorCleared = currentBox && !getEditorUserText(currentBox);
       // 3. New media tile appeared in grid
       const tileAppeared = freshMedia.length > 0;
 

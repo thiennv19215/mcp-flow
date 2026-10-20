@@ -140,3 +140,137 @@ test('getCachedProjectMedia reuses previously uploaded asset by sha256', () => {
   // Different project should not hit
   assert.equal(getCachedProjectMedia('other-proj', filePath), undefined);
 });
+
+test('getEditorUserText extracts plain prompt text while completely excluding inline chips', () => {
+  const domUtilsSource = readFileSync(new URL('../extension/content/dom-utils.js', import.meta.url), 'utf8');
+  const context = vm.createContext({ window: {}, document: {}, location: { href: 'https://flow.google.com' } });
+  vm.runInContext(domUtilsSource, context);
+  const getEditorUserText = context.getEditorUserText;
+
+  // Mock an editor with a chip and user prompt text
+  const chipElement = {
+    nodeType: 1,
+    tagName: 'SPAN',
+    getAttribute: attr => attr === 'contenteditable' ? 'false' : null,
+    childNodes: [{ nodeType: 3, nodeValue: '@HeroCharacter' }],
+    querySelectorAll: () => [],
+    closest: selector => selector === '[contenteditable="false"]' ? chipElement : null,
+  };
+  const promptTextNode = {
+    nodeType: 3,
+    nodeValue: ' jumping over mountains at sunrise',
+    parentElement: { closest: () => null },
+  };
+
+  const editor = {
+    nodeType: 1,
+    isContentEditable: true,
+    childNodes: [chipElement, promptTextNode],
+    querySelectorAll: selector => selector === '[contenteditable="false"]' ? [chipElement] : [],
+  };
+
+  const extracted = getEditorUserText(editor);
+  assert.equal(extracted, 'jumping over mountains at sunrise');
+});
+
+test('clearEditorTextPreservingChips wipes user text without removing reference chips', async () => {
+  const domUtilsSource = readFileSync(new URL('../extension/content/dom-utils.js', import.meta.url), 'utf8');
+  const dispatchedEvents = [];
+  const context = vm.createContext({
+    window: { getSelection: () => null },
+    setTimeout: (fn) => fn(),
+    clearTimeout: () => {},
+    document: {
+      createRange: () => ({ selectNode: () => {}, selectNodeContents: () => {} }),
+      execCommand: () => true,
+    },
+    location: { href: 'https://flow.google.com' },
+    InputEvent: class InputEvent { constructor(type, init) { this.type = type; this.init = init; } },
+  });
+  vm.runInContext(domUtilsSource, context);
+  const clearEditorTextPreservingChips = context.clearEditorTextPreservingChips;
+  const getEditorUserText = context.getEditorUserText;
+  const countInlineChips = context.countInlineChips;
+
+  const chipElement = {
+    nodeType: 1,
+    tagName: 'SPAN',
+    getAttribute: attr => attr === 'contenteditable' ? 'false' : null,
+    childNodes: [{ nodeType: 3, nodeValue: '@CharacterChip' }],
+    querySelectorAll: () => [],
+    closest: selector => selector === '[contenteditable="false"]' ? chipElement : null,
+  };
+  const promptTextNode = {
+    nodeType: 3,
+    nodeValue: 'old stale prompt from previous attempt',
+    parentElement: { closest: () => null },
+  };
+
+  const editor = {
+    nodeType: 1,
+    isContentEditable: true,
+    focus: () => {},
+    dispatchEvent: evt => dispatchedEvents.push(evt),
+    childNodes: [chipElement, promptTextNode],
+    querySelectorAll: selector => selector === '[contenteditable="false"]' ? [chipElement] : [],
+  };
+
+  assert.equal(countInlineChips(editor), 1);
+  assert.equal(getEditorUserText(editor), 'old stale prompt from previous attempt');
+
+  const cleared = await clearEditorTextPreservingChips(editor);
+  assert.equal(cleared, true);
+  // Text node value wiped
+  assert.equal(promptTextNode.nodeValue, '');
+  // Chip still intact
+  assert.equal(countInlineChips(editor), 1);
+  assert.equal(getEditorUserText(editor), '');
+});
+
+test('dismissBlockingOverlays clicks close buttons or dispatches Escape for open dialogs', async () => {
+  const domUtilsSource = readFileSync(new URL('../extension/content/dom-utils.js', import.meta.url), 'utf8');
+  let closeClicked = false;
+  let escapeCount = 0;
+
+  const closeButton = {
+    nodeType: 1,
+    name: 'Close dialog',
+    innerText: 'Close',
+    getAttribute: (attr) => attr === 'aria-label' ? 'Close dialog' : null,
+    querySelectorAll: () => [],
+    getBoundingClientRect: () => ({ width: 40, height: 40 }),
+    click: () => { closeClicked = true; },
+  };
+
+  const modalDialog = {
+    nodeType: 1,
+    getAttribute: () => null,
+    querySelectorAll: selector => selector.includes('button') ? [closeButton] : [],
+    querySelector: () => null,
+    getBoundingClientRect: () => ({ width: 300, height: 200 }),
+  };
+
+  const context = vm.createContext({
+    window: {},
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+    setTimeout: (fn) => fn(),
+    clearTimeout: () => {},
+    document: {
+      querySelectorAll: selector => {
+        if (selector.includes('[role="dialog"]')) return [modalDialog];
+        if (selector.includes('cdk-overlay-backdrop')) return [];
+        return [];
+      },
+      dispatchEvent: evt => { if (evt.key === 'Escape') escapeCount++; },
+    },
+    KeyboardEvent: class KeyboardEvent { constructor(type, init) { this.type = type; this.key = init?.key; } },
+    accessibleName: el => el.name || el.innerText || '',
+    location: { href: 'https://flow.google.com' },
+  });
+  vm.runInContext(domUtilsSource, context);
+  const dismissBlockingOverlays = context.dismissBlockingOverlays;
+
+  const result = await dismissBlockingOverlays();
+  assert.equal(result, true);
+  assert.equal(closeClicked, true);
+});

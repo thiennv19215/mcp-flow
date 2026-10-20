@@ -245,6 +245,7 @@ async function preflightGenerationPrompt(payload, framesMode) {
   if (flowSettingsPanelVisible()) {
     await closeFlowSettings();
   }
+  await dismissBlockingOverlays();
   const deadline = Date.now() + 5000;
   let promptBox = null;
   while (Date.now() < deadline) {

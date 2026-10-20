@@ -256,12 +256,184 @@ function replaceNativeEditableText(el, value) {
   return String(el.innerText || el.textContent || el.value || "").includes(text);
 }
 
+function getEditorUserText(editor) {
+  if (!editor) return "";
+  if (!editor.isContentEditable) {
+    return String(editor.value || editor.textContent || "").replace(/[\u200B\u200C\u200D\uFEFF]/g, "").replace(/\s+/g, " ").trim();
+  }
+  const chunks = [];
+  const blockTags = new Set(["P", "DIV", "LI", "UL", "OL", "BLOCKQUOTE", "PRE"]);
+  const visit = node => {
+    if (node.nodeType === 3 /* TEXT_NODE */) {
+      chunks.push(node.nodeValue || "");
+      return;
+    }
+    if (node.nodeType !== 1 /* ELEMENT_NODE */) return;
+    const element = node;
+    // Bỏ qua các inline chip nhân vật, tham chiếu, mention có contenteditable="false"
+    if (element.getAttribute?.("contenteditable") === "false") return;
+    if (element.tagName === "BR") {
+      chunks.push("\n");
+      return;
+    }
+    const isBlock = blockTags.has(element.tagName);
+    if (isBlock && chunks.length && !String(chunks[chunks.length - 1]).endsWith("\n")) chunks.push("\n");
+    for (const child of element.childNodes || []) visit(child);
+    if (isBlock && !String(chunks[chunks.length - 1] || "").endsWith("\n")) chunks.push("\n");
+  };
+  visit(editor);
+  return chunks.join("").replace(/[\u200B\u200C\u200D\uFEFF]/g, "").replace(/\s+/g, " ").trim();
+}
+
+function countInlineChips(editor) {
+  if (!editor || !editor.querySelectorAll) return 0;
+  return editor.querySelectorAll('[contenteditable="false"]').length;
+}
+
+async function clearEditorTextPreservingChips(editor) {
+  if (!editor?.isContentEditable) return false;
+  
+  const chipCount = countInlineChips(editor);
+  const currentText = getEditorUserText(editor);
+  if (!currentText) return true;
+
+  editor.focus?.();
+  const selection = typeof window !== "undefined" ? window.getSelection?.() : null;
+
+  if (chipCount === 0) {
+    try {
+      const range = document.createRange();
+      range.selectNodeContents(editor);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      document.execCommand("delete", false);
+      selection?.removeAllRanges();
+    } catch {}
+    await wait(50);
+    if (getEditorUserText(editor)) {
+      try {
+        document.execCommand("selectAll", false);
+        document.execCommand("delete", false);
+      } catch {}
+      await wait(50);
+    }
+    return !getEditorUserText(editor);
+  }
+
+  // Khi có chips: xóa các text node tự do mà giữ nguyên các thẻ chip [contenteditable="false"]
+  const textNodesToDelete = [];
+  const SHOW_TEXT = typeof NodeFilter !== "undefined" ? NodeFilter.SHOW_TEXT : 4;
+  const FILTER_ACCEPT = typeof NodeFilter !== "undefined" ? NodeFilter.FILTER_ACCEPT : 1;
+  const FILTER_REJECT = typeof NodeFilter !== "undefined" ? NodeFilter.FILTER_REJECT : 2;
+  const FILTER_SKIP = typeof NodeFilter !== "undefined" ? NodeFilter.FILTER_SKIP : 3;
+
+  if (typeof document.createTreeWalker === "function") {
+    try {
+      const walker = document.createTreeWalker(editor, SHOW_TEXT, {
+        acceptNode: node => {
+          if (node.parentElement?.closest?.('[contenteditable="false"]')) return FILTER_REJECT;
+          if ((node.nodeValue || "").replace(/[\u200B\u200C\u200D\uFEFF]/g, "").trim().length > 0) {
+            return FILTER_ACCEPT;
+          }
+          return FILTER_SKIP;
+        }
+      });
+      while (walker.nextNode()) textNodesToDelete.push(walker.currentNode);
+    } catch {}
+  }
+
+  if (!textNodesToDelete.length) {
+    const collectTextNodes = node => {
+      if (!node) return;
+      if (node.nodeType === 3) {
+        if (!node.parentElement?.closest?.('[contenteditable="false"]')) textNodesToDelete.push(node);
+        return;
+      }
+      if (node.getAttribute?.("contenteditable") === "false") return;
+      for (const child of node.childNodes || []) collectTextNodes(child);
+    };
+    collectTextNodes(editor);
+  }
+
+  for (const textNode of textNodesToDelete) {
+    try {
+      const range = document.createRange();
+      range.selectNode(textNode);
+      selection?.removeAllRanges?.();
+      selection?.addRange?.(range);
+      document.execCommand?.("delete", false);
+    } catch {}
+    textNode.nodeValue = "";
+  }
+
+  selection?.removeAllRanges?.();
+  await wait(50);
+  try {
+    editor.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }));
+  } catch {}
+  return !getEditorUserText(editor);
+}
+
+function dispatchEscapeKey() {
+  const eventInit = { key: "Escape", code: "Escape", keyCode: 27, which: 27, bubbles: true, cancelable: true };
+  document.dispatchEvent(new KeyboardEvent("keydown", eventInit));
+  document.dispatchEvent(new KeyboardEvent("keyup", eventInit));
+}
+
+async function dismissBlockingOverlays() {
+  let dismissedAny = false;
+
+  const isSettingsDialog = el => {
+    if (!el) return false;
+    if (el.querySelector?.('button[id*="-trigger-"]')) return true;
+    const radios = [...(el.querySelectorAll?.('[role="radio"], mat-radio-button') || [])];
+    return radios.some(r => /image|video|9:16|16:9/i.test(accessibleName(r)));
+  };
+
+  const dialogs = [...document.querySelectorAll('[role="dialog"], mat-dialog-container, flow-dialog, [aria-modal="true"]')].filter(visible);
+  for (const dialog of dialogs) {
+    if (isSettingsDialog(dialog)) continue;
+    const closeBtn = [...dialog.querySelectorAll('button, [role="button"]')].find(btn => {
+      if (!visible(btn)) return false;
+      const label = (accessibleName(btn) || btn.innerText || btn.textContent || "").trim().toLowerCase();
+      const hasCloseIcon = [...btn.querySelectorAll('mat-icon')].some(icon => /close|clear/i.test((icon.innerText || icon.textContent || "").trim()));
+      return hasCloseIcon || /^(?:close|đóng|dismiss|got it|cancel|hủy)$/i.test(label) || label.includes("close") || label.includes("đóng");
+    });
+
+    if (closeBtn) {
+      closeBtn.click();
+      dismissedAny = true;
+      await wait(150);
+    } else {
+      dispatchEscapeKey();
+      dismissedAny = true;
+      await wait(150);
+    }
+  }
+
+  const backdrops = [...document.querySelectorAll('.cdk-overlay-backdrop.cdk-overlay-backdrop-showing')].filter(visible);
+  if (backdrops.length > 0) {
+    const activePanels = [...document.querySelectorAll('.cdk-overlay-pane')].filter(visible);
+    const hasOnlySettings = activePanels.length > 0 && activePanels.every(isSettingsDialog);
+    if (!hasOnlySettings) {
+      dispatchEscapeKey();
+      dismissedAny = true;
+      await wait(150);
+    }
+  }
+
+  return dismissedAny;
+}
+
 async function insertNativeFlowPrompt(el, value) {
   const text = String(value || "");
   const normalize = input => String(input || "").replace(/[\u200B\u200C\u200D\uFEFF]/g, "").replace(/\s+/g, " ").trim();
   const expected = normalize(text);
   if (!el?.isContentEditable) return false;
-  const before = normalize(el.innerText || el.textContent);
+
+  // Xóa sạch text prompt cũ nhưng bảo toàn các chip reference/nhân vật
+  await clearEditorTextPreservingChips(el);
+
   el.focus();
   const selection = window.getSelection();
   const range = document.createRange();
@@ -276,15 +448,14 @@ async function insertNativeFlowPrompt(el, value) {
       clipboard.setData("text/plain", text);
       const paste = new ClipboardEvent("paste", { clipboardData: clipboard, bubbles: true, cancelable: true });
       el.dispatchEvent(paste);
-      inserted = paste.defaultPrevented || normalize(el.innerText || el.textContent) !== before;
+      inserted = paste.defaultPrevented || normalize(getEditorUserText(el)) === expected;
     } catch {}
   }
   if (expected && !inserted) document.execCommand("insertText", false, text);
   await wait(150);
-  const actual = normalize(el.innerText || el.textContent);
-  // Inline reference chips may share the editor, so preserve them and confirm that the
-  // submitted prompt is the final text segment instead of replacing the editor contents.
-  return !expected || actual.endsWith(expected) || actual === normalize(`${before} ${text}`);
+  const actual = normalize(getEditorUserText(el));
+  // Xác nhận text thuần khớp với prompt mới, bảo toàn các inline chips
+  return !expected || actual === expected || actual.endsWith(expected);
 }
 
 function readGenerationCreditQuote() {
@@ -405,4 +576,12 @@ async function ensureFlowLibrarySection(label) {
     throw flowError("FLOW_LIBRARY_LOADING", `Flow's "${label}" library did not become ready after navigation.`, true);
   }
   blurFlowNavigationFocus();
+}
+
+if (typeof globalThis !== "undefined") {
+  globalThis.getEditorUserText = getEditorUserText;
+  globalThis.countInlineChips = countInlineChips;
+  globalThis.clearEditorTextPreservingChips = clearEditorTextPreservingChips;
+  globalThis.dismissBlockingOverlays = dismissBlockingOverlays;
+  globalThis.dispatchEscapeKey = dispatchEscapeKey;
 }
