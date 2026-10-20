@@ -73,6 +73,29 @@ async function chooseDuration(duration) {
   }
 }
 
+async function chooseAspectRatio(aspectRatio) {
+  if (!aspectRatio) return;
+  const normalized = normalizeAspectRatio(aspectRatio) || String(aspectRatio).trim();
+  await openFlowSettings();
+  const panel = flowSettingsPanelVisible() ? (document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog') || document) : document;
+
+  const candidates = [...panel.querySelectorAll('[role="radio"], mat-radio-button, [role="tab"], [role="option"], button, [role="button"]')].filter(visible).filter(el => !isFlowProjectNavigationControl(el));
+  const match = candidates.find(el => {
+    const label = accessibleName(el).replace(/\s+/g, " ").trim().toLowerCase();
+    const txt = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+    return label === normalized || txt === normalized || label.endsWith(` ${normalized}`) || txt.endsWith(` ${normalized}`);
+  });
+
+  if (match) {
+    if (!nativeRadioSelected(match) && match.getAttribute("aria-selected") !== "true" && match.getAttribute("data-state") !== "active") {
+      match.click();
+      await wait(300);
+    }
+    return;
+  }
+  console.warn(`[FlowSettings] Aspect ratio "${aspectRatio}" (${normalized}) not found in panel, keeping current Flow default`);
+}
+
 async function chooseResolution(resolution) {
   if (!resolution) return;
   const wanted = String(resolution).trim().toLowerCase().replace(/\s+/g, "");
@@ -364,6 +387,9 @@ async function chooseNativeModel(model, type) {
       const score = version.reduce((value, part) => value * 1000 + part, 0);
       return score > best.score ? { index: i, score } : best;
     }, { index: -1, score: -1 }).index;
+    if (index < 0) {
+      index = names.findIndex(name => /nano banana/i.test(name) && !/\blite\b/i.test(name));
+    }
   } else {
     // 1. Try exact alias match
     index = items.findIndex((item, i) => {
@@ -378,6 +404,10 @@ async function chooseNativeModel(model, type) {
         const matched = aliases.find(a => domText.includes(a));
         if (!matched) return false;
         if (matched.includes("veo") && domText.includes("veo")) {
+          if (matched.includes("fast") && !domText.includes("fast")) return false;
+          if (matched.includes("quality") && !domText.includes("quality")) return false;
+        }
+        if (matched.includes("imagen") && domText.includes("imagen")) {
           if (matched.includes("fast") && !domText.includes("fast")) return false;
           if (matched.includes("quality") && !domText.includes("quality")) return false;
         }

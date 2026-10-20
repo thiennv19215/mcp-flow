@@ -71,7 +71,7 @@
 
       await openFlowSettings();
       await chooseRadio("Video");
-      if (payload.aspectRatio) await chooseRadio(payload.aspectRatio);
+      if (payload.aspectRatio) await chooseAspectRatio(payload.aspectRatio);
 
       // Flow may dismiss the settings popover as soon as a model is selected.
       // Apply the model before the settings that depend on it, then reopen and
@@ -80,7 +80,7 @@
         await chooseNativeModel(requestedModel, type);
         await openFlowSettings();
         await chooseRadio("Video");
-        if (payload.aspectRatio) await chooseRadio(payload.aspectRatio);
+        if (payload.aspectRatio) await chooseAspectRatio(payload.aspectRatio);
       }
 
       if (payload.duration) await chooseDuration(payload.duration);
