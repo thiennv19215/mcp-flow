@@ -349,49 +349,23 @@
         <span id="txtCardTitle">Thông số kết nối</span>
       </div>
 
+      <div class="help-text"><span id="txtHelp">Máy chủ Flow MCP: https://mcp.shopcongngheso5.io.vn</span></div>
       <div class="form-group">
-        <label for="bridge" id="lblBridge">Địa chỉ máy chủ (Bridge URL)</label>
-        <div class="input-wrap">
-          <span class="input-icon">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
-              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
-            </svg>
-          </span>
-          <input type="text" id="bridge" value="https://mcp.shopcongngheso5.io.vn" placeholder="https://your-vps-domain">
-        </div>
-
-        <div class="presets">
-          <span class="preset-chip" data-url="https://mcp.shopcongngheso5.io.vn">VPS backend</span>
-          <span class="preset-chip" data-url="http://127.0.0.1:18899">Localhost</span>
-          <span class="preset-chip" data-url="http://localhost:18899">http://localhost:18899</span>
-        </div>
-
-        <div class="help-text">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="10"></circle>
-            <line x1="12" y1="16" x2="12" y2="12"></line>
-            <line x1="12" y1="8" x2="12.01" y2="8"></line>
-          </svg>
-          <span id="txtHelp">Backend VPS cần HTTPS. Nhập mã ghép đôi do quản trị viên cấp để xác thực thiết bị Chrome này.</span>
-        </div>
+        <label for="account" id="lblAccount">Tài khoản</label>
+        <div class="input-wrap"><input type="text" id="account" autocomplete="username" placeholder="Ví dụ: Owner" /></div>
       </div>
-
       <div class="form-group">
-        <label for="pairingCode" id="lblPairingCode">Mã ghép đôi VPS</label>
-        <div class="input-wrap">
-          <input type="password" id="pairingCode" autocomplete="one-time-code" placeholder="Ví dụ: ABCD-EFGH" />
-        </div>
-        <div class="help-text"><span id="txtPairingHelp">Mã này được đổi lấy token riêng cho profile Chrome hiện tại và sẽ được xóa sau khi ghép đôi.</span></div>
+        <label for="password" id="lblPassword">Mật khẩu</label>
+        <div class="input-wrap"><input type="password" id="password" autocomplete="current-password" /></div>
+        <div class="help-text"><span id="txtPasswordHelp">Mật khẩu do quản trị viên đặt. Extension chỉ lưu token thiết bị, không lưu mật khẩu.</span></div>
       </div>
-
       <button class="btn-save" id="save">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
           <polyline points="17 21 17 13 7 13 7 21"></polyline>
           <polyline points="7 3 7 8 15 8"></polyline>
         </svg>
-        <span id="txtBtnSave">Lưu và ghép đôi / kết nối</span>
+        <span id="txtBtnSave">Đăng nhập và kết nối</span>
       </button>
 
       <div class="status-msg" id="status"></div>

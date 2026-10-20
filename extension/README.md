@@ -17,7 +17,7 @@ extension/
 │   └── flow-media-headers.json      # DeclarativeNetRequest rules gỡ bỏ CORP headers để tải media
 ├── ui/
 │   ├── popup.html / popup.js        # Giao diện popup kết nối trạng thái
-│   └── options.html / options.js    # Cài đặt cấu hình URL backend MCP
+│   └── options.html / options.js    # Đăng nhập tài khoản vào backend VPS
 └── content/
     ├── dom-actions.js               # Entry point router (~40 dòng), ủy quyền cho ProviderRegistry
     ├── shared/                      # CÁC TIỆN ÍCH DÙNG CHUNG (SHARED UTILS)

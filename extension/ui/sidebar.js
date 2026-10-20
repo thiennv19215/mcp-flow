@@ -64,7 +64,8 @@
     if (emptyEl) emptyEl.textContent = t("sidebar.logsEmpty");
 
     // Settings pane
-    document.querySelector("#txtSaveSettings").textContent = t("sidebar.saveSettings");
+    const saveSettingsLabel = document.querySelector("#txtSaveSettings");
+    if (saveSettingsLabel) saveSettingsLabel.textContent = t("sidebar.saveSettings");
 
     if (cachedStatus) renderStatus(cachedStatus);
     else document.querySelector("#wsText").textContent = t("popup.checking");
@@ -451,21 +452,6 @@
     const container = document.querySelector("#logsContainer");
     container.innerHTML = `<div class="logs-empty" id="logsEmpty">${t("sidebar.logsEmpty")}</div>`;
     logs.length = 0;
-  };
-
-  // Save settings
-  document.querySelector("#btnSaveSettings").onclick = async () => {
-    const url = document.querySelector("#inputBridgeUrl").value.trim();
-    if (!url) return;
-    try {
-      await chrome.storage.local.set({ bridge: url });
-      setFeedback(t("sidebar.settingsSaved"), true);
-      addLog("settings.save", `Bridge URL: ${url}`, true);
-      await chrome.runtime.sendMessage({ type: "flow-mcp:connect" });
-      setTimeout(fetchStatus, 700);
-    } catch (err) {
-      setFeedback(err.message, false);
-    }
   };
 
   document.querySelector("#btnPairSettings").onclick = () => chrome.runtime.openOptionsPage();

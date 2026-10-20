@@ -476,7 +476,7 @@ async function connect() {
       scheduleReconnect(close.code === 1008 ? 10_000 : undefined);
     };
     ws.onerror = () => {
-      lastError = `Cannot connect to backend at ${new URL(settings.bridge).origin}. Check the URL, VPS HTTPS/WSS, and device pairing.`;
+      lastError = `Cannot connect to backend at ${new URL(settings.bridge).origin}. Sign in to the account, then check the VPS HTTPS/WSS connection.`;
       ws.close();
     };
   } catch (error) { lastError = String(error?.message || error); scheduleReconnect(); }

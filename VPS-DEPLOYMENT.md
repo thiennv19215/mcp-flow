@@ -8,9 +8,9 @@ This deploys the HTTP backend and Studio on one Linux VPS behind Caddy-managed H
 - A DNS name pointing to the VPS. Allow inbound TCP 80 and 443 for Caddy's TLS certificate.
 - SSH access to the VPS.
 
-The backend now has user and device accounts in SQLite. Device bearer tokens select a separate persisted job queue, Flow WebSocket connection, uploads, and output directory for each paired device. Keep the admin credentials private; users should receive only their pairing code.
+The backend has user and device accounts in SQLite. Device bearer tokens select a separate persisted job queue, Flow WebSocket connection, uploads, and output directory for each device. Keep admin credentials private; users sign in with the account label and a password set by an administrator.
 
-The extension supports the public HTTPS/WSS endpoint and device pairing. Each Chrome profile must pair with a user code before the VPS accepts its WebSocket connection. The public WebSocket rejects connections without a valid device token or the configured server WebSocket secret.
+The extension signs in to the public HTTPS endpoint with a user account and password. The backend issues a per-profile device token, then accepts its WebSocket connection. The public WebSocket rejects connections without a valid device token or the configured server WebSocket secret.
 
 ## Configure and start
 
@@ -34,26 +34,26 @@ The extension supports the public HTTPS/WSS endpoint and device pairing. Each Ch
 
 4. Install Caddy on the host, copy `deploy/Caddyfile.example` to its Caddy configuration, replace `flow.example.com`, then reload Caddy. The reverse proxy must preserve the Host header and WebSocket upgrades; Caddy's `reverse_proxy` does this automatically. To use Cloudflare Tunnel instead, see the next section and do not expose the app port publicly.
 5. Open `https://<your-domain>`. The Studio displays a login page and uses the `FLOW_MCP_ADMIN_USER` and `FLOW_MCP_ADMIN_PASSWORD` credentials from `.env`. A successful login creates a 12-hour, HttpOnly, Secure, SameSite=Strict session cookie. The admin registry API accepts this browser session or HTTP Basic credentials for CLI use. Studio job APIs continue to require `FLOW_MCP_TOKEN`.
-6. Open `https://<your-domain>/admin` to create users, issue or rotate pairing codes, inspect paired devices, revoke devices, or disable/reactivate a user. Newly generated pairing codes are displayed once; copy and share them securely. A user's disabled devices are revoked, and reactivation requires issuing a fresh pairing code before new devices can pair.
+6. Open `https://<your-domain>/admin` to create users, set their login passwords, inspect devices, revoke devices, or disable/reactivate a user. Passwords must be at least 12 characters. Disabling a user revokes all their devices; after reactivation, set a password if the account does not have one.
 
 The Compose port is published only on `127.0.0.1`. Do not change it to `0.0.0.0` or open port 18899 in the VPS firewall. Serve it through HTTPS at 443.
 
 ## Cloudflare Tunnel option
 
-You can use a Cloudflare Tunnel instead of Caddy and inbound ports 80/443. Create a public hostname such as `flow.example.com` in Cloudflare Zero Trust and route it to `http://127.0.0.1:18899` on the VPS. Keep `FLOW_MCP_PUBLIC_URL=https://flow.example.com` and include `flow.example.com` in `FLOW_MCP_ALLOWED_HOSTS`. The tunnel forwards WebSocket upgrades. Keep the Compose loopback-only port binding and firewall closed; only `cloudflared` on the VPS should reach the app. `FLOW_MCP_TRUST_PROXY=true` lets pairing rate limits use Cloudflare's client IP header.
+You can use a Cloudflare Tunnel instead of Caddy and inbound ports 80/443. Create a public hostname such as `flow.example.com` in Cloudflare Zero Trust and route it to `http://127.0.0.1:18899` on the VPS. Keep `FLOW_MCP_PUBLIC_URL=https://flow.example.com` and include `flow.example.com` in `FLOW_MCP_ALLOWED_HOSTS`. The tunnel forwards WebSocket upgrades. Keep the Compose loopback-only port binding and firewall closed; only `cloudflared` on the VPS should reach the app. `FLOW_MCP_TRUST_PROXY=true` lets login rate limits use Cloudflare's client IP header.
 
 ## User and device registry API
 
-The backend can create users and issue a pairing code. Create a user with the admin Basic credentials; the returned `pairing_code` is only shown once:
+The backend can create user accounts through the admin UI. Set a password for each account in the user list. The extension signs in with the account label and that password:
 
 ```bash
 curl -u admin -H 'content-type: application/json' \
   -d '{"label":"Customer A"}' https://<your-domain>/api/admin/users
 ```
 
-List users at `GET /api/admin/users`. Rotate a user's code with `POST /api/admin/users/<user-id>/rotate-code`; suspend/reactivate with `POST /api/admin/users/<user-id>/status` and body `{"status":"disabled"}` or `{"status":"active"}`. Re-enabling a user requires rotating a new pairing code. Admin can list devices at `GET /api/admin/users/<user-id>/devices` and revoke one at `POST /api/admin/users/<user-id>/devices/<device-id>/revoke`.
+List users at `GET /api/admin/users`. Set a password with `POST /api/admin/users/<user-id>/password` and body `{"password":"at-least-12-characters"}`. Suspend/reactivate with `POST /api/admin/users/<user-id>/status` and body `{"status":"disabled"}` or `{"status":"active"}`. Admin can list devices at `GET /api/admin/users/<user-id>/devices` and revoke one at `POST /api/admin/users/<user-id>/devices/<device-id>/revoke`.
 
-The extension will exchange the user's code for a per-installation token using `POST /api/pair` with `{"user_code":"...","device_name":"..."}`. Send the returned token as `Authorization: Bearer <device_token>` to the `/api/<method>` endpoints and on the `/ws/bridge?token=<device_token>` connection. `GET /api/user/me` returns that device's account and device list; a user can revoke one of their devices through `POST /api/user/devices/<device-id>/revoke`. Pair attempts are rate-limited. Set `FLOW_MCP_TRUST_PROXY=true` only when requests can reach the app exclusively through the configured reverse proxy, so rate limits can use the forwarded client IP.
+The extension signs in using `POST /api/device/login` with `{"account":"...","password":"...","device_name":"..."}` and receives a per-profile device token. Passwords are stored as scrypt hashes. Device login attempts are rate-limited. Send the returned token as `Authorization: Bearer <device_token>` to the `/api/<method>` endpoints and on the `/ws/bridge?token=<device_token>` connection. `GET /api/user/me` returns that device's account and device list; a user can revoke one of their devices through `POST /api/user/devices/<device-id>/revoke`. Set `FLOW_MCP_TRUST_PROXY=true` only when requests can reach the app exclusively through the configured reverse proxy, so rate limits can use the forwarded client IP.
 
 ## Data and operations
 
@@ -70,6 +70,6 @@ docker compose up -d --build
 ## Current limitations
 
 - SQLite persists each device's job queue and output/upload paths are isolated per device. Queued work resumes when the paired extension reconnects and reports status. A job that was already running during a server restart is marked as an unknown outcome and cannot be retried automatically; check Flow first to avoid duplicate generation or charges.
-- VPS pairing is configured in the extension options: enter the public HTTPS URL and the user's pairing code, then save. The extension exchanges the code for a device token and reconnects over WSS. Revoke a lost Chrome profile from the admin UI.
-- A paired device represents one browser profile/Flow session. A person using multiple Chrome profiles should pair each profile separately; each gets its own device token and queue.
+- VPS sign-in is configured in the extension options: the backend URL is fixed and the user enters their account and password. The extension stores the returned device token and reconnects over WSS. Revoke a lost Chrome profile from the admin UI.
+- A signed-in device represents one browser profile/Flow session. A person using multiple Chrome profiles should sign in on each profile; each gets its own device token and queue.
 - The VPS does not host the user's Google Flow session. The extension stays on the user's computer and sends authenticated browser commands to the backend.

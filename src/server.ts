@@ -10,7 +10,7 @@ import { OUTPUT_ROOT, shapes, type Core } from "./core.js";
 import { extensionConnected, extensionRevokeDeviceConnection, extensionStatus, extensionSetWebSocket } from "./extension.js";
 import { runWithDeviceContext } from "./request-context.js";
 import { outputRootForContext, uploadDirForContext } from "./paths.js";
-import { authenticateDevice, createUser, listDevicesForUser, listUsers, pairDevice, revokeDevice, rotatePairingCode, setUserStatus } from "./users.js";
+import { authenticateDevice, createUser, listDevicesForUser, listUsers, loginDevice, pairDevice, revokeDevice, rotatePairingCode, setUserPassword, setUserStatus } from "./users.js";
 
 export const PORT = Number(process.env.FLOW_MCP_PORT ?? 18899);
 export const HOST = process.env.FLOW_MCP_HOST ?? "127.0.0.1";
@@ -86,6 +86,7 @@ export async function startServer(core: Core, getDeviceCore?: (deviceId: string)
   const adminPassword = process.env.FLOW_MCP_ADMIN_PASSWORD ?? "";
   const wsToken = process.env.FLOW_MCP_WS_TOKEN ?? "";
   const pairAttempts = new Map<string, { count: number; resetsAt: number }>();
+  const deviceLoginAttempts = new Map<string, { count: number; resetsAt: number }>();
   const loginAttempts = new Map<string, { count: number; resetsAt: number }>();
   const adminSessions = new Map<string, { username: string; expiresAt: number }>();
 
@@ -224,6 +225,31 @@ export async function startServer(core: Core, getDeviceCore?: (deviceId: string)
         res.setHeader("set-cookie", `${ADMIN_SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`);
         return json(res, 200, { ok: true });
       }
+      if (req.method === "POST" && url.pathname === "/api/device/login") {
+        const ip = trustedClientIp(req);
+        const now = Date.now();
+        if (deviceLoginAttempts.size > 1000) {
+          for (const [key, attempt] of deviceLoginAttempts) if (attempt.resetsAt <= now) deviceLoginAttempts.delete(key);
+        }
+        const attempt = deviceLoginAttempts.get(ip);
+        if (attempt && attempt.resetsAt > now && attempt.count >= 10) {
+          res.setHeader("retry-after", String(Math.max(1, Math.ceil((attempt.resetsAt - now) / 1000))));
+          return json(res, 429, { error: "Quá nhiều lần đăng nhập. Hãy thử lại sau một phút." });
+        }
+        if (!attempt || attempt.resetsAt <= now) deviceLoginAttempts.set(ip, { count: 1, resetsAt: now + 60_000 });
+        else attempt.count += 1;
+        const body = JSON.parse((await readBody(req, 8192)).toString() || "{}");
+        if (typeof body.account !== "string" || typeof body.password !== "string" || typeof body.device_name !== "string" || body.account.length > 100 || body.password.length > 1024) {
+          return json(res, 400, { error: "Vui lòng nhập tài khoản và mật khẩu." });
+        }
+        try {
+          const device = loginDevice(body.account, body.password, body.device_name);
+          deviceLoginAttempts.delete(ip);
+          return json(res, 200, device);
+        } catch {
+          return json(res, 401, { error: "Tài khoản hoặc mật khẩu chưa đúng, hoặc tài khoản đã bị khóa." });
+        }
+      }
       if (req.method === "POST" && url.pathname === "/api/pair") {
         const ip = trustedClientIp(req);
         const now = Date.now();
@@ -247,6 +273,17 @@ export async function startServer(core: Core, getDeviceCore?: (deviceId: string)
           return json(res, 201, createUser(body.label));
         }
         const userActionRoute = url.pathname.match(/^\/api\/admin\/users\/([0-9a-f-]+)\/(rotate-code|status)$/i);
+        const userPasswordRoute = url.pathname.match(/^\/api\/admin\/users\/([0-9a-f-]+)\/password$/i);
+        if (userPasswordRoute && req.method === "POST") {
+          const body = JSON.parse((await readBody(req, 8192)).toString() || "{}");
+          if (typeof body.password !== "string" || body.password.length < 12 || body.password.length > 1024) return json(res, 400, { error: "Mật khẩu phải có từ 12 ký tự trở lên." });
+          try {
+            setUserPassword(userPasswordRoute[1], body.password);
+            return json(res, 200, { ok: true, login_enabled: true });
+          } catch {
+            return json(res, 404, { error: "Không tìm thấy người dùng đang hoạt động." });
+          }
+        }
         if (userActionRoute && req.method === "POST") {
           const [, userId, action] = userActionRoute;
           if (action === "rotate-code") return json(res, 200, rotatePairingCode(userId));

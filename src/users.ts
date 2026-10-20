@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
 import { chmodSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -12,7 +12,7 @@ const db = new DatabaseSync(databasePath);
 chmodSync(databasePath, 0o600);
 db.exec("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
 const { user_version: schemaVersion } = db.prepare("PRAGMA user_version").get() as { user_version: number };
-if (schemaVersion > 2) throw new Error(`User database schema ${schemaVersion} is newer than this backend supports.`);
+if (schemaVersion > 3) throw new Error(`User database schema ${schemaVersion} is newer than this backend supports.`);
 if (schemaVersion < 1) db.exec(`
   BEGIN IMMEDIATE;
   CREATE TABLE users (
@@ -49,8 +49,26 @@ if (schemaVersion < 2) db.exec(`
   PRAGMA user_version = 2;
   COMMIT;
 `);
+if (schemaVersion < 3) db.exec(`
+  BEGIN IMMEDIATE;
+  ALTER TABLE users ADD COLUMN password_hash TEXT;
+  PRAGMA user_version = 3;
+  COMMIT;
+`);
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
+const passwordHash = (password: string): string => {
+  const salt = randomBytes(16).toString("hex");
+  return `scrypt$${salt}$${scryptSync(password, salt, 64).toString("hex")}`;
+};
+const passwordMatches = (password: string, stored: string | null): boolean => {
+  if (!stored) return false;
+  const [algorithm, salt, expectedHex] = stored.split("$");
+  if (algorithm !== "scrypt" || !salt || !expectedHex) return false;
+  const expected = Buffer.from(expectedHex, "hex");
+  const actual = scryptSync(password, salt, expected.length);
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
+};
 const randomCode = () => {
   const raw = randomBytes(12).toString("hex").toUpperCase();
   return `FLOW-${raw.match(/.{1,4}/g)!.join("-")}`;
@@ -64,11 +82,14 @@ export type UserSummary = {
   created_at: string;
   device_count: number;
   pairing_enabled: boolean;
+  login_enabled: boolean;
 };
 
 export function createUser(label: string): { id: string; label: string; pairing_code: string; created_at: string } {
   const cleanLabel = label.trim().slice(0, 100);
   if (!cleanLabel) throw new Error("User label is required.");
+  const existing = db.prepare("SELECT 1 FROM users WHERE label = ? COLLATE NOCASE LIMIT 1").get(cleanLabel);
+  if (existing) throw new Error("Account name is already in use.");
   const id = randomUUID();
   const pairingCode = randomCode();
   const createdAt = new Date().toISOString();
@@ -80,7 +101,8 @@ export function listUsers(): UserSummary[] {
   return db.prepare(`
     SELECT u.id, u.label, u.status, u.created_at,
       COUNT(CASE WHEN d.status = 'active' THEN 1 END) AS device_count,
-      (u.pairing_code_hash IS NOT NULL AND u.status = 'active') AS pairing_enabled
+      (u.pairing_code_hash IS NOT NULL AND u.status = 'active') AS pairing_enabled,
+      (u.password_hash IS NOT NULL AND u.status = 'active') AS login_enabled
     FROM users u LEFT JOIN devices d ON d.user_id = u.id
     GROUP BY u.id ORDER BY u.created_at DESC
   `).all() as unknown as UserSummary[];
@@ -115,6 +137,27 @@ export function pairDevice(pairingCode: string, label: string): { user_id: strin
   db.prepare("INSERT INTO devices (id, user_id, label, token_hash, created_at) VALUES (?, ?, ?, ?, ?)")
     .run(deviceId, user.id, cleanLabel, hash(deviceToken), new Date().toISOString());
   return { user_id: user.id, device_id: deviceId, device_token: deviceToken };
+}
+
+export function setUserPassword(userId: string, password: string): void {
+  const result = db.prepare("UPDATE users SET password_hash = ? WHERE id = ? AND status = 'active'")
+    .run(passwordHash(password), userId);
+  if (Number(result.changes) !== 1) throw new Error("Active user not found.");
+}
+
+export function loginDevice(account: string, password: string, label: string): { user_id: string; device_id: string; device_token: string } {
+  const matches = db.prepare("SELECT id, password_hash FROM users WHERE label = ? COLLATE NOCASE AND status = 'active' LIMIT 2")
+    .all(account.trim()) as Array<{ id: string; password_hash: string | null }>;
+  if (matches.length !== 1 || !passwordMatches(password, matches[0].password_hash)) {
+    throw new Error("Account or password is incorrect, or the account is disabled.");
+  }
+  const userId = matches[0].id;
+  const deviceId = randomUUID();
+  const deviceToken = randomDeviceToken();
+  const cleanLabel = label.trim().slice(0, 100) || "Chrome device";
+  db.prepare("INSERT INTO devices (id, user_id, label, token_hash, created_at) VALUES (?, ?, ?, ?, ?)")
+    .run(deviceId, userId, cleanLabel, hash(deviceToken), new Date().toISOString());
+  return { user_id: userId, device_id: deviceId, device_token: deviceToken };
 }
 
 export function authenticateDevice(token: string): { user_id: string; device_id: string; label: string } | undefined {

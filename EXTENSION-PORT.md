@@ -15,7 +15,7 @@ The connector remembers the selected tab while you browse elsewhere. Use the pop
 
 Commands, progress, and results use one WebSocket. Every operation is capability-gated and carries a request ID and deadline. The extension rejects unsupported operations before dispatch. On disconnect, the backend rejects pending calls; it does not replay commands. Inspect Flow before retrying any operation whose result is uncertain, especially a paid generation.
 
-The extension connects to the backend independently of whether a Flow tab is open. Flow commands require an open Flow tab, which the extension selects when a command arrives. For a VPS, configure its public HTTPS URL in extension settings and pair with a user code; the extension stores the returned per-device token and uses it on the WSS connection. Localhost remains available without pairing. The backend accepts WebSocket upgrades from a Chrome extension origin; no HTTP bridge transport is provided.
+The extension connects to the backend independently of whether a Flow tab is open. Flow commands require an open Flow tab, which the extension selects when a command arrives. For the VPS, the HTTPS URL is fixed in the extension. The user signs in with an account name and password; the backend returns a per-device token that the extension stores and uses on the WSS connection. The backend accepts WebSocket upgrades from a Chrome extension origin; no HTTP bridge transport is provided.
 
 ## File handling
 
