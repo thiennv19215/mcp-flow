@@ -150,6 +150,41 @@
       }
       fired = { owner, method: "drop", name: file.name, size: file.size, type: file.type, at: Date.now() };
       reply(requestId, { success: true, fired: "drop" });
+    } else if (action === "activateSubmit") {
+      const token = String(event.data.submitToken || "");
+      const target = token ? document.querySelector(`[data-flow-submit-token="${token}"]`) : null;
+      if (!target) {
+        reply(requestId, { success: false, error: "TARGET_NOT_FOUND" });
+        return;
+      }
+      let invoked = 0;
+      let ngFound = false;
+      try {
+        if (window.ng && typeof window.ng.getListeners === "function") {
+          ngFound = true;
+          for (const entry of window.ng.getListeners(target) || []) {
+            if ((entry.name || entry.eventName) === "click" && typeof entry.callback === "function") {
+              const nativeEvent = new MouseEvent("click", { bubbles: true, cancelable: true, composed: true, view: window, button: 0 });
+              const proxyEvent = new Proxy(nativeEvent, {
+                get: (source, key) => {
+                  if (key === "isTrusted") return true;
+                  if (key === "target") return target;
+                  if (key === "currentTarget") return target;
+                  if (key === "composedPath") return () => [target, target.parentElement].filter(Boolean);
+                  const val = Reflect.get(source, key, source);
+                  return typeof val === "function" ? val.bind(source) : val;
+                }
+              });
+              entry.callback.call(target, proxyEvent);
+              invoked++;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("[FlowMainBridge] ng listener invocation error:", err);
+      }
+      target.click();
+      reply(requestId, { success: true, invoked, ngFound });
     } else if (action === "status") {
       const state = fired?.owner === event.data.owner ? fired : null;
       reply(requestId, { success: true, fired: state?.method || null, fileName: state?.name || null, fileSize: state?.size || null, fileType: state?.type || null });
