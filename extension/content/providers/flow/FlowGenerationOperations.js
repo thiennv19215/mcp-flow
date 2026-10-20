@@ -200,8 +200,9 @@
         const credits = Number.isFinite(renderedCredits) ? renderedCredits : (Number.isFinite(settingsCredits) ? settingsCredits : 0);
         if (payload.maxCredits !== undefined && credits > Number(payload.maxCredits)) throw this.error("FLOW_MAX_CREDITS_EXCEEDED", `Flow quotes ${credits} credits, above max_credits=${payload.maxCredits}. Nothing was submitted.`, false, false);
 
-        const start = await editor.waitForGenerationSubmitButton(payload.prompt, 3000);
-        if (start && (start.disabled || start.getAttribute("aria-disabled") === "true")) {
+        const start = await editor.waitForGenerationSubmitButton(payload.prompt, 15000);
+        if (!start) throw this.error("FLOW_SUBMIT_BUTTON_MISSING", "Flow's Start generation button was not found; nothing was submitted.", true);
+        if (start.disabled || start.getAttribute("aria-disabled") === "true") {
           throw this.error("FLOW_SUBMIT_DISABLED", "Flow's Start generation button is disabled; nothing was submitted.", true);
         }
 

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Flow MCP Native Automation",
-  "version": "0.2.27",
+  "version": "0.2.28",
   "minimum_chrome_version": "116",
   "description": "Flow MCP with browser-side automation handlers in a Chrome extension.",
   "icons": {
@@ -50,7 +50,8 @@
       ],
       "js": [
         "content/bridge/flow-upload-main.js",
-        "content/bridge/flow-correlation-observer.js"
+        "content/bridge/flow-correlation-observer.js",
+        "content/bridge/slate-bridge.js"
       ],
       "run_at": "document_start",
       "world": "MAIN"

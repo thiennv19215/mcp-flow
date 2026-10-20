@@ -232,11 +232,10 @@
       const composerButtons = [...composer.querySelectorAll('button,[role="button"]')].filter(el =>
         root.visible?.(el) && !root.isFlowProjectNavigationControl?.(el));
 
-      // 1.1 Tìm nút có icon đặc thù của Submit trong Google Flow
+      // 1.1 Tìm nút có icon đặc thù của Submit trong Google Flow (KHÔNG loại trừ disabled để nhận diện đúng nút)
       const submitConfig = root.FlowSelectors?.submitButton;
       const allowedIcons = submitConfig?.icons || ["arrow_forward", "arrow_upward", "send", "sparkle", "auto_awesome", "play_arrow", "north", "east"];
       const submitIconBtn = composerButtons.find(b => {
-        if (b.disabled || b.getAttribute("aria-disabled") === "true") return false;
         const icon = root.flowFindIcon ? root.flowFindIcon(b) : b.querySelector?.("mat-icon, .mat-icon, .google-symbols, i, svg");
         const iconTxt = (icon?.textContent || "").trim().toLowerCase();
         return allowedIcons.includes(iconTxt);
@@ -244,37 +243,37 @@
       if (submitIconBtn) return submitIconBtn;
 
       // 1.2 Tìm nút match pattern submit trong composer
-      const submitMatchedBtn = composerButtons.find(b => {
-        if (b.disabled || b.getAttribute("aria-disabled") === "true") return false;
-        return isSubmitButtonElement(b);
-      });
+      const submitMatchedBtn = composerButtons.find(b => isSubmitButtonElement(b));
       if (submitMatchedBtn) return submitMatchedBtn;
 
       // 1.3 Nút type="submit" hoặc data-action="submit"
-      const typeSubmitBtn = composerButtons.find(b => {
-        if (b.disabled || b.getAttribute("aria-disabled") === "true") return false;
-        return b.getAttribute?.("type") === "submit" || b.getAttribute?.("data-action") === "submit";
-      });
+      const typeSubmitBtn = composerButtons.find(b => b.getAttribute?.("type") === "submit" || b.getAttribute?.("data-action") === "submit");
       if (typeSubmitBtn) return typeSubmitBtn;
 
-      // 1.4 Fallback trong composer: Nút cuối cùng không phải settings hay clear hay add
+      // 1.4 Nút có text submit
+      const submitTextBtn = composerButtons.find(b => {
+        const txt = (b.innerText || b.textContent || "").trim();
+        return /^(?:start generation|generate|bắt đầu tạo|tạo video|tạo ảnh|tạo hình ảnh|tạo|create)$/i.test(txt);
+      });
+      if (submitTextBtn) return submitTextBtn;
+
+      // 1.5 Fallback trong composer: Nút cuối cùng không phải settings hay clear hay add
       const excludedIcons = submitConfig?.excludedComposerIcons || ["tune", "settings", "close", "clear", "add", "add_circle"];
       const excludedAria = submitConfig?.excludedComposerAria || /setting|cài đặt|clear|xóa|thành phần|ingredient|add media/i;
-      const enabledComposerButtons = composerButtons.filter(b => {
-        if (b.disabled || b.getAttribute("aria-disabled") === "true") return false;
+      const candidateButtons = composerButtons.filter(b => {
         const aria = (root.accessibleName?.(b) || "").toLowerCase();
         const icon = (root.flowFindIcon ? root.flowFindIcon(b) : b.querySelector?.("mat-icon, .mat-icon, .google-symbols"))?.textContent?.trim()?.toLowerCase() || "";
         if (excludedIcons.includes(icon) || excludedAria.test(aria)) return false;
         return true;
       });
-      if (enabledComposerButtons.length > 0) {
-        return enabledComposerButtons[enabledComposerButtons.length - 1];
+      if (candidateButtons.length > 0) {
+        return candidateButtons[candidateButtons.length - 1];
       }
     }
 
     // 2. Fallback tìm trên toàn trang (chỉ khi không có composer DOM thông thường)
     const allButtons = [...document.querySelectorAll('button,[role="button"]')].filter(el => {
-      if (!root.visible?.(el) || el.disabled || el.getAttribute("aria-disabled") === "true") return false;
+      if (!root.visible?.(el)) return false;
       if (root.isFlowProjectNavigationControl?.(el)) return false;
       if (el.closest?.('nav, [role="navigation"], mat-sidenav, header, mat-toolbar, [role="banner"]')) return false;
       return isSubmitButtonElement(el);
@@ -317,7 +316,7 @@
 
       const baseOptions = { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true, composed: true };
 
-      // 1. Mod+Enter (Ctrl+Enter for Windows/Linux, Cmd+Enter for Mac) - Standard ProseMirror Submit Shortcut
+      // 1. Mod+Enter (Ctrl+Enter for Windows/Linux, Cmd+Enter for Mac)
       editor.dispatchEvent(new KeyboardEvent("keydown", { ...baseOptions, ctrlKey: true }));
       editor.dispatchEvent(new KeyboardEvent("keypress", { ...baseOptions, ctrlKey: true }));
       editor.dispatchEvent(new KeyboardEvent("keyup", { ...baseOptions, ctrlKey: true }));
@@ -326,7 +325,7 @@
       editor.dispatchEvent(new KeyboardEvent("keypress", { ...baseOptions, metaKey: true }));
       editor.dispatchEvent(new KeyboardEvent("keyup", { ...baseOptions, metaKey: true }));
 
-      // 2. Direct ProseMirror View handleKeyDown if accessible on DOM node
+      // 2. Direct ProseMirror View handleKeyDown
       try {
         const pmView = editor.pmViewDesc?.view;
         if (pmView && typeof pmView.someProp === "function") {
@@ -347,81 +346,149 @@
   }
 
   async function activateFlowSubmitButton(button, expectedPrompt) {
-    const editor = (typeof root.flowQuery === "function" ? root.flowQuery("editor") : null) ||
-      document.querySelector(".ProseMirror[contenteditable='true']") ||
-      document.querySelector(".ProseMirror");
-
-    // 1. ƯU TIÊN HÀNG ĐẦU (Cách 1): Kích hoạt shortcut Mod+Enter vào ProseMirror Editor
-    let shortcutSent = false;
-    if (editor) {
-      shortcutSent = pressFlowEditorSubmit(editor);
-    }
-
-    // 2. KÍCH HOẠT ĐỒNG THỜI: Click DOM button nếu có
-    let clickSent = false;
     const targetButton = button || (expectedPrompt ? getFlowSubmitButton(expectedPrompt) : null);
-    if (targetButton && targetButton.isConnected && root.visible?.(targetButton) &&
-        !targetButton.disabled && targetButton.getAttribute("aria-disabled") !== "true") {
-      try { targetButton.scrollIntoView?.({ behavior: "instant", block: "center" }); } catch {}
-      const rect = targetButton.getBoundingClientRect();
-      const x = rect.left + rect.width / 2;
-      const y = rect.top + rect.height / 2;
-      const point = { bubbles: true, cancelable: true, composed: true, view: window, button: 0, clientX: x, clientY: y };
-
-      try { targetButton.focus?.({ preventScroll: true }); } catch {}
-      try {
-        targetButton.dispatchEvent(new PointerEvent("pointerover", { ...point, pointerId: 1, pointerType: "mouse" }));
-        targetButton.dispatchEvent(new MouseEvent("mouseover", point));
-        targetButton.dispatchEvent(new PointerEvent("pointerdown", { ...point, pointerId: 1, pointerType: "mouse" }));
-        targetButton.dispatchEvent(new MouseEvent("mousedown", point));
-        targetButton.dispatchEvent(new PointerEvent("pointerup", { ...point, pointerId: 1, pointerType: "mouse" }));
-        targetButton.dispatchEvent(new MouseEvent("mouseup", point));
-        targetButton.dispatchEvent(new MouseEvent("click", point));
-        targetButton.click();
-        clickSent = true;
-      } catch (e) {
-        console.warn("[FlowEditor] direct button click failed:", e);
-      }
-
-      // Dispatch click on inner icon or label if present
-      const inner = targetButton.querySelector("mat-icon, .mat-icon, .google-symbols, svg, [class*='label'], [class*='icon']");
-      if (inner) {
-        try { inner.dispatchEvent(new MouseEvent("click", point)); } catch {}
-      }
-
-      // Request submit if inside form
-      const form = targetButton.form || targetButton.closest("form");
-      if (form && typeof form.requestSubmit === "function") {
-        try { form.requestSubmit(targetButton); } catch {}
-      }
+    if (!targetButton || !targetButton.isConnected) {
+      throw root.flowError("FLOW_SUBMIT_BUTTON_MISSING", "Flow's Start generation button disappeared before activation.", true);
+    }
+    if (targetButton.disabled || targetButton.getAttribute("aria-disabled") === "true") {
+      throw root.flowError("FLOW_SUBMIT_DISABLED", "Flow's Start generation button is disabled; nothing was submitted.", true);
     }
 
+    try { targetButton.scrollIntoView?.({ behavior: "instant", block: "center" }); } catch {}
+    const rect = targetButton.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    const eventOptions = {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      button: 0,
+      clientX: x,
+      clientY: y,
+      pointerType: "mouse",
+      view: window,
+    };
+
+    let clickDelivered = false;
+    let controlAccepted = false;
+    const markDelivered = () => { clickDelivered = true; };
+    targetButton.addEventListener("click", markDelivered, { capture: true, once: true });
+
+    const observeRoot = targetButton.parentElement || targetButton;
+    const acceptanceObserver = new MutationObserver(() => {
+      if (targetButton.disabled || targetButton.getAttribute("aria-disabled") === "true") {
+        controlAccepted = true;
+      }
+    });
+    try {
+      acceptanceObserver.observe(observeRoot, {
+        attributes: true,
+        childList: true,
+        subtree: true,
+        attributeFilter: ["disabled", "aria-disabled", "class"],
+      });
+    } catch (_) {}
+
+    let mainActivation = null;
+    try {
+      // 1. Gesture sequence with exact 120ms hold delay (TobyFlow pattern)
+      targetButton.dispatchEvent(new PointerEvent("pointerdown", eventOptions));
+      targetButton.dispatchEvent(new MouseEvent("mousedown", eventOptions));
+      try { targetButton.focus({ preventScroll: true }); } catch {}
+
+      await Promise.all([
+        new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+        new Promise(resolve => setTimeout(resolve, 120))
+      ]);
+
+      if (!targetButton.isConnected || targetButton.disabled || targetButton.getAttribute("aria-disabled") === "true") {
+        controlAccepted = true;
+      }
+
+      targetButton.dispatchEvent(new PointerEvent("pointerup", eventOptions));
+      targetButton.dispatchEvent(new MouseEvent("mouseup", eventOptions));
+
+      // 2. Invoke Main-world Angular Listener via Proxy (isTrusted: true)
+      const submitToken = crypto.randomUUID();
+      targetButton.setAttribute("data-tobyflow-submit-token", submitToken);
+      try {
+        mainActivation = await new Promise(resolve => {
+          let resolved = false;
+          const handler = ev => {
+            if (ev.source !== window || ev.origin !== location.origin) return;
+            if (ev.data?.source === "flow-auto-slate-result" && ev.data?.requestId === submitToken) {
+              resolved = true;
+              clearTimeout(timer);
+              window.removeEventListener("message", handler);
+              resolve(ev.data);
+            }
+          };
+          const timer = setTimeout(() => {
+            if (!resolved) {
+              window.removeEventListener("message", handler);
+              resolve({ success: false, error: "Bridge timeout" });
+            }
+          }, 3000);
+          window.addEventListener("message", handler);
+          window.postMessage({
+            source: "flow-auto-slate",
+            action: "activateV2Submit",
+            submitToken,
+            requestId: submitToken,
+          }, location.origin);
+        });
+      } finally {
+        targetButton.removeAttribute("data-tobyflow-submit-token");
+      }
+
+      const mainListenerInvoked = mainActivation?.success === true && Number(mainActivation?.invoked) > 0;
+      if (!mainListenerInvoked) {
+        // Fallback: direct click and inner icon click
+        targetButton.click();
+        const inner = targetButton.querySelector("mat-icon, .mat-icon, .google-symbols, svg");
+        if (inner) {
+          try { inner.dispatchEvent(new MouseEvent("click", eventOptions)); } catch {}
+        }
+        const form = targetButton.form || targetButton.closest("form");
+        if (form && typeof form.requestSubmit === "function") {
+          try { form.requestSubmit(targetButton); } catch {}
+        }
+        const editor = (typeof root.flowQuery === "function" ? root.flowQuery("editor") : null) || document.querySelector(".ProseMirror");
+        if (editor) {
+          pressFlowEditorSubmit(editor);
+        }
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 180));
+    } catch (err) {
+      console.warn("[FlowEditor] activateFlowSubmitButton failed:", err);
+    } finally {
+      try { acceptanceObserver.disconnect(); } catch (_) {}
+      try { targetButton.removeEventListener("click", markDelivered, { capture: true }); } catch (_) {}
+    }
+
+    const mainListenerInvoked = mainActivation?.success === true && Number(mainActivation?.invoked) > 0;
     return {
-      clickDelivered: clickSent || shortcutSent,
-      shortcutDispatched: shortcutSent,
-      mainListenerInvoked: false,
-      allowEnterFallback: true,
-      strategy: clickSent ? "shortcut-and-dom-click" : "shortcut-only",
+      clickDelivered: clickDelivered || mainListenerInvoked || controlAccepted,
+      controlAccepted,
+      mainListenerInvoked,
+      strategy: mainListenerInvoked ? "angular_main_proxy" : "native_click_fallback",
     };
   }
 
-  async function waitForGenerationSubmitButton(expectedPrompt, timeoutMs = 3000) {
+  async function waitForGenerationSubmitButton(expectedPrompt, timeoutMs = 15000) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       const button = getFlowSubmitButton(expectedPrompt);
       if (button) {
-        try {
-          inspectFlowSubmitTarget(button, expectedPrompt);
+        const isDisabled = button.disabled || button.getAttribute("aria-disabled") === "true";
+        if (!isDisabled) {
           return button;
-        } catch (err) {
-          if (!button.disabled && button.getAttribute("aria-disabled") !== "true") {
-            return button;
-          }
         }
       }
-      await root.wait?.(150);
+      await root.wait?.(200);
     }
-    return null;
+    return getFlowSubmitButton(expectedPrompt);
   }
 
   function currentFlowSubmitErrors() {
