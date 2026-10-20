@@ -531,15 +531,103 @@ async function waitForFlowRoute(predicate, timeoutMs, message) {
 }
 
 async function leaveFlowDetailView() {
-  if (/\/character(?:\/|$)/i.test(location.pathname)) {
-    const done = [...document.querySelectorAll("button,[role=button]")].find(el => visible(el) && /^Done( editing)?$/i.test(accessibleName(el).trim()));
-    if (done) done.click();
-    await waitForFlowRoute(path => !/\/character(?:\/|$)/i.test(path), 15_000, "Flow did not leave the character editor.");
-  } else if (/\/edit(?:\/|$)/i.test(location.pathname)) {
-    const back = flowButton("Back button to go to previous page");
-    if (back) back.click();
-    await waitForFlowRoute(path => !/\/edit(?:\/|$)/i.test(path), 20_000, "Flow did not return from the video editor.");
+  const target = globalThis.FlowDriverRegistry?.describeUrl?.(location.href);
+  if (target?.projectId && !target.isProjectEditor) {
+    if (/\/character(?:\/|$)/i.test(location.pathname)) {
+      const done = [...document.querySelectorAll("button,[role=button]")].find(el => visible(el) && /^Done( editing)?$/i.test(accessibleName(el).trim()));
+      if (done) {
+        done.click();
+        const left = await waitForFlowRoute(path => !/\/character(?:\/|$)/i.test(path), 2000, "").catch(() => false);
+        if (left) return;
+      }
+      const goBack = flowButton("Go back") || flowButton("Back");
+      if (goBack) {
+        goBack.click();
+        const left = await waitForFlowRoute(path => !/\/character(?:\/|$)/i.test(path), 2000, "").catch(() => false);
+        if (left) return;
+      }
+    } else if (/\/edit(?:\/|$)/i.test(location.pathname)) {
+      const back = flowButton("Back button to go to previous page") || flowButton("Back");
+      if (back) {
+        back.click();
+        const left = await waitForFlowRoute(path => !/\/edit(?:\/|$)/i.test(path), 2000, "").catch(() => false);
+        if (left) return;
+      }
+    }
+
+    // Nếu không có nút thoát UI hoặc click không chuyển trang, tự động phục hồi về project editor
+    await ensureFlowProjectEditor();
   }
+}
+
+async function ensureFlowProjectEditor() {
+  const describe = () => globalThis.FlowDriverRegistry?.describeUrl?.(location.href) || null;
+  let target = describe();
+
+  // 1. Đã ở đúng màn hình Project Editor chính
+  if (target?.isProjectEditor) {
+    return { success: true, isProjectEditor: true, projectId: target.projectId };
+  }
+
+  // 2. Đang ở trong project nhưng kẹt ở sub-route (/character, /edit, ...)
+  if (target?.projectId && !target.isProjectEditor) {
+    console.log("[FlowProjectNavigation] Detected sub-route (" + location.pathname + "), recovering to project root editor...");
+    
+    // Thử click nút quay lại / Done nếu có
+    const doneOrBack = [...document.querySelectorAll('button, [role="button"]')].find(el => {
+      if (!visible(el)) return false;
+      const name = accessibleName(el).trim();
+      return /^Done( editing)?$/i.test(name) || /^Back( button.*)?$/i.test(name) || /^(Go back|Quay lại)$/i.test(name);
+    });
+    if (doneOrBack) {
+      doneOrBack.click();
+      const leftSubRoute = await waitForFlowRoute(() => describe()?.isProjectEditor === true, 2000, "").catch(() => false);
+      if (leftSubRoute) return { success: true, isProjectEditor: true, projectId: target.projectId };
+    }
+
+    // Thử click All media navigation
+    const allMedia = flowNavigationItem("All media");
+    if (allMedia) {
+      allMedia.click();
+      const leftSubRoute = await waitForFlowRoute(() => describe()?.isProjectEditor === true, 2000, "").catch(() => false);
+      if (leftSubRoute) return { success: true, isProjectEditor: true, projectId: target.projectId };
+    }
+
+    // Điều hướng trực tiếp về project root URL (cơ chế phục hồi giống TobyFlow)
+    const rootUrl = `${target.origin}${target.routePrefix}/project/${target.projectId}`;
+    console.log("[FlowProjectNavigation] Navigating directly to project root URL:", rootUrl);
+    location.assign(rootUrl);
+    await waitForFlowRoute(() => describe()?.isProjectEditor === true, 12_000, "Flow did not navigate to project editor.");
+    return { success: true, isProjectEditor: true, projectId: target.projectId };
+  }
+
+  // 3. Đang ở ngoài project (trang chủ hoặc danh sách dự án): tự động mở hoặc tạo dự án mới
+  console.log("[FlowProjectNavigation] Outside of project. Finding New project button or existing project...");
+  const newProjectBtn = [...document.querySelectorAll('button, a[role="button"]')].find(btn => {
+    if (!visible(btn)) return false;
+    const label = (accessibleName(btn) || btn.innerText || btn.textContent || "").trim().toLowerCase();
+    const hasAddIcon = [...btn.querySelectorAll('mat-icon')].some(i => /add|create|new/i.test((i.innerText || i.textContent || "").trim()));
+    return /new project|tạo dự án|create project/i.test(label) || (hasAddIcon && /project|dự án/i.test(label));
+  });
+
+  if (newProjectBtn) {
+    console.log("[FlowProjectNavigation] Clicking New project button...");
+    newProjectBtn.click();
+    await waitForFlowRoute(() => describe()?.isProjectEditor === true, 15_000, "Flow did not open a new project editor.");
+    target = describe();
+    return { success: true, isProjectEditor: true, projectId: target?.projectId || null };
+  }
+
+  const firstProjectCard = document.querySelector('a[href*="/project/"]');
+  if (firstProjectCard && visible(firstProjectCard)) {
+    console.log("[FlowProjectNavigation] Opening first existing project...");
+    firstProjectCard.click();
+    await waitForFlowRoute(() => describe()?.isProjectEditor === true, 15_000, "Flow did not open existing project editor.");
+    target = describe();
+    return { success: true, isProjectEditor: true, projectId: target?.projectId || null };
+  }
+
+  return { success: false, error: "FLOW_PROJECT_REQUIRED" };
 }
 
 function blurFlowNavigationFocus() {
@@ -584,4 +672,5 @@ if (typeof globalThis !== "undefined") {
   globalThis.clearEditorTextPreservingChips = clearEditorTextPreservingChips;
   globalThis.dismissBlockingOverlays = dismissBlockingOverlays;
   globalThis.dispatchEscapeKey = dispatchEscapeKey;
+  globalThis.ensureFlowProjectEditor = ensureFlowProjectEditor;
 }

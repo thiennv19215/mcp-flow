@@ -24,10 +24,11 @@
       if (projectAt < 0) return { projectId: null, routePrefix, isProjectEditor: false };
       const projectId = segments[projectAt + 1];
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(projectId || "")) return null;
+      const isProjectEditor = segments.length === projectAt + 2;
       return {
         projectId,
         routePrefix,
-        isProjectEditor: true,
+        isProjectEditor,
         projectPath: `/${segments.slice(0, projectAt + 2).join("/")}`,
       };
     }

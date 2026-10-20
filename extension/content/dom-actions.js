@@ -6,6 +6,7 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
     return scanNativeProjects();
   }
   if (name === "flow.generation.upload.preflight") {
+    await ensureFlowProjectEditor();
     const state = nativeRead("flowState");
     if (!state.signedIn || !state.inProject) throw flowError("FLOW_NOT_READY", state.hint || "Open a signed-in Flow project first.", true);
     // Flow creates/replaces file inputs when its upload menu opens. Do not require
@@ -322,6 +323,7 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
     return { attached, submitted: false };
   }
   if (name === "flow.generation.submit") {
+    await ensureFlowProjectEditor();
     const state = nativeRead("flowState");
     if (!state.signedIn || !state.inProject) throw flowError("FLOW_NOT_READY", state.hint || "Open a signed-in Flow project first.", true);
     await dismissBlockingOverlays();

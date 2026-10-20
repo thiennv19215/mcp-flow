@@ -98,11 +98,14 @@ async function scanNativeCharacters() {
 function nativeRead(name) {
   if (name === "flowState") {
     const url = location.href;
+    const desc = globalThis.FlowDriverRegistry?.describeUrl?.(url) || null;
     const signedIn = !/\/about|accounts\.google\.com/.test(url);
-    const inProject = /\/project\//.test(url);
-    const state = { url, signedIn, inProject };
+    const inProject = Boolean(desc?.projectId);
+    const isProjectEditor = Boolean(desc?.isProjectEditor);
+    const state = { url, signedIn, inProject, isProjectEditor, projectId: desc?.projectId || null };
     if (!signedIn) state.hint = "Not signed in. Sign in to Google in the Flow Chrome tab.";
     else if (!inProject) state.hint = "Signed in, but no project is open. Open or create a Flow project.";
+    else if (!isProjectEditor) state.hint = "Flow is not in project editor view. Recovering to project root...";
     return state;
   }
   if (name === "assets") return scanNativeAssets();

@@ -12,8 +12,14 @@
       });
     }
 
-    invoke(operation, payload = {}, command = {}) {
+    async invoke(operation, payload = {}, command = {}) {
       if (operation === "flow.context") {
+        const live = root.FlowDriverRegistry.describeUrl(location.href);
+        if (live && !live.isProjectEditor && live.projectId) {
+          await globalThis.ensureFlowProjectEditor?.();
+          const refreshed = root.FlowDriverRegistry.describeUrl(location.href);
+          if (refreshed) this.context = Object.freeze({ ...refreshed });
+        }
         const mismatch = this.targetMismatch(command?._flowTarget || command?.flowTarget);
         if (mismatch) return Promise.reject(this.error(mismatch.error, mismatch.message, false, false, mismatch.details));
         return Promise.resolve({ success: true, ...this.context });

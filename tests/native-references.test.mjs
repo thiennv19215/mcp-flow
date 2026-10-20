@@ -274,3 +274,69 @@ test('dismissBlockingOverlays clicks close buttons or dispatches Escape for open
   assert.equal(result, true);
   assert.equal(closeClicked, true);
 });
+
+test('FlowDriverRegistry correctly flags sub-routes like /character as not project editor', () => {
+  const registrySource = readFileSync(new URL('../extension/content/flow-driver-registry.js', import.meta.url), 'utf8');
+  const rootObj = {};
+  const context = vm.createContext({ globalThis: rootObj, URL });
+  vm.runInContext(registrySource, context);
+  const Registry = rootObj.FlowDriverRegistry;
+
+  const rootEditor = Registry.describeUrl('https://flow.google.com/project/172cc8b0-cb73-44fb-9300-e1484f84a4bc');
+  assert.equal(rootEditor.projectId, '172cc8b0-cb73-44fb-9300-e1484f84a4bc');
+  assert.equal(rootEditor.isProjectEditor, true);
+
+  const characterSubroute = Registry.describeUrl('https://flow.google.com/project/172cc8b0-cb73-44fb-9300-e1484f84a4bc/character');
+  assert.equal(characterSubroute.projectId, '172cc8b0-cb73-44fb-9300-e1484f84a4bc');
+  assert.equal(characterSubroute.isProjectEditor, false);
+
+  const videoEditSubroute = Registry.describeUrl('https://flow.google.com/project/172cc8b0-cb73-44fb-9300-e1484f84a4bc/edit/some-video-id');
+  assert.equal(videoEditSubroute.projectId, '172cc8b0-cb73-44fb-9300-e1484f84a4bc');
+  assert.equal(videoEditSubroute.isProjectEditor, false);
+
+  const localizedRoot = Registry.describeUrl('https://flow.google.com/u/0/project/172cc8b0-cb73-44fb-9300-e1484f84a4bc');
+  assert.equal(localizedRoot.isProjectEditor, true);
+});
+
+test('ensureFlowProjectEditor navigates to project root when stuck on sub-routes', async () => {
+  const registrySource = readFileSync(new URL('../extension/content/flow-driver-registry.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/content/dom-utils.js', import.meta.url), 'utf8');
+
+  let assignedUrl = null;
+  const mockLocation = {
+    href: 'https://flow.google.com/project/172cc8b0-cb73-44fb-9300-e1484f84a4bc/character',
+    origin: 'https://flow.google.com',
+    pathname: '/project/172cc8b0-cb73-44fb-9300-e1484f84a4bc/character',
+    assign: (url) => {
+      assignedUrl = url;
+      mockLocation.href = url;
+      mockLocation.pathname = new URL(url).pathname;
+    },
+  };
+
+  const rootObj = {};
+  const context = vm.createContext({
+    globalThis: rootObj,
+    window: rootObj,
+    URL,
+    document: {
+      querySelectorAll: () => [],
+      querySelector: () => null,
+      dispatchEvent: () => {},
+    },
+    location: mockLocation,
+    setTimeout: (fn) => fn(),
+    clearTimeout: () => {},
+    console: { log: () => {} },
+  });
+
+  vm.runInContext(registrySource, context);
+  vm.runInContext(domUtilsSource, context);
+
+  const ensureFlowProjectEditor = rootObj.ensureFlowProjectEditor;
+  const result = await ensureFlowProjectEditor();
+
+  assert.equal(result.success, true);
+  assert.equal(result.isProjectEditor, true);
+  assert.equal(assignedUrl, 'https://flow.google.com/project/172cc8b0-cb73-44fb-9300-e1484f84a4bc');
+});
