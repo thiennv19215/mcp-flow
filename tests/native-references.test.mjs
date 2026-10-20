@@ -340,3 +340,83 @@ test('ensureFlowProjectEditor navigates to project root when stuck on sub-routes
   assert.equal(result.isProjectEditor, true);
   assert.equal(assignedUrl, 'https://flow.google.com/project/172cc8b0-cb73-44fb-9300-e1484f84a4bc');
 });
+
+test('checkFlowCreditLimitAlert detects quota exhaustion banners immediately', () => {
+  const domUtilsSource = readFileSync(new URL('../extension/content/dom-utils.js', import.meta.url), 'utf8');
+  const alertEl = {
+    nodeType: 1,
+    innerText: "You've run out of credits. Upgrade your account or wait for reset.",
+    getBoundingClientRect: () => ({ width: 200, height: 40 }),
+  };
+
+  const context = vm.createContext({
+    globalThis: {},
+    window: {},
+    URL,
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+    document: {
+      querySelectorAll: selector => selector.includes('[role="alert"]') ? [alertEl] : [],
+      body: { innerText: "" },
+    },
+    location: { href: 'https://flow.google.com' },
+  });
+
+  vm.runInContext(domUtilsSource, context);
+  const checkFlowCreditLimitAlert = context.globalThis.checkFlowCreditLimitAlert;
+
+  const detected = checkFlowCreditLimitAlert();
+  assert.match(detected, /run out of credits/i);
+
+  // Clean DOM without alert
+  const cleanContext = vm.createContext({
+    globalThis: {},
+    window: {},
+    URL,
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+    document: {
+      querySelectorAll: () => [],
+      body: { innerText: "Welcome to Flow" },
+    },
+    location: { href: 'https://flow.google.com' },
+  });
+  vm.runInContext(domUtilsSource, cleanContext);
+  assert.equal(cleanContext.globalThis.checkFlowCreditLimitAlert(), null);
+});
+
+test('clearExistingIngredientChips removes stale reference chips before attaching new ones', async () => {
+  const domUtilsSource = readFileSync(new URL('../extension/content/dom-utils.js', import.meta.url), 'utf8');
+  let removedCount = 0;
+  const chips = [
+    {
+      nodeType: 1,
+      name: 'Ingredient: Old Cat',
+      innerText: 'Ingredient: Old Cat',
+      getAttribute: () => null,
+      getBoundingClientRect: () => ({ width: 100, height: 30 }),
+      querySelectorAll: selector => [],
+      click: () => { chips.shift(); removedCount++; },
+    }
+  ];
+
+  const context = vm.createContext({
+    globalThis: {},
+    window: {},
+    URL,
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+    setTimeout: fn => fn(),
+    clearTimeout: () => {},
+    document: {
+      querySelectorAll: selector => selector.includes('button') ? chips : [],
+    },
+    location: { href: 'https://flow.google.com' },
+    accessibleName: el => el.name || el.innerText || '',
+    flowButton: () => null,
+  });
+
+  vm.runInContext(domUtilsSource, context);
+  const clearExistingIngredientChips = context.globalThis.clearExistingIngredientChips;
+
+  await clearExistingIngredientChips();
+  assert.equal(removedCount, 1);
+  assert.equal(chips.length, 0);
+});

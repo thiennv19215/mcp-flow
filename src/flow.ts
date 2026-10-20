@@ -157,7 +157,7 @@ export async function runGeneration(job: Job): Promise<string[]> {
   }
   const normalizedRatio = normalizeAspectRatio(s.aspect_ratio);
 
-  const submitted = await nativeOperation<{ submitted: boolean; before: string[]; type: MediaKind; expectedCount: number; credits?: number }>("flow.generation.submit", {
+  const submitted = await nativeOperation<{ submitted: boolean; before: string[]; type: MediaKind; expectedCount: number; credits?: number; correlationAttemptId?: string }>("flow.generation.submit", {
     prompt: s.prompt, type: s.type, model: s.model, aspectRatio: normalizedRatio, duration: s.duration,
     resolution: s.resolution, variants: s.variants, maxCredits: s.max_credits,
     firstFrame: frame(s.first_frame, "start"), lastFrame: frame(s.last_frame, "end"), attachments,
@@ -169,6 +169,7 @@ export async function runGeneration(job: Job): Promise<string[]> {
   if (!submitted.submitted) throw new Error("Native Flow submit did not confirm that generation started.");
   const observed = await nativeOperation<{ media: NativeMedia[] }>("flow.generation.observe", {
     before: submitted.before, kind: submitted.type, expectedCount: submitted.expectedCount,
+    correlationAttemptId: submitted.correlationAttemptId,
     timeoutMs: s.type === "image" ? IMAGE_TIMEOUT_MS : VIDEO_TIMEOUT_MS, retries: s.retries ?? 2,
   }, "flow.native.generation.observe", job, s.type === "image" ? IMAGE_TIMEOUT_MS : VIDEO_TIMEOUT_MS);
   job.progress = undefined;

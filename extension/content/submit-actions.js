@@ -113,56 +113,69 @@ function pressFlowEditorSubmit(editor) {
 }
 
 async function activateFlowSubmitButton(button, expectedPrompt) {
-  let target = null;
-  try {
-    target = inspectFlowSubmitTarget(button, expectedPrompt);
-  } catch (e) {
-    console.warn("[FlowSubmit] inspect target warning, continuing with bounding rect:", e?.message);
-    const rect = button.getBoundingClientRect();
-    target = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  inspectFlowSubmitTarget(button, expectedPrompt);
+  const editor = document.querySelector(".ProseMirror");
+  if (!editor || normalizeFlowPrompt(getEditorUserText(editor)) !== normalizeFlowPrompt(expectedPrompt)) {
+    throw flowError("FLOW_PRESUBMIT_STALE", "The Flow prompt changed before submit activation; nothing was submitted.", true, false);
   }
+  const submitToken = crypto.randomUUID();
+  button.setAttribute("data-tobyflow-submit-token", submitToken);
+  let bridgeResult = null;
+  let bridgeTimedOut = false;
   try {
-    const point = { bubbles: true, cancelable: true, composed: true, button: 0, clientX: target.x, clientY: target.y, pointerType: "mouse", view: window };
-    button.dispatchEvent(new PointerEvent("pointerover", { ...point, pointerId: 1 }));
-    button.dispatchEvent(new MouseEvent("mouseover", point));
-    button.dispatchEvent(new PointerEvent("pointerdown", { ...point, pointerId: 1 }));
-    button.dispatchEvent(new MouseEvent("mousedown", point));
-    if (typeof button.focus === "function") button.focus({ preventScroll: true });
-    await wait(60);
-    button.dispatchEvent(new PointerEvent("pointerup", { ...point, pointerId: 1 }));
-    button.dispatchEvent(new MouseEvent("mouseup", point));
-    button.dispatchEvent(new MouseEvent("click", point));
-    button.click();
-
-    // TobyFlow: If button has child elements (icon, span), click child as well
-    const innerIcon = button.querySelector("mat-icon, i, svg, span");
-    if (innerIcon) {
-      innerIcon.dispatchEvent(new MouseEvent("click", point));
-    }
-
-    // Call TobyFlow's slate-bridge in MAIN world to directly execute Angular click listener with isTrusted proxy
-    const submitToken = crypto.randomUUID();
-    button.setAttribute("data-tobyflow-submit-token", submitToken);
-    try {
-      await new Promise(resolve => {
-        const handler = ev => {
-          if (ev.data?.source === "flow-auto-slate-result") {
-            window.removeEventListener("message", handler);
-            resolve();
-          }
-        };
-        window.addEventListener("message", handler);
-        window.postMessage({ source: "flow-auto-slate", action: "activateV2Submit", submitToken, requestId: submitToken }, location.origin);
-        setTimeout(resolve, 300);
-      });
-    } finally {
-      button.removeAttribute("data-tobyflow-submit-token");
-    }
+    bridgeResult = await new Promise(resolve => {
+      let settled = false;
+      const finish = value => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        window.removeEventListener("message", handler);
+        resolve(value);
+      };
+      const handler = ev => {
+        if (ev.source !== window || ev.origin !== location.origin) return;
+        if (ev.data?.source !== "flow-auto-slate-result" || ev.data?.requestId !== submitToken) return;
+        finish(ev.data);
+      };
+      const timer = setTimeout(() => {
+        bridgeTimedOut = true;
+        finish(null);
+      }, 500);
+      window.addEventListener("message", handler);
+      window.postMessage({
+        source: "flow-auto-slate",
+        action: "activateV2Submit",
+        submitToken,
+        requestId: submitToken,
+      }, location.origin);
+    });
   } catch (error) {
     if (error?.code) throw error;
-    throw flowError("FLOW_SUBMIT_ACTIVATION_FAILED", `Flow's validated DOM click raised an error (${String(error?.message || error)}). No submit was confirmed.`, true, false);
+    throw flowError("FLOW_SUBMIT_ACTIVATION_FAILED", `Flow's submit bridge failed (${String(error?.message || error)}). No retry was sent.`, true, true);
+  } finally {
+    button.removeAttribute("data-tobyflow-submit-token");
   }
-  return { clickDelivered: true, controlAccepted: false, strategy: "validated-dom-click" };
+
+  const invoked = Math.max(0, Number(bridgeResult?.invoked) || 0);
+  if (invoked > 0) {
+    return {
+      clickDelivered: true,
+      mainListenerInvoked: true,
+      allowEnterFallback: false,
+      bridgeResult,
+      strategy: "main-world-listener",
+    };
+  }
+
+  // A timeout means the MAIN-world listener may have run without its reply arriving.
+  // Do not send Enter in that ambiguous case, since it could start a duplicate render.
+  return {
+    clickDelivered: false,
+    mainListenerInvoked: false,
+    allowEnterFallback: !bridgeTimedOut && Boolean(bridgeResult),
+    bridgeResult,
+    strategy: bridgeTimedOut ? "main-world-timeout" : "enter-fallback",
+  };
 }
 
 async function waitForGenerationSubmitButton(expectedPrompt, timeoutMs = 8000) {

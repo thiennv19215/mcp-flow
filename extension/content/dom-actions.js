@@ -1,3 +1,99 @@
+const FLOW_CORRELATION_ARM_EVENT = "TOBY_FLOW_V2_CORRELATION_ARM";
+const FLOW_CORRELATION_DISARM_EVENT = "TOBY_FLOW_V2_CORRELATION_DISARM";
+const FLOW_CORRELATION_RECEIPT_EVENT = "TOBY_FLOW_V2_CORRELATION_RECEIPT";
+
+function nativeFlowCorrelationMap() {
+  if (!(globalThis.__flowNativeGenerationCorrelations instanceof Map)) {
+    globalThis.__flowNativeGenerationCorrelations = new Map();
+  }
+  return globalThis.__flowNativeGenerationCorrelations;
+}
+
+function flowPromptFingerprint(value) {
+  const normalized = String(value || "").normalize("NFKC").trim().replace(/\s+/g, " ");
+  let hash = 2166136261;
+  for (let index = 0; index < normalized.length; index++) {
+    hash ^= normalized.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `id-${(hash >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+async function armNativeFlowCorrelation({ projectId, mediaType, prompt, expectedQuantity }) {
+  if (!projectId || !["image", "video"].includes(mediaType)) return null;
+  const attemptId = crypto.randomUUID();
+  const nonce = crypto.randomUUID();
+  const entry = { attemptId, nonce, projectId, mediaType, receipts: [], listener: null, armed: false, armedAt: Date.now(), requestSeen: false, useTilesFallback: false };
+  const armed = new Promise(resolve => {
+    const timer = setTimeout(() => resolve(false), 500);
+    entry.listener = event => {
+      const receipt = event.detail;
+      if (
+        receipt?.schemaVersion !== 1 ||
+        receipt?.nonce !== nonce ||
+        receipt?.attemptId !== attemptId ||
+        receipt?.projectId !== projectId ||
+        receipt?.mediaType !== mediaType
+      ) return;
+      entry.receipts.push(receipt);
+      if (receipt.stage === "request_seen") entry.requestSeen = true;
+      if (receipt.stage === "armed") {
+        entry.armed = !receipt.reason;
+        clearTimeout(timer);
+        resolve(entry.armed);
+      }
+      if (receipt.reason === "trusted_interaction_before_request") entry.interfered = true;
+    };
+    window.addEventListener(FLOW_CORRELATION_RECEIPT_EVENT, entry.listener);
+  });
+  window.dispatchEvent(new CustomEvent(FLOW_CORRELATION_ARM_EVENT, {
+    detail: {
+      schemaVersion: 1,
+      nonce,
+      attemptId,
+      projectId,
+      mediaType,
+      expectedQuantity,
+      promptFingerprint: flowPromptFingerprint(prompt),
+      expectedReferenceIds: [],
+      expectedMediaReferenceIds: [],
+      expectedCharacterIds: [],
+      expectedGlobalCharacter: false,
+      strictDispatch: true,
+      ttlMs: 15 * 60_000,
+    },
+  }));
+  if (!(await armed)) {
+    window.removeEventListener(FLOW_CORRELATION_RECEIPT_EVENT, entry.listener);
+    window.dispatchEvent(new CustomEvent(FLOW_CORRELATION_DISARM_EVENT, {
+      detail: { nonce, attemptId, dispatched: false, discardOnStop: true },
+    }));
+    return null;
+  }
+  nativeFlowCorrelationMap().set(attemptId, entry);
+  return attemptId;
+}
+
+function nativeFlowCorrelationReceipt(attemptId) {
+  const entry = nativeFlowCorrelationMap().get(String(attemptId || ""));
+  if (!entry) return null;
+  return [...entry.receipts].reverse().find(receipt =>
+    ["response_seen", "result_seen"].includes(receipt.stage) &&
+    ((Array.isArray(receipt.mediaIds) && receipt.mediaIds.length > 0) ||
+      (Array.isArray(receipt.children) && receipt.children.some(child => child?.status === "failed")))
+  ) || null;
+}
+
+function disarmNativeFlowCorrelation(attemptId) {
+  const entry = nativeFlowCorrelationMap().get(String(attemptId || ""));
+  if (!entry) return;
+  window.removeEventListener(FLOW_CORRELATION_RECEIPT_EVENT, entry.listener);
+  window.dispatchEvent(new CustomEvent(FLOW_CORRELATION_DISARM_EVENT, {
+    detail: { nonce: entry.nonce, attemptId: entry.attemptId, dispatched: true },
+  }));
+  nativeFlowCorrelationMap().delete(entry.attemptId);
+}
+
 async function executeFlowOperation(name, payload = {}, command = {}) {
   if (name === "flow.projects.list") {
     if (/\/project\/[0-9a-f-]{36}(?:\/|$)/i.test(location.pathname)) {
@@ -327,6 +423,8 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
     const state = nativeRead("flowState");
     if (!state.signedIn || !state.inProject) throw flowError("FLOW_NOT_READY", state.hint || "Open a signed-in Flow project first.", true);
     await dismissBlockingOverlays();
+    const creditAlert = checkFlowCreditLimitAlert();
+    if (creditAlert) throw flowError("FLOW_QUOTA_EXCEEDED", `Flow credit limit reached: "${creditAlert}". Generation aborted.`, false, false);
     await closeNativeAgentSession();
     await ensureFlowLibrarySection("All media");
     const attachments = Array.isArray(payload.attachments) ? payload.attachments : [];
@@ -353,7 +451,7 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
     if (agent?.getAttribute("aria-pressed") === "true") {
       await setNativeAgentMode(false);
     }
-    const clear = flowButton("Clear prompt"); if (clear) clear.click();
+    await clearExistingIngredientChips();
     const settingsCredits = payload.type === "image"
       ? await globalThis.FlowImageActions.prepare(payload, variants)
       : await globalThis.FlowVideoActions.prepare(payload, variants, framesMode);
@@ -420,19 +518,37 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
     const start = await waitForGenerationSubmitButton(payload.prompt, 10_000);
     if (!start) throw flowError("FLOW_SUBMIT_DISABLED", "Flow's Start generation button did not become ready within 10 seconds; nothing was submitted.", true);
     const errorsBeforeSubmit = new Set(currentFlowSubmitErrors());
-    const activation = await activateFlowSubmitButton(start, payload.prompt);
+    const projectId = FlowDriverRegistry.describeUrl(location.href)?.projectId;
+    const correlationAttemptId = !framesMode && referenceAttachments.length === 0
+      ? await armNativeFlowCorrelation({ projectId, mediaType: payload.type === "image" ? "image" : "video", prompt: payload.prompt, expectedQuantity: variants })
+      : null;
+    let activation;
+    try {
+      activation = await activateFlowSubmitButton(start, payload.prompt);
+    } catch (error) {
+      if (correlationAttemptId) disarmNativeFlowCorrelation(correlationAttemptId);
+      throw error;
+    }
 
     // Follow TobyFlow's submit contract: a delivered click is only an attempt.
     // Require a changed control/editor or a new tile before starting the render wait.
     const submitDeadline = Date.now() + 30_000;
+    const submitStartedAt = Date.now();
     let acknowledged = false;
+    let fallbackDispatched = false;
     let lastSubmitProgress = "";
     while (Date.now() < submitDeadline) {
       const newError = currentFlowSubmitErrors().find(message => !errorsBeforeSubmit.has(message));
       if (newError) {
+        if (correlationAttemptId) disarmNativeFlowCorrelation(correlationAttemptId);
         const classified = classifyFlowError(newError);
         if (classified) throw flowError(classified.code, classified.message, classified.retryable, false);
         throw flowError("FLOW_SUBMIT_REJECTED", `Flow rejected the submit: ${newError}`, false, false);
+      }
+      const correlationEntry = correlationAttemptId && nativeFlowCorrelationMap().get(correlationAttemptId);
+      if (correlationEntry?.interfered) {
+        disarmNativeFlowCorrelation(correlationAttemptId);
+        throw flowError("FLOW_SUBMIT_INTERFERENCE", "A trusted interaction changed the Flow composer before the generation request was observed. The submit outcome is unknown; inspect Flow before retrying.", false, true);
       }
       const currentStart = getFlowSubmitButton(payload.prompt) || flowButton("Start generation");
       const currentBox = document.querySelector(".ProseMirror");
@@ -450,9 +566,26 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
         acknowledged = true;
         break;
       }
-      // If after 1.2s the submit hasn't triggered, try TobyFlow's Enter press fallback on editor
-      if (Date.now() - (submitDeadline - 30_000) > 1200 && !acknowledged && currentBox) {
-        pressFlowEditorSubmit(currentBox);
+      // Retry with Enter at most once, only when the MAIN-world bridge explicitly
+      // reported that it did not invoke Flow's submit listener and the prompt is unchanged.
+      if (
+        activation.allowEnterFallback &&
+        !fallbackDispatched &&
+        Date.now() - submitStartedAt >= 1200 &&
+        currentBox &&
+        normalizeFlowPrompt(getEditorUserText(currentBox)) === normalizeFlowPrompt(payload.prompt) &&
+        currentStart &&
+        !currentStart.disabled &&
+        currentStart.getAttribute("aria-disabled") !== "true"
+      ) {
+        try {
+          inspectFlowSubmitTarget(currentStart, payload.prompt);
+          fallbackDispatched = true;
+          pressFlowEditorSubmit(currentBox);
+        } catch {
+          // The composer changed or became unavailable; leave the outcome unambiguous.
+          fallbackDispatched = true;
+        }
       }
       const progress = freshMedia.some(item => item.busy) ? "Flow accepted the submit and is rendering" : "Waiting for Flow to accept the submit";
       if (progress !== lastSubmitProgress) {
@@ -462,6 +595,7 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
       await wait(250);
     }
     if (!acknowledged && !activation.controlAccepted) {
+      if (correlationAttemptId) disarmNativeFlowCorrelation(correlationAttemptId);
       const newError = currentFlowSubmitErrors().find(message => !errorsBeforeSubmit.has(message));
       if (newError) {
         const classified = classifyFlowError(newError);
@@ -476,6 +610,7 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
       type: payload.type === "image" ? "image" : "video",
       expectedCount: variants,
       credits,
+      correlationAttemptId,
       activation: activation.strategy || "dom-click",
       acceptanceObserved: acknowledged || Boolean(activation.controlAccepted),
     };
@@ -485,10 +620,32 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
     const kind = payload.kind === "image" ? "image" : payload.kind === "video" ? "video" : undefined;
     const expected = Math.max(1, Math.min(20, Number(payload.expectedCount || 1)));
     const deadline = Date.now() + Math.max(1000, Math.min(15 * 60_000, Number(payload.timeoutMs || 12 * 60_000)));
+    const correlationAttemptId = String(payload.correlationAttemptId || "");
+    const correlationEntry = correlationAttemptId ? nativeFlowCorrelationMap().get(correlationAttemptId) : null;
     let priorProgress = "", lastTitleOnlyResult = "";
     let retriesLeft = Math.max(0, Math.min(3, Number(payload.retries ?? 1)));
-    while (Date.now() < deadline) {
-      const fresh = collectNativeMedia().filter(item => !before.includes(item.id || `title:${item.title}`) && !item.title.startsWith("fm-") && (!kind || item.kind === kind));
+    try {
+      while (Date.now() < deadline) {
+      if (correlationEntry?.interfered) {
+        throw flowError("FLOW_GENERATION_INTERFERENCE", "A trusted interaction changed the Flow composer before this generation request was observed. The result cannot be safely attributed; inspect the project before retrying.", false, true);
+      }
+      if (correlationEntry && !correlationEntry.requestSeen && Date.now() - correlationEntry.armedAt >= 30_000) {
+        // The private RPC schema may have changed. Fall back to the native tile
+        // observer if the correlation script never recognized this submit.
+        correlationEntry.useTilesFallback = true;
+      }
+      const strictCorrelation = correlationEntry && !correlationEntry.useTilesFallback;
+      const receipt = correlationEntry ? nativeFlowCorrelationReceipt(correlationAttemptId) : null;
+      const correlatedIds = new Set([
+        ...(receipt?.mediaIds || []),
+        ...(receipt?.children || []).flatMap(child => [child?.mediaId, child?.operationId]),
+      ].filter(id => typeof id === "string").map(id => id.toLowerCase()));
+      const fresh = collectNativeMedia().filter(item =>
+        !before.includes(item.id || `title:${item.title}`) &&
+        !item.title.startsWith("fm-") &&
+        (!kind || item.kind === kind) &&
+        (!strictCorrelation || (item.id && correlatedIds.has(item.id.toLowerCase())))
+      );
       const failed = fresh.filter(item => item.failed);
       if (failed.length) {
         const failureDetails = failed[0]?.failureReason || "";
@@ -507,7 +664,13 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
       }
       const ready = fresh.filter(item => !item.busy);
       if (ready.length >= expected) {
-        const picked = ready.slice(0, expected);
+        const picked = strictCorrelation
+          ? [...correlatedIds].map(id => ready.find(item => item.id?.toLowerCase() === id)).filter(Boolean).slice(0, expected)
+          : ready.slice(0, expected);
+        if (picked.length < expected) {
+          await wait(1000);
+          continue;
+        }
         const titleOnly = picked.some(item => !item.id || item.id.startsWith("title:"));
         const signature = picked.map(item => item.id || `title:${item.title}`).join("|");
         if (!titleOnly || signature === lastTitleOnlyResult) return { media: picked.map(({ id, title, kind: mediaKind }) => ({ id, title, kind: mediaKind })) };
@@ -520,8 +683,11 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
       const progress = percentages.join(", ") || (fresh.length ? "Flow is finishing the result" : "Waiting for Flow to start rendering");
       if (progress !== priorProgress) { emitFlowProgress(command, progress); priorProgress = progress; }
       await wait(2000);
+      }
+      throw flowError("FLOW_GENERATION_TIMEOUT", "Timed out waiting for Flow. The command may have been accepted; inspect the project before retrying.", false, true);
+    } finally {
+      if (correlationAttemptId) disarmNativeFlowCorrelation(correlationAttemptId);
     }
-    throw flowError("FLOW_GENERATION_TIMEOUT", "Timed out waiting for Flow. The command may have been accepted; inspect the project before retrying.", false, true);
   }
   if (name === "flow.asset.rename" || name === "flow.asset.trash") {
     const title = String(payload.name || "");

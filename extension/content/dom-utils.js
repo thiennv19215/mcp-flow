@@ -5,17 +5,22 @@ function visible(el) {
 }
 
 function accessibleName(el) {
+  if (!el) return "";
   const labels = el.labels ? [...el.labels].map(l => l.innerText).join(" ") : "";
-  const labelledBy = (el.getAttribute("aria-labelledby") || "").split(/\s+/).filter(Boolean).map(id => document.getElementById(id)?.innerText || document.getElementById(id)?.textContent || "").join(" ").trim();
-  return el.getAttribute("aria-label") || labelledBy || el.getAttribute("title") || el.getAttribute("alt") || labels || el.getAttribute("placeholder") || el.innerText || el.textContent || "";
+  const labelledBy = (el.getAttribute?.("aria-labelledby") || "").split(/\s+/).filter(Boolean).map(id => document.getElementById(id)?.innerText || document.getElementById(id)?.textContent || "").join(" ").trim();
+  return el.getAttribute?.("aria-label") || labelledBy || el.getAttribute?.("title") || el.getAttribute?.("alt") || labels || el.getAttribute?.("placeholder") || el.innerText || el.textContent || "";
 }
 
 function semanticActionText(el) {
+  if (!el) return "";
   const labels = el.labels ? [...el.labels].map(label => label.innerText || label.textContent || "").join(" ").trim() : "";
-  const labelledBy = (el.getAttribute("aria-labelledby") || "").split(/\s+/).filter(Boolean)
+  const labelledBy = (el.getAttribute?.("aria-labelledby") || "").split(/\s+/).filter(Boolean)
     .map(id => document.getElementById(id)?.innerText || document.getElementById(id)?.textContent || "").join(" ").trim();
-  const explicit = el.getAttribute("aria-label") || labelledBy || el.getAttribute("title") || labels || el.getAttribute("alt");
+  const explicit = el.getAttribute?.("aria-label") || labelledBy || el.getAttribute?.("title") || labels || el.getAttribute?.("alt");
   if (explicit) return explicit;
+  if (typeof document.createTreeWalker !== "function" || typeof NodeFilter === "undefined") {
+    return el.innerText || el.textContent || "";
+  }
   const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
   const text = [];
   while (walker.nextNode()) {
@@ -23,7 +28,7 @@ function semanticActionText(el) {
     let parent = node.parentElement;
     let hidden = false;
     while (parent && el.contains(parent)) {
-      if (parent.getAttribute("aria-hidden") === "true") { hidden = true; break; }
+      if (parent.getAttribute?.("aria-hidden") === "true") { hidden = true; break; }
       if (parent === el) break;
       parent = parent.parentElement;
     }
@@ -530,9 +535,120 @@ async function waitForFlowRoute(predicate, timeoutMs, message) {
   throw flowError("FLOW_NAVIGATION_TIMEOUT", message, true);
 }
 
+async function exitFlowMediaViewer() {
+  const isMediaViewer = () => {
+    return /\/edit(?:\/|$)/i.test(location.pathname) || /\/project\/[^/]+\/edit/i.test(location.pathname);
+  };
+  if (!isMediaViewer()) return true;
+
+  console.log("[FlowMediaViewer] Detected open media viewer, executing 3-tier exit...");
+
+  // Tier 1: Nút back với icon arrow_back hoặc text Back
+  const backButtons = [...document.querySelectorAll('button, [role="button"]')].filter(visible);
+  const backBtn = backButtons.find(btn => {
+    const label = (accessibleName(btn) || btn.innerText || btn.textContent || "").trim().toLowerCase();
+    const hasBackIcon = [...btn.querySelectorAll('mat-icon')].some(icon => /arrow_back|arrow-back|back/i.test((icon.innerText || icon.textContent || "").trim()));
+    return hasBackIcon || /^(?:back|go back|quay lại|back button.*)$/i.test(label);
+  });
+
+  if (backBtn) {
+    const eventInit = { bubbles: true, cancelable: true, view: window, button: 0 };
+    try { backBtn.dispatchEvent(new PointerEvent("pointerdown", eventInit)); } catch {}
+    try { backBtn.dispatchEvent(new MouseEvent("mousedown", eventInit)); } catch {}
+    try { backBtn.dispatchEvent(new PointerEvent("pointerup", eventInit)); } catch {}
+    try { backBtn.dispatchEvent(new MouseEvent("mouseup", eventInit)); } catch {}
+    try { backBtn.click(); } catch {}
+    const left = await waitForFlowRoute(path => !isMediaViewer(), 2000, "").catch(() => false);
+    if (left) return true;
+  }
+
+  // Tier 2: history.back()
+  try {
+    if (typeof history !== "undefined" && typeof history.back === "function") {
+      history.back();
+      const left = await waitForFlowRoute(path => !isMediaViewer(), 2000, "").catch(() => false);
+      if (left) return true;
+    }
+  } catch {}
+
+  // Tier 3: Điều hướng trực tiếp về project editor
+  const target = globalThis.FlowDriverRegistry?.describeUrl?.(location.href);
+  if (target?.projectId) {
+    const rootUrl = `${target.origin}${target.routePrefix}/project/${target.projectId}`;
+    console.warn("[FlowMediaViewer] Tier 1+2 did not exit media viewer; reloading clean project URL:", rootUrl);
+    location.assign(rootUrl);
+    await waitForFlowRoute(path => !isMediaViewer(), 10_000, "Flow did not return from video/media editor.");
+  }
+
+  return !isMediaViewer();
+}
+
+async function clearExistingIngredientChips() {
+  const clear = flowButton("Clear prompt");
+  if (clear) {
+    clear.click();
+    await wait(150);
+  }
+
+  const isRefChip = el => {
+    if (!visible(el)) return false;
+    const name = (accessibleName(el) || el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
+    return /(?:Ingredient|Thành phần)/i.test(name) || /Xóa thành phần|Remove ingredient/i.test(name) || el.hasAttribute?.("data-chip");
+  };
+
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const chips = [...document.querySelectorAll('button,[role="button"],[role="listitem"],mat-chip,[data-chip]')].filter(isRefChip);
+    if (!chips.length) break;
+
+    const firstChip = chips[0];
+    const removeBtn = [...firstChip.querySelectorAll('button, [role="button"], mat-icon')].find(btn => {
+      const label = (accessibleName(btn) || btn.innerText || btn.textContent || "").trim().toLowerCase();
+      return /close|clear|remove|xóa|delete/i.test(label);
+    }) || firstChip;
+
+    try {
+      removeBtn.click();
+    } catch {}
+    await wait(100);
+  }
+}
+
+function checkFlowCreditLimitAlert() {
+  const alertTexts = [
+    "run out of credits",
+    "no credits remaining",
+    "not enough credits",
+    "credit limit reached",
+    "bạn đã hết credit",
+    "không đủ credit",
+    "hết hạn mức credit",
+    "public_error_user_quota_reached"
+  ];
+
+  const candidates = [...document.querySelectorAll('[role="alert"], mat-error, .flow-alert, [class*="alert"], [class*="error"], [class*="quota"], [class*="credit"]')].filter(visible);
+  for (const el of candidates) {
+    const text = (el.innerText || el.textContent || "").trim().toLowerCase();
+    if (alertTexts.some(alert => text.includes(alert))) {
+      return text;
+    }
+  }
+
+  const bodyText = (document.body?.innerText || "").toLowerCase();
+  for (const alert of alertTexts) {
+    if (bodyText.includes(alert)) {
+      return alert;
+    }
+  }
+  return null;
+}
+
 async function leaveFlowDetailView() {
   const target = globalThis.FlowDriverRegistry?.describeUrl?.(location.href);
   if (target?.projectId && !target.isProjectEditor) {
+    if (/\/edit(?:\/|$)/i.test(location.pathname)) {
+      await exitFlowMediaViewer();
+      return;
+    }
     if (/\/character(?:\/|$)/i.test(location.pathname)) {
       const done = [...document.querySelectorAll("button,[role=button]")].find(el => visible(el) && /^Done( editing)?$/i.test(accessibleName(el).trim()));
       if (done) {
@@ -544,13 +660,6 @@ async function leaveFlowDetailView() {
       if (goBack) {
         goBack.click();
         const left = await waitForFlowRoute(path => !/\/character(?:\/|$)/i.test(path), 2000, "").catch(() => false);
-        if (left) return;
-      }
-    } else if (/\/edit(?:\/|$)/i.test(location.pathname)) {
-      const back = flowButton("Back button to go to previous page") || flowButton("Back");
-      if (back) {
-        back.click();
-        const left = await waitForFlowRoute(path => !/\/edit(?:\/|$)/i.test(path), 2000, "").catch(() => false);
         if (left) return;
       }
     }
@@ -673,4 +782,7 @@ if (typeof globalThis !== "undefined") {
   globalThis.dismissBlockingOverlays = dismissBlockingOverlays;
   globalThis.dispatchEscapeKey = dispatchEscapeKey;
   globalThis.ensureFlowProjectEditor = ensureFlowProjectEditor;
+  globalThis.exitFlowMediaViewer = exitFlowMediaViewer;
+  globalThis.clearExistingIngredientChips = clearExistingIngredientChips;
+  globalThis.checkFlowCreditLimitAlert = checkFlowCreditLimitAlert;
 }

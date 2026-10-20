@@ -39,7 +39,8 @@
         "https://flow.google.com/*"
       ],
       "js": [
-        "content/flow-upload-main.js"
+        "content/flow-upload-main.js",
+        "content/flow-v2-correlation-observer.js"
       ],
       "run_at": "document_start",
       "world": "MAIN"

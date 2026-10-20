@@ -1,0 +1,1898 @@
+(function () {
+  "use strict";
+  const VERSION = 1;
+  const OBSERVER_REVISION = 23;
+  const ARM = "TOBY_FLOW_V2_CORRELATION_ARM";
+  const DISARM = "TOBY_FLOW_V2_CORRELATION_DISARM";
+  const RECEIPT = "TOBY_FLOW_V2_CORRELATION_RECEIPT";
+  const MEDIA_IDENTITIES = "TOBY_FLOW_V2_MEDIA_IDENTITIES";
+  const MEDIA_IDENTITIES_READ = "TOBY_FLOW_V2_MEDIA_IDENTITIES_READ";
+  const mediaIdentities = new Map();
+  const mediaIdentityTypes = new Map();
+  let mediaIdentityProject = null;
+  const old = window.__tobyFlowV2CorrelationObserver;
+  if (old?.health) {
+    try {
+      if (old.health()?.activeAttempts !== 0) return;
+    } catch (_) {
+      return;
+    }
+  }
+  const retired = old?.retired || { entries: [], saturated: false };
+  retired.requestSignatures || (retired.requestSignatures = []);
+  for (const entry of retired.entries || []) {
+    if (
+      entry?.mediaType === "image" &&
+      (!Array.isArray(entry.expectedMediaReferenceIds) ||
+        !Array.isArray(entry.expectedCharacterIds))
+    )
+      entry.refMatchVersion = 0;
+  }
+  if (old?.dispose) {
+    try {
+      old.dispose();
+    } catch (_) {}
+  }
+  const nativeOpen = XMLHttpRequest.prototype.open;
+  const nativeSend = XMLHttpRequest.prototype.send;
+  const nativeFetch = typeof window.fetch === "function" ? window.fetch : null;
+  const attempts = new Map();
+  const xhrState = new WeakMap();
+  let diagnosticBudget = 12;
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const ERROR_CODE_RE =
+    /^(?:PUBLIC_ERROR(?:_[A-Z0-9]+)*|SEXUALLY_EXPLICIT|CHILD_SAFETY|[A-Z][A-Z0-9_]*(?:_ERROR|_FAILED|_FAILURE))$/;
+  const BATCHEXECUTE_PATH = "/_/AiSandboxAngularFrontend/data/batchexecute";
+  const projectId = () => {
+    const parts = location.pathname.split("/").filter(Boolean);
+    const projectAt = parts.indexOf("project");
+    if (projectAt < 0 || projectAt !== parts.length - 2) return null;
+    const prefix = parts.slice(0, projectAt);
+    let accountSeen = false;
+    let localeSeen = false;
+    for (let i = 0; i < prefix.length; i++) {
+      if (prefix[i] === "u" && !accountSeen && /^\d+$/.test(prefix[i + 1] || "")) {
+        accountSeen = true;
+        i++;
+        continue;
+      }
+      if (!localeSeen && /^[a-z]{2,3}(?:-[a-z]{2,4})?$/i.test(prefix[i])) {
+        localeSeen = true;
+        continue;
+      }
+      return null;
+    }
+    const value = parts[projectAt + 1] || "";
+    return UUID_RE.test(value) ? value : null;
+  };
+  const isFlowBatchExecuteUrl = (value) => {
+    try {
+      const url = new URL(value || "", location.href);
+      if (url.origin !== location.origin) return false;
+      if (url.pathname === BATCHEXECUTE_PATH) return true;
+      const parts = location.pathname.split("/").filter(Boolean);
+      const projectAt = parts.indexOf("project");
+      if (projectAt <= 0) return false;
+      const routePrefix = parts.slice(0, projectAt);
+      if (url.pathname === `/${routePrefix.join("/")}${BATCHEXECUTE_PATH}`) return true;
+      return (
+        routePrefix[0] === "u" &&
+        /^\d+$/.test(routePrefix[1] || "") &&
+        url.pathname === `/u/${routePrefix[1]}${BATCHEXECUTE_PATH}`
+      );
+    } catch (_) {
+      return false;
+    }
+  };
+  const identityFingerprint = (values) => {
+    const input = [...new Set(values || [])].sort().join("|");
+    let hash = 2166136261;
+    for (let i = 0; i < input.length; i++) {
+      hash ^= input.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return `id-${(hash >>> 0).toString(16).padStart(8, "0")}`;
+  };
+  const normalizePrompt = (value) =>
+    String(value || "")
+      .normalize("NFKC")
+      .trim()
+      .replace(/\s+/g, " ");
+  const promptFingerprint = (value) => identityFingerprint([normalizePrompt(value)]);
+  const videoInputNodes = (row) => {
+    const canonical = row?.[0]?.[2]?.[0];
+    if (Array.isArray(canonical) && canonical.length) return canonical;
+    const edit = row?.[1]?.[2]?.[0];
+    if (
+      row?.[0]?.[0] == null &&
+      UUID_RE.test(row?.[0]?.[1] || "") &&
+      Number.isInteger(row[0][2]) &&
+      Number.isInteger(row[0][3]) &&
+      row[0][2] >= 0 &&
+      row[0][3] > row[0][2] &&
+      typeof row[2] === "string" &&
+      Array.isArray(edit) &&
+      edit.length
+    )
+      return edit;
+    const observedEightField = row?.[2]?.[0];
+    return Array.isArray(observedEightField) && observedEightField.length
+      ? observedEightField
+      : null;
+  };
+  const decodeStructuredNodes = (nodes) => {
+    if (!Array.isArray(nodes) || !nodes.length) return null;
+    const normalize = (value) =>
+      String(value || "")
+        .normalize("NFKC")
+        .trim()
+        .replace(/\s+/g, " ");
+    const parts = [];
+    const characterIds = [];
+    const voiceIds = [];
+    for (const node of nodes) {
+      if (!Array.isArray(node)) return null;
+      if (typeof node[0] === "string" && node.slice(1).every((value) => value == null)) {
+        if (parts[parts.length - 1]?.kind === "text") parts[parts.length - 1].text += node[0];
+        else parts.push({ kind: "text", text: node[0] });
+        continue;
+      }
+      if (
+        node[0] != null ||
+        !Array.isArray(node[1]) ||
+        node.slice(2).some((value) => value != null)
+      )
+        return null;
+      const ref = node[1];
+      if (ref[0] != null) return null;
+      let kind, pair;
+      if (Array.isArray(ref[1]) && ref.slice(2).every((value) => value == null)) {
+        kind = "voice";
+        pair = ref[1];
+      } else if (
+        ref[1] == null &&
+        Array.isArray(ref[2]) &&
+        ref.slice(3).every((value) => value == null)
+      ) {
+        kind = "character";
+        pair = ref[2];
+      } else return null;
+      if (
+        typeof pair[0] !== "string" ||
+        typeof pair[1] !== "string" ||
+        pair.slice(2).some((value) => value != null)
+      )
+        return null;
+      if (kind === "character" ? !UUID_RE.test(pair[0]) : !/^voices\/[a-z0-9_-]+$/i.test(pair[0]))
+        return null;
+      const id = pair[0].toLowerCase();
+      parts.push({ kind, id });
+      if (kind === "character") characterIds.push(id);
+      else voiceIds.push(id);
+    }
+    if (!parts.some((part) => part.kind !== "text")) return null;
+    return {
+      fingerprint: promptFingerprint(
+        JSON.stringify(
+          parts
+            .filter((part) => part.kind !== "text" || normalize(part.text))
+            .map((part) =>
+              part.kind === "text" ? { kind: "text", text: normalize(part.text) } : part
+            )
+        )
+      ),
+      characterIds: normalizedRefs(characterIds),
+      voiceIds: [...new Set(voiceIds)].sort(),
+    };
+  };
+  const structuredInputFingerprints = (payload) => {
+    if (!Array.isArray(payload?.[0]) || !payload[0].length) return [];
+    return payload[0].map(
+      (row) => decodeStructuredNodes(videoInputNodes(row))?.fingerprint || null
+    );
+  };
+  const plainInputSummary = (payload) => {
+    const rows = payload?.[0];
+    if (!Array.isArray(rows) || !rows.length) return null;
+    const values = rows.map((row) => {
+      const nodes = videoInputNodes(row);
+      if (
+        !Array.isArray(nodes) ||
+        !nodes.length ||
+        nodes.some(
+          (node) =>
+            !Array.isArray(node) ||
+            typeof node[0] !== "string" ||
+            node.slice(1).some((v) => v != null)
+        )
+      )
+        return null;
+      const normalized = normalizePrompt(nodes.map((node) => node[0]).join(""));
+      return {
+        fingerprint: promptFingerprint(normalized),
+        anchorFingerprint: promptFingerprint(normalized.slice(0, 512)),
+        normalizedLength: normalized.length,
+      };
+    });
+    return values.every((value) => value && value.fingerprint === values[0].fingerprint)
+      ? values[0]
+      : null;
+  };
+  const plainInputFingerprint = (payload) => plainInputSummary(payload)?.fingerprint || null;
+  const normalizedRefs = (ids) =>
+    [...new Set((ids || []).map((id) => String(id).toLowerCase()))].sort();
+  const refsMatch = (actual, expected) =>
+    actual.every((id) => typeof id === "string" && UUID_RE.test(id)) &&
+    JSON.stringify(normalizedRefs(actual)) === JSON.stringify(normalizedRefs(expected));
+  const exactRefsMatch = (actual, expected) =>
+    Array.isArray(actual) &&
+    Array.isArray(expected) &&
+    actual.length === normalizedRefs(actual).length &&
+    expected.length === normalizedRefs(expected).length &&
+    refsMatch(actual, expected);
+  const globalCharacterCount = (attempt) =>
+    attempt.expectedGlobalCharacter === true
+      ? Math.max(1, Number(attempt.expectedGlobalCharacterCount) || 1)
+      : 0;
+  const attemptRefsMatch = (actual, attempt) => {
+    if (attempt.expectedGlobalCharacter !== true)
+      return refsMatch(actual, attempt.expectedReferenceIds);
+    const actualIds = normalizedRefs(actual);
+    const expectedIds = normalizedRefs(attempt.expectedReferenceIds);
+    return (
+      actual.every((id) => typeof id === "string" && UUID_RE.test(id)) &&
+      actual.length === actualIds.length &&
+      actualIds.length === expectedIds.length + globalCharacterCount(attempt) &&
+      expectedIds.every((id) => actualIds.includes(id))
+    );
+  };
+  const decodeVideoInputRow = (row) => {
+    if (!Array.isArray(row) || !videoInputNodes(row)) return null;
+    let model,
+      ratio,
+      referenceSlots,
+      entitySlot = null;
+    if (typeof row[2] === "string") {
+      model = row[2];
+      ratio = row[3];
+      if (row[0]?.[0] == null && UUID_RE.test(row[0]?.[1] || "")) {
+        referenceSlots = [row[0], row[8]];
+      } else {
+        referenceSlots = [row[1]];
+        entitySlot = row[9];
+      }
+    } else if (typeof row[1] === "string") {
+      model = row[1];
+      ratio = row[2];
+      referenceSlots = [row[3], row[4], row[5], row[6]];
+    } else if (typeof row[4] === "string") {
+      model = row[4];
+      ratio = row[5];
+      referenceSlots = [row[3]];
+    } else return null;
+    if (!Number.isInteger(ratio) || ratio < 1) return null;
+    const refs = [];
+    for (const slot of referenceSlots) {
+      if (slot == null) continue;
+      if (!Array.isArray(slot)) return null;
+      if (slot[0] == null && typeof slot[1] === "string" && UUID_RE.test(slot[1])) {
+        refs.push(slot[1]);
+        continue;
+      }
+      if (!slot.length || !slot.every((ref) => Array.isArray(ref))) continue;
+      const parsed = [];
+      let validReferenceList = true;
+      for (const ref of slot) {
+        const id = ref[0] == null ? ref[1] : ref[0];
+        if (typeof id !== "string" || !UUID_RE.test(id)) {
+          validReferenceList = false;
+          break;
+        }
+        parsed.push(id);
+      }
+      if (validReferenceList) refs.push(...parsed);
+    }
+    if (entitySlot != null) {
+      if (!Array.isArray(entitySlot)) return null;
+      for (const ref of entitySlot) {
+        if (
+          !Array.isArray(ref) ||
+          ref.length !== 1 ||
+          typeof ref[0] !== "string" ||
+          !UUID_RE.test(ref[0])
+        )
+          return null;
+        refs.push(ref[0]);
+      }
+    }
+    for (const node of videoInputNodes(row) || []) {
+      const characterId = node?.[1]?.[2]?.[0];
+      if (typeof characterId === "string" && UUID_RE.test(characterId)) refs.push(characterId);
+    }
+    return { model, ratio, refs };
+  };
+  const requestVariants = (attempt) => {
+    const refs =
+      attempt.refMatchVersion === 1 && Array.isArray(attempt.expectedReferenceIds)
+        ? normalizedRefs(attempt.expectedReferenceIds)
+        : null;
+    const model =
+      attempt.mediaType === "image" ? attempt.expectedImageModelKey : attempt.expectedVideoModelKey;
+    const variants = [
+      {
+        kind: attempt.structuredPromptFingerprint ? "structured" : "plain",
+        hash: attempt.structuredPromptFingerprint || attempt.promptFingerprint,
+        model,
+        ratio: attempt.expectedVideoRatioEnum,
+        refs,
+        globalCharacter: globalCharacterCount(attempt),
+      },
+    ];
+    if (
+      attempt.structuredPromptFingerprint &&
+      attempt.normalizedVoiceFingerprint &&
+      attempt.normalizedVideoModelKey &&
+      (!refs || refs.length === 0)
+    )
+      variants.push({
+        kind: "plain",
+        hash: attempt.normalizedVoiceFingerprint,
+        model: attempt.normalizedVideoModelKey,
+        ratio: attempt.expectedVideoRatioEnum,
+        refs,
+      });
+    return variants;
+  };
+  const attemptsOverlap = (left, right) =>
+    left.mediaType === right.mediaType &&
+    (left.mediaType === "image" || left.expectedQuantity === right.expectedQuantity) &&
+    requestVariants(left).some((a) =>
+      requestVariants(right).some(
+        (b) =>
+          a.kind === b.kind &&
+          a.hash === b.hash &&
+          (!a.model || !b.model || a.model === b.model) &&
+          (!a.ratio || !b.ratio || a.ratio === b.ratio) &&
+          a.globalCharacter === b.globalCharacter &&
+          (!a.refs || !b.refs || JSON.stringify(a.refs) === JSON.stringify(b.refs))
+      )
+    );
+  const imageInputMatches = (payload, attempt) => {
+    const rows = payload?.[1];
+    if (
+      payload?.[0] != null ||
+      payload?.[2] !== 1 ||
+      !Array.isArray(rows) ||
+      rows.length !== attempt.expectedQuantity
+    )
+      return false;
+    if (
+      !refsMatch(
+        [...attempt.expectedMediaReferenceIds, ...attempt.expectedCharacterIds],
+        attempt.expectedReferenceIds
+      )
+    )
+      return false;
+    return rows.every((row) => {
+      const nodes = row?.[8]?.[0];
+      if (typeof row?.[5] !== "string" || !Array.isArray(nodes) || !nodes.length) return false;
+      if (attempt.expectedImageModelKey && row[5] !== attempt.expectedImageModelKey) return false;
+      for (const declared of [payload?.[3]?.[5], row?.[7]?.[5]]) {
+        if (
+          typeof declared === "string" &&
+          UUID_RE.test(declared) &&
+          declared !== attempt.projectId
+        )
+          return false;
+      }
+      if (
+        row[2] != null &&
+        (!Array.isArray(row[2]) ||
+          row[2].some(
+            (ref) => !Array.isArray(ref) || typeof ref[0] !== "string" || !UUID_RE.test(ref[0])
+          ))
+      )
+        return false;
+      const mediaRefs = (row[2] || []).map((ref) => ref[0]);
+      if (!exactRefsMatch(mediaRefs, attempt.expectedMediaReferenceIds)) return false;
+      const declaredCharacters = row[10] == null ? [] : row[10];
+      if (
+        !Array.isArray(declaredCharacters) ||
+        declaredCharacters.some(
+          (ref) =>
+            !Array.isArray(ref) ||
+            ref.length !== 1 ||
+            typeof ref[0] !== "string" ||
+            !UUID_RE.test(ref[0])
+        )
+      )
+        return false;
+      const declaredCharacterIds = declaredCharacters.map((ref) => ref[0]);
+      if (attempt.expectedGlobalCharacter === true) {
+        if (
+          attempt.expectedCharacterIds.length !== 0 ||
+          declaredCharacterIds.length !== globalCharacterCount(attempt) ||
+          normalizedRefs(declaredCharacterIds).length !== declaredCharacterIds.length
+        )
+          return false;
+      } else if (!exactRefsMatch(declaredCharacterIds, attempt.expectedCharacterIds)) return false;
+      if (attempt.structuredPromptFingerprint) {
+        const structured = decodeStructuredNodes(nodes);
+        return (
+          !!structured &&
+          structured.fingerprint === attempt.structuredPromptFingerprint &&
+          structured.voiceIds.length === 0 &&
+          exactRefsMatch(structured.characterIds, attempt.expectedCharacterIds)
+        );
+      }
+      if (
+        (!attempt.expectedGlobalCharacter && attempt.expectedCharacterIds.length > 0) ||
+        nodes.some(
+          (node) =>
+            !Array.isArray(node) ||
+            typeof node[0] !== "string" ||
+            node.slice(1).some((value) => value != null)
+        )
+      )
+        return false;
+      return promptFingerprint(nodes.map((node) => node[0]).join("")) === attempt.promptFingerprint;
+    });
+  };
+  const attemptMatchesPayload = (payload, attempt) => {
+    if (attempt.mediaType === "image") return imageInputMatches(payload, attempt);
+    const declaredProject = payload?.[1]?.[5];
+    if (
+      typeof declaredProject === "string" &&
+      UUID_RE.test(declaredProject) &&
+      declaredProject !== attempt.projectId
+    )
+      return false;
+    const plainSummary = plainInputSummary(payload);
+    const plain = plainSummary?.fingerprint || null;
+    const row = payload?.[0]?.[0];
+    if (attempt.mediaType === "video") {
+      const rows = payload?.[0];
+      if (!Array.isArray(rows) || !rows.length || rows.length > attempt.expectedQuantity)
+        return false;
+      for (const input of rows) {
+        const decoded = decodeVideoInputRow(input);
+        if (!decoded || typeof decoded.model !== "string") return false;
+        const expected =
+          plain && attempt.structuredPromptFingerprint
+            ? attempt.normalizedVideoModelKey
+            : attempt.expectedVideoModelKey;
+        if (expected && decoded.model !== expected) return false;
+        if (attempt.expectedVideoRatioEnum && decoded.ratio !== attempt.expectedVideoRatioEnum)
+          return false;
+        if (!attemptRefsMatch(decoded.refs, attempt)) return false;
+      }
+      if (rows.length !== attempt.expectedQuantity) return false;
+    }
+    if (!attempt.structuredPromptFingerprint) {
+      if (plain === attempt.promptFingerprint) return true;
+      return (
+        !!attempt.promptAnchorFingerprint &&
+        attempt.promptNormalizedLength > 4096 &&
+        plainSummary?.anchorFingerprint === attempt.promptAnchorFingerprint &&
+        plainSummary.normalizedLength > 0 &&
+        plainSummary.normalizedLength <= attempt.promptNormalizedLength
+      );
+    }
+    const fingerprints = structuredInputFingerprints(payload);
+    if (
+      fingerprints.length &&
+      fingerprints.every((value) => value === attempt.structuredPromptFingerprint)
+    )
+      return true;
+    return (
+      !!attempt.normalizedVoiceFingerprint &&
+      !!attempt.normalizedVideoModelKey &&
+      attempt.mediaType === "video" &&
+      payload?.[1]?.[5] === attempt.projectId &&
+      payload[0].length === 1 &&
+      plain === attempt.normalizedVoiceFingerprint
+    );
+  };
+  const videoInputDiagnostic = (payload, attempt) => {
+    if (attempt.mediaType !== "video" || !Array.isArray(payload?.[0]) || !payload[0].length)
+      return null;
+    const summary = plainInputSummary(payload);
+    let quantity = payload[0].length;
+    const models = [];
+    const ratios = [];
+    const refs = [];
+    for (const input of payload[0]) {
+      const decoded = decodeVideoInputRow(input);
+      if (!decoded || typeof decoded.model !== "string") return null;
+      models.push(decoded.model);
+      ratios.push(decoded.ratio);
+      refs.push(...decoded.refs);
+    }
+    const actualRefs = normalizedRefs(
+      refs.filter((id) => typeof id === "string" && UUID_RE.test(id))
+    );
+    const expectedRefs = normalizedRefs(attempt.expectedReferenceIds);
+    return {
+      promptExact: summary?.fingerprint === attempt.promptFingerprint,
+      promptAnchorMatched:
+        !!attempt.promptAnchorFingerprint &&
+        summary?.anchorFingerprint === attempt.promptAnchorFingerprint,
+      actualPromptLength: summary?.normalizedLength || 0,
+      modelMatched:
+        !attempt.expectedVideoModelKey ||
+        models.every((model) => model === attempt.expectedVideoModelKey),
+      ratioMatched:
+        !attempt.expectedVideoRatioEnum ||
+        ratios.every((ratio) => ratio === attempt.expectedVideoRatioEnum),
+      quantityMatched: quantity === attempt.expectedQuantity,
+      referencesMatched: attemptRefsMatch(actualRefs, attempt),
+      actualReferenceCount: actualRefs.length,
+      expectedReferenceCount: expectedRefs.length + globalCharacterCount(attempt),
+    };
+  };
+  const imageInputDiagnostic = (payload, attempt) => {
+    if (attempt.mediaType !== "image") return null;
+    const row = payload?.[1]?.[0];
+    if (!Array.isArray(row)) return null;
+    const mediaRefs = (row[2] || [])
+      .map((ref) => ref?.[0])
+      .filter((id) => typeof id === "string" && UUID_RE.test(id));
+    const characterRefs = (row[10] || [])
+      .map((ref) => ref?.[0])
+      .filter((id) => typeof id === "string" && UUID_RE.test(id));
+    return {
+      referencesMatched:
+        exactRefsMatch(mediaRefs, attempt.expectedMediaReferenceIds) &&
+        (attempt.expectedGlobalCharacter === true
+          ? attempt.expectedCharacterIds.length === 0 &&
+            characterRefs.length === globalCharacterCount(attempt) &&
+            normalizedRefs(characterRefs).length === characterRefs.length
+          : exactRefsMatch(characterRefs, attempt.expectedCharacterIds)),
+      actualReferenceCount: mediaRefs.length + characterRefs.length,
+      expectedReferenceCount:
+        attempt.expectedMediaReferenceIds.length +
+        attempt.expectedCharacterIds.length +
+        globalCharacterCount(attempt),
+    };
+  };
+  const retireUnbound = (attempt) => {
+    for (const signature of attempt.completedNoOwnership ? [] : attempt.requestSignatures || []) {
+      if (retired.requestSignatures.includes(signature)) continue;
+      if (retired.requestSignatures.length >= 256) retired.saturated = true;
+      else retired.requestSignatures.push(signature);
+    }
+    if (attempt.requestCount >= attempt.requestCardinality) return;
+    if (retired.entries.length >= 256) {
+      retired.saturated = true;
+      return;
+    }
+    retired.entries.push({
+      projectId: attempt.projectId,
+      mediaType: attempt.mediaType,
+      expectedQuantity: attempt.expectedQuantity,
+      promptFingerprint: attempt.promptFingerprint,
+      structuredPromptFingerprint: attempt.structuredPromptFingerprint,
+      normalizedVoiceFingerprint: attempt.normalizedVoiceFingerprint,
+      expectedImageModelKey: attempt.expectedImageModelKey,
+      expectedReferenceIds: attempt.expectedReferenceIds,
+      expectedMediaReferenceIds: attempt.expectedMediaReferenceIds,
+      expectedCharacterIds: attempt.expectedCharacterIds,
+      expectedGlobalCharacter: attempt.expectedGlobalCharacter === true,
+      expectedGlobalCharacterCount: globalCharacterCount(attempt),
+      refMatchVersion: attempt.refMatchVersion,
+      expectedVideoModelKey: attempt.expectedVideoModelKey,
+      expectedVideoRatioEnum: attempt.expectedVideoRatioEnum,
+      normalizedVideoModelKey: attempt.normalizedVideoModelKey,
+    });
+  };
+  const emit = (attempt, stage, detail = {}) => {
+    window.dispatchEvent(
+      new CustomEvent(RECEIPT, {
+        detail: {
+          schemaVersion: VERSION,
+          nonce: attempt.nonce,
+          attemptId: attempt.attemptId,
+          stage,
+          mediaType: attempt.mediaType,
+          expectedQuantity: attempt.expectedQuantity,
+          projectId: projectId(),
+          observedAt: Date.now(),
+          ...detail,
+        },
+      })
+    );
+  };
+  const parseCalls = (raw) => {
+    try {
+      let fReq = null;
+      if (typeof FormData !== "undefined" && raw instanceof FormData) {
+        const value = raw.get("f.req");
+        fReq = typeof value === "string" ? value : null;
+      } else if (raw instanceof URLSearchParams) {
+        fReq = raw.get("f.req");
+      } else if (raw instanceof ArrayBuffer || ArrayBuffer.isView(raw)) {
+        const bytes =
+          raw instanceof ArrayBuffer
+            ? new Uint8Array(raw)
+            : new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
+        fReq = new URLSearchParams(new TextDecoder().decode(bytes)).get("f.req");
+      } else {
+        fReq = new URLSearchParams(typeof raw === "string" ? raw : String(raw || "")).get("f.req");
+      }
+      const envelope = JSON.parse(fReq || "null");
+      return (Array.isArray(envelope?.[0]) ? envelope[0] : []).filter(Array.isArray).map((row) => ({
+        rpcId: typeof row[0] === "string" ? row[0] : null,
+        payload: (() => {
+          try {
+            return typeof row[1] === "string" ? JSON.parse(row[1]) : row[1];
+          } catch (_) {
+            return null;
+          }
+        })(),
+      }));
+    } catch (_) {
+      return [];
+    }
+  };
+  const parseCallsAsync = async (raw, immediate = parseCalls(raw)) => {
+    if (immediate.length > 0) return immediate;
+    try {
+      if (typeof Blob !== "undefined" && raw instanceof Blob) {
+        return parseCalls(await raw.text());
+      }
+      if (raw && typeof raw.text === "function") {
+        return parseCalls(await raw.text());
+      }
+    } catch (_) {}
+    return [];
+  };
+  const decodeResponse = (text, rootsOnly = false) => {
+    if (text && typeof text === "object") {
+      const decoded2 = [];
+      const walk2 = (value, depth = 0) => {
+        if (depth > 24) return;
+        if (
+          typeof value === "string" &&
+          (value.trim().startsWith("[") || value.trim().startsWith("{"))
+        ) {
+          try {
+            const parsed = JSON.parse(value);
+            decoded2.push(parsed);
+            walk2(parsed, depth + 1);
+          } catch (_) {}
+        } else if (Array.isArray(value)) value.forEach((v) => walk2(v, depth + 1));
+        else if (value && typeof value === "object")
+          Object.values(value).forEach((v) => walk2(v, depth + 1));
+      };
+      walk2(text);
+      return { roots: [text], decoded: decoded2 };
+    }
+    const roots = [];
+    for (const line of String(text || "").split(/\r?\n/)) {
+      const s = line.trim();
+      if (!s.startsWith("[") && !s.startsWith("{")) continue;
+      try {
+        roots.push(JSON.parse(s));
+      } catch (_) {}
+    }
+    const decoded = [];
+    if (rootsOnly) return { roots, decoded };
+    const walk = (value, depth = 0) => {
+      if (depth > 24) return;
+      if (typeof value === "string" && (value.startsWith("[") || value.startsWith("{"))) {
+        try {
+          const parsed = JSON.parse(value);
+          decoded.push(parsed);
+          walk(parsed, depth + 1);
+        } catch (_) {}
+      } else if (Array.isArray(value)) value.forEach((v) => walk(v, depth + 1));
+      else if (value && typeof value === "object")
+        Object.values(value).forEach((v) => walk(v, depth + 1));
+    };
+    roots.forEach((root) => walk(root));
+    return { roots, decoded };
+  };
+  const MEDIA_SCHEMA = "TOBY_FLOW_NATIVE_MEDIA_SCHEMA";
+  const MEDIA_SCHEMA_READ = "TOBY_FLOW_NATIVE_MEDIA_SCHEMA_READ";
+  const MEDIA_RESPONSE_MAX_CHARS = 8 * 1024 * 1024;
+  const MEDIA_IDENTITY_MAX_ALIASES = 4096;
+  let mediaLimitDiagnosticBudget = 4;
+  let mediaSchema = null,
+    mediaSchemaFingerprint = null,
+    mediaSchemaEpoch = 0;
+  const mediaSchemaSession = Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
+  const pendingMediaResponses = [];
+  let pendingMediaBytes = 0,
+    lastNativeMediaResponse = null;
+  const mediaPath = (value, path) => {
+    for (const index of path) {
+      if (!Array.isArray(value)) return void 0;
+      value = value[index];
+    }
+    return value;
+  };
+  const validateMediaSchema = (value) => {
+    const only = (object, keys) =>
+      object &&
+      typeof object === "object" &&
+      !Array.isArray(object) &&
+      Object.keys(object).every((key) => keys.includes(key));
+    if (
+      !only(value, [
+        "version",
+        "enabled",
+        "collection_path",
+        "uuid_path",
+        "project_path",
+        "generation_path",
+        "details_path",
+        "media_types",
+      ]) ||
+      value.version !== 1 ||
+      typeof value.enabled !== "boolean"
+    )
+      return null;
+    if (!value.enabled) return { version: 1, enabled: false };
+    const path = (p) =>
+      Array.isArray(p) &&
+      p.length > 0 &&
+      p.length <= 8 &&
+      p.every((index) => Number.isInteger(index) && index >= 0 && index <= 128);
+    const fields = [
+      "collection_path",
+      "uuid_path",
+      "project_path",
+      "generation_path",
+      "details_path",
+    ];
+    if (
+      fields.some((key) => !path(value[key])) ||
+      !Array.isArray(value.media_types) ||
+      value.media_types.length !== 2 ||
+      new Set(value.media_types.map((type) => type?.type)).size !== 2
+    )
+      return null;
+    const kinds = ["string", "integer", "positive_integer", "positive_integer_pair"];
+    for (const type of value.media_types) {
+      if (
+        !only(type, ["type", "rules", "asb_url_paths"]) ||
+        !["image", "video"].includes(type?.type) ||
+        !Array.isArray(type.rules) ||
+        !type.rules.length ||
+        type.rules.length > 8 ||
+        !Array.isArray(type.asb_url_paths) ||
+        !type.asb_url_paths.length ||
+        type.asb_url_paths.length > 8 ||
+        type.asb_url_paths.some((p) => !path(p))
+      )
+        return null;
+      for (const rule of type.rules)
+        if (
+          !only(rule, ["all"]) ||
+          !Array.isArray(rule?.all) ||
+          !rule.all.length ||
+          rule.all.length > 8 ||
+          rule.all.some(
+            (check) =>
+              !only(check, ["path", "kind"]) || !path(check?.path) || !kinds.includes(check?.kind)
+          )
+        )
+          return null;
+    }
+    return {
+      version: 1,
+      enabled: true,
+      ...Object.fromEntries(fields.map((key) => [key, [...value[key]]])),
+      media_types: value.media_types.map((type) => ({
+        type: type.type,
+        asb_url_paths: type.asb_url_paths.map((p) => [...p]),
+        rules: type.rules.map((rule) => ({
+          all: rule.all.map((check) => ({ path: [...check.path], kind: check.kind })),
+        })),
+      })),
+    };
+  };
+  const matchesMediaCheck = (row, check) => {
+    const value = mediaPath(row, check.path);
+    if (check.kind === "string") return typeof value === "string";
+    if (check.kind === "integer") return Number.isInteger(value);
+    if (check.kind === "positive_integer") return Number.isInteger(value) && value > 0;
+    return (
+      Array.isArray(value) && value.length === 2 && value.every((n) => Number.isInteger(n) && n > 0)
+    );
+  };
+  const publishMediaIdentities = () => {
+    if (mediaIdentityProject !== projectId()?.toLowerCase()) return;
+    window.dispatchEvent(
+      new CustomEvent(MEDIA_IDENTITIES, {
+        detail: {
+          projectId: mediaIdentityProject,
+          schemaEpoch: mediaSchemaSession + "." + mediaSchemaEpoch,
+          entries: [...mediaIdentities].map(([asb, mediaUuid]) => ({
+            asb,
+            mediaUuid,
+            mediaType: mediaIdentityTypes.get(asb),
+          })),
+        },
+      })
+    );
+  };
+  const observeMediaIdentities = (text, status) => {
+    if (disposed || status < 200 || status >= 300 || typeof text !== "string") return;
+    if (text.length > MEDIA_RESPONSE_MAX_CHARS) {
+      if (mediaLimitDiagnosticBudget-- > 0)
+        console.info(
+          "[FlowNativeMediaIdentity] response rejected",
+          JSON.stringify({
+            reason: "response_size_limit",
+            characters: text.length,
+            maxCharacters: MEDIA_RESPONSE_MAX_CHARS,
+          })
+        );
+      return;
+    }
+    const currentProject = projectId()?.toLowerCase();
+    if (!UUID_RE.test(currentProject || "")) return;
+    if (!mediaSchema) {
+      pendingMediaResponses.push({ text, status, project: currentProject });
+      pendingMediaBytes += text.length;
+      while (pendingMediaResponses.length > 8 || pendingMediaBytes > MEDIA_RESPONSE_MAX_CHARS)
+        pendingMediaBytes -= pendingMediaResponses.shift().text.length;
+      return;
+    }
+    if (!mediaSchema.enabled) return;
+    if (mediaIdentityProject !== currentProject) {
+      mediaIdentities.clear();
+      mediaIdentityTypes.clear();
+      lastNativeMediaResponse = null;
+      mediaIdentityProject = currentProject;
+    }
+    const parsed = decodeResponse(text, true);
+    let remaining = 2e4,
+      changed = false;
+    const audit = {
+      rpcIds: new Set(),
+      rows: 0,
+      imageRows: 0,
+      videoRows: 0,
+      untypedRows: 0,
+      conflicts: 0,
+      cappedAliases: 0,
+    };
+    const walk = (value, depth = 0) => {
+      if (--remaining < 0 || depth > 24 || !Array.isArray(value)) return null;
+      const rowUuid = mediaPath(value, mediaSchema.uuid_path),
+        rowProject = mediaPath(value, mediaSchema.project_path);
+      const rowGeneration = mediaPath(value, mediaSchema.generation_path),
+        details = mediaPath(value, mediaSchema.details_path);
+      const matched = mediaSchema.media_types.filter((type) =>
+        type.rules.some((rule) => rule.all.every((check) => matchesMediaCheck(value, check)))
+      );
+      const mediaType = matched.length === 1 ? matched[0].type : null;
+      const isVideo = mediaType === "video",
+        isImage = mediaType === "image";
+      if (
+        UUID_RE.test(rowUuid || "") &&
+        rowProject?.toLowerCase?.() === currentProject &&
+        UUID_RE.test(rowGeneration || "") &&
+        Array.isArray(details)
+      ) {
+        audit.rows++;
+        if (isVideo) audit.videoRows++;
+        else if (isImage) audit.imageRows++;
+        else audit.untypedRows++;
+      }
+      if (
+        UUID_RE.test(rowUuid || "") &&
+        rowProject?.toLowerCase?.() === currentProject &&
+        UUID_RE.test(rowGeneration || "") &&
+        Array.isArray(details) &&
+        mediaType
+      ) {
+        let orderedAsb = null;
+        for (const path of matched[0].asb_url_paths) {
+          const url = mediaPath(value, path);
+          if (typeof url !== "string") continue;
+          const match = url.match(
+            /^https:\/\/(?:flow\.google\.com|lh3\.googleusercontent\.com)\/asb\/([A-Za-z0-9_-]{32,1024})(?:=[A-Za-z0-9,=_-]+)?(?:\?[^#]*)?$/
+          );
+          if (!match) continue;
+          const asb = match[1],
+            uuid = rowUuid.toLowerCase();
+          if (!orderedAsb) orderedAsb = asb;
+          if (mediaIdentities.has(asb)) {
+            const oldUuid = mediaIdentities.get(asb);
+            if (
+              (oldUuid !== uuid || mediaIdentityTypes.get(asb) !== mediaType) &&
+              oldUuid !== null
+            ) {
+              mediaIdentities.set(asb, null);
+              changed = true;
+              audit.conflicts++;
+            }
+          } else if (mediaIdentities.size < MEDIA_IDENTITY_MAX_ALIASES) {
+            mediaIdentities.set(asb, uuid);
+            mediaIdentityTypes.set(asb, mediaType);
+            changed = true;
+          } else audit.cappedAliases++;
+        }
+        return orderedAsb;
+      }
+      return null;
+    };
+    const walkFrame = (frame, depth = 0) => {
+      if (--remaining < 0 || depth > 6 || !Array.isArray(frame)) return;
+      if (frame[0] === "wrb.fr" && typeof frame[2] === "string") {
+        if (typeof frame[1] === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(frame[1]))
+          audit.rpcIds.add(frame[1]);
+        try {
+          const body = JSON.parse(frame[2]);
+          const rows = mediaPath(body, mediaSchema.collection_path);
+          if (Array.isArray(rows)) {
+            for (const row of rows) walk(row);
+          }
+        } catch (_) {}
+        return;
+      }
+      for (const entry of frame) if (Array.isArray(entry)) walkFrame(entry, depth + 1);
+    };
+    for (const root of parsed.roots) walkFrame(root);
+    if (
+      audit.rows &&
+      (!lastNativeMediaResponse ||
+        audit.rows >= Math.floor(Number(lastNativeMediaResponse.rows || 0) * 0.8))
+    ) {
+      lastNativeMediaResponse = { text, status, project: currentProject, rows: audit.rows };
+    }
+    if (audit.rows)
+      console.info(
+        "[FlowNativeMediaIdentity] response",
+        JSON.stringify({
+          projectId: currentProject,
+          rpcIds: [...audit.rpcIds],
+          rows: audit.rows,
+          imageRows: audit.imageRows,
+          videoRows: audit.videoRows,
+          untypedRows: audit.untypedRows,
+          aliases: mediaIdentities.size,
+          conflicts: audit.conflicts,
+          changed,
+          responseCharacters: text.length,
+          cappedAliases: audit.cappedAliases,
+          budgetExhausted: remaining < 0,
+        })
+      );
+    if (changed) {
+      console.info(
+        "[FlowV2MediaIdentity] project media identities observed",
+        JSON.stringify({ projectId: currentProject, count: mediaIdentities.size })
+      );
+      publishMediaIdentities();
+    }
+  };
+  const onMediaSchema = (event) => {
+    const next = validateMediaSchema(event.detail),
+      fingerprint = JSON.stringify(next);
+    if (fingerprint === mediaSchemaFingerprint) return;
+    mediaSchema = next;
+    mediaSchemaFingerprint = fingerprint;
+    mediaSchemaEpoch++;
+    mediaIdentities.clear();
+    mediaIdentityTypes.clear();
+    mediaIdentityProject = projectId()?.toLowerCase() || null;
+    publishMediaIdentities();
+    console.info(
+      "[FlowNativeMediaIdentity] server schema applied",
+      JSON.stringify({
+        schemaEpoch: mediaSchemaEpoch,
+        valid: !!next,
+        enabled: next?.enabled === true,
+        buffered: pendingMediaResponses.length,
+        replayAvailable: !!lastNativeMediaResponse,
+      })
+    );
+    if (!next?.enabled) return;
+    const replay = [...pendingMediaResponses];
+    pendingMediaResponses.length = 0;
+    pendingMediaBytes = 0;
+    if (
+      lastNativeMediaResponse &&
+      !replay.some((record) => record.text === lastNativeMediaResponse.text)
+    )
+      replay.push(lastNativeMediaResponse);
+    for (const record of replay)
+      if (record.project === projectId()?.toLowerCase())
+        observeMediaIdentities(record.text, record.status);
+  };
+  window.addEventListener(MEDIA_SCHEMA, onMediaSchema);
+  window.addEventListener(MEDIA_IDENTITIES_READ, publishMediaIdentities);
+  const collectMachineData = (value) => {
+    const identities = new Set();
+    const errors = new Set();
+    const walk = (v, depth = 0) => {
+      if (depth > 28) return;
+      if (typeof v === "string") {
+        if (UUID_RE.test(v)) identities.add(v.toLowerCase());
+        else if (ERROR_CODE_RE.test(v)) {
+          errors.add(v);
+        }
+      } else if (Array.isArray(v)) v.forEach((x) => walk(x, depth + 1));
+      else if (v && typeof v === "object") Object.values(v).forEach((x) => walk(x, depth + 1));
+    };
+    walk(value);
+    return { identities: [...identities].slice(0, 32), errorCodes: [...errors].slice(0, 12) };
+  };
+  const matchingRpcResponse = (parsed, rpcId) => {
+    const codes = new Set();
+    const payloads = [];
+    let matched = false;
+    const visit = (node, depth = 0) => {
+      if (depth > 12 || !Array.isArray(node)) return;
+      if (node[0] === "wrb.fr" && node[1] === rpcId) {
+        matched = true;
+        for (const payload of [node[2], node[5]]) {
+          if (payload == null) continue;
+          payloads.push(payload);
+        }
+        return;
+      }
+      for (const child of node) visit(child, depth + 1);
+    };
+    for (const root of parsed?.roots || []) visit(root);
+    const data = decodeResponse(payloads);
+    for (const code of collectMachineData(data).errorCodes) codes.add(code);
+    return { matched, errorCodes: [...codes].slice(0, 12), data };
+  };
+  const extractCorrelationData = (value, mediaType, terminalOnly = false) => {
+    const operationIds = new Set();
+    const mediaIds = new Set();
+    const children = new Map();
+    const mediaUrls = (row, mediaId) => {
+      const urls = {};
+      const visit = (node, depth = 0) => {
+        if (depth > 28) return;
+        if (typeof node === "string") {
+          try {
+            const url = new URL(node);
+            if (url.protocol !== "https:" || url.hostname !== "flow-content.google") return;
+            if (url.pathname.toLowerCase() === `/image/${mediaId}`) urls.thumbnail = node;
+            if (url.pathname.toLowerCase() === `/video/${mediaId}`) urls.video_url = node;
+          } catch (_) {}
+        } else if (Array.isArray(node)) node.forEach((value2) => visit(value2, depth + 1));
+      };
+      visit(row);
+      return urls;
+    };
+    const addChild = (
+      operationId,
+      mediaId,
+      status = "completed",
+      errorCodes = [],
+      preview = {}
+    ) => {
+      const operation = String(operationId).toLowerCase();
+      const media = mediaId ? String(mediaId).toLowerCase() : null;
+      operationIds.add(operation);
+      if (media) mediaIds.add(media);
+      children.set(`${operation}:${media || status}`, {
+        operationId: operation,
+        mediaId: media,
+        status,
+        errorCodes: [...new Set(errorCodes)].slice(0, 12),
+        ...preview,
+      });
+    };
+    const findTerminalVideoId = (value2) => {
+      let found = null;
+      const visit = (node, depth = 0) => {
+        if (found || depth > 16) return;
+        if (typeof node === "string") {
+          const match = node.match(
+            /\/video\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[/?#]|$)/i
+          );
+          if (match) found = match[1].toLowerCase();
+        } else if (Array.isArray(node)) node.forEach((item) => visit(item, depth + 1));
+        else if (node && typeof node === "object")
+          Object.values(node).forEach((item) => visit(item, depth + 1));
+      };
+      visit(value2);
+      return found;
+    };
+    const isVideoGenerationMetadata = (row) => {
+      const details = row?.[3];
+      const timestamp = (value2) =>
+        Array.isArray(value2) && value2.length === 2 && value2.every(Number.isInteger);
+      return (
+        Array.isArray(details) &&
+        details.length === 7 &&
+        typeof details[0] === "string" &&
+        timestamp(details[1]) &&
+        details[2] == null &&
+        details[3] == null &&
+        UUID_RE.test(details[4] || "") &&
+        UUID_RE.test(details[5] || "") &&
+        timestamp(details[6])
+      );
+    };
+    const isVideoOperationRow = (row) => {
+      if (!UUID_RE.test(row[0] || "") || !UUID_RE.test(row[1] || "") || !UUID_RE.test(row[2] || ""))
+        return false;
+      if (row[3] === "CAE") return true;
+      return (
+        row[3] == null &&
+        row[4] == null &&
+        Array.isArray(row[5]?.[6]?.[2]) &&
+        Array.isArray(row[7]?.[0]) &&
+        typeof row[7][0][12] === "string" &&
+        row[7][0][12].length > 0 &&
+        row[5]?.[6]?.[1]?.[0]?.[0] === row[7][0][12] &&
+        Array.isArray(row[7]?.[2]) &&
+        row[7][2].length === 1 &&
+        row[7][2][0] === row[0]
+      );
+    };
+    const walk = (v, depth = 0) => {
+      if (depth > 28) return false;
+      if (Array.isArray(v)) {
+        let nestedChildEvidence = false;
+        for (const child of v) nestedChildEvidence = walk(child, depth + 1) || nestedChildEvidence;
+        let childEvidence = false;
+        if (mediaType === "video" && isVideoOperationRow(v)) {
+          const terminalMediaId = findTerminalVideoId(v);
+          const rowErrors = collectMachineData(v).errorCodes;
+          if (!terminalOnly) addChild(v[0], v[2], "accepted");
+          else if (terminalMediaId)
+            addChild(v[0], terminalMediaId, "completed", [], mediaUrls(v, terminalMediaId));
+          else if (rowErrors.length > 0) addChild(v[0], null, "failed", rowErrors);
+          else addChild(v[0], v[2], "processing");
+          childEvidence = true;
+        }
+        if (
+          mediaType === "video" &&
+          UUID_RE.test(String(v[0] || "")) &&
+          v[1] == null &&
+          v[2] == null &&
+          v[3] != null &&
+          UUID_RE.test(String(v[4] || "")) &&
+          !isVideoGenerationMetadata(v) &&
+          !nestedChildEvidence
+        ) {
+          const childErrors = collectMachineData(v[3]).errorCodes;
+          addChild(
+            v[0],
+            null,
+            "failed",
+            childErrors.length > 0 ? childErrors : ["PROVIDER_TERMINAL_FAILURE"]
+          );
+          childEvidence = true;
+        }
+        if (
+          mediaType === "video" &&
+          terminalOnly &&
+          UUID_RE.test(String(v[0] || "")) &&
+          v[1] == null &&
+          v[2] == null &&
+          v[3] == null &&
+          v[4] == null
+        ) {
+          const pollErrors = collectMachineData(v.slice(5)).errorCodes;
+          if (pollErrors.length > 0) {
+            addChild(v[0], null, "failed", pollErrors);
+            childEvidence = true;
+          }
+        }
+        if (
+          mediaType === "image" &&
+          UUID_RE.test(String(v[0] || "")) &&
+          v[1] == null &&
+          UUID_RE.test(String(v[2] || "")) &&
+          v[3] == null &&
+          Array.isArray(v[6])
+        ) {
+          addChild(v[2], v[0], "completed", [], mediaUrls(v, String(v[0]).toLowerCase()));
+          childEvidence = true;
+        }
+        return childEvidence || nestedChildEvidence;
+      } else if (v && typeof v === "object") {
+        let childEvidence = false;
+        for (const child of Object.values(v))
+          childEvidence = walk(child, depth + 1) || childEvidence;
+        return childEvidence;
+      }
+      return false;
+    };
+    walk(value);
+    return {
+      operationIds: [...operationIds],
+      mediaIds: [...mediaIds],
+      children: [...children.values()],
+    };
+  };
+  const summarizeInput = (payload) => {
+    const fields = [];
+    const visit = (value, path, depth) => {
+      if (fields.length >= 16 || depth > 16) return;
+      if (typeof value === "string")
+        fields.push({
+          path,
+          length: value.length,
+          normalizedLength: value.normalize("NFKC").trim().replace(/\s+/g, " ").length,
+          fingerprint: promptFingerprint(value),
+        });
+      else if (Array.isArray(value))
+        value.slice(0, 16).forEach((child, index) => visit(child, path + "." + index, depth + 1));
+    };
+    if (Array.isArray(payload?.[0])) visit(payload[0], "0", 0);
+    return fields;
+  };
+  const transportSignature = (payload) => {
+    const ids = [];
+    if (payload?.[0] == null && Array.isArray(payload?.[1])) {
+      for (const row of payload[1]) {
+        if (
+          typeof row?.[5] === "string" &&
+          UUID_RE.test(row?.[12] || "") &&
+          UUID_RE.test(row?.[13] || "")
+        )
+          ids.push(row[12]);
+      }
+      if (UUID_RE.test(payload?.[4]?.[0] || "")) ids.push(payload[4][0]);
+    } else if (Array.isArray(payload?.[0])) {
+      for (const row of payload[0]) {
+        if (!Array.isArray(row)) continue;
+        for (const slot of row.slice(1)) {
+          if (
+            Array.isArray(slot) &&
+            slot.length === 6 &&
+            slot.slice(0, 4).every((value) => value == null) &&
+            UUID_RE.test(slot[4] || "") &&
+            UUID_RE.test(slot[5] || "")
+          )
+            ids.push(slot[4]);
+        }
+      }
+      if (UUID_RE.test(payload?.[2]?.[0] || "") && [1, 2].includes(payload[2][1]))
+        ids.push(payload[2][0]);
+    }
+    return ids.length ? "request-v1:" + identityFingerprint(ids) : null;
+  };
+  const eligibleAttempt = (call) => {
+    const machineIds = collectMachineData(call.payload).identities;
+    const signature = transportSignature(call.payload);
+    if (
+      signature &&
+      (retired.requestSignatures.includes(signature) ||
+        retired.requestSignatures.includes(identityFingerprint(machineIds)))
+    )
+      return null;
+    const now = Date.now();
+    const candidates = [];
+    for (const [id, attempt] of attempts) {
+      if (now > attempt.expiresAt || attempt.projectId !== projectId()) {
+        retireUnbound(attempt);
+        attempts.delete(id);
+      }
+    }
+    for (const attempt of attempts.values()) {
+      if (attempt.interfered || attempt.requestCount >= attempt.requestCardinality) continue;
+      const structured = attempt.structuredPromptFingerprint
+        ? structuredInputFingerprints(call.payload)
+        : [];
+      const promptMatched = attemptMatchesPayload(call.payload, attempt);
+      if (!promptMatched && (attempt.bridgeInputDiagnostics || 0) < 2) {
+        const mismatch = videoInputDiagnostic(call.payload, attempt);
+        if (mismatch) {
+          attempt.bridgeInputDiagnostics = (attempt.bridgeInputDiagnostics || 0) + 1;
+          emit(attempt, "input_seen", mismatch);
+        }
+      }
+      if ((attempt.inputDiagnostics || 0) < 6 && Array.isArray(call.payload?.[0])) {
+        attempt.inputDiagnostics = (attempt.inputDiagnostics || 0) + 1;
+        console.info(
+          "[FlowCorrelationInput] " +
+            JSON.stringify({
+              attempt: attempt.attemptId.slice(0, 8),
+              rpcId: call.rpcId,
+              expectedFingerprint: attempt.promptFingerprint,
+              expectedStructuredFingerprint: attempt.structuredPromptFingerprint || null,
+              structuredFingerprints: structured,
+              promptMatched,
+              fields: summarizeInput(call.payload),
+            })
+        );
+      }
+      if (!promptMatched) continue;
+      if (
+        retired.saturated ||
+        retired.entries.some(
+          (entry) =>
+            entry.mediaType === attempt.mediaType &&
+            (entry.refMatchVersion === 1
+              ? attemptMatchesPayload(call.payload, entry)
+              : attemptsOverlap(entry, attempt))
+        )
+      ) {
+        attempt.interfered = true;
+        emit(attempt, "acceptance_unknown", { reason: "ambiguous_retired_request" });
+        continue;
+      }
+      candidates.push(attempt);
+    }
+    return candidates.length === 1 ? candidates[0] : null;
+  };
+  const matchGenerationCall = (calls) => {
+    const matches = [];
+    for (const call of calls) {
+      const attempt = eligibleAttempt(call);
+      if (attempt) matches.push({ call, attempt });
+    }
+    return matches.length === 1 ? matches[0] : null;
+  };
+  const matchFollowupCalls = (calls) => {
+    const now = Date.now();
+    const matchedByAttempt = new Map();
+    for (const call of calls) {
+      const identities = new Set(collectMachineData(call.payload).identities);
+      if (identities.size === 0) continue;
+      for (const [id, attempt] of attempts) {
+        if (now > attempt.expiresAt || attempt.projectId !== projectId()) {
+          retireUnbound(attempt);
+          attempts.delete(id);
+          continue;
+        }
+        if (!attempt.correlationIdentities?.some((identity) => identities.has(identity))) continue;
+        matchedByAttempt.set(attempt.attemptId, { call, attempt });
+      }
+    }
+    return [...matchedByAttempt.values()];
+  };
+  const matchObservedCalls = (calls) => {
+    const generation = matchGenerationCall(calls);
+    return generation ? [generation] : matchFollowupCalls(calls);
+  };
+  const beginObservedRequest = (attempt, call) => {
+    const requestOrdinal = attempt.requestCount++;
+    const requestMachine = collectMachineData(call.payload);
+    const inputDiagnostic =
+      attempt.mediaType === "image"
+        ? imageInputDiagnostic(call.payload, attempt)
+        : videoInputDiagnostic(call.payload, attempt);
+    const signature = transportSignature(call.payload);
+    if (signature) (attempt.requestSignatures || (attempt.requestSignatures = [])).push(signature);
+    emit(attempt, "request_seen", {
+      rpcId: call.rpcId,
+      requestOrdinal,
+      requestCardinality: attempt.requestCardinality,
+      matchKind: attempt.structuredPromptFingerprint
+        ? plainInputFingerprint(call.payload)
+          ? "normalized_voice_text"
+          : "structured_ids"
+        : "plain_text",
+      requestIdentityCount: requestMachine.identities.length,
+      requestIdentityFingerprint: identityFingerprint(requestMachine.identities),
+      requestIdentityTokens: requestMachine.identities
+        .map((value) => identityFingerprint([value]))
+        .slice(0, 16),
+      ...(inputDiagnostic || {}),
+    });
+    return {
+      attempt,
+      rpcId: call.rpcId,
+      requestOrdinal,
+      requestIdentities: requestMachine.identities,
+      kind: "generation",
+    };
+  };
+  const beginFollowupRequest = (attempt, call) => ({
+    attempt,
+    rpcId: call.rpcId,
+    requestOrdinal: null,
+    requestIdentities: collectMachineData(call.payload).identities,
+    kind: "followup",
+  });
+  const finishObservedRequest = (state, transport, responseText, httpStatus = 0) => {
+    if (attempts.get(state.attempt.attemptId) !== state.attempt) return;
+    const parsed = transport === "load" ? decodeResponse(responseText) : null;
+    const rpcResponse = matchingRpcResponse(parsed, state.rpcId);
+    const machine = collectMachineData(rpcResponse.data);
+    const correlation = parsed
+      ? extractCorrelationData(rpcResponse.data, state.attempt.mediaType, state.kind === "followup")
+      : { operationIds: [], mediaIds: [], children: [] };
+    if (
+      state.kind === "generation" &&
+      state.attempt.mediaType === "image" &&
+      state.attempt.expectedQuantity === 1 &&
+      state.attempt.requestCardinality === 1 &&
+      transport === "load" &&
+      httpStatus >= 200 &&
+      httpStatus < 300 &&
+      rpcResponse.matched &&
+      correlation.children.length === 0 &&
+      correlation.operationIds.length === 0
+    ) {
+      state.attempt.completedNoOwnership = true;
+    }
+    if (state.kind === "followup") {
+      const owned = new Set(state.attempt.correlationIdentities || []);
+      correlation.children = correlation.children.filter(
+        (child) => owned.has(child.operationId) || (child.mediaId && owned.has(child.mediaId))
+      );
+      correlation.operationIds = [
+        ...new Set(correlation.children.map((child) => child.operationId)),
+      ];
+      correlation.mediaIds = [
+        ...new Set(correlation.children.map((child) => child.mediaId).filter(Boolean)),
+      ];
+    }
+    let currentChildren = correlation.children;
+    const hasTerminalChild = currentChildren.some((child) =>
+      ["completed", "failed"].includes(child.status)
+    );
+    if (state.kind === "followup" && !hasTerminalChild) {
+      currentChildren = currentChildren.filter((child) => {
+        const changed = state.attempt.lastChildStatuses.get(child.operationId) !== child.status;
+        if (changed) state.attempt.lastChildStatuses.set(child.operationId, child.status);
+        return changed;
+      });
+      correlation.children = currentChildren;
+      correlation.operationIds = [...new Set(currentChildren.map((child) => child.operationId))];
+      correlation.mediaIds = [
+        ...new Set(currentChildren.map((child) => child.mediaId).filter(Boolean)),
+      ];
+    }
+    if (state.kind === "followup" && hasTerminalChild) {
+      for (const child of currentChildren.filter((entry) =>
+        ["completed", "failed"].includes(entry.status)
+      )) {
+        state.attempt.terminalChildren.set(child.operationId, child);
+        state.attempt.lastChildStatuses.set(child.operationId, child.status);
+      }
+      const processingByOperation = new Map(
+        currentChildren
+          .filter(
+            (child) =>
+              child.status === "processing" &&
+              !state.attempt.terminalChildren.has(child.operationId)
+          )
+          .map((child) => [child.operationId, child])
+      );
+      correlation.children = [
+        ...state.attempt.terminalChildren.values(),
+        ...processingByOperation.values(),
+      ];
+      correlation.operationIds = [
+        ...new Set(correlation.children.map((child) => child.operationId)),
+      ];
+      correlation.mediaIds = [
+        ...new Set(
+          correlation.children
+            .filter((child) => child.status === "completed" && child.mediaId)
+            .map((child) => child.mediaId)
+        ),
+      ];
+    }
+    const requestSet = new Set(state.requestIdentities || []);
+    const hasFollowupEvidence = state.kind !== "followup" || correlation.children.length > 0;
+    if (!hasFollowupEvidence) return;
+    const stage =
+      state.kind === "followup"
+        ? hasTerminalChild
+          ? "result_seen"
+          : "poll_seen"
+        : transport === "load"
+          ? "response_seen"
+          : "acceptance_unknown";
+    const failedChildren = correlation.children.filter((child) => child.status === "failed");
+    if (failedChildren.length) {
+      console.warn(
+        "[FlowProviderFailureAudit]",
+        JSON.stringify({
+          attempt: state.attempt.attemptId.slice(0, 8),
+          rpcId: state.rpcId,
+          stage,
+          rpcResponseMatched: rpcResponse.matched,
+          httpStatus: Number(httpStatus) || 0,
+          expectedOutputs: state.attempt.expectedQuantity,
+          failedOutputs: failedChildren.length,
+          errorCodes: [...new Set(failedChildren.flatMap((child) => child.errorCodes))].slice(
+            0,
+            12
+          ),
+        })
+      );
+    }
+    emit(state.attempt, stage, {
+      rpcId: state.rpcId,
+      requestOrdinal: state.requestOrdinal,
+      transport,
+      httpStatus: Number(httpStatus) || 0,
+      identityCandidates: machine.identities.filter((id) => !requestSet.has(id)),
+      responseIdentityCount: machine.identities.length,
+      responseCharacters: typeof responseText === "string" ? responseText.length : 0,
+      responseRootCount: Array.isArray(parsed?.roots) ? parsed.roots.length : 0,
+      responseDecodedCount: Array.isArray(parsed?.decoded) ? parsed.decoded.length : 0,
+      operationIds: correlation.operationIds,
+      mediaIds: correlation.mediaIds,
+      children: correlation.children,
+      errorCodes: machine.errorCodes,
+      terminalErrorCodes: correlation.children.length === 0 ? rpcResponse.errorCodes : [],
+      rpcResponseMatched: rpcResponse.matched,
+      reason:
+        state.kind === "generation" && transport === "load" && !correlation.children.length
+          ? "generation_response_missing_ownership"
+          : null,
+    });
+    if (state.kind === "generation" && transport === "load") {
+      state.attempt.correlationIdentities = [
+        ...new Set([...correlation.operationIds, ...correlation.mediaIds]),
+      ];
+    }
+    if (
+      state.kind === "followup" &&
+      state.attempt.terminalChildren.size >= state.attempt.expectedQuantity
+    ) {
+      retireUnbound(state.attempt);
+      attempts.delete(state.attempt.attemptId);
+    } else if (state.kind === "generation" && state.attempt.mediaType === "image") {
+      state.attempt.responsesSeen = (state.attempt.responsesSeen || 0) + 1;
+      if (state.attempt.responsesSeen >= state.attempt.requestCardinality) {
+        retireUnbound(state.attempt);
+        attempts.delete(state.attempt.attemptId);
+      }
+    }
+  };
+  const onArm = (event) => {
+    const d = event.detail || {};
+    if (
+      d.schemaVersion !== VERSION ||
+      typeof d.nonce !== "string" ||
+      typeof d.attemptId !== "string"
+    )
+      return;
+    if (!["image", "video"].includes(d.mediaType) || d.projectId !== projectId()) return;
+    if (!/^id-[0-9a-f]{8}$/.test(d.promptFingerprint || "")) return;
+    if (
+      d.structuredPromptFingerprint != null &&
+      !/^id-[0-9a-f]{8}$/.test(d.structuredPromptFingerprint)
+    )
+      return;
+    const expectedQuantity = Math.max(1, Math.min(16, Number(d.expectedQuantity) || 1));
+    const previous = attempts.get(d.attemptId);
+    if (previous) retireUnbound(previous);
+    attempts.set(d.attemptId, {
+      nonce: d.nonce,
+      attemptId: d.attemptId,
+      projectId: d.projectId,
+      mediaType: d.mediaType,
+      expectedQuantity,
+      promptFingerprint: d.promptFingerprint,
+      promptAnchorFingerprint: /^id-[0-9a-f]{8}$/.test(d.promptAnchorFingerprint || "")
+        ? d.promptAnchorFingerprint
+        : null,
+      promptNormalizedLength: Math.max(0, Math.min(1e6, Number(d.promptNormalizedLength) || 0)),
+      refMatchVersion: 1,
+      structuredPromptFingerprint: d.structuredPromptFingerprint || null,
+      normalizedVoiceFingerprint: /^id-[0-9a-f]{8}$/.test(d.normalizedVoiceFingerprint || "")
+        ? d.normalizedVoiceFingerprint
+        : null,
+      expectedReferenceIds: Array.isArray(d.expectedReferenceIds)
+        ? d.expectedReferenceIds
+            .filter((id) => typeof id === "string" && UUID_RE.test(id))
+            .slice(0, 32)
+            .map((id) => id.toLowerCase())
+        : [],
+      expectedMediaReferenceIds: Array.isArray(d.expectedMediaReferenceIds)
+        ? d.expectedMediaReferenceIds
+            .filter((id) => typeof id === "string" && UUID_RE.test(id))
+            .slice(0, 32)
+            .map((id) => id.toLowerCase())
+        : [],
+      expectedCharacterIds: Array.isArray(d.expectedCharacterIds)
+        ? d.expectedCharacterIds
+            .filter((id) => typeof id === "string" && UUID_RE.test(id))
+            .slice(0, 32)
+            .map((id) => id.toLowerCase())
+        : [],
+      expectedGlobalCharacter: d.expectedGlobalCharacter === true,
+      expectedGlobalCharacterCount: Math.max(
+        0,
+        Number(d.expectedGlobalCharacterCount) || (d.expectedGlobalCharacter === true ? 1 : 0)
+      ),
+      expectedImageModelKey:
+        typeof d.expectedImageModelKey === "string" &&
+        /^[a-zA-Z0-9_-]{1,128}$/.test(d.expectedImageModelKey)
+          ? d.expectedImageModelKey
+          : null,
+      expectedVideoModelKey:
+        typeof d.expectedVideoModelKey === "string" &&
+        /^[a-zA-Z0-9_-]{1,128}$/.test(d.expectedVideoModelKey)
+          ? d.expectedVideoModelKey
+          : null,
+      expectedVideoRatioEnum:
+        d.expectedVideoRatioEnum != null && Number.isInteger(Number(d.expectedVideoRatioEnum))
+          ? Math.max(1, Math.min(16, Number(d.expectedVideoRatioEnum)))
+          : null,
+      normalizedVideoModelKey:
+        typeof d.normalizedVideoModelKey === "string" &&
+        /^[a-zA-Z0-9_-]{1,128}$/.test(d.normalizedVideoModelKey)
+          ? d.normalizedVideoModelKey
+          : null,
+      requestCardinality: 1,
+      strictDispatch: d.strictDispatch === true,
+      interfered: false,
+      requestCount: 0,
+      terminalChildren: new Map(),
+      lastChildStatuses: new Map(),
+      expiresAt: Date.now() + Math.max(5e3, Math.min(9e5, Number(d.ttlMs) || 6e4)),
+    });
+    console.info("[FlowV2CorrelationObserver] armed", {
+      attempt: d.attemptId.slice(0, 8),
+      mediaType: d.mediaType,
+      expectedQuantity,
+      promptFingerprint: d.promptFingerprint,
+      xhrHookActive: XMLHttpRequest.prototype.send === patchedSend,
+      fetchHookActive: !!nativeFetch && window.fetch === patchedFetch,
+    });
+    const conflict =
+      retired.saturated ||
+      retired.entries.some(
+        (entry) =>
+          entry.projectId === d.projectId && attemptsOverlap(entry, attempts.get(d.attemptId))
+      );
+    if (conflict) attempts.get(d.attemptId).interfered = true;
+    emit(attempts.get(d.attemptId), "armed", {
+      structuredPromptVersion: 2,
+      observerRevision: OBSERVER_REVISION,
+      xhrHookActive:
+        XMLHttpRequest.prototype.open === patchedOpen &&
+        XMLHttpRequest.prototype.send === patchedSend,
+      fetchHookActive: !!nativeFetch && window.fetch === patchedFetch,
+      reason: conflict ? "ambiguous_retired_request" : null,
+    });
+  };
+  const onDisarm = (event) => {
+    const d = event.detail || {};
+    const attempt = attempts.get(d.attemptId);
+    if (attempt && attempt.nonce === d.nonce) {
+      if (d.discardOnStop !== true && (d.dispatched !== false || attempt.requestCount > 0))
+        retireUnbound(attempt);
+      attempts.delete(d.attemptId);
+    }
+  };
+  const onTrustedInteraction = (event) => {
+    if (event.isTrusted !== true) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target?.closest?.(".ProseMirror[contenteditable='true'], [data-slate-editor='true']")) return;
+    for (const attempt of attempts.values()) {
+      if (
+        !attempt.strictDispatch ||
+        attempt.requestCount >= attempt.requestCardinality ||
+        attempt.interfered
+      )
+        continue;
+      attempt.manualInteractionCount = Math.min(100, (attempt.manualInteractionCount || 0) + 1);
+      attempt.interfered = true;
+      emit(attempt, "acceptance_unknown", { reason: "trusted_interaction_before_request" });
+      if (attempt.manualInteractionCount <= 2)
+        console.info(
+          "[FlowV2CorrelationObserver] trusted interaction observed while awaiting exact request",
+          {
+            attempt: attempt.attemptId.slice(0, 8),
+            eventType: event.type,
+            manualInteractionCount: attempt.manualInteractionCount,
+          }
+        );
+    }
+  };
+  window.addEventListener("pointerdown", onTrustedInteraction, true);
+  window.addEventListener("keydown", onTrustedInteraction, true);
+  window.addEventListener(ARM, onArm);
+  window.addEventListener(DISARM, onDisarm);
+  XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+    let absolute = String(url || "");
+    try {
+      absolute = new URL(absolute, location.href).href;
+    } catch (_) {}
+    xhrState.set(this, { url: absolute });
+    return Reflect.apply(nativeOpen, this, [method, url, ...rest]);
+  };
+  XMLHttpRequest.prototype.send = function (body) {
+    try {
+      const state = xhrState.get(this) || {};
+      if (isFlowBatchExecuteUrl(state.url)) {
+        this.addEventListener(
+          "load",
+          () => {
+            try {
+              observeMediaIdentities(this.responseText, Number(this.status) || 0);
+            } catch (_) {}
+          },
+          { once: true }
+        );
+        if (attempts.size > 0) {
+          const calls = parseCalls(body);
+          if (attempts.size > 0 && diagnosticBudget-- > 0) {
+            const bodyType = body == null ? "null" : body.constructor?.name || typeof body;
+            console.info(
+              "[FlowV2CorrelationObserver] batchexecute observed",
+              JSON.stringify({
+                bodyType,
+                parsedRpcIds: calls.map((call) => call.rpcId).filter(Boolean),
+                xhrHookActive: XMLHttpRequest.prototype.send === patchedSend,
+              })
+            );
+          }
+          const matchedSync = calls.length > 0 ? matchObservedCalls(calls) : [];
+          const beginMatches = (matches) =>
+            matches.map((matched) =>
+              matched.attempt.requestCount < matched.attempt.requestCardinality &&
+              attemptMatchesPayload(matched.call.payload, matched.attempt)
+                ? beginObservedRequest(matched.attempt, matched.call)
+                : beginFollowupRequest(matched.attempt, matched.call)
+            );
+          if (matchedSync.length > 0) state.requestStates = beginMatches(matchedSync);
+          const observedPromise =
+            calls.length > 0
+              ? Promise.resolve(matchedSync)
+              : parseCallsAsync(body, calls).then(matchObservedCalls);
+          let terminal = false;
+          observedPromise
+            .then((matches) => {
+              if (!matches?.length || state.requestStates) return;
+              state.requestStates = beginMatches(matches);
+            })
+            .catch(() => {});
+          const finishWithOwnedState = (transport) => {
+            if (terminal) return;
+            const finishNow = () => {
+              const requestStates = state.requestStates;
+              if (!requestStates?.length || terminal) return;
+              terminal = true;
+              let responsePayload = "";
+              if (transport === "load") {
+                try {
+                  responsePayload = this.responseText;
+                } catch (_) {}
+                if (!responsePayload) {
+                  try {
+                    responsePayload = this.response;
+                  } catch (_) {}
+                }
+              }
+              for (const requestState of requestStates) {
+                finishObservedRequest(
+                  requestState,
+                  transport,
+                  responsePayload,
+                  Number(this.status) || 0
+                );
+              }
+            };
+            if (state.requestStates) finishNow();
+            else observedPromise.then(finishNow).catch(() => {});
+          };
+          this.addEventListener("load", () => finishWithOwnedState("load"), { once: true });
+          ["error", "abort", "timeout"].forEach((type) =>
+            this.addEventListener(type, () => finishWithOwnedState(type), { once: true })
+          );
+        }
+      }
+    } catch (_) {}
+    return Reflect.apply(nativeSend, this, [body]);
+  };
+  if (nativeFetch)
+    window.fetch = function (...args) {
+      let body = null;
+      let observeBatchResponse = false;
+      try {
+        const input = args[0];
+        const url = typeof input === "string" || input instanceof URL ? String(input) : input?.url;
+        const method = args[1]?.method || input?.method || "GET";
+        observeBatchResponse =
+          String(method).toUpperCase() === "POST" && isFlowBatchExecuteUrl(url);
+        if (observeBatchResponse && attempts.size > 0) {
+          body =
+            args[1]?.body != null
+              ? args[1].body
+              : typeof Request !== "undefined" && input instanceof Request
+                ? input.clone()
+                : null;
+        }
+      } catch (_) {
+        body = null;
+        observeBatchResponse = false;
+      }
+      const result = Reflect.apply(nativeFetch, this, args);
+      if (!observeBatchResponse) return result;
+      const statesPromise =
+        body == null
+          ? Promise.resolve([])
+          : Promise.resolve()
+              .then(() => parseCallsAsync(body))
+              .then((calls) =>
+                matchObservedCalls(calls).map(({ call, attempt }) =>
+                  attempt.requestCount < attempt.requestCardinality &&
+                  attemptMatchesPayload(call.payload, attempt)
+                    ? beginObservedRequest(attempt, call)
+                    : beginFollowupRequest(attempt, call)
+                )
+              )
+              .catch(() => []);
+      Promise.resolve(result)
+        .then(
+          async (response) => {
+            let responseTextPromise;
+            try {
+              responseTextPromise = response.clone().text();
+            } catch (_) {
+              responseTextPromise = Promise.resolve("");
+            }
+            let responseText = "";
+            try {
+              responseText = await responseTextPromise;
+            } catch (_) {}
+            try {
+              observeMediaIdentities(responseText, Number(response.status) || 0);
+            } catch (_) {}
+            const states = await statesPromise;
+            for (const state of states)
+              finishObservedRequest(state, "load", responseText, Number(response.status) || 0);
+          },
+          async () => {
+            const states = await statesPromise;
+            for (const state of states) finishObservedRequest(state, "error", "", 0);
+          }
+        )
+        .catch(() => {});
+      return result;
+    };
+  let disposed = false;
+  const dispose = () => {
+    disposed = true;
+    window.removeEventListener(ARM, onArm);
+    window.removeEventListener(DISARM, onDisarm);
+    window.removeEventListener(MEDIA_IDENTITIES_READ, publishMediaIdentities);
+    window.removeEventListener(MEDIA_SCHEMA, onMediaSchema);
+    pendingMediaResponses.length = 0;
+    pendingMediaBytes = 0;
+    lastNativeMediaResponse = null;
+    mediaIdentities.clear();
+    mediaIdentityTypes.clear();
+    if (XMLHttpRequest.prototype.open === patchedOpen) XMLHttpRequest.prototype.open = nativeOpen;
+    if (XMLHttpRequest.prototype.send === patchedSend) XMLHttpRequest.prototype.send = nativeSend;
+    if (nativeFetch && window.fetch === patchedFetch) window.fetch = nativeFetch;
+    for (const attempt of attempts.values()) retireUnbound(attempt);
+    attempts.clear();
+  };
+  const patchedOpen = XMLHttpRequest.prototype.open;
+  const patchedSend = XMLHttpRequest.prototype.send;
+  const patchedFetch = window.fetch;
+  window.__tobyFlowV2CorrelationObserver = Object.freeze({
+    version: VERSION,
+    observerRevision: OBSERVER_REVISION,
+    dispose,
+    retired,
+    health: () => {
+      const now = Date.now();
+      for (const [id, attempt] of attempts) {
+        if (now > attempt.expiresAt) {
+          retireUnbound(attempt);
+          attempts.delete(id);
+        }
+      }
+      const xhrHookActive =
+        XMLHttpRequest.prototype.open === patchedOpen &&
+        XMLHttpRequest.prototype.send === patchedSend;
+      const fetchHookActive = !!nativeFetch && window.fetch === patchedFetch;
+      return {
+        ready: !disposed && xhrHookActive && (!nativeFetch || fetchHookActive),
+        observerRevision: OBSERVER_REVISION,
+        structuredPromptVersion: 2,
+        activeAttempts: attempts.size,
+        xhrHookActive,
+        fetchHookActive,
+      };
+    },
+  });
+  window.dispatchEvent(new CustomEvent(MEDIA_SCHEMA_READ));
+})();
