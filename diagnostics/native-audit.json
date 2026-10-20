@@ -1,0 +1,202 @@
+{
+  "started": "2026-10-19T11:40:00.934Z",
+  "probes": [
+    {
+      "name": "status",
+      "status": "passed",
+      "seconds": 0.624,
+      "result": {
+        "url": "https://flow.google.com/project/f550e625-a247-47f8-bb8d-876d4bf2da6f?hl=en",
+        "signedIn": true,
+        "inProject": true,
+        "composer": "🍌 Nano Banana 2.1 crop_square x1",
+        "credits_remaining": 62
+      }
+    },
+    {
+      "name": "assets",
+      "status": "passed",
+      "seconds": 4.467,
+      "result": [
+        {
+          "name": "Provide the image prompt",
+          "kind": "image"
+        },
+        {
+          "name": "fm-362cd32327a1-ref1.jpg",
+          "kind": "image"
+        },
+        {
+          "name": "Character lock prompt text request",
+          "kind": "image"
+        },
+        {
+          "name": "fm-7b493f42486c-ref1.png",
+          "kind": "image"
+        },
+        {
+          "name": "fm-9cf835710cc2-ref1.jpg",
+          "kind": "image"
+        },
+        {
+          "name": "image.png",
+          "kind": "image"
+        },
+        {
+          "name": "Provide image prompt for transla…",
+          "kind": "image"
+        },
+        {
+          "name": "User prompt cut off",
+          "kind": "image"
+        },
+        {
+          "name": "Character lock prompt guidelines",
+          "kind": "image"
+        },
+        {
+          "name": "Character lock prompt rules",
+          "kind": "image"
+        },
+        {
+          "name": "Prompt cut off after Sa",
+          "kind": "image"
+        },
+        {
+          "name": "Prompt cut off text request",
+          "kind": "image"
+        },
+        {
+          "name": "Prompt got cut off",
+          "kind": "image"
+        },
+        {
+          "name": "User requesting image prompt com…",
+          "kind": "image"
+        },
+        {
+          "name": "Providing image prompt for trans…",
+          "kind": "image"
+        },
+        {
+          "name": "Prompt cut off provided",
+          "kind": "image"
+        },
+        {
+          "name": "Provide image prompt to translate",
+          "kind": "image"
+        },
+        {
+          "name": "cx",
+          "kind": "image"
+        },
+        {
+          "name": "Prompt translation request",
+          "kind": "image"
+        },
+        {
+          "name": "xc",
+          "kind": "image"
+        },
+        {
+          "name": "x",
+          "kind": "image"
+        },
+        {
+          "name": "dF",
+          "kind": "image"
+        },
+        {
+          "name": "Requesting missing image prompt",
+          "kind": "image"
+        },
+        {
+          "name": "Assistant requesting prompt comp…",
+          "kind": "image"
+        },
+        {
+          "name": "S.",
+          "kind": "image"
+        },
+        {
+          "name": "Red fox sitting by lantern",
+          "kind": "image"
+        },
+        {
+          "name": "Red fox sitting beside lantern",
+          "kind": "image"
+        },
+        {
+          "name": "Red fox sitting with lantern",
+          "kind": "image"
+        }
+      ]
+    },
+    {
+      "name": "characters.list",
+      "status": "failed",
+      "seconds": 0.508,
+      "error": "A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received"
+    },
+    {
+      "name": "download.original",
+      "status": "failed",
+      "seconds": 0.036,
+      "error": "Flow's project navigation could not open \"All media\" from this view. (downloaded so far: 0)"
+    },
+    {
+      "name": "image.text",
+      "status": "failed",
+      "seconds": 3.033,
+      "error": "Flow's project navigation could not open \"All media\" from this view. (job ac9f2481; outcome_unknown=false)"
+    },
+    {
+      "name": "video.text.zero-credit-guard",
+      "status": "failed",
+      "seconds": 63.21,
+      "error": "Flow quotes 15 credits, above max_credits=0. Nothing was submitted. (job 5f1dba43; outcome_unknown=false)"
+    },
+    {
+      "name": "video.first-frame.zero-credit-guard",
+      "status": "failed",
+      "seconds": 63.208,
+      "error": "Flow did not confirm that \"Frames\" was selected. Nothing was submitted. (job 0b01a5b9; outcome_unknown=false)"
+    },
+    {
+      "name": "image.reference",
+      "status": "passed",
+      "seconds": 66.204,
+      "result": {
+        "id": "2570cc16",
+        "status": "done",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeDiagnostic1019",
+        "scene": "scene-04",
+        "prompt": "Show the same subject on a plain white background, no text. CHARACTER LOCK — image.png must match the reference image exactly, as if copying it: same head shape and size, same face, same eyes, same hair, same skin, same build and proportions, same clothing items in the same colours, same hands, and the same rendering style and level of realism as the reference. Never redesign, restyle, re-proportion, re-age or re-colour them, and never swap an item for a similar one.",
+        "attempts": 1,
+        "credits": 0,
+        "progress": "Waiting for Chrome download",
+        "files": [
+          "C:\\Users\\nguye\\flow-mcp-out\\NativeDiagnostic1019\\scene-04.jpeg"
+        ],
+        "outcome_unknown": false
+      }
+    },
+    {
+      "name": "character.create.project-image",
+      "status": "failed",
+      "seconds": 32.59,
+      "error": "A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received"
+    },
+    {
+      "name": "character.edit",
+      "status": "blocked",
+      "reason": "No existing character available; creation must work first."
+    },
+    {
+      "name": "video.edit",
+      "status": "blocked",
+      "reason": "No video in the selected project. Video generation must work first."
+    }
+  ],
+  "finished": "2026-10-19T11:43:56.285Z"
+}

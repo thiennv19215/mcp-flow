@@ -1,0 +1,593 @@
+{
+  "flow": {
+    "url": "https://flow.google.com/project/f550e625-a247-47f8-bb8d-876d4bf2da6f?hl=en",
+    "signedIn": true,
+    "inProject": true,
+    "composer": "🍌 Nano Banana 2.1 crop_square x1"
+  },
+  "pacing": null,
+  "output_root": "C:\\Users\\nguye\\flow-mcp-out",
+  "jobs": [
+    {
+      "id": "af013794",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-02",
+      "prompt": "Sa.",
+      "attempts": 1,
+      "credits": 0,
+      "files": [],
+      "error": "Flow extension WebSocket disconnected. Reconnect before starting another operation.",
+      "outcome_unknown": false
+    },
+    {
+      "id": "8b364fa7",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-03",
+      "prompt": "Sa.",
+      "attempts": 1,
+      "files": [],
+      "error": "Flow did not show a numeric generation credit quote. Nothing was submitted.",
+      "outcome_unknown": false
+    },
+    {
+      "id": "2849e9c7",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-04",
+      "prompt": "Sa.",
+      "attempts": 1,
+      "files": [],
+      "error": "Flow did not show a numeric generation credit quote. Nothing was submitted.",
+      "outcome_unknown": false
+    },
+    {
+      "id": "2698f0b0",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-05",
+      "prompt": "Sa.",
+      "attempts": 2,
+      "files": [],
+      "error": "Flow did not show a numeric generation credit quote after settings, references, and prompt were prepared. Nothing was submitted.",
+      "outcome_unknown": false
+    },
+    {
+      "id": "e6b42544",
+      "status": "done",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-06",
+      "prompt": "Sa.",
+      "attempts": 1,
+      "credits": 0,
+      "progress": "Waiting for Chrome download",
+      "files": [
+        "C:\\Users\\nguye\\flow-mcp-out\\MyFilm\\scene-06.jpeg"
+      ],
+      "outcome_unknown": false
+    },
+    {
+      "id": "86ace974",
+      "status": "done",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-07",
+      "prompt": "Sa.",
+      "attempts": 1,
+      "credits": 0,
+      "progress": "Waiting for Chrome download",
+      "files": [
+        "C:\\Users\\nguye\\flow-mcp-out\\MyFilm\\scene-07.jpeg"
+      ],
+      "outcome_unknown": false
+    },
+    {
+      "id": "0630d0fb",
+      "status": "done",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-08",
+      "prompt": "Sa.",
+      "attempts": 1,
+      "credits": 0,
+      "progress": "Waiting for Chrome download",
+      "files": [
+        "C:\\Users\\nguye\\flow-mcp-out\\MyFilm\\scene-08.jpeg"
+      ],
+      "outcome_unknown": false
+    },
+    {
+      "id": "d79048aa",
+      "status": "done",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-09",
+      "prompt": "Sa.",
+      "attempts": 1,
+      "credits": 0,
+      "progress": "Waiting for Chrome download",
+      "files": [
+        "C:\\Users\\nguye\\flow-mcp-out\\MyFilm\\scene-09.jpeg"
+      ],
+      "outcome_unknown": false
+    },
+    {
+      "id": "71e23989",
+      "status": "done",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-10",
+      "prompt": "Sa.",
+      "attempts": 1,
+      "credits": 0,
+      "progress": "Downloading 100%",
+      "files": [
+        "C:\\Users\\nguye\\flow-mcp-out\\MyFilm\\scene-10-v1.jpeg",
+        "C:\\Users\\nguye\\flow-mcp-out\\MyFilm\\scene-10-v2.jpeg"
+      ],
+      "outcome_unknown": false
+    },
+    {
+      "id": "3380ee1e",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-11",
+      "prompt": "con gà.",
+      "attempts": 1,
+      "files": [],
+      "error": "Flow did not confirm that \"Frames\" was selected. Nothing was submitted.",
+      "outcome_unknown": false
+    },
+    {
+      "id": "8523ded8",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-12",
+      "prompt": "con gà.",
+      "attempts": 1,
+      "files": [],
+      "error": "Flow did not confirm that \"Frames\" was selected. Nothing was submitted.",
+      "outcome_unknown": false
+    },
+    {
+      "id": "24e27d3c",
+      "status": "done",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-13",
+      "prompt": "Sa.",
+      "attempts": 1,
+      "credits": 0,
+      "progress": "Waiting for Chrome download",
+      "files": [
+        "C:\\Users\\nguye\\flow-mcp-out\\MyFilm\\scene-13.jpeg"
+      ],
+      "outcome_unknown": false
+    },
+    {
+      "id": "a48b15c2",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-14",
+      "prompt": "Sa. CHARACTER LOCK — Prompt got cut off must match the reference image exactly, as if copying it: same head shape and size, same face, same eyes, same hair, same skin, same build and proportions, same clothing items in the same colours, same hands, and the same rendering style and level of realism as the reference. Never redesign, restyle, re-proportion, re-age or re-colour them, and never swap an item for a similar one.",
+      "attempts": 2,
+      "files": [],
+      "error": "Flow did not confirm model \"Nano Banana\" within 4 seconds. Nothing was submitted.",
+      "outcome_unknown": false
+    },
+    {
+      "id": "c26ef972",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-15",
+      "prompt": "Sa. CHARACTER LOCK — Prompt got cut off must match the reference image exactly, as if copying it: same head shape and size, same face, same eyes, same hair, same skin, same build and proportions, same clothing items in the same colours, same hands, and the same rendering style and level of realism as the reference. Never redesign, restyle, re-proportion, re-age or re-colour them, and never swap an item for a similar one.",
+      "attempts": 3,
+      "files": [],
+      "error": "Flow's upload menu or file input is unavailable.",
+      "outcome_unknown": false
+    },
+    {
+      "id": "d6b33550",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-16",
+      "prompt": "Sa. CHARACTER LOCK — Prompt got cut off must match the reference image exactly, as if copying it: same head shape and size, same face, same eyes, same hair, same skin, same build and proportions, same clothing items in the same colours, same hands, and the same rendering style and level of realism as the reference. Never redesign, restyle, re-proportion, re-age or re-colour them, and never swap an item for a similar one.",
+      "attempts": 1,
+      "files": [],
+      "error": "Flow's upload menu or file input is unavailable.",
+      "outcome_unknown": false
+    },
+    {
+      "id": "ddb5c36d",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-17",
+      "prompt": "Sa. CHARACTER LOCK — Prompt got cut off must match the reference image exactly, as if copying it: same head shape and size, same face, same eyes, same hair, same skin, same build and proportions, same clothing items in the same colours, same hands, and the same rendering style and level of realism as the reference. Never redesign, restyle, re-proportion, re-age or re-colour them, and never swap an item for a similar one.",
+      "attempts": 1,
+      "files": [],
+      "error": "Flow's upload menu or file input is unavailable.",
+      "outcome_unknown": false
+    },
+    {
+      "id": "c6d9e4a9",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-18",
+      "prompt": "Sa. CHARACTER LOCK — Prompt got cut off must match the reference image exactly, as if copying it: same head shape and size, same face, same eyes, same hair, same skin, same build and proportions, same clothing items in the same colours, same hands, and the same rendering style and level of realism as the reference. Never redesign, restyle, re-proportion, re-age or re-colour them, and never swap an item for a similar one.",
+      "attempts": 1,
+      "files": [],
+      "error": "Flow's upload menu or file input is unavailable.",
+      "outcome_unknown": false
+    },
+    {
+      "id": "a897af9b",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-19",
+      "prompt": "Sa. CHARACTER LOCK — Prompt got cut off must match the reference image exactly, as if copying it: same head shape and size, same face, same eyes, same hair, same skin, same build and proportions, same clothing items in the same colours, same hands, and the same rendering style and level of realism as the reference. Never redesign, restyle, re-proportion, re-age or re-colour them, and never swap an item for a similar one.",
+      "attempts": 1,
+      "files": [],
+      "error": "Flow's upload menu or file input is unavailable.",
+      "outcome_unknown": false
+    },
+    {
+      "id": "d5f9e306",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-20",
+      "prompt": "Sa. CHARACTER LOCK — Prompt got cut off must match the reference image exactly, as if copying it: same head shape and size, same face, same eyes, same hair, same skin, same build and proportions, same clothing items in the same colours, same hands, and the same rendering style and level of realism as the reference. Never redesign, restyle, re-proportion, re-age or re-colour them, and never swap an item for a similar one.",
+      "attempts": 1,
+      "files": [],
+      "error": "Flow did not show its Upload menu item.",
+      "outcome_unknown": false
+    },
+    {
+      "id": "3906bfbc",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-21",
+      "prompt": "Sa. CHARACTER LOCK — Prompt got cut off must match the reference image exactly, as if copying it: same head shape and size, same face, same eyes, same hair, same skin, same build and proportions, same clothing items in the same colours, same hands, and the same rendering style and level of realism as the reference. Never redesign, restyle, re-proportion, re-age or re-colour them, and never swap an item for a similar one.",
+      "attempts": 2,
+      "files": [],
+      "error": "Flow did not open its file input after the upload control was clicked.",
+      "outcome_unknown": true
+    },
+    {
+      "id": "338de685",
+      "status": "done",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-22",
+      "prompt": "Sa. CHARACTER LOCK — Prompt got cut off must match the reference image exactly, as if copying it: same head shape and size, same face, same eyes, same hair, same skin, same build and proportions, same clothing items in the same colours, same hands, and the same rendering style and level of realism as the reference. Never redesign, restyle, re-proportion, re-age or re-colour them, and never swap an item for a similar one.",
+      "attempts": 1,
+      "credits": 0,
+      "progress": "Downloading 100%",
+      "files": [
+        "C:\\Users\\nguye\\flow-mcp-out\\MyFilm\\scene-22.jpeg"
+      ],
+      "outcome_unknown": false
+    },
+    {
+      "id": "7d5a3dab",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-23",
+      "prompt": "Sa.",
+      "attempts": 1,
+      "files": [],
+      "error": "Flow did not open its file input after the upload control was clicked.",
+      "outcome_unknown": true
+    },
+    {
+      "id": "585a54d3",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-24",
+      "prompt": "Sa.",
+      "attempts": 1,
+      "files": [],
+      "error": "Flow did not open its file input after the upload control was clicked.",
+      "outcome_unknown": true
+    },
+    {
+      "id": "4eeeb24a",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-25",
+      "prompt": "Sa.",
+      "attempts": 4,
+      "files": [],
+      "error": "Flow's Upload row was found, but it did not open a file input; the staged file was not selected. Retry after reloading the Flow extension page.",
+      "outcome_unknown": false
+    },
+    {
+      "id": "4a5e70ec",
+      "status": "done",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-26",
+      "prompt": "Sa.",
+      "attempts": 1,
+      "credits": 0,
+      "progress": "Waiting for Chrome download",
+      "files": [
+        "C:\\Users\\nguye\\flow-mcp-out\\MyFilm\\scene-26.jpeg"
+      ],
+      "outcome_unknown": false
+    },
+    {
+      "id": "8ca7a5ce",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-27",
+      "prompt": "Sa.",
+      "attempts": 1,
+      "files": [],
+      "error": "Flow's Upload row was found, but it did not open a file input; the staged file was not selected. Retry after reloading the Flow extension page.",
+      "outcome_unknown": false
+    },
+    {
+      "id": "6ee5a2f9",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-28",
+      "prompt": "Sa.",
+      "attempts": 1,
+      "files": [],
+      "error": "Flow's Upload row was found, but it did not open a file input; the staged file was not selected. Retry after reloading the Flow extension page.",
+      "outcome_unknown": false
+    },
+    {
+      "id": "3ed011fe",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-29",
+      "prompt": "con gà.",
+      "attempts": 1,
+      "files": [],
+      "error": "Flow did not confirm that \"Frames\" was selected. Nothing was submitted.",
+      "outcome_unknown": false
+    },
+    {
+      "id": "7f115b13",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-30",
+      "prompt": "Sa.",
+      "attempts": 1,
+      "files": [],
+      "error": "Flow opened the add menu but no clickable Upload row was found (add media).",
+      "outcome_unknown": false
+    },
+    {
+      "id": "4d498aa3",
+      "status": "done",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-31",
+      "prompt": "Sa.",
+      "attempts": 1,
+      "credits": 0,
+      "progress": "Waiting for Chrome download",
+      "files": [
+        "C:\\Users\\nguye\\flow-mcp-out\\MyFilm\\scene-31.jpeg"
+      ],
+      "outcome_unknown": false
+    },
+    {
+      "id": "81c19ad6",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-32",
+      "prompt": "Sa.",
+      "attempts": 1,
+      "files": [],
+      "error": "The staged upload path is invalid.",
+      "outcome_unknown": false
+    },
+    {
+      "id": "aba23cbc",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-33",
+      "prompt": "Sa.",
+      "attempts": 1,
+      "files": [],
+      "error": "The connected Flow extension is missing flow.native.generation.submit, flow.native.generation.observe, flow.native.asset.download. Reload the repository's extension.",
+      "outcome_unknown": false
+    },
+    {
+      "id": "89574782",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-34",
+      "prompt": "Sa.",
+      "attempts": 1,
+      "files": [],
+      "error": "The staged upload path is invalid.",
+      "outcome_unknown": false
+    },
+    {
+      "id": "433e6eb5",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-35",
+      "prompt": "Sa.",
+      "attempts": 1,
+      "files": [],
+      "error": "The staged upload path is invalid.",
+      "outcome_unknown": false
+    },
+    {
+      "id": "dc208458",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-36",
+      "prompt": "Sa.",
+      "attempts": 1,
+      "files": [],
+      "error": "The connected Flow extension is missing flow.native.generation.submit, flow.native.generation.observe, flow.native.asset.download. Reload the repository's extension.",
+      "outcome_unknown": false
+    },
+    {
+      "id": "2a57441e",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-37",
+      "prompt": "Sa.",
+      "attempts": 1,
+      "files": [],
+      "error": "Flow opened the add menu but no clickable Upload row was found.",
+      "outcome_unknown": false
+    },
+    {
+      "id": "cf16046a",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-38",
+      "prompt": "Sa.",
+      "attempts": 1,
+      "files": [],
+      "error": "The connected Flow extension is missing flow.native.generation.submit, flow.native.generation.observe, flow.native.asset.download. Reload the repository's extension.",
+      "outcome_unknown": false
+    },
+    {
+      "id": "ec7db2d1",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-39",
+      "prompt": "Sa.",
+      "attempts": 1,
+      "files": [],
+      "error": "The connected Flow extension is missing flow.native.generation.submit, flow.native.generation.observe, flow.native.asset.download. Reload the repository's extension.",
+      "outcome_unknown": false
+    },
+    {
+      "id": "e806d364",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-40",
+      "prompt": "Sa.",
+      "attempts": 1,
+      "files": [],
+      "error": "Flow's picker does not contain an exact match for \"fm-9cf835710cc2-ref1.jpg\". Visible entries: fm-9cf835710cc2-ref1.jpg image; image.png image; provide image prompt for transla… image; user prompt cut off image; character lock prompt guidelines image; prompt got cut off image; character lock prompt rules image; prompt cut off after sa image; prompt cut off text request image; prompt got cut off image; user requesting image prompt com… image; providing image prompt for trans… image. No asset was selected.",
+      "outcome_unknown": false
+    },
+    {
+      "id": "bd5777ba",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-41",
+      "prompt": "Sa.",
+      "attempts": 1,
+      "files": [],
+      "error": "Flow's picker does not contain an exact match for \"fm-7b493f42486c-ref1.png\". Visible entries: fm-7b493f42486c-ref1.png image; fm-9cf835710cc2-ref1.jpg image; image.png image; provide image prompt for transla… image; user prompt cut off image; character lock prompt guidelines image; prompt got cut off image; character lock prompt rules image; prompt cut off after sa image; prompt cut off text request image; prompt got cut off image; user requesting image prompt com… image. No asset was selected.",
+      "outcome_unknown": false
+    },
+    {
+      "id": "f18e37e4",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-42",
+      "prompt": "Sa. CHARACTER LOCK — Prompt cut off text request must match the reference image exactly, as if copying it: same head shape and size, same face, same eyes, same hair, same skin, same build and proportions, same clothing items in the same colours, same hands, and the same rendering style and level of realism as the reference. Never redesign, restyle, re-proportion, re-age or re-colour them, and never swap an item for a similar one.",
+      "attempts": 1,
+      "files": [],
+      "error": "Flow's picker does not contain an exact match for \"Prompt cut off text request\". Visible entries: fm-7b493f42486c-ref1.png image; fm-9cf835710cc2-ref1.jpg image; image.png image; provide image prompt for transla… image; user prompt cut off image; character lock prompt guidelines image; prompt got cut off image; character lock prompt rules image; prompt cut off after sa image; prompt cut off text request image; prompt got cut off image; user requesting image prompt com… image. No asset was selected.",
+      "outcome_unknown": false
+    },
+    {
+      "id": "6067830f",
+      "status": "done",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-43",
+      "prompt": "Sa. CHARACTER LOCK — Prompt cut off text request must match the reference image exactly, as if copying it: same head shape and size, same face, same eyes, same hair, same skin, same build and proportions, same clothing items in the same colours, same hands, and the same rendering style and level of realism as the reference. Never redesign, restyle, re-proportion, re-age or re-colour them, and never swap an item for a similar one.",
+      "attempts": 1,
+      "credits": 0,
+      "progress": "Waiting for Chrome download",
+      "files": [
+        "C:\\Users\\nguye\\flow-mcp-out\\MyFilm\\scene-43.jpeg"
+      ],
+      "outcome_unknown": false
+    },
+    {
+      "id": "233c7758",
+      "status": "done",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\MyFilm",
+      "scene": "scene-44",
+      "prompt": "Sa.",
+      "attempts": 1,
+      "credits": 0,
+      "progress": "Waiting for Chrome download",
+      "files": [
+        "C:\\Users\\nguye\\flow-mcp-out\\MyFilm\\scene-44.jpeg"
+      ],
+      "outcome_unknown": false
+    },
+    {
+      "id": "ac9f2481",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeDiagnostic1019",
+      "scene": "scene-01",
+      "prompt": "A single red ceramic mug on a plain white background, studio product photo, no text.",
+      "attempts": 1,
+      "files": [],
+      "error": "Flow's project navigation could not open \"All media\" from this view.",
+      "outcome_unknown": false
+    },
+    {
+      "id": "5f1dba43",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeDiagnostic1019",
+      "scene": "scene-02",
+      "prompt": "A red ceramic mug on a table. Slow camera push in.",
+      "attempts": 1,
+      "files": [],
+      "error": "Flow quotes 15 credits, above max_credits=0. Nothing was submitted.",
+      "outcome_unknown": false
+    },
+    {
+      "id": "0b01a5b9",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeDiagnostic1019",
+      "scene": "scene-03",
+      "prompt": "A gentle slow camera push in.",
+      "attempts": 1,
+      "files": [],
+      "error": "Flow did not confirm that \"Frames\" was selected. Nothing was submitted.",
+      "outcome_unknown": false
+    },
+    {
+      "id": "2570cc16",
+      "status": "done",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeDiagnostic1019",
+      "scene": "scene-04",
+      "prompt": "Show the same subject on a plain white background, no text. CHARACTER LOCK — image.png must match the reference image exactly, as if copying it: same head shape and size, same face, same eyes, same hair, same skin, same build and proportions, same clothing items in the same colours, same hands, and the same rendering style and level of realism as the reference. Never redesign, restyle, re-proportion, re-age or re-colour them, and never swap an item for a similar one.",
+      "attempts": 1,
+      "credits": 0,
+      "progress": "Waiting for Chrome download",
+      "files": [
+        "C:\\Users\\nguye\\flow-mcp-out\\NativeDiagnostic1019\\scene-04.jpeg"
+      ],
+      "outcome_unknown": false
+    },
+    {
+      "id": "998ddc8b",
+      "status": "done",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeDiagnostic1019",
+      "scene": "scene-05",
+      "prompt": "A red ceramic mug on a wooden table. Slow gentle camera push in, natural daylight. No text.",
+      "attempts": 1,
+      "credits": 15,
+      "progress": "Waiting for Chrome download",
+      "files": [
+        "C:\\Users\\nguye\\flow-mcp-out\\NativeDiagnostic1019\\scene-05.mp4"
+      ],
+      "outcome_unknown": false
+    },
+    {
+      "id": "4af2dab0",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeDiagnostic1019",
+      "scene": "scene-06",
+      "prompt": "A single red ceramic mug on a plain white background, studio product photo, no text.",
+      "attempts": 1,
+      "credits": 0,
+      "files": [],
+      "error": "Flow reported 1 failed generation tile(s): A single red ceramic mug on a plain white background, studio product photo, no text.: warning Failed We noticed some unusual activity. Note that browser extensions that modify the page may cause issues. Please visit the Help Center for more information. You have not been charged for this generation. refresh undo delete_forever. Nothing was charged for the failed render.",
+      "outcome_unknown": false
+    }
+  ]
+}

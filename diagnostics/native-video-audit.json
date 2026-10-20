@@ -1,0 +1,38 @@
+{
+  "started": "2026-10-19T11:44:04.493Z",
+  "probes": [
+    {
+      "name": "status",
+      "status": "passed",
+      "seconds": 0.591,
+      "result": {
+        "url": "https://flow.google.com/project/f550e625-a247-47f8-bb8d-876d4bf2da6f?hl=en",
+        "signedIn": true,
+        "inProject": true,
+        "composer": "🍌 Nano Banana 2.1 crop_square x1",
+        "credits_remaining": 62
+      }
+    },
+    {
+      "name": "video.text.render-and-download",
+      "status": "passed",
+      "seconds": 48.198,
+      "result": {
+        "id": "998ddc8b",
+        "status": "done",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeDiagnostic1019",
+        "scene": "scene-05",
+        "prompt": "A red ceramic mug on a wooden table. Slow gentle camera push in, natural daylight. No text.",
+        "attempts": 1,
+        "credits": 15,
+        "progress": "Waiting for Chrome download",
+        "files": [
+          "C:\\Users\\nguye\\flow-mcp-out\\NativeDiagnostic1019\\scene-05.mp4"
+        ],
+        "outcome_unknown": false
+      }
+    }
+  ],
+  "finished": "2026-10-19T11:44:53.297Z",
+  "credits_after": 47
+}

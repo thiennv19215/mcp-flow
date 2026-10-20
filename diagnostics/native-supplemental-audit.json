@@ -1,0 +1,42 @@
+{
+  "started": "2026-10-19T11:47:09.347Z",
+  "probes": [
+    {
+      "name": "status",
+      "status": "passed",
+      "seconds": 0.593,
+      "result": {
+        "url": "https://flow.google.com/project/f550e625-a247-47f8-bb8d-876d4bf2da6f?hl=en",
+        "signedIn": true,
+        "inProject": true,
+        "composer": "Video · 720p · 10s crop_16_9 x1",
+        "credits_remaining": 47
+      }
+    },
+    {
+      "name": "download.original.fresh-project",
+      "status": "passed",
+      "seconds": 10.669,
+      "result": {
+        "dir": "C:\\Users\\nguye\\flow-mcp-out\\NativeDiagnostic1019",
+        "files": [
+          "C:\\Users\\nguye\\flow-mcp-out\\NativeDiagnostic1019\\clip-01.jpeg"
+        ]
+      }
+    },
+    {
+      "name": "upload.local-image",
+      "status": "failed",
+      "seconds": 0.004,
+      "error": "Not found."
+    },
+    {
+      "name": "image.text.fresh-project",
+      "status": "failed",
+      "seconds": 9.05,
+      "error": "Flow reported 1 failed generation tile(s): A single red ceramic mug on a plain white background, studio product photo, no text.: warning Failed We noticed some unusual activity. Note that browser extensions that modify the page may cause issues. Please visit the Help Center for more information. You have not been charged for this generation. refresh undo delete_forever. Nothing was charged for the failed render. (job 4af2dab0; outcome_unknown=false)"
+    }
+  ],
+  "finished": "2026-10-19T11:47:29.691Z",
+  "credits_after": 47
+}
