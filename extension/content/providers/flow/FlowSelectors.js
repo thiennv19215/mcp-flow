@@ -27,7 +27,7 @@
         "button",
         "[role='button']"
       ],
-      icons: ["arrow_forward", "send", "sparkle", "auto_awesome", "play_arrow"],
+      icons: ["arrow_forward", "arrow_upward", "send", "sparkle", "auto_awesome", "play_arrow", "north", "east"],
       textRegex: /^(?:start generation|generate|bắt đầu tạo|tạo video|tạo ảnh|tạo hình ảnh)$/i,
       nearComposerTextRegex: /^(?:create|tạo)$/i,
       excludedTextRegex: /(?:project|dự án|character|nhân vật|folder|thư mục|settings|cài đặt|tune|clear prompt|xóa câu lệnh|xóa văn bản|quay lại|back|upload|tải lên)/i,

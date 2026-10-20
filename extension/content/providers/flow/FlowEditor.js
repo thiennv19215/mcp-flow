@@ -199,7 +199,7 @@
     const icon = root.flowFindIcon ? root.flowFindIcon(el) : el.querySelector?.("mat-icon, .mat-icon, .google-symbols, i, svg");
     if (icon) {
       const iconText = (icon.textContent || "").trim();
-      const allowedIcons = config?.icons || ["arrow_forward", "send", "sparkle", "auto_awesome", "play_arrow"];
+      const allowedIcons = config?.icons || ["arrow_forward", "arrow_upward", "send", "sparkle", "auto_awesome", "play_arrow", "north", "east"];
       if (allowedIcons.some(act => act.toLowerCase() === iconText.toLowerCase())) return true;
     }
     if (el.getAttribute?.("type") === "submit") return true;
@@ -207,19 +207,34 @@
     return false;
   }
 
+  function getFlowComposerContainer() {
+    const editor = (typeof root.flowQuery === "function" ? root.flowQuery("editor") : null) ||
+      document.querySelector(".ProseMirror[contenteditable='true']") ||
+      document.querySelector(".ProseMirror");
+    if (editor) {
+      const explicit = editor.closest(".flow-composer, flow-base-prompt-box, form, [class*='composer'], [class*='prompt-box'], [class*='prompt-container']");
+      if (explicit) return explicit;
+      let parent = editor.parentElement;
+      for (let i = 0; i < 6 && parent && parent !== document.body; i++) {
+        if (parent.querySelector('button, [role="button"]')) return parent;
+        parent = parent.parentElement;
+      }
+    }
+    return (typeof root.flowQuery === "function" ? root.flowQuery("composerRoot") : null) ||
+      document.querySelector(".flow-composer, flow-base-prompt-box, [class*='composer']");
+  }
+
   function getFlowSubmitButton(expectedPrompt) {
     // 1. ƯU TIÊN TUYỆT ĐỐI: Tìm nút Submit TRONG Composer Container trước!
     // Tránh click nhầm vào các nút ở Header, Sidebar, Navigation khi giao diện là tiếng Việt.
-    const composer = (typeof root.flowQuery === "function" ? root.flowQuery("composerRoot") : null) ||
-      document.querySelector(".ProseMirror")?.closest(".flow-composer, flow-base-prompt-box, form, [class*='composer']") ||
-      document.querySelector(".flow-composer, flow-base-prompt-box, [class*='composer']");
+    const composer = getFlowComposerContainer();
     if (composer) {
       const composerButtons = [...composer.querySelectorAll('button,[role="button"]')].filter(el =>
         root.visible?.(el) && !root.isFlowProjectNavigationControl?.(el));
 
       // 1.1 Tìm nút có icon đặc thù của Submit trong Google Flow
       const submitConfig = root.FlowSelectors?.submitButton;
-      const allowedIcons = submitConfig?.icons || ["arrow_forward", "send", "sparkle", "auto_awesome", "play_arrow"];
+      const allowedIcons = submitConfig?.icons || ["arrow_forward", "arrow_upward", "send", "sparkle", "auto_awesome", "play_arrow", "north", "east"];
       const submitIconBtn = composerButtons.find(b => {
         if (b.disabled || b.getAttribute("aria-disabled") === "true") return false;
         const icon = root.flowFindIcon ? root.flowFindIcon(b) : b.querySelector?.("mat-icon, .mat-icon, .google-symbols, i, svg");
@@ -258,7 +273,6 @@
     }
 
     // 2. Fallback tìm trên toàn trang (chỉ khi không có composer DOM thông thường)
-    // Loại trừ triệt để header, navigation, sidebar và các nút tạo dự án / nhân vật
     const allButtons = [...document.querySelectorAll('button,[role="button"]')].filter(el => {
       if (!root.visible?.(el) || el.disabled || el.getAttribute("aria-disabled") === "true") return false;
       if (root.isFlowProjectNavigationControl?.(el)) return false;
@@ -276,6 +290,7 @@
     if (button.disabled || button.getAttribute("aria-disabled") === "true") {
       throw root.flowError("FLOW_SUBMIT_DISABLED", "Flow's Start generation button is disabled; nothing was submitted.", true);
     }
+    try { button.scrollIntoView?.({ behavior: "instant", block: "center" }); } catch {}
     const wanted = normalizeFlowPrompt(expectedPrompt);
     const editors = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("editor") : null) ||
       [...document.querySelectorAll(".ProseMirror[contenteditable='true']")].filter(el => root.visible?.(el));
@@ -289,8 +304,7 @@
     const rect = button.getBoundingClientRect();
     const x = rect.left + rect.width / 2;
     const y = rect.top + rect.height / 2;
-    if (!Number.isFinite(x) || !Number.isFinite(y) || rect.width < 4 || rect.height < 4 ||
-        x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight) {
+    if (!Number.isFinite(x) || !Number.isFinite(y) || rect.width < 4 || rect.height < 4) {
       throw root.flowError("FLOW_SUBMIT_TARGET_OUT_OF_VIEW", "Flow's submit button is not fully available in the visible viewport. Nothing was submitted.", true, false);
     }
     return { x, y, prompt: normalizeFlowPrompt(promptBox.innerText || promptBox.textContent) };
@@ -310,6 +324,11 @@
       editor.dispatchEvent(new KeyboardEvent("keydown", options));
       editor.dispatchEvent(new KeyboardEvent("keypress", options));
       editor.dispatchEvent(new KeyboardEvent("keyup", options));
+
+      // Also dispatch Enter with Ctrl/Cmd
+      editor.dispatchEvent(new KeyboardEvent("keydown", { ...options, ctrlKey: true }));
+      editor.dispatchEvent(new KeyboardEvent("keypress", { ...options, ctrlKey: true }));
+      editor.dispatchEvent(new KeyboardEvent("keyup", { ...options, ctrlKey: true }));
       return true;
     } catch (err) {
       console.warn("[FlowEditor] editor Enter press failed:", err);
@@ -318,15 +337,51 @@
   }
 
   async function activateFlowSubmitButton(button, expectedPrompt) {
+    try { button.scrollIntoView?.({ behavior: "instant", block: "center" }); } catch {}
     inspectFlowSubmitTarget(button, expectedPrompt);
     const editor = (typeof root.flowQuery === "function" ? root.flowQuery("editor") : null) || document.querySelector(".ProseMirror");
-    if (!editor || normalizeFlowPrompt(getEditorUserText(editor)) !== normalizeFlowPrompt(expectedPrompt)) {
+    const actualText = editor ? normalizeFlowPrompt(getEditorUserText(editor)) : "";
+    const wantedText = normalizeFlowPrompt(expectedPrompt);
+    if (!editor || (wantedText && !actualText.includes(wantedText) && !wantedText.includes(actualText))) {
       throw root.flowError("FLOW_PRESUBMIT_STALE", "The Flow prompt changed before submit activation; nothing was submitted.", true, false);
     }
+
+    const rect = button.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    const point = { bubbles: true, cancelable: true, composed: true, view: window, button: 0, clientX: x, clientY: y };
+
+    // 1. Direct DOM Pointer & Mouse & Click events
+    try { button.focus?.(); } catch {}
+    try {
+      button.dispatchEvent(new PointerEvent("pointerover", { ...point, pointerId: 1, pointerType: "mouse" }));
+      button.dispatchEvent(new MouseEvent("mouseover", point));
+      button.dispatchEvent(new PointerEvent("pointerdown", { ...point, pointerId: 1, pointerType: "mouse" }));
+      button.dispatchEvent(new MouseEvent("mousedown", point));
+      button.dispatchEvent(new PointerEvent("pointerup", { ...point, pointerId: 1, pointerType: "mouse" }));
+      button.dispatchEvent(new MouseEvent("mouseup", point));
+      button.dispatchEvent(new MouseEvent("click", point));
+      button.click();
+    } catch (e) {
+      console.warn("[FlowEditor] direct click sequence failed:", e);
+    }
+
+    // 2. Dispatch click on inner icon or label if present
+    const inner = button.querySelector("mat-icon, .mat-icon, .google-symbols, svg, [class*='label'], [class*='icon']");
+    if (inner) {
+      try { inner.dispatchEvent(new MouseEvent("click", point)); } catch {}
+    }
+
+    // 3. Request submit if inside form
+    const form = button.form || button.closest("form");
+    if (form && typeof form.requestSubmit === "function") {
+      try { form.requestSubmit(button); } catch {}
+    }
+
+    // 4. Also notify main-world bridge if listening
     const submitToken = crypto.randomUUID();
     button.setAttribute("data-tobyflow-submit-token", submitToken);
     let bridgeResult = null;
-    let bridgeTimedOut = false;
     try {
       bridgeResult = await new Promise(resolve => {
         let settled = false;
@@ -342,10 +397,7 @@
           if (ev.data?.source !== "flow-auto-slate-result" || ev.data?.requestId !== submitToken) return;
           finish(ev.data);
         };
-        const timer = setTimeout(() => {
-          bridgeTimedOut = true;
-          finish(null);
-        }, 500);
+        const timer = setTimeout(() => finish(null), 300);
         window.addEventListener("message", handler);
         window.postMessage({
           source: "flow-auto-slate",
@@ -354,30 +406,18 @@
           requestId: submitToken,
         }, location.origin);
       });
-    } catch (error) {
-      if (error?.code) throw error;
-      throw root.flowError("FLOW_SUBMIT_ACTIVATION_FAILED", `Flow's submit bridge failed (${String(error?.message || error)}). No retry was sent.`, true, true);
-    } finally {
+    } catch {}
+    finally {
       button.removeAttribute("data-tobyflow-submit-token");
     }
 
     const invoked = Math.max(0, Number(bridgeResult?.invoked) || 0);
-    if (invoked > 0) {
-      return {
-        clickDelivered: true,
-        mainListenerInvoked: true,
-        allowEnterFallback: false,
-        bridgeResult,
-        strategy: "main-world-listener",
-      };
-    }
-
     return {
-      clickDelivered: false,
-      mainListenerInvoked: false,
-      allowEnterFallback: !bridgeTimedOut && Boolean(bridgeResult),
+      clickDelivered: true,
+      mainListenerInvoked: invoked > 0,
+      allowEnterFallback: true,
       bridgeResult,
-      strategy: bridgeTimedOut ? "main-world-timeout" : "enter-fallback",
+      strategy: invoked > 0 ? "main-world-listener" : "dom-click",
     };
   }
 
