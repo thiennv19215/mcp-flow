@@ -1033,7 +1033,7 @@ $("#home_projects").addEventListener("click", async e => {
     await loadLibraryAssets();
     setStatus(`${project.name} 已选择。`);
   } catch (err) { setStatus(err.message); toast(err.message, true); }
-  finally { $$("#home_projects button").forEach(item => item.disabled = false); }
+  finally { $("#home_projects").disabled = false; }
 });
 async function loadLibraryAssets() {
   const b = $("#l_load"); b.disabled = true; b.textContent = "Reading Flow…";
