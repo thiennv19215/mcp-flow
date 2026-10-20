@@ -338,6 +338,9 @@
             if (failed.length) {
               const failureDetails = failed[0]?.failureReason || "";
               const classified = root.classifyFlowError?.(failureDetails);
+              if (classified?.category === "rate_limit") {
+                throw this.error(classified.code, classified.message, true, false);
+              }
               if (classified && !classified.retryable) {
                 throw this.error(classified.code, classified.message, false, false);
               }

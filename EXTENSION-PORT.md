@@ -1,21 +1,21 @@
 # Flow MCP Connector
 
-The Chrome extension is the only Flow browser driver. It connects to the backend over a WebSocket, locally over localhost or remotely over HTTPS/WSS to a VPS. The backend keeps MCP tools, job orchestration, local files, downloads, and media assembly.
+The Chrome extension is the only Flow browser driver. It connects to the backend over authenticated HTTPS long-poll requests, locally over localhost or remotely over HTTPS to a VPS. The backend keeps MCP tools, job orchestration, local files, downloads, and media assembly. WebSocket remains available as a compatibility fallback for older backends.
 
 ## Install or update
 
 1. Build and start the backend or Studio at `http://127.0.0.1:18899`.
 2. Load this repository's `extension/` directory as an unpacked extension, or reload it at `chrome://extensions`.
 3. Open the existing signed-in Flow project tab. In the connector popup, click **Connect active Flow tab**.
-4. Confirm the popup shows a WebSocket connection and selected tab. `/api/health` reports the connector protocol and extension version.
+4. Confirm the popup shows a backend connection and selected tab. `/api/health` reports the connector transport, protocol, and extension version on local deployments.
 
 The connector remembers the selected tab while you browse elsewhere. Use the popup to select another Flow tab. If multiple Flow tabs are open and none is selected, choose one explicitly.
 
 ## Transport and lifecycle
 
-Commands, progress, and results use one WebSocket. Every operation is capability-gated and carries a request ID and deadline. The extension rejects unsupported operations before dispatch. On disconnect, the backend rejects pending calls; it does not replay commands. Inspect Flow before retrying any operation whose result is uncertain, especially a paid generation.
+Commands use a backend queue delivered through a bounded HTTPS long poll. Results and progress return through authenticated HTTPS POSTs. Every operation is capability-gated and carries a request ID and deadline. The extension rejects unsupported operations before dispatch. The backend does not replay commands after delivery: a disconnect before delivery is safe to retry, while a disconnect after delivery is reported as an unknown outcome. Inspect Flow before retrying any operation whose result is uncertain, especially a paid generation.
 
-The extension connects to the backend independently of whether a Flow tab is open. Flow commands require an open Flow tab, which the extension selects when a command arrives. For the VPS, the HTTPS URL is fixed in the extension. The user signs in with an account name and password; the backend returns a per-device token that the extension stores and uses on the WSS connection. The backend accepts WebSocket upgrades from a Chrome extension origin; no HTTP bridge transport is provided.
+The extension connects to the backend independently of whether a Flow tab is open. Flow commands require an open Flow tab, which the extension selects when a command arrives. For the VPS, the HTTPS URL is fixed in the extension. The user signs in with an account name and password; the backend returns a per-device token that the extension stores and sends in the Authorization header. The backend also accepts the existing WebSocket protocol while older deployments are being upgraded. Deploy the backend before updating the extension so both sides support protocol 3.
 
 ## File handling
 

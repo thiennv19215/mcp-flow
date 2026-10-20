@@ -548,7 +548,7 @@ test('I18n core: translations, plurals, string interpolation and UI pattern look
 
   // Default locale is Vietnamese
   assert.equal(I18n.getLocale(), 'vi');
-  assert.equal(I18n.t('popup.wsConnected'), 'Đã kết nối WebSocket');
+  assert.equal(I18n.t('popup.wsConnected'), 'Đã kết nối backend');
   assert.equal(I18n.t('popup.tabsCount', 3), '3 tab đang mở');
   assert.equal(I18n.t('errors.navUnavailable', { label: 'All media' }), 'Không thể mở mục "All media" từ giao diện này.');
 
@@ -560,7 +560,7 @@ test('I18n core: translations, plurals, string interpolation and UI pattern look
   // Switch to English
   await I18n.setLocale('en');
   assert.equal(I18n.getLocale(), 'en');
-  assert.equal(I18n.t('popup.wsConnected'), 'Connected via WebSocket');
+  assert.equal(I18n.t('popup.wsConnected'), 'Backend connected');
   assert.equal(I18n.t('popup.tabsCount', 1), '1 open tab');
   assert.equal(I18n.t('popup.tabsCount', 4), '4 open tabs');
   assert.equal(I18n.t('errors.navUnavailable', { label: 'All media' }), 'Flow\'s project navigation could not open "All media" from this view.');

@@ -12,13 +12,14 @@ import { TECHNIQUES, techniqueById } from "./techniques.js";
 import { OUTPUT_ROOT, outputRootForContext, projectDir } from "./paths.js";
 import { shapes, type Args } from "./schemas.js";
 import { extensionConnected } from "./extension.js";
+import { validateFlowSceneCapabilities } from "./flow-capabilities.js";
 
 export { OUTPUT_ROOT, projectDir };
 export { shapes, type Args };
 
 const words = (s: string) => s.split(/[^a-z0-9]+/i).filter((w) => w.length > 3).map((w) => w.toLowerCase());
 
-export const jobView = ({ id, status, params, files, attempts, credits, progress, note, error, failed_scenes, outcomeUnknown }: Job) => ({
+export const jobView = ({ id, status, params, files, attempts, credits, progress, note, error, errorCategory, retryAfterAt, failed_scenes, outcomeUnknown }: Job) => ({
   id,
   status,
   project: params.output_dir,
@@ -30,6 +31,8 @@ export const jobView = ({ id, status, params, files, attempts, credits, progress
   files,
   note,
   error,
+  error_category: errorCategory,
+  retry_after: retryAfterAt,
   failed_scenes,
   outcome_unknown: outcomeUnknown ?? false,
 });
@@ -141,6 +144,7 @@ export class LocalCore implements Core {
     if (noPrev >= 0) throw new Error("Scene 1 has no previous scene to reference.");
     const unknown = scenes.find((s) => s.technique && !techniqueById(s.technique));
     if (unknown) throw new Error(`Unknown technique "${unknown.technique}". Call flow_techniques for valid ids.`);
+    for (const [index, scene] of scenes.entries()) validateFlowSceneCapabilities(scene, index);
 
     const output_dir = projectDir(project);
     // Continue numbering after whatever is already on disk or queued, so reruns never overwrite earlier scenes.
@@ -202,6 +206,7 @@ export class LocalCore implements Core {
     for (const id of ids) {
       const job = this.queue.get(id);
       if (job?.outcomeUnknown) throw new Error(`Job ${id} may already have been submitted to Flow. Check the project for its result before retrying; automatic replay is blocked to avoid duplicate generation or charges.`);
+      if (job?.errorCategory === "download") throw new Error(`Job ${id} generated media but could not download it. Do not retry the generation; check flow_assets, then use flow_download for the existing result.`);
       const p = job?.params;
       if (job?.failed_scenes?.length && p?.agent_scenes && job.status === "done") {
         // A batch that finished with some images still failed: make just those again, under their own scene numbers,

@@ -182,15 +182,15 @@
 
     const config = root.FlowSelectors?.submitButton;
     const excludedPatterns = config?.excludedTextRegex || /(?:project|dự án|character|nhân vật|folder|thư mục|settings|cài đặt|tune|clear prompt|xóa câu lệnh|xóa văn bản|quay lại|back|upload|tải lên)/i;
-    if (excludedPatterns.test(name) || excludedPatterns.test(text)) return false;
+    if (root.matchesFlowUiRegex?.(name, excludedPatterns) || root.matchesFlowUiRegex?.(text, excludedPatterns)) return false;
 
     const submitPatterns = config?.textRegex || /^(?:start generation|generate|bắt đầu tạo|tạo video|tạo ảnh|tạo hình ảnh)$/i;
-    if (submitPatterns.test(name) || submitPatterns.test(text)) return true;
+    if (root.matchesFlowUiRegex?.(name, submitPatterns) || root.matchesFlowUiRegex?.(text, submitPatterns)) return true;
     if (name.includes("start generation") || name.includes("bắt đầu tạo")) return true;
 
     // Nếu nhãn là từ đơn "tạo" hoặc "create", CHỈ chấp nhận khi nó thuộc hoặc nằm cạnh composer / ProseMirror
     const nearComposerRegex = config?.nearComposerTextRegex || /^(?:create|tạo)$/i;
-    if (nearComposerRegex.test(name) || nearComposerRegex.test(text)) {
+    if (root.matchesFlowUiRegex?.(name, nearComposerRegex) || root.matchesFlowUiRegex?.(text, nearComposerRegex)) {
       const isNearComposer = Boolean(el.closest?.(".flow-composer, flow-base-prompt-box, form, [class*='composer']")) ||
         Boolean(el.parentElement?.querySelector?.(".ProseMirror"));
       if (isNearComposer) return true;

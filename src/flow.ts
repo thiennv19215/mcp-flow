@@ -5,6 +5,7 @@ import { executeFlowDom, extensionSupportsCapability } from "./extension.js";
 import { nativeDownloadIds, waitForNativeDownload, downloadNativeResults, extensionOf, unpackTakes } from "./native-downloads.js";
 import { uploadFlowMediaToProject, getCachedProjectMedia, cacheProjectMedia } from "./flow-transfer.js";
 import type { FlowState, FlowAsset, FlowProject, DownloadQuality, MediaKind, NativeMedia, CharacterParams } from "./types.js";
+import { validateFlowSceneCapabilities } from "./flow-capabilities.js";
 
 export type { FlowState, FlowAsset, FlowProject, DownloadQuality, MediaKind, NativeMedia, CharacterParams };
 export { characterLook, rememberCharacter, createCharacter, editCharacter } from "./characters.js";
@@ -82,6 +83,7 @@ export async function openFlowProject(projectId: string): Promise<{ opened: bool
 
 export async function runGeneration(job: Job): Promise<string[]> {
   const s = job.params;
+  validateFlowSceneCapabilities(s);
   const refs = s.reference_images ?? [];
   const framesMode = s.type === "video" && Boolean(s.first_frame || s.last_frame);
   // Frames and references are mutually exclusive in Flow. When frames are present,

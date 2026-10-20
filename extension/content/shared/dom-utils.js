@@ -38,8 +38,11 @@ function semanticActionText(el) {
 }
 
 function matchesName(value, expected, regex, exact) {
-  if (regex?.__regexp || regex?.source) { try { return new RegExp(regex.source, regex.flags).test(value); } catch {} }
-  return expected === undefined || (exact ? value === expected : value.toLowerCase().includes(String(expected).toLowerCase()));
+  if (regex?.__regexp || regex?.source) { try { return new RegExp(regex.source, regex.flags).test(value) || matchesFlowUiRegex(value, regex); } catch {} }
+  if (expected === undefined) return true;
+  const actual = normalizeFlowUiText(value);
+  const wanted = normalizeFlowUiText(expected);
+  return exact ? actual === wanted : actual.includes(wanted);
 }
 
 function mediaId(tile) {
@@ -81,6 +84,30 @@ function validStagedLocalImage(value, suffixPattern) {
 
 function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Flow may expose Vietnamese labels with inconsistent accents or Unicode
+// composition. Fold those differences while keeping caller match boundaries.
+function normalizeFlowUiText(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[đĐ]/g, match => match === "Đ" ? "D" : "d")
+    .replace(/[\u200B\u200C\u200D\uFEFF]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLocaleLowerCase("vi");
+}
+
+function matchesFlowUiRegex(value, regex) {
+  if (!regex?.source) return false;
+  try {
+    if (new RegExp(regex.source, regex.flags).test(value)) return true;
+    return new RegExp(normalizeFlowUiText(regex.source), regex.flags)
+      .test(normalizeFlowUiText(value));
+  } catch {
+    return false;
+  }
 }
 
 function flowError(code, message, retryable = false, outcomeUnknown = false) {
@@ -132,6 +159,28 @@ function classifyFlowError(rawText) {
       code: "FLOW_RATE_LIMIT",
       message: `Flow rate limited: ${text}. Please wait before submitting again.`,
       retryable: true,
+    };
+  }
+
+  // 5. Expired sign-in/session. This is recoverable after the user signs in again,
+  // but automation must not keep retrying against an unavailable account.
+  if (/(?:UNAUTHENTICATED|AUTH_REQUIRED|login required|sign in to continue|session expired|not signed in|authentication required)/i.test(text)) {
+    return {
+      category: "session",
+      code: "FLOW_SESSION_REQUIRED",
+      message: `Flow sign-in is required: ${text}. Sign in on the Flow tab, then retry the job.`,
+      retryable: false,
+    };
+  }
+
+  // 6. Media delivery failures happen after generation. Retrying the whole job can
+  // create and charge for a duplicate, so surface these separately from render errors.
+  if (/(?:download failed|download unavailable|media url|media download|failed to fetch media)/i.test(text)) {
+    return {
+      category: "download",
+      code: "FLOW_DOWNLOAD_FAILED",
+      message: `Flow generated the media but it could not be downloaded: ${text}. The result remains in the Flow project.`,
+      retryable: false,
     };
   }
 
@@ -207,8 +256,9 @@ function flowButton(name, root = document) {
   for (const el of candidates) {
     const { rawText, rawAria, rawInner, cleanText, cleanAria, cleanInner } = getCleanTexts(el);
     for (const syn of synonyms) {
-      if (rawText === syn || rawAria === syn || rawInner === syn ||
-          cleanText === syn || cleanAria === syn || cleanInner === syn) {
+      const wanted = normalizeFlowUiText(syn);
+      if ([rawText, rawAria, rawInner, cleanText, cleanAria, cleanInner]
+        .some(value => normalizeFlowUiText(value) === wanted)) {
         return el;
       }
     }
@@ -235,15 +285,17 @@ function flowButton(name, root = document) {
     const { rawText, rawAria, cleanText, cleanAria } = getCleanTexts(el);
     for (const syn of synonyms) {
       if (syn.includes(" ") || syn.length >= 6) {
+        const wanted = normalizeFlowUiText(syn);
         // Starts with hoặc ends with có khoảng cách ranh giới từ
-        if (rawText.startsWith(syn + " ") || rawText.endsWith(" " + syn) ||
-            rawAria.startsWith(syn + " ") || rawAria.endsWith(" " + syn) ||
-            cleanText.startsWith(syn + " ") || cleanText.endsWith(" " + syn) ||
-            cleanAria.startsWith(syn + " ") || cleanAria.endsWith(" " + syn)) {
+        if ([rawText, rawAria, cleanText, cleanAria].some(value => {
+          const folded = normalizeFlowUiText(value);
+          return folded.startsWith(wanted + " ") || folded.endsWith(" " + wanted);
+        })) {
           return el;
         }
         // Substring includes CHỈ cho cụm từ dài >= 8 ký tự (ví dụ: "bắt đầu tạo", "thêm thành phần vào hộp câu lệnh")
-        if (syn.length >= 8 && (rawText.includes(syn) || rawAria.includes(syn) || cleanText.includes(syn) || cleanAria.includes(syn))) {
+        if (syn.length >= 8 && [rawText, rawAria, cleanText, cleanAria]
+          .some(value => normalizeFlowUiText(value).includes(wanted))) {
           return el;
         }
       }
@@ -301,18 +353,22 @@ function flowRadio(name) {
 
   return [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"]')].find(el => {
     if (!visible(el) || isFlowProjectNavigationControl(el)) return false;
-    const label = (accessibleName(el) || "").replace(/\s+/g, " ").trim().toLowerCase();
-    const inner = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
-
-    if (aliases.some(a => label === a || inner === a || label.endsWith(` ${a}`) || inner.endsWith(` ${a}`) || label.startsWith(`${a} `) || inner.startsWith(`${a} `))) return true;
-    if (normalizedWanted && (label === normalizedWanted || inner === normalizedWanted || label.includes(normalizedWanted) || inner.includes(normalizedWanted))) return true;
+    const label = normalizeFlowUiText(accessibleName(el));
+    const inner = normalizeFlowUiText(el.innerText || el.textContent || "");
+    const labels = [label, inner];
+    if (aliases.some(alias => {
+      const a = normalizeFlowUiText(alias);
+      return labels.some(value => value === a || value.endsWith(` ${a}`) || value.startsWith(`${a} `));
+    })) return true;
+    const foldedWanted = normalizeFlowUiText(normalizedWanted);
+    if (foldedWanted && labels.some(value => value === foldedWanted || value.includes(foldedWanted))) return true;
     
     if (variantNum) {
       if (label === `x${variantNum}` || inner === `x${variantNum}` || label === variantNum || inner === variantNum) return true;
-      if (label.includes(`${variantNum} kết quả`) || inner.includes(`${variantNum} kết quả`)) return true;
-      if (label.includes(`${variantNum} biến thể`) || inner.includes(`${variantNum} biến thể`)) return true;
-      if (label.includes(`${variantNum} ảnh`) || inner.includes(`${variantNum} ảnh`)) return true;
-      if (label.includes(`${variantNum} hình ảnh`) || inner.includes(`${variantNum} hình ảnh`)) return true;
+      if (label.includes(`${variantNum} ket qua`) || inner.includes(`${variantNum} ket qua`)) return true;
+      if (label.includes(`${variantNum} bien the`) || inner.includes(`${variantNum} bien the`)) return true;
+      if (label.includes(`${variantNum} anh`) || inner.includes(`${variantNum} anh`)) return true;
+      if (label.includes(`${variantNum} hinh anh`) || inner.includes(`${variantNum} hinh anh`)) return true;
       if (label.includes(`${variantNum} video`) || inner.includes(`${variantNum} video`)) return true;
     }
 
@@ -331,19 +387,24 @@ function flowOption(name) {
   const variantNum = variantMatch ? variantMatch[1] : null;
 
   return [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')].find(el => {
-    const label = (accessibleName(el) || "").replace(/\s+/g, " ").trim().toLowerCase();
-    const inner = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const label = normalizeFlowUiText(accessibleName(el));
+    const inner = normalizeFlowUiText(el.innerText || el.textContent || "");
     if (!visible(el) || el === settingsTrigger || isFlowProjectNavigationControl(el)) return false;
-    
-    if (aliases.some(a => label === a || inner === a || label.endsWith(` ${a}`) || inner.endsWith(` ${a}`) || label.startsWith(`${a} `) || inner.startsWith(`${a} `))) return true;
-    if (normalizedExpected && (label === normalizedExpected || inner === normalizedExpected || label.includes(normalizedExpected) || inner.includes(normalizedExpected))) return true;
+
+    const labels = [label, inner];
+    if (aliases.some(alias => {
+      const a = normalizeFlowUiText(alias);
+      return labels.some(value => value === a || value.endsWith(` ${a}`) || value.startsWith(`${a} `));
+    })) return true;
+    const foldedExpected = normalizeFlowUiText(normalizedExpected);
+    if (foldedExpected && labels.some(value => value === foldedExpected || value.includes(foldedExpected))) return true;
     
     if (variantNum) {
       if (label === `x${variantNum}` || inner === `x${variantNum}` || label === variantNum || inner === variantNum) return true;
-      if (label.includes(`${variantNum} kết quả`) || inner.includes(`${variantNum} kết quả`)) return true;
-      if (label.includes(`${variantNum} biến thể`) || inner.includes(`${variantNum} biến thể`)) return true;
-      if (label.includes(`${variantNum} ảnh`) || inner.includes(`${variantNum} ảnh`)) return true;
-      if (label.includes(`${variantNum} hình ảnh`) || inner.includes(`${variantNum} hình ảnh`)) return true;
+      if (label.includes(`${variantNum} ket qua`) || inner.includes(`${variantNum} ket qua`)) return true;
+      if (label.includes(`${variantNum} bien the`) || inner.includes(`${variantNum} bien the`)) return true;
+      if (label.includes(`${variantNum} anh`) || inner.includes(`${variantNum} anh`)) return true;
+      if (label.includes(`${variantNum} hinh anh`) || inner.includes(`${variantNum} hinh anh`)) return true;
       if (label.includes(`${variantNum} video`) || inner.includes(`${variantNum} video`)) return true;
     }
 
@@ -551,9 +612,9 @@ async function dismissBlockingOverlays() {
     if (isSettingsDialog(dialog)) continue;
     const closeBtn = [...dialog.querySelectorAll('button, [role="button"]')].find(btn => {
       if (!visible(btn)) return false;
-      const label = (accessibleName(btn) || btn.innerText || btn.textContent || "").trim().toLowerCase();
+    const label = normalizeFlowUiText(accessibleName(btn) || btn.innerText || btn.textContent || "");
       const hasCloseIcon = [...btn.querySelectorAll('mat-icon')].some(icon => /close|clear/i.test((icon.innerText || icon.textContent || "").trim()));
-      return hasCloseIcon || /^(?:close|đóng|dismiss|got it|cancel|hủy)$/i.test(label) || label.includes("close") || label.includes("đóng");
+      return hasCloseIcon || /^(?:close|dong|dismiss|got it|cancel|huy)$/.test(label) || label.includes("close") || label.includes("dong");
     });
 
     if (closeBtn) {
@@ -765,7 +826,7 @@ async function clearExistingIngredientChips() {
   const isRefChip = el => {
     if (!visible(el)) return false;
     const name = (accessibleName(el) || el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
-    return /(?:Ingredient|Thành phần)/i.test(name) || /Xóa thành phần|Remove ingredient/i.test(name) || el.hasAttribute?.("data-chip");
+    return matchesFlowUiRegex(name, /(?:Ingredient|Thành phần)/i) || matchesFlowUiRegex(name, /Xóa thành phần|Remove ingredient/i) || el.hasAttribute?.("data-chip");
   };
 
   for (let attempt = 0; attempt < 10; attempt++) {
@@ -861,7 +922,7 @@ async function ensureFlowProjectEditor() {
     const doneOrBack = [...document.querySelectorAll('button, [role="button"]')].find(el => {
       if (!visible(el)) return false;
       const name = accessibleName(el).trim();
-      return /^Done( editing)?$/i.test(name) || /^Back( button.*)?$/i.test(name) || /^(Go back|Quay lại)$/i.test(name);
+      return matchesFlowUiRegex(name, /^Done( editing)?$/i) || matchesFlowUiRegex(name, /^Back( button.*)?$/i) || matchesFlowUiRegex(name, /^(Go back|Quay lại)$/i);
     });
     if (doneOrBack) {
       doneOrBack.click();
@@ -981,6 +1042,8 @@ if (typeof globalThis !== "undefined") {
   globalThis.visible = visible;
   globalThis.accessibleName = accessibleName;
   globalThis.wait = wait;
+  globalThis.normalizeFlowUiText = normalizeFlowUiText;
+  globalThis.matchesFlowUiRegex = matchesFlowUiRegex;
   globalThis.flowError = flowError;
   globalThis.classifyFlowError = classifyFlowError;
   globalThis.flowButton = flowButton;

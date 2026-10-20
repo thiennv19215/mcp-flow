@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { loadJobs, saveJob } from "./users.js";
+import { classifyFlowFailure, type FlowErrorCategory } from "./flow-error-policy.js";
 
 export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled";
 
@@ -41,6 +42,8 @@ export interface Job {
   progress?: string;
   note?: string;
   error?: string;
+  errorCategory?: FlowErrorCategory;
+  retryAfterAt?: string;
   // True when Flow may have accepted a submit but the backend could not confirm its result.
   // Such a job must not be retried automatically or from the Retry button.
   outcomeUnknown?: boolean;
@@ -70,7 +73,12 @@ export class JobQueue {
         job.status = "failed";
         job.finishedAt = new Date().toISOString();
         job.outcomeUnknown = true;
+        job.errorCategory = "extension";
         job.error = "Backend restarted while this job was running. Check the Flow project before retrying; its outcome is unknown.";
+        saveJob(scopeId, job);
+      }
+      if (job.error && !job.errorCategory) {
+        job.errorCategory = classifyFlowFailure({ message: job.error, outcome_unknown: job.outcomeUnknown }).category;
         saveJob(scopeId, job);
       }
       this.jobs.set(job.id, job);
@@ -114,6 +122,8 @@ export class JobQueue {
     if (job && !job.outcomeUnknown && (job.status === "failed" || job.status === "cancelled")) {
       job.status = "queued";
       job.error = undefined;
+      job.errorCategory = undefined;
+      job.retryAfterAt = undefined;
       job.finishedAt = undefined;
       saveJob(this.scopeId, job);
       void this.work();
@@ -147,16 +157,20 @@ export class JobQueue {
       for (;;) {
         const job = this.list().find((j) => j.status === "queued");
         if (!job) return;
-        if (this.lastFinished) {
-          const pause = PAUSE_MIN_MS + Math.random() * (PAUSE_MAX_MS - PAUSE_MIN_MS);
-          const remaining = this.lastFinished + pause - Date.now();
+        if (this.lastFinished || job.retryAfterAt) {
+          const pause = this.lastFinished ? PAUSE_MIN_MS + Math.random() * (PAUSE_MAX_MS - PAUSE_MIN_MS) : 0;
+          const retryAt = job.retryAfterAt ? Date.parse(job.retryAfterAt) : 0;
+          const remaining = Math.max(this.lastFinished + pause, Number.isFinite(retryAt) ? retryAt : 0) - Date.now();
           if (remaining > 0) {
-            this.pausedReason = `pacing: next generation in ${Math.ceil(remaining / 1000)}s`;
+            this.pausedReason = retryAt > Date.now()
+              ? `Flow ${job.errorCategory ?? "transient"}; retrying in ${Math.ceil(remaining / 1000)}s`
+              : `pacing: next generation in ${Math.ceil(remaining / 1000)}s`;
             await new Promise((r) => setTimeout(r, remaining));
             this.pausedReason = null;
           }
         }
         if (job.status !== "queued") continue;
+        job.retryAfterAt = undefined;
         job.status = "running";
         job.attempts++;
         saveJob(this.scopeId, job);
@@ -164,16 +178,21 @@ export class JobQueue {
           job.files = await this.runner(job);
           job.status = "done";
           job.error = undefined;
+          job.errorCategory = undefined;
+          job.retryAfterAt = undefined;
           job.outcomeUnknown = false;
         } catch (err) {
           job.error = err instanceof Error ? err.message : String(err);
-          job.outcomeUnknown = Boolean((err as { outcome_unknown?: unknown } | null)?.outcome_unknown);
-          // Failed tiles are already retried inside Flow (its own Retry button); only an agent that produced nothing
-          // is re-queued here. Timeouts are never retried automatically: they may still have spent credits.
-          const retryable = /agent finished without creating/i.test(job.error);
-          job.status = retryable && job.attempts <= (job.params.retries ?? 1) ? "queued" : "failed";
+          const policy = classifyFlowFailure(err);
+          job.outcomeUnknown = policy.outcomeUnknown;
+          job.errorCategory = policy.category;
+          const canAutoRetry = policy.autoRetry && policy.retryable && !policy.outcomeUnknown && job.attempts <= (job.params.retries ?? 1);
+          if (canAutoRetry && policy.cooldownMs > 0) job.retryAfterAt = new Date(Date.now() + policy.cooldownMs).toISOString();
+          job.status = canAutoRetry ? "queued" : "failed";
+          if (canAutoRetry) job.finishedAt = undefined;
         }
-        job.finishedAt = new Date().toISOString();
+        if (job.status === "queued") job.finishedAt = undefined;
+        else job.finishedAt = new Date().toISOString();
         saveJob(this.scopeId, job);
         this.lastFinished = Date.now();
       }

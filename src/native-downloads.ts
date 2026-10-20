@@ -28,7 +28,9 @@ export async function waitForNativeDownload(
     if (complete) return complete;
 
     const failed = items.find(item => item.state === "interrupted");
-    if (failed) throw new Error(`Chrome download failed: ${failed.error ?? "unknown error"} (${failed.bytesReceived}/${failed.totalBytes} bytes). The media remains in Flow.`);
+    if (failed) throw Object.assign(new Error(`Chrome download failed: ${failed.error ?? "unknown error"} (${failed.bytesReceived}/${failed.totalBytes} bytes). The media remains in Flow.`), {
+      code: "FLOW_DOWNLOAD_FAILED", retryable: false, outcome_unknown: false,
+    });
 
     const active = items.find(item => item.state === "in_progress");
     const progress = active && active.totalBytes > 0
@@ -37,7 +39,9 @@ export async function waitForNativeDownload(
     if (progress !== lastProgress) { onProgress?.(progress); lastProgress = progress; }
     await new Promise(resolve => setTimeout(resolve, 750));
   }
-  throw new Error("Flow started the download but Chrome did not finish it in time. The media remains in Flow.");
+  throw Object.assign(new Error("Flow started the download but Chrome did not finish it in time. The media remains in Flow."), {
+    code: "FLOW_DOWNLOAD_FAILED", retryable: false, outcome_unknown: false,
+  });
 }
 
 export function extensionOf(file: string): string {
@@ -82,7 +86,9 @@ export async function downloadNativeResults(
     const triggered = await nativeOperation<{ downloadTriggered: boolean }>("flow.asset.download", {
       id: item.id, name: item.title, quality,
     }, "flow.native.asset.download", job, 30_000);
-    if (!triggered?.downloadTriggered) throw new Error(`Flow did not confirm the download for "${item.title}".`);
+    if (!triggered?.downloadTriggered) throw Object.assign(new Error(`Flow did not confirm the download for "${item.title}".`), {
+      code: "FLOW_DOWNLOAD_FAILED", retryable: false, outcome_unknown: false,
+    });
     const download = await waitForNativeDownload(before, quality === "upscaled" ? 12 * 60_000 : 3 * 60_000, progress => {
       if (job) job.progress = progress;
     });

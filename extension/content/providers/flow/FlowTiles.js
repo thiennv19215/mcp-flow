@@ -291,7 +291,7 @@
       if (!root.visible?.(el) || el.disabled || el.getAttribute("aria-disabled") === "true") return false;
       const label = (root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim().toLowerCase();
       const icon = (root.flowFindIcon ? root.flowFindIcon(el) : el.querySelector("mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined,svg"))?.textContent?.trim() || "";
-      return labelRegex.test(label) || iconRegex.test(icon);
+      return root.matchesFlowUiRegex?.(label, labelRegex) || labelRegex.test(label) || iconRegex.test(icon);
     });
     if (!retry) return false;
     const retryRect = retry.getBoundingClientRect();
@@ -323,6 +323,9 @@
       if (failed.length) {
         const failureReason = failed[0]?.failureReason || "";
         const classified = root.classifyFlowError?.(failureReason);
+        if (classified?.category === "rate_limit") {
+          throw root.flowError(classified.code, classified.message, true, false);
+        }
         if (classified && !classified.retryable) {
           throw root.flowError(classified.code, classified.message, false, false);
         }

@@ -241,7 +241,8 @@
       if (!root.visible?.(btn)) return false;
       const label = (root.accessibleName?.(btn) || btn.innerText || btn.textContent || "").trim().toLowerCase();
       const hasAddIcon = [...btn.querySelectorAll('mat-icon')].some(i => /add|create|new/i.test((i.innerText || i.textContent || "").trim()));
-      return navTextRegex.test(label) || (hasAddIcon && /project|dự án/i.test(label));
+      return (root.matchesFlowUiRegex?.(label, navTextRegex) || navTextRegex.test(label)) ||
+        (hasAddIcon && (root.matchesFlowUiRegex?.(label, /project|dự án/i) || /project|dự án/i.test(label)));
     });
 
     if (newProjectBtn) {

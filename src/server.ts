@@ -7,7 +7,10 @@ import { z } from "zod";
 import { WebSocketServer } from "ws";
 import { HOME_DIR } from "./paths.js";
 import { OUTPUT_ROOT, shapes, type Core } from "./core.js";
-import { extensionConnected, extensionRevokeDeviceConnection, extensionStatus, extensionSetWebSocket } from "./extension.js";
+import {
+  extensionConnected, extensionHttpPoll, extensionHttpProgress, extensionHttpResult,
+  extensionRegisterHttpPoll, extensionRevokeDeviceConnection, extensionStatus, extensionSetWebSocket,
+} from "./extension.js";
 import { runWithDeviceContext } from "./request-context.js";
 import { outputRootForContext, uploadDirForContext } from "./paths.js";
 import { getFlowSelectors } from "./selectors.js";
@@ -188,6 +191,45 @@ export async function startServer(core: Core, getDeviceCore?: (deviceId: string)
       }
       if (req.method === "GET" && url.pathname === "/api/flow-selectors") {
         return json(res, 200, getFlowSelectors());
+      }
+      if (url.pathname.startsWith("/api/extension/")) {
+        if (req.method !== "POST" || !["/api/extension/connect", "/api/extension/poll", "/api/extension/result", "/api/extension/progress"].includes(url.pathname)) {
+          return json(res, 404, { error: "Not found." });
+        }
+        const device = deviceFromRequest(req);
+        if (!device && !localOnly) return json(res, 401, { error: "Valid device bearer token required." });
+        const deviceId = device?.device_id ?? "local";
+        const raw = (await readBody(req, 64 * 1024)).toString() || "{}";
+        const body = JSON.parse(raw) as Record<string, unknown>;
+        if (url.pathname === "/api/extension/connect") {
+          if (typeof body.protocol !== "number" || (body.version !== undefined && typeof body.version !== "string") ||
+              (body.capabilities !== undefined && (!Array.isArray(body.capabilities) || body.capabilities.length > 100 || body.capabilities.some((value) => typeof value !== "string" || value.length > 120)))) {
+            return json(res, 400, { error: "Invalid connector handshake." });
+          }
+          extensionRegisterHttpPoll(deviceId, body as { protocol: number; version?: string; capabilities?: unknown });
+          return json(res, 200, { ok: true, protocol: 3, transport: "http-poll" });
+        }
+        if (url.pathname === "/api/extension/poll") {
+          const controller = new AbortController();
+          res.on("close", () => { if (!res.writableEnded) controller.abort(); });
+          const message = await extensionHttpPoll(deviceId, typeof body.wait_ms === "number" ? body.wait_ms : 20_000, controller.signal);
+          if (!res.destroyed) return json(res, 200, { message });
+          return;
+        }
+        if (url.pathname === "/api/extension/result") {
+          if (typeof body.id !== "string" || body.id.length > 100 || !body.result || typeof body.result !== "object" || typeof (body.result as { ok?: unknown }).ok !== "boolean") {
+            return json(res, 400, { error: "Invalid extension result." });
+          }
+          extensionHttpResult(deviceId, body.id, body.result as Parameters<typeof extensionHttpResult>[2]);
+          return json(res, 200, { ok: true });
+        }
+        if (url.pathname === "/api/extension/progress") {
+          if (body.requestId !== undefined && typeof body.requestId !== "string" && typeof body.requestId !== "number") {
+            return json(res, 400, { error: "Invalid extension progress." });
+          }
+          extensionHttpProgress(deviceId, { requestId: body.requestId, tabId: typeof body.tabId === "number" ? body.tabId : undefined, progress: body.progress });
+          return json(res, 200, { ok: true });
+        }
       }
       if (url.pathname === "/api/auth/session" && req.method === "GET") {
         const session = sessionFromRequest(req);

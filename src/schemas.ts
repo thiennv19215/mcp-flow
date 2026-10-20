@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { validateFlowSceneCapabilities } from "./flow-capabilities.js";
 
 export const sceneSchema = z.object({
   prompt: z.string().min(1).describe("Full English prompt for one clip: action, shot and camera move, location, style, light, sound."),
@@ -32,6 +33,9 @@ export const sceneSchema = z.object({
     .boolean()
     .optional()
     .describe("Continue the previous scene in this call: its last frame becomes this scene's first frame. Not valid on the first scene or together with first_frame."),
+}).superRefine((scene, context) => {
+  try { validateFlowSceneCapabilities(scene); }
+  catch (error) { context.addIssue({ code: "custom", message: error instanceof Error ? error.message : String(error) }); }
 });
 
 // Raw shapes double as MCP input schemas and, wrapped in z.object, as HTTP body validators.

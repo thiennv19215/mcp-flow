@@ -2,6 +2,7 @@
   "use strict";
 
   const isNavControl = el => root.isFlowProjectNavigationControl?.(el) || false;
+  const foldLabel = value => root.normalizeFlowUiText?.(value) || String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
 
   function flowSettingsTrigger() {
     const tune = [...document.querySelectorAll('button,[role="button"]')].find(el => {
@@ -28,7 +29,7 @@
   };
 
   function flowRadio(name) {
-    const wanted = String(name || "").trim().toLowerCase();
+    const wanted = foldLabel(name);
     const normalizedWanted = root.normalizeAspectRatio?.(wanted) || wanted;
     const aliases = OPTION_ALIASES[wanted] || (normalizedWanted ? [wanted, normalizedWanted] : [wanted]);
     
@@ -37,18 +38,21 @@
 
     return [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"]')].find(el => {
       if (!root.visible?.(el) || isNavControl(el)) return false;
-      const label = (root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim().toLowerCase();
-      const inner = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+      const label = foldLabel(root.accessibleName?.(el));
+      const inner = foldLabel(el.innerText || el.textContent || "");
 
-      if (aliases.some(a => label === a || inner === a || label.endsWith(` ${a}`) || inner.endsWith(` ${a}`) || label.startsWith(`${a} `) || inner.startsWith(`${a} `))) return true;
+      if (aliases.some(alias => {
+        const a = foldLabel(alias);
+        return [label, inner].some(value => value === a || value.endsWith(` ${a}`) || value.startsWith(`${a} `));
+      })) return true;
       if (normalizedWanted && (label === normalizedWanted || inner === normalizedWanted || label.includes(normalizedWanted) || inner.includes(normalizedWanted))) return true;
 
       if (variantNum) {
         if (label === `x${variantNum}` || inner === `x${variantNum}` || label === variantNum || inner === variantNum) return true;
-        if (label.includes(`${variantNum} kết quả`) || inner.includes(`${variantNum} kết quả`)) return true;
-        if (label.includes(`${variantNum} biến thể`) || inner.includes(`${variantNum} biến thể`)) return true;
-        if (label.includes(`${variantNum} ảnh`) || inner.includes(`${variantNum} ảnh`)) return true;
-        if (label.includes(`${variantNum} hình ảnh`) || inner.includes(`${variantNum} hình ảnh`)) return true;
+        if (label.includes(`${variantNum} ket qua`) || inner.includes(`${variantNum} ket qua`)) return true;
+        if (label.includes(`${variantNum} bien the`) || inner.includes(`${variantNum} bien the`)) return true;
+        if (label.includes(`${variantNum} anh`) || inner.includes(`${variantNum} anh`)) return true;
+        if (label.includes(`${variantNum} hinh anh`) || inner.includes(`${variantNum} hinh anh`)) return true;
         if (label.includes(`${variantNum} video`) || inner.includes(`${variantNum} video`)) return true;
       }
 
@@ -57,7 +61,7 @@
   }
 
   function flowOption(name) {
-    const expected = String(name).replace(/\s+/g, " ").trim().toLowerCase();
+    const expected = foldLabel(name);
     const normalizedExpected = root.normalizeAspectRatio?.(expected) || expected;
     const aliases = OPTION_ALIASES[expected] || (normalizedExpected ? [expected, normalizedExpected] : [expected]);
     const settingsTrigger = flowSettingsTrigger();
@@ -66,19 +70,22 @@
     const variantNum = variantMatch ? variantMatch[1] : null;
 
     return [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')].find(el => {
-      const label = (root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim().toLowerCase();
-      const inner = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+      const label = foldLabel(root.accessibleName?.(el));
+      const inner = foldLabel(el.innerText || el.textContent || "");
       if (!root.visible?.(el) || el === settingsTrigger || isNavControl(el)) return false;
 
-      if (aliases.some(a => label === a || inner === a || label.endsWith(` ${a}`) || inner.endsWith(` ${a}`) || label.startsWith(`${a} `) || inner.startsWith(`${a} `))) return true;
+      if (aliases.some(alias => {
+        const a = foldLabel(alias);
+        return [label, inner].some(value => value === a || value.endsWith(` ${a}`) || value.startsWith(`${a} `));
+      })) return true;
       if (normalizedExpected && (label === normalizedExpected || inner === normalizedExpected || label.includes(normalizedExpected) || inner.includes(normalizedExpected))) return true;
 
       if (variantNum) {
         if (label === `x${variantNum}` || inner === `x${variantNum}` || label === variantNum || inner === variantNum) return true;
-        if (label.includes(`${variantNum} kết quả`) || inner.includes(`${variantNum} kết quả`)) return true;
-        if (label.includes(`${variantNum} biến thể`) || inner.includes(`${variantNum} biến thể`)) return true;
-        if (label.includes(`${variantNum} ảnh`) || inner.includes(`${variantNum} ảnh`)) return true;
-        if (label.includes(`${variantNum} hình ảnh`) || inner.includes(`${variantNum} hình ảnh`)) return true;
+        if (label.includes(`${variantNum} ket qua`) || inner.includes(`${variantNum} ket qua`)) return true;
+        if (label.includes(`${variantNum} bien the`) || inner.includes(`${variantNum} bien the`)) return true;
+        if (label.includes(`${variantNum} anh`) || inner.includes(`${variantNum} anh`)) return true;
+        if (label.includes(`${variantNum} hinh anh`) || inner.includes(`${variantNum} hinh anh`)) return true;
         if (label.includes(`${variantNum} video`) || inner.includes(`${variantNum} video`)) return true;
       }
 
@@ -111,21 +118,22 @@
       const controls = [...openPanel.querySelectorAll('[role="radio"], mat-radio-button, [role="tab"], button')];
       const names = controls.filter(r => root.visible?.(r)).map(r => {
         const name = root.accessibleName?.(r) || r.innerText || r.textContent || "";
-        return String(name).replace(/\b(accessibility_new|person|movie|image|videocam|mic|dashboard)\b/gi, " ")
-          .replace(/\s+/g, " ").trim().toLocaleLowerCase("vi");
+        return foldLabel(String(name).replace(/\b(accessibility_new|person|movie|image|videocam|mic|dashboard)\b/gi, " "));
       });
       const hasOption = option => {
         const aliases = OPTION_ALIASES[option] || [option];
-        return names.some(name => aliases.some(alias =>
-          name === alias || name.startsWith(`${alias} `) || name.endsWith(` ${alias}`)));
+        return names.some(name => aliases.some(alias => {
+          const folded = foldLabel(alias);
+          return name === folded || name.startsWith(`${folded} `) || name.endsWith(` ${folded}`);
+        }));
       };
       const hasVariants = [1, 2, 3, 4].some(count => names.some(name =>
         name === `x${count}` || name === String(count) ||
-        new RegExp(`(?:^|\\s)${count}\\s*(?:kết quả|biến thể|ảnh|hình ảnh|video)(?:$|\\s)`, "i").test(name)));
+        new RegExp(`(?:^|\\s)${count}\\s*(?:ket qua|bien the|anh|hinh anh|video)(?:$|\\s)`, "i").test(name)));
       const hasAspectRatio = names.some(name => /(?:^|\s)(?:9:16|16:9|1:1|4:3|3:4)(?:$|\s)/.test(name));
-      const looksLikeProjectNavigation = names.some(name => /^(?:all media|tất cả nội dung nghe nhìn|tất cả phương tiện)$/.test(name)) &&
-        names.some(name => /^(?:characters|nhân vật)$/.test(name)) &&
-        names.some(name => /^(?:upload|uploads|tệp tải lên|tải lên)$/.test(name));
+      const looksLikeProjectNavigation = names.some(name => /^(?:all media|tat ca noi dung nghe nhin|tat ca phuong tien)$/.test(name)) &&
+        names.some(name => /^(?:characters|nhan vat)$/.test(name)) &&
+        names.some(name => /^(?:upload|uploads|tep tai len|tai len)$/.test(name));
       const hasSettingsContent = !looksLikeProjectNavigation &&
         ((hasOption("image") && hasOption("video")) || hasVariants || hasAspectRatio);
       if (hasSettingsContent) return true;
@@ -194,10 +202,10 @@
       }
       const candidates = [...panel.querySelectorAll('button[role="tab"], [role="radio"], mat-radio-button, button')].filter(el => root.visible?.(el) && !isNavControl(el));
       const match = candidates.find(el => {
-        const txt = (el.innerText || el.textContent || "").trim().toLowerCase();
-        const aria = (root.accessibleName?.(el) || "").trim().toLowerCase();
-        if (txt === str || aria === str || txt === String(num) || aria === String(num)) return true;
-        if (txt === `${num} giây` || aria === `${num} giây` || txt.includes(`${num} giây`) || aria.includes(`${num} giây`)) return true;
+        const txt = foldLabel(el.innerText || el.textContent || "");
+        const aria = foldLabel(root.accessibleName?.(el));
+        if (txt === foldLabel(str) || aria === foldLabel(str) || txt === String(num) || aria === String(num)) return true;
+        if (txt === `${num} giay` || aria === `${num} giay` || txt.includes(`${num} giay`) || aria.includes(`${num} giay`)) return true;
         if (txt === `${num}s` || aria === `${num}s`) return true;
         const m = txt.match(/^(\d{1,2})[\p{L}\p{M}.]*$/u) || aria.match(/^(\d{1,2})[\p{L}\p{M}.]*$/u);
         return m && Number(m[1]) === num;
@@ -227,16 +235,16 @@
 
     const candidates = [...panel.querySelectorAll('[role="radio"], mat-radio-button, [role="tab"], [role="option"], button, [role="button"]')].filter(el => root.visible?.(el) && !isNavControl(el));
     const match = candidates.find(el => {
-      const label = (root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim().toLowerCase();
-      const txt = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+      const label = foldLabel(root.accessibleName?.(el));
+      const txt = foldLabel(el.innerText || el.textContent || "");
 
       if (label === normalized || txt === normalized || label.endsWith(` ${normalized}`) || txt.endsWith(` ${normalized}`)) return true;
       if (label.includes(normalized) || txt.includes(normalized)) return true;
 
       // Hỗ trợ từ khóa định dạng tiếng Việt
-      if (normalized === "9:16" && (/^(?:dọc|portrait|vertical)$/i.test(label) || /^(?:dọc|portrait|vertical)$/i.test(txt))) return true;
+      if (normalized === "9:16" && (/^(?:doc|portrait|vertical)$/i.test(label) || /^(?:doc|portrait|vertical)$/i.test(txt))) return true;
       if (normalized === "16:9" && (/^(?:ngang|landscape|horizontal|widescreen)$/i.test(label) || /^(?:ngang|landscape|horizontal|widescreen)$/i.test(txt))) return true;
-      if (normalized === "1:1" && (/^(?:vuông|square)$/i.test(label) || /^(?:vuông|square)$/i.test(txt))) return true;
+      if (normalized === "1:1" && (/^(?:vuong|square)$/i.test(label) || /^(?:vuong|square)$/i.test(txt))) return true;
 
       return false;
     });
@@ -315,7 +323,7 @@
       if (currentCount === String(variants)) return variants;
       const countControl = [...composer.querySelectorAll('[role="radio"],[role="option"],[role="tab"],button,[role="button"]')]
         .find(el => root.visible?.(el) && !isNavControl(el) &&
-          new RegExp(`^(?:x${variants}|${variants}|${variants}\\s+(?:ảnh|hình ảnh|video|kết quả))$`, "i")
+          new RegExp(`^(?:x${variants}|${variants}|${variants}\\s+(?:anh|hinh anh|video|ket qua))$`, "i")
             .test(normalizeModelLabel(root.accessibleName?.(el) || el.innerText || el.textContent || "")));
       if (!countControl) {
         throw root.flowError("FLOW_VARIANT_OPTION_MISSING", `Flow's composer does not expose ${name}; no generation was submitted.`, true);
@@ -362,13 +370,64 @@
   }
 
   function normalizeModelLabel(value) {
-    return String(value || "")
+    const label = String(value || "")
       .normalize("NFKC")
       .replace(/^[\u{1F000}-\u{1FFFF}]\s*/u, "")
       .replace(/^[^\p{L}\p{N}]+/u, "")
       .trim()
       .toLowerCase()
       .replace(/\s+/g, " ");
+    return foldLabel(label);
+  }
+
+  let capabilityRegistryPromise;
+  async function assertNativeModelCapabilities(payload, type, framesMode = false) {
+    if (!capabilityRegistryPromise) {
+      capabilityRegistryPromise = fetch(chrome.runtime.getURL("flow-model-capabilities.json"))
+        .then(response => {
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return response.json();
+        });
+    }
+    let registry;
+    try { registry = await capabilityRegistryPromise; }
+    catch (error) {
+      capabilityRegistryPromise = null;
+      throw root.flowError("FLOW_CAPABILITY_REGISTRY_UNAVAILABLE", `Flow model capability registry could not be read: ${error?.message || error}. Nothing was submitted.`, false, false);
+    }
+    const ratios = type === "video" ? registry.defaults.videoAspectRatios : registry.defaults.imageAspectRatios;
+    if (payload.aspectRatio && !ratios.includes(payload.aspectRatio)) {
+      throw root.flowError("FLOW_MODEL_UNSUPPORTED", `${type} aspect ratio ${payload.aspectRatio} is not supported. Allowed: ${ratios.join(", ")}. Nothing was submitted.`, false, false);
+    }
+    if (type === "image" && (payload.duration != null || payload.resolution != null)) {
+      throw root.flowError("FLOW_MODEL_UNSUPPORTED", "Duration and video resolution settings are only supported for video generation. Nothing was submitted.", false, false);
+    }
+    const selectedModel = payload.model || (findModelPickerButton()?.innerText || findModelPickerButton()?.textContent || "");
+    const normalized = normalizeModelLabel(selectedModel);
+    const rule = registry.models.find(item => item.match.some(alias => normalized.includes(normalizeModelLabel(alias))));
+    const referenceCount = Array.isArray(payload.attachments) ? payload.attachments.length : 0;
+    const maxReferences = rule?.maxReferences ?? registry.defaults.maxReferences;
+    if (referenceCount > maxReferences) {
+      throw root.flowError("FLOW_MODEL_UNSUPPORTED", `Flow accepts at most ${maxReferences} references for this model. Nothing was submitted.`, false, false);
+    }
+    if (framesMode && rule && !rule.supportsFrames) {
+      throw root.flowError("FLOW_MODEL_UNSUPPORTED", `Model "${selectedModel}" does not support first/last frame inputs. Nothing was submitted.`, false, false);
+    }
+    if (!rule) return;
+    if (!rule.types.includes(type)) {
+      throw root.flowError("FLOW_MODEL_UNSUPPORTED", `Model "${selectedModel}" does not support ${type} generation. Nothing was submitted.`, false, false);
+    }
+    if (payload.aspectRatio && !rule.aspectRatios.includes(payload.aspectRatio)) {
+      throw root.flowError("FLOW_MODEL_UNSUPPORTED", `Model "${selectedModel}" does not support ${payload.aspectRatio}. Nothing was submitted.`, false, false);
+    }
+    if (payload.duration != null && !rule.durations.includes(Number(payload.duration))) {
+      const supported = rule.fixedDuration ? `fixed at ${rule.fixedDuration} seconds` : `supports ${rule.durations.join(", ")} seconds`;
+      throw root.flowError("FLOW_MODEL_UNSUPPORTED", `Model "${selectedModel}" ${supported}. Nothing was submitted.`, false, false);
+    }
+    if (payload.resolution != null && !rule.resolutions.includes(String(payload.resolution))) {
+      const options = rule.resolutions.length ? ` Allowed: ${rule.resolutions.join(", ")}.` : "";
+      throw root.flowError("FLOW_MODEL_UNSUPPORTED", `Model "${selectedModel}" does not offer ${payload.resolution} resolution.${options} Nothing was submitted.`, false, false);
+    }
   }
 
   function getModelAliases(model) {
@@ -512,7 +571,7 @@
     await openFlowSettings();
     const findFrames = () => [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')]
       .find(el => root.visible?.(el) && !isNavControl(el) &&
-        /^(?:frames|khung hình|khung|khung ảnh)$/i.test((root.accessibleName?.(el) || "").replace(/^(?:accessibility_new|dashboard|face)\s*/i, "").replace(/\s+/g, " ").trim()));
+        /^(?:frames|khung hinh|khung|khung anh)$/.test(foldLabel((root.accessibleName?.(el) || "").replace(/^(?:accessibility_new|dashboard|face)\s*/i, ""))));
     let frames = findFrames();
     if (!frames) throw root.flowError("FLOW_FRAMES_MODE_UNAVAILABLE", "Flow does not show a Frames mode control after local frame upload. Nothing was submitted.", true, false);
     if (!nativeRadioSelected(frames) && frames.getAttribute("aria-selected") !== "true") frames.click();
@@ -535,6 +594,7 @@
   }
 
   async function prepareNativeImageSettings(payload, variants) {
+    await assertNativeModelCapabilities(payload, "image");
     const aspectRatio = payload?.aspectRatio || payload?.aspect_ratio;
     const requestedModel = payload?.model || "Nano Banana";
     const composer = flowComposerRoot();
@@ -571,12 +631,12 @@
   };
 
   function exactModeControl(name) {
-    const rawWanted = String(name || "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
-    const aliases = MODE_ALIASES[rawWanted] || [rawWanted];
+    const rawWanted = foldLabel(name);
+    const aliases = (MODE_ALIASES[rawWanted] || [rawWanted]).map(foldLabel);
     return [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')]
       .find(element => {
         if (!root.visible?.(element) || isNavControl(element)) return false;
-        const cName = String(root.accessibleName?.(element) || "").replace(/^(?:accessibility_new|dashboard|face)\s*/i, "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
+        const cName = foldLabel(String(root.accessibleName?.(element) || "").replace(/^(?:accessibility_new|dashboard|face)\s*/i, ""));
         return aliases.includes(cName) || aliases.some(a => cName.endsWith(` ${a}`));
       });
   }
@@ -616,6 +676,7 @@
   }
 
   async function prepareNativeVideoSettings(payload, variants, framesMode) {
+    await assertNativeModelCapabilities(payload, "video", framesMode);
     const type = payload.type || "video";
     const requestedModel = payload.model || payload.video_settings?.model;
     const modeName = framesMode ? "Frames" : "Ingredients";

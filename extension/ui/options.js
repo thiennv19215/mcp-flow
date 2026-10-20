@@ -19,7 +19,7 @@ const I18N = {
     saving: "Đang đăng nhập…",
     credentialsRequired: "Nhập cả tài khoản và mật khẩu.",
     loginRequired: "Hãy đăng nhập tài khoản để kết nối extension này.",
-    connectFailed: "Chưa kết nối được backend. Kiểm tra trạng thái WSS trên VPS.",
+    connectFailed: "Chưa kết nối được backend. Kiểm tra HTTPS trên VPS và phiên bản backend.",
   },
   en: {
     pageTitle: "Flow MCP Connector Settings",
@@ -39,7 +39,7 @@ const I18N = {
     saving: "Signing in…",
     credentialsRequired: "Enter both the account name and password.",
     loginRequired: "Sign in to connect this extension.",
-    connectFailed: "Could not connect to the backend. Check the VPS WSS status.",
+    connectFailed: "Could not connect to the backend. Check VPS HTTPS and the deployed backend version.",
   },
 };
 
@@ -152,10 +152,10 @@ document.querySelector("#save").addEventListener("click", async () => {
     for (let attempt = 0; attempt < 20; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 500));
       connectionStatus = await chrome.runtime.sendMessage({ type: "flow-mcp:status" });
-      if (connectionStatus?.wsConnected) break;
+      if (connectionStatus?.connected) break;
       if (connectionStatus?.error && attempt >= 3) throw new Error(connectionStatus.error);
     }
-    if (!connectionStatus?.wsConnected) {
+    if (!connectionStatus?.connected) {
       throw new Error(connectionStatus?.error || t("connectFailed"));
     }
 

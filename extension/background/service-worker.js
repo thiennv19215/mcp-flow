@@ -11,6 +11,8 @@ const nativeFlowOperations = new Set([
   "flow.continue.run", "flow.agent.batch",
 ]);
 let socket = null;
+let httpSession = null;
+let bridgeTransport = "disconnected";
 let opening = false;
 let reconnectTimer;
 let reconnectAttempt = 0;
@@ -306,7 +308,20 @@ function endpoint(value, token) {
   return url.href;
 }
 function send(ws, message) { if (ws === socket && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message)); }
-function event(method, params) { if (socket) send(socket, { type: "event", method, params }); }
+function bridgeConnected() {
+  return bridgeTransport === "http-poll"
+    ? Boolean(httpSession && !httpSession.stopped)
+    : socket?.readyState === WebSocket.OPEN;
+}
+function event(method, params) {
+  if (httpSession && !httpSession.stopped) {
+    void postHttpMessage(httpSession, "/api/extension/progress", { ...params[0], method }).catch(error => {
+      if (httpSession) lastError = `Progress could not reach backend: ${String(error?.message || error)}`;
+    });
+    return;
+  }
+  if (socket) send(socket, { type: "event", method, params });
+}
 async function chooseTab() {
   const tabs = await chrome.tabs.query({ url: "https://flow.google.com/*" });
   const saved = (await chrome.storage.session.get("selectedFlowTabId")).selectedFlowTabId;
@@ -331,11 +346,11 @@ async function adoptFlowTab(tab, prepare = false) {
   if (prepare) {
     await prepareFlowTab(tab.id);
   }
-  if (socket?.readyState === WebSocket.OPEN) lastError = "";
-  if (socket?.readyState !== WebSocket.OPEN && socket?.readyState !== WebSocket.CONNECTING) void connect();
+  if (bridgeConnected()) lastError = "";
+  if (!bridgeConnected() && socket?.readyState !== WebSocket.CONNECTING) void connect();
   return true;
 }
-async function execute(ws, method, args = []) {
+async function execute(_ws, method, args = []) {
   if (method === "flow.dom.execute") {
     const [command] = args;
     if (!command || typeof command !== "object" || typeof command.op !== "string") throw new Error("Invalid Flow DOM command");
@@ -427,22 +442,144 @@ async function execute(ws, method, args = []) {
   }
   throw new Error(`Unsupported connector method: ${method}`);
 }
+async function fetchBackend(url, token, body, timeoutMs = 15_000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const headers = { "content-type": "application/json" };
+    if (token) headers.authorization = `Bearer ${token}`;
+    return await fetch(url, { method: "POST", headers, body: JSON.stringify(body), signal: controller.signal, cache: "no-store" });
+  } finally { clearTimeout(timer); }
+}
+async function postHttpMessage(session, path, body) {
+  let lastFailure;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const response = await fetchBackend(`${session.bridge}${path}`, session.token, body, 15_000);
+      if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        const error = new Error(detail.error || `Backend returned HTTP ${response.status}.`);
+        error.status = response.status;
+        if (response.status < 500 || attempt === 2) throw error;
+        lastFailure = error;
+      } else return await response.json().catch(() => ({}));
+    } catch (error) {
+      lastFailure = error;
+      if (error?.status && error.status < 500) throw error;
+      if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+    }
+  }
+  throw lastFailure || new Error("Could not send a message to the backend.");
+}
+function applyBackendEvent(message) {
+  if (message?.type === "event" && message.method === "flow.selectors.sync") {
+    const payload = message.params?.[0];
+    if (payload && typeof payload === "object") {
+      console.log("[Flow MCP] Dynamic selectors sync received from backend");
+      chrome.storage.local.set({ flow_remote_selectors: payload });
+    }
+  }
+}
+function dispatchCommand(command, sendResult) {
+  const commandId = command.id ?? command.request_id ?? command.requestId;
+  if (commandId === undefined || commandId === null) throw new Error("Command is missing request id");
+  // Keep the receive loop responsive while a page operation waits.
+  void execute(null, command.method, command.args).then(
+    value => sendResult({ type: "result", id: commandId, result: { ok: true, value } }),
+    error => sendResult({ type: "result", id: commandId, result: { ok: false, error: { code: error?.code || "EXTENSION_COMMAND_FAILED", message: String(error?.message || error), retryable: Boolean(error?.retryable), outcome_unknown: Boolean(error?.outcome_unknown) } } }),
+  );
+}
+async function pollHttp(session) {
+  while (httpSession === session && !session.stopped) {
+    const controller = new AbortController();
+    session.pollAbort = controller;
+    const timer = setTimeout(() => controller.abort(), 35_000);
+    try {
+      const headers = { "content-type": "application/json" };
+      if (session.token) headers.authorization = `Bearer ${session.token}`;
+      const response = await fetch(`${session.bridge}/api/extension/poll`, {
+        method: "POST", headers, body: JSON.stringify({ wait_ms: 20_000 }), signal: controller.signal, cache: "no-store",
+      });
+      if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        throw new Error(detail.error || `Backend polling failed (HTTP ${response.status}).`);
+      }
+      const payload = await response.json();
+      const message = payload?.message;
+      if (message?.type === "event") applyBackendEvent(message);
+      else if (message?.type === "command") dispatchCommand(message, result => {
+        void postHttpMessage(session, "/api/extension/result", { id: String(result.id), result: result.result }).catch(error => {
+          if (httpSession === session) lastError = `Command result could not reach backend: ${String(error?.message || error)}`;
+        });
+      });
+    } finally {
+      clearTimeout(timer);
+      if (session.pollAbort === controller) session.pollAbort = null;
+    }
+  }
+}
+function stopHttpSession() {
+  if (!httpSession) return;
+  httpSession.stopped = true;
+  httpSession.pollAbort?.abort();
+  httpSession = null;
+}
+async function connectHttp(settings, token) {
+  const bridge = new URL(settings.bridge).origin;
+  const response = await fetchBackend(`${bridge}/api/extension/connect`, token, {
+    protocol: 3,
+    version: chrome.runtime.getManifest().version,
+    capabilities: [...nativeFlowOperations].map(name => `flow.native.${name.slice(5)}`),
+  });
+  if (response.status === 404 || response.status === 405) return false;
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({}));
+    throw new Error(detail.error || `Backend connection failed (HTTP ${response.status}).`);
+  }
+  const session = { bridge, token, stopped: false, pollAbort: null };
+  httpSession = session;
+  bridgeTransport = "http-poll";
+  reconnectAttempt = 0;
+  lastError = "";
+  void pollHttp(session).catch(error => {
+    if (httpSession !== session || session.stopped) return;
+    stopHttpSession();
+    bridgeTransport = "disconnected";
+    lastError = `HTTPS polling disconnected: ${String(error?.message || error)}`;
+    scheduleReconnect();
+  });
+  try {
+    const selectors = await fetch(`${bridge}/api/flow-selectors`, { cache: "no-store" }).then(r => r.ok ? r.json() : null);
+    if (selectors && typeof selectors === "object" && Object.keys(selectors).length > 0) {
+      await chrome.storage.local.set({ flow_remote_selectors: selectors });
+    }
+  } catch (_) {}
+  return true;
+}
 function scheduleReconnect(delayMs) {
   if (reconnectTimer) return;
   const backoff = Math.min(1500 * (2 ** reconnectAttempt++), 30_000);
   reconnectTimer = setTimeout(() => { reconnectTimer = undefined; void connect(); }, delayMs ?? backoff);
 }
 async function connect() {
-  if (opening || socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return;
+  if (opening || bridgeConnected() || socket?.readyState === WebSocket.CONNECTING) return;
   opening = true;
   lastError = "";
+  let backendOrigin = "";
   try {
     const settings = await config();
+    backendOrigin = new URL(settings.bridge).origin;
     const token = settings.tokenBridgeOrigin === new URL(settings.bridge).origin ? settings.deviceToken : "";
+    stopHttpSession();
+    const httpConnected = await connectHttp(settings, token);
+    if (httpConnected) return;
+    // Older backends do not expose the HTTPS poll API yet. Keep the existing
+    // WebSocket path available until that backend has been upgraded.
     const ws = new WebSocket(endpoint(settings.bridge, token));
     socket = ws;
     ws.onopen = () => {
       if (socket !== ws) return;
+      bridgeTransport = "websocket";
       reconnectAttempt = 0;
       lastError = "";
       send(ws, { type: "event", method: "extension.initialized", params: [{ protocol: 2, version: chrome.runtime.getManifest().version, capabilities: [...nativeFlowOperations].map(name => `flow.native.${name.slice(5)}`) }] });
@@ -468,26 +605,15 @@ async function connect() {
       if (socket !== ws) return;
       let command;
       try { command = JSON.parse(message.data); } catch { ws.close(1002, "Invalid JSON"); return; }
-      if (command.type === "event" && command.method === "flow.selectors.sync") {
-        const payload = command.params?.[0];
-        if (payload && typeof payload === "object") {
-          console.log("[Flow MCP] Dynamic selectors sync received from backend via WebSocket");
-          chrome.storage.local.set({ flow_remote_selectors: payload });
-        }
-        return;
-      }
+      if (command.type === "event") { applyBackendEvent(command); return; }
       if (command.type !== "command") return;
-      const commandId = command.id ?? command.request_id ?? command.requestId;
-      if (commandId === undefined || commandId === null) { ws.close(1002, "Command is missing request id"); return; }
-      // Keep the socket receive loop responsive while a page operation waits.
-      void execute(ws, command.method, command.args).then(
-        value => send(ws, { type: "result", id: commandId, result: { ok: true, value } }),
-        error => send(ws, { type: "result", id: commandId, result: { ok: false, error: { code: error?.code || "EXTENSION_COMMAND_FAILED", message: String(error?.message || error), retryable: Boolean(error?.retryable), outcome_unknown: Boolean(error?.outcome_unknown) } } }),
-      );
+      try { dispatchCommand(command, result => send(ws, result)); }
+      catch (error) { ws.close(1002, String(error?.message || error)); }
     };
     ws.onclose = close => {
       if (socket !== ws) return;
       socket = null;
+      bridgeTransport = "disconnected";
       clearInterval(heartbeat);
       const intentionalClose = ["User reconnect", "Bridge URL changed"].includes(close.reason);
       lastError = intentionalClose ? "" : close.reason || lastError || "Backend disconnected";
@@ -495,10 +621,15 @@ async function connect() {
       scheduleReconnect(close.code === 1008 ? 10_000 : undefined);
     };
     ws.onerror = () => {
+      bridgeTransport = "disconnected";
       lastError = `Cannot connect to backend at ${new URL(settings.bridge).origin}. Sign in to the account, then check the VPS HTTPS/WSS connection.`;
       ws.close();
     };
-  } catch (error) { lastError = String(error?.message || error); scheduleReconnect(); }
+  } catch (error) {
+    bridgeTransport = "disconnected";
+    lastError = `Cannot connect to backend${backendOrigin ? ` at ${backendOrigin}` : ""}: ${String(error?.message || error)}`;
+    scheduleReconnect();
+  }
   finally { opening = false; }
 }
 chrome.tabs.onRemoved.addListener((tabId, info) => {
@@ -539,8 +670,13 @@ chrome.alarms.onAlarm.addListener(() => void connect());
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local" || !changes.bridge) return;
   clearTimeout(reconnectTimer); reconnectTimer = undefined;
-  if (socket) socket.close(1000, "Bridge URL changed");
-  else void connect();
+  stopHttpSession();
+  bridgeTransport = "disconnected";
+  const previousSocket = socket;
+  socket = null;
+  clearInterval(heartbeat);
+  if (previousSocket) previousSocket.close(1000, "Bridge URL changed");
+  void connect();
 });
 chrome.runtime.onMessage.addListener((message, _sender, respond) => {
   if (message?.type === "flow-mcp:ensure-active-tab") {
@@ -606,13 +742,20 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
     return true;
   }
   if (message?.type === "flow-mcp:status") {
-    Promise.all([config(), chrome.tabs.query({ url: "https://flow.google.com/*" })]).then(([c, tabs]) => respond({ configured: true, bridge: c.bridge, flowTabs: tabs.length, selectedTabId, wsConnected: socket?.readyState === WebSocket.OPEN, error: lastError }));
+    Promise.all([config(), chrome.tabs.query({ url: "https://flow.google.com/*" })]).then(([c, tabs]) => respond({ configured: true, bridge: c.bridge, flowTabs: tabs.length, selectedTabId, connected: bridgeConnected(), transport: bridgeTransport, wsConnected: bridgeConnected(), error: lastError }));
     return true;
   }
   if (message?.type === "flow-mcp:connect") {
     void (async () => {
       await chrome.storage.session.remove("selectedFlowTabId");
-      if (socket) socket.close(1000, "User reconnect"); else await connect();
+      clearTimeout(reconnectTimer); reconnectTimer = undefined;
+      stopHttpSession();
+      bridgeTransport = "disconnected";
+      const previousSocket = socket;
+      socket = null;
+      clearInterval(heartbeat);
+      if (previousSocket) previousSocket.close(1000, "User reconnect");
+      await connect();
       respond({ ok: true });
     })();
     return true;
