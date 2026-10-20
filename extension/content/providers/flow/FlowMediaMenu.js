@@ -88,30 +88,64 @@
     return null;
   }
 
-  async function waitForFlowTileMedia(tile, title, timeoutMs = 10000) {
+  async function waitForFlowTileMedia(tile, title, timeoutMs = 20000) {
     const deadline = Date.now() + timeoutMs;
     let lastState = "media element missing";
     while (Date.now() < deadline) {
       if (!tile.isConnected) throw root.flowError("FLOW_ASSET_CHANGED", `The tile for "${title}" changed while preparing its download.`, true);
       const errorTile = tile.querySelector("flow-error-tile");
-      const retryControl = [...tile.querySelectorAll('button,[role="button"]')].find(el => /^(retry|try again)$/i.test(flowMenuLabel(el) || (root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim()));
+      const retryControl = [...tile.querySelectorAll('button,[role="button"]')].find(el => /^(retry|try again|thử lại)$/i.test(flowMenuLabel(el) || (root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim()));
       if (errorTile || retryControl) {
         const reason = (errorTile?.innerText || errorTile?.textContent || flowMenuLabel(retryControl) || "").replace(/\s+/g, " ").trim();
         throw root.flowError("FLOW_GENERATION_FAILED", `Flow marked "${title}" as failed${reason ? `: ${reason}` : ""}.`, false, true);
       }
-      const media = [...tile.querySelectorAll("video,img")];
+
+      const isBusy = Boolean(tile.querySelector('flow-progress-tile,mat-progress-bar,[role="progressbar"]'));
+      const optionsBtn = flowTileOptionsButton(tile);
+
+      // Search for media elements in light DOM and shadow roots
+      const media = [
+        ...tile.querySelectorAll("video,img,canvas,[role='img'],flow-video-tile,flow-image-tile"),
+        ...(tile.shadowRoot ? [...tile.shadowRoot.querySelectorAll("video,img,canvas")] : []),
+        ...([...tile.querySelectorAll("*")].flatMap(el => el.shadowRoot ? [...el.shadowRoot.querySelectorAll("video,img,canvas")] : []))
+      ];
+
       for (const element of media) {
-        const src = element.currentSrc || element.getAttribute("src") || "";
-        const placeholder = !src || src.includes("media.html") || src.endsWith(".html") || src.startsWith("chrome-extension://");
-        const validSource = !placeholder && (root.isFlowMediaSource?.(src) || element.getAttribute("src")?.startsWith("/fx/"));
-        const ready = element instanceof HTMLVideoElement
-          ? validSource
-          : validSource && (element.complete && element.naturalWidth > 0 || root.mediaId?.(tile)?.startsWith("asb:"));
-        lastState = `media found (valid source: ${validSource}, ready: ${ready})`;
-        if (ready) return element;
+        if (element instanceof HTMLVideoElement) {
+          const src = element.currentSrc || element.getAttribute("src") || "";
+          const placeholder = !src || src.includes("media.html") || src.endsWith(".html") || src.startsWith("chrome-extension://");
+          const validSource = !placeholder && (root.isFlowMediaSource?.(src) || element.getAttribute("src")?.startsWith("/fx/") || src.startsWith("blob:"));
+          lastState = `video found (src: ${src ? 'yes' : 'no'}, valid: ${validSource})`;
+          if (validSource || (!isBusy && (src || element.readyState >= 1))) return element;
+        } else if (element instanceof HTMLImageElement) {
+          const src = element.currentSrc || element.getAttribute("src") || "";
+          const placeholder = !src || src.includes("media.html") || src.endsWith(".html") || src.startsWith("chrome-extension://");
+          const validSource = !placeholder && (root.isFlowMediaSource?.(src) || element.getAttribute("src")?.startsWith("/fx/") || src.startsWith("blob:") || src.startsWith("data:"));
+          const ready = validSource && (element.complete && element.naturalWidth > 0 || root.mediaId?.(tile)?.startsWith("asb:"));
+          lastState = `image found (valid source: ${validSource}, ready: ${ready})`;
+          if (ready) return element;
+        } else if (!isBusy && optionsBtn) {
+          lastState = `custom media element (${element.tagName.toLowerCase()}) ready with options menu`;
+          return element;
+        }
       }
+
+      // If no explicit img/video is matched, but the tile is rendered (not busy) and has options button
+      if (!isBusy && optionsBtn) {
+        lastState = "tile options ready";
+        return tile;
+      }
+
       await root.wait?.(200);
     }
+
+    // Graceful fallback: If tile is connected and finished rendering (not failed, not busy), allow download
+    const finalError = tile.querySelector("flow-error-tile");
+    const finalBusy = Boolean(tile.querySelector('flow-progress-tile,mat-progress-bar,[role="progressbar"]'));
+    if (tile.isConnected && !finalError && !finalBusy) {
+      return tile;
+    }
+
     throw root.flowError("FLOW_MEDIA_NOT_READY", `Flow has not finished loading media for "${title}" (${lastState}).`, true);
   }
 
@@ -156,6 +190,13 @@
         if (!download) throw root.flowError("FLOW_SCENE_DOWNLOAD_MISSING", "Scene view opened but Download scene is unavailable.", true);
         download.click();
       } else {
+        const isDownloadItem = el => {
+          const lbl = flowMenuLabel(el);
+          const icon = el.querySelector?.("mat-icon, .mat-icon, .google-symbols")?.textContent?.trim().toLowerCase();
+          return /^(?:Download|Tải xuống|Tải)(?:\s+(?:image|video|hình ảnh|ảnh|tệp|original|gốc))?$/i.test(lbl) ||
+            icon === "download" || icon === "file_download";
+        };
+
         const more = await revealFlowTileOptions(tile);
         let entries;
         if (more) {
@@ -172,11 +213,11 @@
           const menuDeadline = Date.now() + 1800;
           do {
             entries = flowMenuItems();
-            if (entries.some(el => /^(?:Download|Tải xuống)(?:\s+(?:image|video|hình ảnh|ảnh))?$/i.test(flowMenuLabel(el)))) break;
+            if (entries.some(isDownloadItem)) break;
             await root.wait?.(100);
           } while (Date.now() < menuDeadline);
         }
-        const download = entries.find(el => /^(?:Download|Tải xuống)(?:\s+(?:image|video|hình ảnh|ảnh))?$/i.test(flowMenuLabel(el)));
+        const download = entries.find(isDownloadItem);
         if (download) {
           if (download.getAttribute("aria-haspopup") === "menu") {
             const parentMenu = download.closest('[role="menu"],mat-menu-panel') || download.parentElement;
