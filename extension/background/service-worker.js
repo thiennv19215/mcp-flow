@@ -122,9 +122,17 @@ async function sendFlowCommand(tabId, message) {
   try {
     return await chrome.tabs.sendMessage(tabId, message);
   } catch (error) {
-    if (!/Receiving end does not exist|Could not establish connection/i.test(String(error?.message || error))) throw error;
-    const tab = await chrome.tabs.get(tabId);
-    if (!flowUrl(tab.url)) throw error;
+    const errMsg = String(error?.message || error);
+    const isDisconnected = /Receiving end does not exist|Could not establish connection|message channel closed|message port closed|closed before a response was received/i.test(errMsg);
+    if (!isDisconnected) throw error;
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (!tab || !flowUrl(tab.url)) throw error;
+
+    console.info(`[ServiceWorker] Flow tab ${tabId} content script disconnected (${errMsg}); reinjecting and retrying...`);
+    // Tab might be in the middle of loading or was reloaded
+    await waitForTabComplete(tabId, 15_000).catch(() => {});
+    await new Promise(resolve => setTimeout(resolve, 300));
+
     // A Flow tab can predate extension installation/reload, leaving no content
     // script listener in that tab. Inject the declared scripts in manifest order
     // and retry once instead of making the user reload the whole Flow page.
@@ -147,9 +155,10 @@ async function sendFlowCommand(tabId, message) {
         "content/providers/flow/FlowDriver.js",
         "content/dom-actions.js",
       ],
-    });
-    await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["content/bridge/flow-upload-main.js"] });
-    return chrome.tabs.sendMessage(tabId, message);
+    }).catch(() => {});
+    await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["content/bridge/flow-upload-main.js"] }).catch(() => {});
+    await new Promise(resolve => setTimeout(resolve, 200));
+    return await chrome.tabs.sendMessage(tabId, message);
   }
 }
 async function waitForTabComplete(tabId, timeoutMs = 45_000) {

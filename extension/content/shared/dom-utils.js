@@ -677,7 +677,7 @@ async function exitFlowMediaViewer() {
     const rootUrl = `${target.origin}${target.routePrefix}/project/${target.projectId}`;
     console.warn("[FlowMediaViewer] Tier 1+2 did not exit media viewer; reloading clean project URL:", rootUrl);
     location.assign(rootUrl);
-    await waitForFlowRoute(path => !isMediaViewer(), 10_000, "Flow did not return from video/media editor.");
+    throw flowError("FLOW_PROJECT_NAVIGATING", "Navigating back to project root editor. Please retry.", true, false);
   }
 
   return !isMediaViewer();
@@ -806,8 +806,10 @@ async function ensureFlowProjectEditor() {
     const rootUrl = `${target.origin}${target.routePrefix}/project/${target.projectId}`;
     console.log("[FlowProjectNavigation] Navigating directly to project root URL:", rootUrl);
     location.assign(rootUrl);
-    await waitForFlowRoute(() => describe()?.isProjectEditor === true, 12_000, "Flow did not navigate to project editor.");
-    return { success: true, isProjectEditor: true, projectId: target.projectId };
+    if (describe()?.isProjectEditor) {
+      return { success: true, isProjectEditor: true, projectId: target.projectId };
+    }
+    throw flowError("FLOW_PROJECT_NAVIGATING", "Navigating back to project root editor. Please retry.", true, false);
   }
 
   // 3. Đang ở ngoài project (trang chủ hoặc danh sách dự án): tự động mở hoặc tạo dự án mới

@@ -21,19 +21,31 @@
 
   if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
     chrome.runtime.onMessage.addListener((message, _sender, respond) => {
-      if (message?.type !== "flow-mcp:execute") return;
-      execute(message.command).then(
-        result => respond({ ok: true, value: result }),
-        error => respond({
-          ok: false,
-          error: {
-            code: error?.code || "FLOW_DOM_FAILED",
-            message: String(error?.message || error),
-            retryable: Boolean(error?.retryable),
-            outcome_unknown: Boolean(error?.outcome_unknown),
-          },
-        })
-      );
+      if (message?.type !== "flow-mcp:execute") return false;
+      let responded = false;
+      const safeRespond = data => {
+        if (responded) return;
+        responded = true;
+        try { respond(data); } catch (_) {}
+      };
+
+      (async () => {
+        try {
+          const result = await execute(message.command);
+          safeRespond({ ok: true, value: result });
+        } catch (error) {
+          safeRespond({
+            ok: false,
+            error: {
+              code: error?.code || "FLOW_DOM_FAILED",
+              message: String(error?.message || error),
+              retryable: Boolean(error?.retryable),
+              outcome_unknown: Boolean(error?.outcome_unknown),
+            },
+          });
+        }
+      })();
+
       return true;
     });
   }

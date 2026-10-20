@@ -110,7 +110,7 @@
       const rootUrl = `${target.origin}${target.routePrefix}/project/${target.projectId}`;
       console.warn("[FlowNavigation] Tier 1+2 did not exit media viewer; reloading clean project URL:", rootUrl);
       location.assign(rootUrl);
-      await waitForFlowRoute(path => !isMediaViewer(), 10000, "Flow did not return from video/media editor.");
+      throw (root.flowError ? root.flowError("FLOW_PROJECT_NAVIGATING", "Navigating back to project root editor. Please retry.", true, false) : new Error("Navigating back to project root editor."));
     }
 
     return !isMediaViewer();
@@ -222,8 +222,10 @@
       const rootUrl = `${target.origin}${target.routePrefix}/project/${target.projectId}`;
       console.log("[FlowNavigation] Navigating directly to project root URL:", rootUrl);
       location.assign(rootUrl);
-      await waitForFlowRoute(() => describe()?.isProjectEditor === true, 12000, "Flow did not navigate to project editor.");
-      return { success: true, isProjectEditor: true, projectId: target.projectId };
+      if (describe()?.isProjectEditor) {
+        return { success: true, isProjectEditor: true, projectId: target.projectId };
+      }
+      throw (root.flowError ? root.flowError("FLOW_PROJECT_NAVIGATING", "Navigating back to project root editor. Please retry.", true, false) : new Error("Navigating back to project root editor."));
     }
 
     // 3. Outside of project
