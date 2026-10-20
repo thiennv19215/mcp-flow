@@ -513,10 +513,21 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
   if (message?.type === "flow-mcp:progress") {
     const requestId = message.requestId ?? message.request_id ?? message.commandId ?? message.command_id;
     const tabId = _sender.tab?.id;
+
+    // Broadcast to UI pages (sidebar, popup) for real-time progress display
+    chrome.runtime.sendMessage({
+      type: "flow-mcp:progress-broadcast",
+      requestId: String(requestId || ""),
+      jobId: message.jobId ?? message.job_id,
+      progress: message.progress,
+    }).catch(() => {});
+
+    const isInteractive = activeInteractiveRequests.get(String(requestId)) === tabId;
+    const isSelectedFlowTab = tabId !== undefined && tabId === selectedTabId;
     const ok = flowUrl(_sender.tab?.url) && (typeof requestId === "string" || typeof requestId === "number")
-      && activeInteractiveRequests.get(String(requestId)) === tabId;
+      && (isInteractive || isSelectedFlowTab);
     if (ok) event("extension.progress", [{ requestId: String(requestId), jobId: message.jobId ?? message.job_id, tabId, progress: message.progress }]);
-    respond({ ok });
+    respond({ ok: Boolean(ok) });
     return;
   }
   if (message?.type === "flow-mcp:preview") {

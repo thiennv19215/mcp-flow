@@ -118,8 +118,10 @@
 
   function collectNativeMedia() {
     return [...document.querySelectorAll("flow-grid-tile-container")].map(tile => {
-      const busy = Boolean(tile.querySelector('flow-progress-tile,mat-progress-bar,[role="progressbar"]'));
-      const error = tile.querySelector("flow-error-tile");
+      const hasProgressBar = Boolean(tile.querySelector('flow-progress-tile,mat-progress-bar,[role="progressbar"]'));
+      const hasProgressBadge = !hasProgressBar && Boolean([...tile.querySelectorAll("div,span")].find(el => el.children.length <= 1 && /^\d{1,3}%$/.test((el.textContent || "").trim())));
+      const busy = hasProgressBar || hasProgressBadge;
+      const error = tile.querySelector("flow-error-tile, [class*='error-tile']");
       const kind = tile.querySelector("flow-scene-tile") ? "scene" : tile.querySelector("flow-video-tile") ? "video" : "image";
       const id = root.mediaId?.(tile);
       const title = (tile.getAttribute("aria-label") || tile.getAttribute("title") || "").trim();

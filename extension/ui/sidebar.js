@@ -201,6 +201,85 @@
     });
   });
 
+  let isGenerating = false;
+
+  // Listen for real-time progress broadcast from background/Flow
+  chrome.runtime.onMessage.addListener(msg => {
+    if (msg?.type === "flow-mcp:progress-broadcast" && msg.progress) {
+      setFeedback(`⏳ ${msg.progress}`, true);
+      addLog("Tiến trình", msg.progress, true);
+    }
+  });
+
+  async function executeGenerationTask({ type, prompt, aspect_ratio, count = 1, attachments = [], video_settings, btn, btnTextEl, defaultTextKey }) {
+    if (isGenerating) {
+      setFeedback("Đang có tác vụ đang chạy, vui lòng đợi!", false);
+      return;
+    }
+    isGenerating = true;
+    if (btn) btn.disabled = true;
+
+    try {
+      setFeedback(t("sidebar.generating") || "Đang gửi lệnh tạo...", true);
+      addLog("flow.generation.submit", `[${type.toUpperCase()}] ${prompt.slice(0, 40)}...`, true);
+
+      // Bước 1: Gửi lệnh submit vào Google Flow
+      const submitRes = await chrome.runtime.sendMessage({
+        type: "flow-mcp:dispatch",
+        operation: "flow.generation.submit",
+        payload: {
+          type,
+          prompt,
+          aspect_ratio,
+          count,
+          attachments,
+          ...(video_settings ? { video_settings } : {})
+        }
+      });
+
+      if (!submitRes?.ok) {
+        throw new Error(submitRes?.error?.message || "Lỗi gửi lệnh tạo");
+      }
+
+      const info = submitRes.value || {};
+      setFeedback("Đã gửi yêu cầu tạo. Đang theo dõi tiến trình render...", true);
+      addLog("flow.generation.observe", "Bắt đầu theo dõi render...", true);
+
+      // Bước 2: Theo dõi đến khi Flow render xong 100%
+      const observeRes = await chrome.runtime.sendMessage({
+        type: "flow-mcp:dispatch",
+        operation: "flow.generation.observe",
+        payload: {
+          before: info.before || [],
+          expectedCount: count,
+          correlationAttemptId: info.correlationAttemptId,
+          kind: type,
+          timeoutMs: type === "video" ? 600000 : 300000
+        }
+      });
+
+      if (!observeRes?.ok) {
+        throw new Error(observeRes?.error?.message || "Lỗi trong quá trình render");
+      }
+
+      const mediaList = observeRes.value?.media || [];
+      const countFinished = mediaList.length || count;
+      const doneMsg = type === "video"
+        ? `Tạo video hoàn tất! (${countFinished} video đã sẵn sàng)`
+        : `Tạo ảnh hoàn tất! (${countFinished} ảnh đã sẵn sàng)`;
+
+      setFeedback(`✅ ${doneMsg}`, true);
+      addLog("flow.generation.complete", doneMsg, true);
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("Lỗi", err.message, false);
+    } finally {
+      isGenerating = false;
+      if (btn) btn.disabled = false;
+      if (btnTextEl && defaultTextKey) btnTextEl.textContent = t(defaultTextKey);
+    }
+  }
+
   // SUBMIT TẠO ẢNH (GENERATE IMAGE)
   document.querySelector("#btnSubmitImage").onclick = async () => {
     const prompt = document.querySelector("#inputPromptImage").value.trim();
@@ -217,28 +296,18 @@
       attachments.push({ assetName: `character:${character}` });
     }
 
-    setFeedback(t("sidebar.generating"), true);
-    addLog("flow.generation.submit", `[Image] ${prompt.slice(0, 40)}... (${aspect_ratio})`, true);
-
-    try {
-      const res = await chrome.runtime.sendMessage({
-        type: "flow-mcp:dispatch",
-        operation: "flow.generation.submit",
-        payload: {
-          type: "image",
-          prompt,
-          aspect_ratio,
-          count,
-          attachments
-        }
-      });
-      if (!res?.ok) throw new Error(res?.error?.message || "Lỗi tạo ảnh");
-      setFeedback(t("sidebar.genSuccess"), true);
-      addLog("flow.generation.submit", "Tạo ảnh thành công!", true);
-    } catch (err) {
-      setFeedback(err.message, false);
-      addLog("flow.generation.submit", err.message, false);
-    }
+    const btn = document.querySelector("#btnSubmitImage");
+    const btnTextEl = document.querySelector("#txtBtnSubmitImage");
+    await executeGenerationTask({
+      type: "image",
+      prompt,
+      aspect_ratio,
+      count,
+      attachments,
+      btn,
+      btnTextEl,
+      defaultTextKey: "sidebar.btnGenerateImage"
+    });
   };
 
   // SUBMIT TẠO VIDEO (GENERATE VIDEO)
@@ -258,31 +327,22 @@
       attachments.push({ assetName: `character:${character}` });
     }
 
-    setFeedback(t("sidebar.generating"), true);
-    addLog("flow.generation.submit", `[Video ${duration}s] ${prompt.slice(0, 40)}...`, true);
-
-    try {
-      const res = await chrome.runtime.sendMessage({
-        type: "flow-mcp:dispatch",
-        operation: "flow.generation.submit",
-        payload: {
-          type: "video",
-          prompt,
-          aspect_ratio,
-          video_settings: {
-            mode,
-            duration
-          },
-          attachments
-        }
-      });
-      if (!res?.ok) throw new Error(res?.error?.message || "Lỗi tạo video");
-      setFeedback(t("sidebar.genSuccess"), true);
-      addLog("flow.generation.submit", "Tạo video thành công!", true);
-    } catch (err) {
-      setFeedback(err.message, false);
-      addLog("flow.generation.submit", err.message, false);
-    }
+    const btn = document.querySelector("#btnSubmitVideo");
+    const btnTextEl = document.querySelector("#txtBtnSubmitVideo");
+    await executeGenerationTask({
+      type: "video",
+      prompt,
+      aspect_ratio,
+      count: 1,
+      video_settings: {
+        mode,
+        duration
+      },
+      attachments,
+      btn,
+      btnTextEl,
+      defaultTextKey: "sidebar.btnGenerateVideo"
+    });
   };
 
   // SUBMIT TẠO NHÂN VẬT (CREATE CHARACTER)
