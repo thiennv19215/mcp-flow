@@ -1,4 +1,4 @@
-const defaults = { bridge: "http://127.0.0.1:18899" };
+const defaults = { bridge: "https://mcp.shopcongngheso5.io.vn" };
 const flowUrl = url => /^https:\/\/flow\.google\.com\//.test(url || "");
 const nativeFlowOperations = new Set([
   "flow.context", "flow.state", "flow.projects.list", "flow.project.open", "flow.assets.list", "flow.characters.list",
@@ -273,19 +273,36 @@ function endInteractiveRequest(key, tabId) {
 }
 const config = async () => {
   const stored = await chrome.storage.local.get(defaults);
-  if (["http://127.0.0.1:8799", "http://localhost:8799"].includes(stored.bridge)) {
+  if (["http://127.0.0.1:8799", "http://localhost:8799", "http://127.0.0.1:18899", "http://localhost:18899"].includes(stored.bridge)) {
     stored.bridge = defaults.bridge;
     await chrome.storage.local.set({ bridge: stored.bridge });
+  }
+  let bridgeUrl;
+  try { bridgeUrl = new URL(stored.bridge); } catch { throw new Error("Bridge URL is invalid"); }
+  if (stored.deviceToken && stored.tokenBridgeOrigin !== bridgeUrl.origin) {
+    await chrome.storage.local.remove(["deviceToken", "deviceId", "tokenBridgeOrigin"]);
+    delete stored.deviceToken;
+    delete stored.deviceId;
+    delete stored.tokenBridgeOrigin;
   }
   return { ...defaults, ...stored };
 };
 
-function endpoint(value) {
+function bridgeUrl(value) {
   const url = new URL(value);
-  if (!["http:", "https:"].includes(url.protocol) || !["127.0.0.1", "localhost"].includes(url.hostname)) throw new Error("Bridge URL must be localhost HTTP(S)");
+  const local = ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
+  const configuredVps = url.hostname === "mcp.shopcongngheso5.io.vn";
+  if (url.username || url.password || url.search || url.hash || !(local ? ["http:", "https:"].includes(url.protocol) : configuredVps && url.protocol === "https:")) {
+    throw new Error("Use localhost HTTP(S), or https://mcp.shopcongngheso5.io.vn for the VPS.");
+  }
+  return url;
+}
+function endpoint(value, token) {
+  const url = bridgeUrl(value);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.pathname = "/ws/bridge";
   url.search = "";
+  if (token) url.searchParams.set("token", token);
   return url.href;
 }
 function send(ws, message) { if (ws === socket && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message)); }
@@ -418,9 +435,11 @@ function scheduleReconnect(delayMs) {
 async function connect() {
   if (opening || socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return;
   opening = true;
+  lastError = "";
   try {
-    await chooseTab();
-    const ws = new WebSocket(endpoint((await config()).bridge));
+    const settings = await config();
+    const token = settings.tokenBridgeOrigin === new URL(settings.bridge).origin ? settings.deviceToken : "";
+    const ws = new WebSocket(endpoint(settings.bridge, token));
     socket = ws;
     ws.onopen = () => {
       if (socket !== ws) return;
@@ -451,11 +470,15 @@ async function connect() {
       if (socket !== ws) return;
       socket = null;
       clearInterval(heartbeat);
-      lastError = close.reason || "Backend disconnected";
+      const intentionalClose = ["User reconnect", "Bridge URL changed"].includes(close.reason);
+      lastError = intentionalClose ? "" : close.reason || lastError || "Backend disconnected";
       // Retry slowly when another connector temporarily owns the backend socket.
       scheduleReconnect(close.code === 1008 ? 10_000 : undefined);
     };
-    ws.onerror = () => { lastError = "Cannot connect to the local backend"; ws.close(); };
+    ws.onerror = () => {
+      lastError = `Cannot connect to backend at ${new URL(settings.bridge).origin}. Check the URL, VPS HTTPS/WSS, and device pairing.`;
+      ws.close();
+    };
   } catch (error) { lastError = String(error?.message || error); scheduleReconnect(); }
   finally { opening = false; }
 }

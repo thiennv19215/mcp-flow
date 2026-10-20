@@ -139,7 +139,7 @@
         wsConnected: false,
         flowTabs: 0,
         selectedTabId: null,
-        bridge: "http://127.0.0.1:18899",
+        bridge: "https://mcp.shopcongngheso5.io.vn",
         error: err.message
       });
     }
@@ -467,6 +467,8 @@
       setFeedback(err.message, false);
     }
   };
+
+  document.querySelector("#btnPairSettings").onclick = () => chrome.runtime.openOptionsPage();
 
   // Initialize
   const initLocale = typeof I18n !== "undefined" ? I18n.init() : Promise.resolve();

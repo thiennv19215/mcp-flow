@@ -9,7 +9,9 @@ function mapErrorMessage(raw) {
   if (!raw) return "";
   const str = String(raw);
   if (/Open a Flow project/i.test(str)) return t("errNoFlowTab");
-  if (/Cannot connect to the local backend|ECONNREFUSED/i.test(str)) return t("errBackendDown");
+  const backendError = str.match(/Cannot connect to backend at (.+?)\. Check the URL/i);
+  if (backendError) return `${t("errBackendDown")} (${backendError[1]})`;
+  if (/Cannot connect to .*backend|ECONNREFUSED/i.test(str)) return t("errBackendDown");
   return `${t("errGeneric")} ${str}`;
 }
 
@@ -124,7 +126,7 @@ initLocale.then(() => {
     wsConnected: false,
     flowTabs: 0,
     selectedTabId: null,
-    bridge: "http://127.0.0.1:18899",
+    bridge: "https://mcp.shopcongngheso5.io.vn",
     error: err.message
   });
 });

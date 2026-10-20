@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Flow MCP Native Automation",
-  "version": "0.2.18",
+  "version": "0.2.19",
   "minimum_chrome_version": "116",
   "description": "Flow MCP with browser-side automation handlers in a Chrome extension.",
   "icons": {
@@ -30,11 +30,12 @@
   },
   "host_permissions": [
     "https://flow.google.com/*",
+    "https://mcp.shopcongngheso5.io.vn/*",
     "http://127.0.0.1/*",
     "http://localhost/*"
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' ws://127.0.0.1:* ws://localhost:* http://127.0.0.1:* http://localhost:*"
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://mcp.shopcongngheso5.io.vn wss://mcp.shopcongngheso5.io.vn ws://127.0.0.1:* ws://localhost:* http://127.0.0.1:* http://localhost:*"
   },
   "background": {
     "service_worker": "background/service-worker.js",

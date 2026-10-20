@@ -10,7 +10,7 @@ This deploys the HTTP backend and Studio on one Linux VPS behind Caddy-managed H
 
 The backend now has user and device accounts in SQLite. Device bearer tokens select a separate persisted job queue, Flow WebSocket connection, uploads, and output directory for each paired device. Keep the admin credentials private; users should receive only their pairing code.
 
-The checked-in extension still restricts its bridge URL to localhost and does not perform pairing or send a device token. The backend is ready for that protocol, but browser control from a remote user's computer requires a later extension update. The public WebSocket rejects connections without a valid device token or the configured server WebSocket secret.
+The extension supports the public HTTPS/WSS endpoint and device pairing. Each Chrome profile must pair with a user code before the VPS accepts its WebSocket connection. The public WebSocket rejects connections without a valid device token or the configured server WebSocket secret.
 
 ## Configure and start
 
@@ -70,6 +70,6 @@ docker compose up -d --build
 ## Current limitations
 
 - SQLite persists each device's job queue and output/upload paths are isolated per device. Queued work resumes when the paired extension reconnects and reports status. A job that was already running during a server restart is marked as an unknown outcome and cannot be retried automatically; check Flow first to avoid duplicate generation or charges.
-- The current extension only accepts localhost bridge URLs and has no pairing UI/token storage. It must be updated to use the public HTTPS/WSS URL, exchange the pairing code, store its device token securely, and reconnect with that token.
+- VPS pairing is configured in the extension options: enter the public HTTPS URL and the user's pairing code, then save. The extension exchanges the code for a device token and reconnects over WSS. Revoke a lost Chrome profile from the admin UI.
 - A paired device represents one browser profile/Flow session. A person using multiple Chrome profiles should pair each profile separately; each gets its own device token and queue.
 - The VPS does not host the user's Google Flow session. The extension stays on the user's computer and sends authenticated browser commands to the backend.

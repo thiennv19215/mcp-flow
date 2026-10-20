@@ -267,6 +267,12 @@
       color: #34d399;
     }
 
+    .status-msg.error {
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #fca5a5;
+    }
+
     @keyframes fadeIn {
       from { opacity: 0; transform: translateY(-4px); }
       to { opacity: 1; transform: translateY(0); }
@@ -322,7 +328,7 @@
         </div>
         <div class="title-wrap">
           <h1 id="txtTitle">Cài đặt Flow MCP Connector</h1>
-          <div class="subtitle" id="txtSubtitle">Cấu hình kết nối giữa Chrome Extension và Flow MCP Server cục bộ.</div>
+        <div class="subtitle" id="txtSubtitle">Kết nối extension với backend Flow MCP trên máy tính hoặc VPS.</div>
         </div>
       </div>
       <div class="lang-switch" title="Chuyển đổi ngôn ngữ / Switch language">
@@ -352,11 +358,12 @@
               <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
             </svg>
           </span>
-          <input type="text" id="bridge" value="http://127.0.0.1:18899" placeholder="http://127.0.0.1:18899">
+          <input type="text" id="bridge" value="https://mcp.shopcongngheso5.io.vn" placeholder="https://your-vps-domain">
         </div>
 
         <div class="presets">
-          <span class="preset-chip" data-url="http://127.0.0.1:18899">http://127.0.0.1:18899 (Mặc định)</span>
+          <span class="preset-chip" data-url="https://mcp.shopcongngheso5.io.vn">VPS backend</span>
+          <span class="preset-chip" data-url="http://127.0.0.1:18899">Localhost</span>
           <span class="preset-chip" data-url="http://localhost:18899">http://localhost:18899</span>
         </div>
 
@@ -366,8 +373,16 @@
             <line x1="12" y1="16" x2="12" y2="12"></line>
             <line x1="12" y1="8" x2="12.01" y2="8"></line>
           </svg>
-          <span id="txtHelp">Extension tự động xác thực bằng ID extension. Không cần nhập token bảo mật.</span>
+          <span id="txtHelp">Backend VPS cần HTTPS. Nhập mã ghép đôi do quản trị viên cấp để xác thực thiết bị Chrome này.</span>
         </div>
+      </div>
+
+      <div class="form-group">
+        <label for="pairingCode" id="lblPairingCode">Mã ghép đôi VPS</label>
+        <div class="input-wrap">
+          <input type="password" id="pairingCode" autocomplete="one-time-code" placeholder="Ví dụ: ABCD-EFGH" />
+        </div>
+        <div class="help-text"><span id="txtPairingHelp">Mã này được đổi lấy token riêng cho profile Chrome hiện tại và sẽ được xóa sau khi ghép đôi.</span></div>
       </div>
 
       <button class="btn-save" id="save">
@@ -376,7 +391,7 @@
           <polyline points="17 21 17 13 7 13 7 21"></polyline>
           <polyline points="7 3 7 8 15 8"></polyline>
         </svg>
-        <span id="txtBtnSave">Lưu cấu hình & Kết nối lại</span>
+        <span id="txtBtnSave">Lưu và ghép đôi / kết nối</span>
       </button>
 
       <div class="status-msg" id="status"></div>

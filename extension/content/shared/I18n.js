@@ -41,7 +41,7 @@
           previewTriggered: "Đang hiển thị viền xanh trên tab Flow...",
           errNoFlowTab: "Mở Google Flow; tiện ích sẽ tự kết nối với tab đang hoạt động.",
           selectingTab: "Đang tự chọn tab Flow…",
-          errBackendDown: "Chưa bật Flow MCP backend (cổng 18899). Hãy chạy Start Flow.cmd.",
+          errBackendDown: "Không kết nối được backend Flow MCP. Kiểm tra URL VPS, HTTPS/WSS và mã ghép đôi.",
           errGeneric: "Lỗi kết nối:",
         },
         sidebar: {
@@ -181,7 +181,7 @@
           previewTriggered: "Displaying activity border on Flow tab...",
           errNoFlowTab: "Open Google Flow; the extension connects to the active Flow tab automatically.",
           selectingTab: "Selecting a Flow tab automatically…",
-          errBackendDown: "Cannot connect to Flow MCP backend (port 18899). Run Start Flow.cmd.",
+          errBackendDown: "Cannot connect to the Flow MCP backend. Check the VPS URL, HTTPS/WSS, and pairing code.",
           errGeneric: "Connector error:",
         },
         sidebar: {

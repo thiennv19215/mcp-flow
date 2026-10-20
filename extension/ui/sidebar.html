@@ -737,7 +737,7 @@
             <span class="pulse-dot"></span>
             <span id="wsText">Đang kiểm tra…</span>
           </span>
-          <span class="info-tag" id="bridgeSummary">127.0.0.1:18899</span>
+          <span class="info-tag" id="bridgeSummary">mcp.shopcongngheso5.io.vn</span>
         </div>
 
         <div class="info-list">
@@ -808,12 +808,14 @@
       <div class="section-card">
         <div class="form-group">
           <label class="form-label">Địa chỉ Backend Bridge URL:</label>
-          <input type="text" class="form-input" id="inputBridgeUrl" value="http://127.0.0.1:18899" />
+          <input type="text" class="form-input" id="inputBridgeUrl" value="https://mcp.shopcongngheso5.io.vn" placeholder="https://your-vps-domain" />
+          <small style="display:block;margin-top:8px;color:var(--text-muted)">VPS cần HTTPS và mã ghép đôi. Mở cài đặt extension để nhập mã.</small>
         </div>
 
         <button class="btn btn-primary" id="btnSaveSettings">
           <span id="txtSaveSettings">Lưu cài đặt</span>
         </button>
+        <button class="btn" id="btnPairSettings" style="margin-top:8px">Mở cài đặt ghép đôi VPS</button>
       </div>
     </div>
   </div>
