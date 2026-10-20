@@ -3,10 +3,16 @@
 
   const isNavControl = el => root.isFlowProjectNavigationControl?.(el) || false;
 
+  const OPTION_ALIASES = {
+    video: ["video", "clip"],
+    image: ["image", "hình ảnh", "ảnh"],
+    ingredients: ["ingredients", "thành phần", "nguyên liệu"],
+    frames: ["frames", "khung hình", "khung ảnh", "khung"],
+  };
+
   function flowRadio(name) {
     const wanted = String(name || "").trim().toLowerCase();
     const normalizedWanted = root.normalizeAspectRatio?.(wanted) || wanted;
-    const OPTION_ALIASES = { video: ["video", "clip"], image: ["image", "hình ảnh", "ảnh"] };
     const aliases = OPTION_ALIASES[wanted] || (normalizedWanted ? [wanted, normalizedWanted] : [wanted]);
     return [...document.querySelectorAll('[role="radio"],mat-radio-button')].find(el => {
       if (!root.visible?.(el) || isNavControl(el)) return false;
@@ -20,7 +26,6 @@
   function flowOption(name) {
     const expected = String(name).replace(/\s+/g, " ").trim().toLowerCase();
     const normalizedExpected = root.normalizeAspectRatio?.(expected) || expected;
-    const OPTION_ALIASES = { video: ["video", "clip"], image: ["image", "hình ảnh", "ảnh"] };
     const aliases = OPTION_ALIASES[expected] || (normalizedExpected ? [expected, normalizedExpected] : [expected]);
     const settingsTrigger = root.flowButton?.("Settings trigger");
     return [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')].find(el => {
@@ -112,7 +117,7 @@
       const candidates = [...panel.querySelectorAll('button[role="tab"], [role="radio"], mat-radio-button, button')].filter(el => root.visible?.(el) && !isNavControl(el));
       const match = candidates.find(el => {
         const txt = (el.innerText || el.textContent || "").trim().toLowerCase();
-        if (txt === str || txt === String(num)) return true;
+        if (txt === str || txt === String(num) || txt === `${num} giây` || txt === `${num}s`) return true;
         const m = txt.match(/^(\d{1,2})[\p{L}\p{M}.]*$/u);
         return m && Number(m[1]) === num;
       });
@@ -272,7 +277,8 @@
   }
 
   function findModelPickerButton() {
-    let button = root.flowButton?.("Select model family") || root.flowButton?.("Model") || root.flowButton?.("Model family");
+    let button = root.flowButton?.("Select model family") || root.flowButton?.("Model") || root.flowButton?.("Model family") ||
+      root.flowButton?.("Chọn dòng mô hình") || root.flowButton?.("Dòng mô hình") || root.flowButton?.("Mô hình");
     if (button) return button;
 
     const panel = flowSettingsPanelVisible() ? (document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog') || document) : document;
@@ -281,9 +287,9 @@
     const isExcluded = el => {
       const txt = (el.innerText || el.textContent || "").trim().toLowerCase();
       const aria = (root.accessibleName?.(el) || "").toLowerCase();
-      if (/^(?:image|video|frames|ingredients|thành phần|khung hình)$/i.test(txt)) return true;
-      if (/^\d+:\d+$/.test(txt) || /^x\d+$/i.test(txt) || /^\d+\s*s$/i.test(txt) || /^\d{3,4}p$/i.test(txt)) return true;
-      if (/settings trigger|start generation|clear prompt|add media|back button/i.test(aria)) return true;
+      if (/^(?:image|video|frames|ingredients|thành phần|khung hình|hình ảnh|ảnh|nguyên liệu)$/i.test(txt)) return true;
+      if (/^\d+:\d+$/.test(txt) || /^x\d+$/i.test(txt) || /^\d+\s*s$/i.test(txt) || /^\d+\s*giây$/i.test(txt) || /^\d{3,4}p$/i.test(txt)) return true;
+      if (/settings trigger|start generation|clear prompt|add media|back button|cài đặt|bắt đầu tạo|xóa câu lệnh|thêm nội dung|nút quay lại/i.test(aria)) return true;
       return false;
     };
 
@@ -291,7 +297,7 @@
       if (isExcluded(el)) return false;
       const txt = (el.innerText || el.textContent || "").trim().toLowerCase();
       const aria = (root.accessibleName?.(el) || "").toLowerCase();
-      return /select model|model family|model picker/i.test(aria) || /veo|imagen|nano banana/i.test(txt) || /veo|imagen|nano banana/i.test(aria);
+      return /select model|model family|model picker|chọn dòng mô hình|dòng mô hình|mô hình/i.test(aria) || /veo|imagen|nano banana/i.test(txt) || /veo|imagen|nano banana/i.test(aria);
     });
     return button || null;
   }
@@ -390,7 +396,7 @@
     await openFlowSettings();
     const findFrames = () => [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')]
       .find(el => root.visible?.(el) && !isNavControl(el) &&
-        (root.accessibleName?.(el) || "").replace(/^(?:accessibility_new|dashboard|face)\s*/i, "").replace(/\s+/g, " ").trim().toLocaleLowerCase() === "frames");
+        /^(?:frames|khung hình|khung|khung ảnh)$/i.test((root.accessibleName?.(el) || "").replace(/^(?:accessibility_new|dashboard|face)\s*/i, "").replace(/\s+/g, " ").trim()));
     let frames = findFrames();
     if (!frames) throw root.flowError("FLOW_FRAMES_MODE_UNAVAILABLE", "Flow does not show a Frames mode control after local frame upload. Nothing was submitted.", true, false);
     if (!nativeRadioSelected(frames) && frames.getAttribute("aria-selected") !== "true") frames.click();

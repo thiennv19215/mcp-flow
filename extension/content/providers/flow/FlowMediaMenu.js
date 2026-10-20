@@ -4,7 +4,12 @@
   function flowTileOptionsButton(tile) {
     return [...tile.querySelectorAll('button,[role="button"]')].find(el => {
       const label = (root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim().toLowerCase();
-      return !el.disabled && el.getAttribute("aria-disabled") !== "true" && (label === "more options" || label.startsWith("more options "));
+      const icon = el.querySelector?.("mat-icon, .mat-icon, .google-symbols")?.textContent?.trim().toLowerCase();
+      return !el.disabled && el.getAttribute("aria-disabled") !== "true" &&
+        (label === "more options" || label.startsWith("more options ") ||
+         label === "tùy chọn khác" || label.startsWith("tùy chọn khác") ||
+         label === "tác vụ khác" || label === "thêm tùy chọn" ||
+         icon === "more_vert" || icon === "more_horiz");
     });
   }
 
@@ -22,8 +27,8 @@
 
   function flowDownloadChoice(items, quality, kind) {
     const wanted = kind === "video"
-      ? quality === "upscaled" ? /1080p|upscaled|chất lượng cao/i : /720p|original|gốc/i
-      : quality === "upscaled" ? /upscaled|2x|4x|2k|chất lượng cao/i : /original|1k|gốc/i;
+      ? quality === "upscaled" ? /1080p|upscaled|chất lượng cao|đã nâng cấp/i : /720p|original|gốc|chất lượng gốc/i
+      : quality === "upscaled" ? /upscaled|2x|4x|2k|chất lượng cao|đã nâng cấp/i : /original|1k|gốc|chất lượng gốc/i;
     return items.find(item => !item.disabled && item.getAttribute("aria-disabled") !== "true" && wanted.test(flowMenuLabel(item)));
   }
 
@@ -147,7 +152,7 @@
       if (scene) {
         tile.click();
         await root.wait?.(1200);
-        const download = root.flowButton?.("Download scene");
+        const download = root.flowButton?.("Download scene") || root.flowButton?.("Tải xuống cảnh") || root.flowButton?.("Tải cảnh");
         if (!download) throw root.flowError("FLOW_SCENE_DOWNLOAD_MISSING", "Scene view opened but Download scene is unavailable.", true);
         download.click();
       } else {
@@ -167,11 +172,11 @@
           const menuDeadline = Date.now() + 1800;
           do {
             entries = flowMenuItems();
-            if (entries.some(el => /^(?:Download|Tải xuống)(?:\s+(?:image|video|hình ảnh))?$/i.test(flowMenuLabel(el)))) break;
+            if (entries.some(el => /^(?:Download|Tải xuống)(?:\s+(?:image|video|hình ảnh|ảnh))?$/i.test(flowMenuLabel(el)))) break;
             await root.wait?.(100);
           } while (Date.now() < menuDeadline);
         }
-        const download = entries.find(el => /^(?:Download|Tải xuống)(?:\s+(?:image|video|hình ảnh))?$/i.test(flowMenuLabel(el)));
+        const download = entries.find(el => /^(?:Download|Tải xuống)(?:\s+(?:image|video|hình ảnh|ảnh))?$/i.test(flowMenuLabel(el)));
         if (download) {
           if (download.getAttribute("aria-haspopup") === "menu") {
             const parentMenu = download.closest('[role="menu"],mat-menu-panel') || download.parentElement;

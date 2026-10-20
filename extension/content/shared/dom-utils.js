@@ -138,9 +138,82 @@ function classifyFlowError(rawText) {
   return null;
 }
 
+var BUTTON_SYNONYMS = {
+  "settings trigger": ["settings trigger", "cài đặt", "kích hoạt cài đặt", "cài đặt tham số", "tune", "settings"],
+  "start generation": ["start generation", "bắt đầu tạo", "tạo video", "tạo ảnh", "tạo", "bắt đầu", "generate", "create"],
+  "clear prompt": ["clear prompt", "xóa câu lệnh", "xóa lời nhắc", "xóa văn bản", "xóa prompt", "clear text"],
+  "add ingredients to the prompt box": [
+    "add ingredients to the prompt box", "thêm thành phần vào hộp câu lệnh", "thêm thành phần vào hộp lời nhắc",
+    "thêm thành phần", "thêm nguyên liệu", "add ingredients", "add media", "thêm nội dung nghe nhìn", "thêm tệp"
+  ],
+  "add to prompt": ["add to prompt", "thêm vào câu lệnh", "thêm vào lời nhắc", "thêm vào lời nhắc văn bản", "thêm vào prompt", "thêm"],
+  "start": ["start", "bắt đầu", "khung bắt đầu", "start frame"],
+  "end": ["end", "kết thúc", "khung kết thúc", "end frame"],
+  "go back": ["go back", "back", "quay lại", "quay về", "trở lại"],
+  "back": ["back", "go back", "quay lại", "quay về", "back button to go to previous page", "nút quay lại"],
+  "done": ["done", "done editing", "xong", "hoàn tất", "lưu"],
+  "done editing": ["done editing", "done", "xong", "hoàn tất"],
+  "close": ["close", "đóng", "dismiss", "hủy", "got it", "bỏ qua"],
+  "save": ["save", "lưu", "áp dụng"],
+  "more options": ["more options", "tùy chọn khác", "tác vụ khác", "thêm tùy chọn", "thêm", "more"],
+  "download scene": ["download scene", "tải xuống cảnh", "tải cảnh"],
+  "download image": ["download image", "tải xuống hình ảnh", "tải xuống ảnh", "tải ảnh"],
+  "download video": ["download video", "tải xuống video", "tải video"],
+  "reuse prompt": ["reuse prompt", "sử dụng lại câu lệnh", "dùng lại lời nhắc", "dùng lại câu lệnh", "sử dụng lại lời nhắc"],
+  "start new session": ["start new session", "bắt đầu phiên mới", "phiên mới"],
+  "account details": ["account details", "chi tiết tài khoản", "tài khoản"],
+  "close account panel": ["close account panel", "đóng bảng tài khoản", "đóng tài khoản"],
+  "add media menu": ["add media menu", "thêm nội dung nghe nhìn", "menu thêm tệp", "thêm tệp", "add media"],
+  "skip to next clip": ["skip to next clip", "chuyển đến đoạn video tiếp theo", "bỏ qua đến clip tiếp theo", "clip tiếp theo"],
+  "save frame": ["save frame", "lưu khung hình", "lưu khung ảnh", "lưu khung"],
+  "animate": ["animate", "tạo hiệu ứng động", "làm chuyển động", "tạo animation"],
+  "agent": ["agent", "trợ lý"],
+  "select a voice": ["select a voice", "chọn giọng nói", "giọng nói"],
+  "add to character": ["add to character", "thêm vào nhân vật", "thêm giọng nói"],
+  "add from project": ["add from project", "thêm từ dự án", "chọn từ dự án"],
+  "upload": ["upload", "tải lên", "tải tệp lên"],
+};
+
 function flowButton(name, root = document) {
-  return [...root.querySelectorAll('button,[role="button"]')].find(el =>
+  const normName = String(name || "").trim().toLowerCase();
+  const direct = [...root.querySelectorAll('button,[role="button"]')].find(el =>
     visible(el) && matchesName(semanticActionText(el).replace(/\s+/g, " ").trim(), name, null, true));
+  if (direct) return direct;
+
+  const synonyms = BUTTON_SYNONYMS[normName];
+  if (synonyms && synonyms.length) {
+    const candidates = [...root.querySelectorAll('button,[role="button"]')].filter(visible);
+    const matched = candidates.find(el => {
+      const text = semanticActionText(el).replace(/\s+/g, " ").trim().toLowerCase();
+      const aria = (accessibleName(el) || "").replace(/\s+/g, " ").trim().toLowerCase();
+      const inner = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+      const icon = el.querySelector?.("mat-icon, .mat-icon, .google-symbols, svg")?.textContent?.trim()?.toLowerCase() || "";
+      return synonyms.some(syn =>
+        text === syn || aria === syn || inner === syn ||
+        text.includes(syn) || aria.includes(syn) ||
+        (icon && syn === icon)
+      );
+    });
+    if (matched) return matched;
+
+    // Phục hồi bằng icon đặc trưng của Flow
+    if (normName === "settings trigger") {
+      const iconTrigger = candidates.find(el => {
+        const icon = el.querySelector?.("mat-icon, .mat-icon, .google-symbols")?.textContent?.trim()?.toLowerCase();
+        return icon === "tune" || icon === "settings";
+      });
+      if (iconTrigger) return iconTrigger;
+    }
+    if (normName === "add ingredients to the prompt box" || normName === "add media menu") {
+      const iconAdd = candidates.find(el => {
+        const icon = el.querySelector?.("mat-icon, .mat-icon, .google-symbols")?.textContent?.trim()?.toLowerCase();
+        return (icon === "add" || icon === "add_circle") && !isFlowProjectNavigationControl(el);
+      });
+      if (iconAdd) return iconAdd;
+    }
+  }
+
+  return null;
 }
 
 async function waitForEnabledFlowButton(name, timeoutMs = 8000) {
@@ -154,9 +227,9 @@ async function waitForEnabledFlowButton(name, timeoutMs = 8000) {
 }
 
 function isFlowProjectNavigationControl(el) {
-  if (el.closest('nav,[role="navigation"]')) return true;
+  if (el.closest?.('nav,[role="navigation"]')) return true;
   for (let parent = el; parent && parent !== document.body; parent = parent.parentElement) {
-    if (/project navigation/i.test(parent.getAttribute("aria-label") || "")) return true;
+    if (/project navigation|điều hướng dự án/i.test(parent.getAttribute?.("aria-label") || "")) return true;
   }
   return false;
 }
@@ -176,6 +249,8 @@ function normalizeAspectRatio(input) {
 var OPTION_ALIASES = {
   video: ["video", "clip"],
   image: ["image", "hình ảnh", "ảnh"],
+  ingredients: ["ingredients", "thành phần", "nguyên liệu"],
+  frames: ["frames", "khung hình", "khung ảnh", "khung"],
 };
 
 function flowRadio(name) {
@@ -471,21 +546,24 @@ async function insertNativeFlowPrompt(el, value) {
   return !expected || actual === expected || actual.endsWith(expected);
 }
 
+var FLOW_CREDIT_QUOTE_REGEX = /(?:\b(?:generating\s+)?will\s+use\s+([\d,]+(?:\.\d+)?)\s+credits?\b|(?:quá trình tạo\s+)?(?:sẽ\s+dùng|sẽ\s+sử\s+dụng|tiêu\s+tốn)\s+([\d,]+(?:\.\d+)?)\s+(?:tín\s+dụng|điểm\s+tín\s+dụng|credits?))/i;
+var FLOW_CREDIT_BARE_REGEX = /^([\d,]+(?:\.\d+)?)\s+(?:credits?|tín\s+dụng|điểm\s+tín\s+dụng)$/i;
+
 function readGenerationCreditQuote() {
   const pageText = (document.body?.innerText || "").replace(/\s+/g, " ").trim();
-  const pageUsage = pageText.match(/\b(?:generating\s+)?will\s+use\s+([\d,]+(?:\.\d+)?)\s+credits?\b/i);
-  if (pageUsage) return Number(pageUsage[1].replace(/,/g, ""));
+  const pageUsage = pageText.match(FLOW_CREDIT_QUOTE_REGEX);
+  if (pageUsage) return Number((pageUsage[1] || pageUsage[2]).replace(/,/g, ""));
   const candidates = [...document.querySelectorAll("a,button,[role],p,span")]
     .filter(visible)
     .map(el => (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim())
     .filter(Boolean);
   // Prefer Flow's explicit usage quote; a balance or unrelated "N credits" label is not a quote.
-  const usage = candidates.map(text => ({ text, match: text.match(/\b(?:generating\s+)?will\s+use\s+([\d,]+(?:\.\d+)?)\s+credits?\b/i) }))
+  const usage = candidates.map(text => ({ text, match: text.match(FLOW_CREDIT_QUOTE_REGEX) }))
     .filter(item => item.match)
     .sort((a, b) => a.text.length - b.text.length)[0];
-  if (usage) return Number(usage.match[1].replace(/,/g, ""));
+  if (usage) return Number((usage.match[1] || usage.match[2]).replace(/,/g, ""));
   // Retain compatibility with Flow builds that expose only a bare numeric quote.
-  const bare = candidates.map(text => ({ text, match: text.match(/^([\d,]+(?:\.\d+)?)\s+credits?$/i) }))
+  const bare = candidates.map(text => ({ text, match: text.match(FLOW_CREDIT_BARE_REGEX) }))
     .filter(item => item.match)
     .sort((a, b) => a.text.length - b.text.length)[0];
   return bare ? Number(bare.match[1].replace(/,/g, "")) : undefined;
@@ -507,23 +585,32 @@ function cleanCharacterName(value) {
     .replace(/\s+/g, " ").trim();
 }
 
+var NAV_SYNONYMS = {
+  "characters": ["characters", "nhân vật", "nhan vat"],
+  "all media": ["all media", "tất cả nội dung nghe nhìn", "tất cả phương tiện", "tất cả media", "tất cả"]
+};
+
 function flowNavigationItem(label) {
   const normalize = value => cleanCharacterName(String(value || "").replace(/\s+/g, " ").trim()).toLowerCase();
-  const navigation = [...document.querySelectorAll('nav,[role="navigation"]')].find(el =>
-    /project navigation/i.test(accessibleName(el)) || /project navigation/i.test(el.getAttribute("aria-label") || ""));
+  const navigation = [...document.querySelectorAll('nav,[role="navigation"],mat-sidenav')].find(el =>
+    /project navigation|điều hướng dự án|dự án/i.test(accessibleName(el)) ||
+    /project navigation|điều hướng dự án|dự án/i.test(el.getAttribute?.("aria-label") || "") ||
+    el.querySelector?.('mat-icon')
+  ) || document.querySelector('nav,[role="navigation"],mat-sidenav');
   const roots = navigation ? [navigation] : [document];
   const candidates = roots.flatMap(root => [...root.querySelectorAll(
     'a,button,[role="button"],[role="menuitem"],mat-list-item,button[mat-list-item]'
   )]);
   const wanted = normalize(label);
+  const synonyms = NAV_SYNONYMS[wanted] || [wanted];
   return candidates.find(el => {
-    if (!visible(el) || el.disabled || el.getAttribute("aria-disabled") === "true") return false;
+    if (!visible(el) || el.disabled || el.getAttribute?.("aria-disabled") === "true") return false;
     const text = normalize(el.innerText || el.textContent || accessibleName(el));
-    const iconNames = [...el.querySelectorAll("mat-icon")].map(icon => normalize(icon.innerText || icon.textContent));
-    if (label === "Characters" && iconNames.includes("accessibility_new")) return true;
-    if (label === "All media" && iconNames.includes("dashboard")) return true;
+    const iconNames = [...(el.querySelectorAll?.("mat-icon") || [])].map(icon => normalize(icon.innerText || icon.textContent));
+    if ((wanted === "characters" || synonyms.includes("nhân vật")) && (iconNames.includes("accessibility_new") || iconNames.includes("person"))) return true;
+    if ((wanted === "all media" || synonyms.includes("tất cả nội dung nghe nhìn")) && (iconNames.includes("dashboard") || iconNames.includes("perm_media"))) return true;
     // Material icon ligatures can prefix the visible navigation label (for example "image All media").
-    return text === wanted || text.endsWith(` ${wanted}`);
+    return synonyms.some(syn => text === syn || text.endsWith(` ${syn}`));
   });
 }
 
@@ -762,13 +849,13 @@ async function ensureFlowLibrarySection(label) {
   const deadline = Date.now() + (label === "Characters" ? 10_000 : 5000);
   const hasCharacterAction = () => [...document.querySelectorAll("flow-custom-tile")].some(tile => {
     if (!visible(tile)) return false;
-    const addIcon = [...tile.querySelectorAll("mat-icon")].some(icon =>
+    const addIcon = [...(tile.querySelectorAll?.("mat-icon") || [])].some(icon =>
       cleanCharacterName(icon.innerText || icon.textContent || "").toLowerCase() === "add");
     const text = cleanCharacterName(tile.innerText || tile.textContent || "").toLowerCase();
     return addIcon && (/character/.test(text) || /nhân vật/.test(text));
   });
   const hasEmptyCharacterChooser = () => /\/character\/?$/i.test(location.pathname) &&
-    (flowButton("Go back") || flowButton("Add from project"));
+    (flowButton("Go back") || flowButton("Add from project") || flowButton("Quay lại") || flowButton("Thêm từ dự án"));
   const hasSectionMarker = () => label === "Characters"
     ? hasCharacterAction() || hasEmptyCharacterChooser()
     : label === "All media" && [...document.querySelectorAll("flow-grid-tile-container")].some(visible);
@@ -806,6 +893,11 @@ if (typeof globalThis !== "undefined") {
   globalThis.exitFlowMediaViewer = exitFlowMediaViewer;
   globalThis.clearExistingIngredientChips = clearExistingIngredientChips;
   globalThis.checkFlowCreditLimitAlert = checkFlowCreditLimitAlert;
+  globalThis.readGenerationCreditQuote = readGenerationCreditQuote;
+  globalThis.waitForGenerationCreditQuote = waitForGenerationCreditQuote;
+  globalThis.flowRadio = flowRadio;
+  globalThis.flowOption = flowOption;
+  globalThis.flowNavigationItem = flowNavigationItem;
   globalThis.ensureFlowLibrarySection = ensureFlowLibrarySection;
   globalThis.waitForFlowRoute = waitForFlowRoute;
 }

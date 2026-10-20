@@ -3,13 +3,20 @@
 
   async function setNativeAgentSettings(confirm, aspect) {
     const composer = document.querySelector("flow-base-prompt-box");
-    const settings = composer && [...composer.querySelectorAll('button,[role="button"]')].find(el =>
-      root.visible?.(el) && (root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim() === "Settings");
+    const settings = composer && [...composer.querySelectorAll('button,[role="button"]')].find(el => {
+      if (!root.visible?.(el)) return false;
+      const label = (root.accessibleName?.(el) || el.innerText || "").replace(/\s+/g, " ").trim().toLowerCase();
+      const icon = el.querySelector?.("mat-icon, .mat-icon, .google-symbols")?.textContent?.trim().toLowerCase();
+      return /^(?:settings|cài đặt)$/i.test(label) || icon === "tune" || icon === "settings";
+    });
     if (!settings) throw root.flowError("NATIVE_CAPABILITY_UNSUPPORTED", "Flow Agent settings are not available in this view; nothing was submitted.", true);
     settings.click();
     await root.wait?.(350);
+    const confirmPatterns = confirm === "Never"
+      ? /^(?:never|không bao giờ)/i
+      : /^(?:always|luôn luôn)/i;
     const confirmRadio = [...document.querySelectorAll('[role="radio"],mat-radio-button')].find(el =>
-      root.visible?.(el) && new RegExp(`^${confirm}(?:\\b|\\s)`, "i").test((root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim()));
+      root.visible?.(el) && confirmPatterns.test((root.accessibleName?.(el) || el.innerText || "").replace(/\s+/g, " ").trim()));
     if (!confirmRadio) throw root.flowError("NATIVE_CAPABILITY_UNSUPPORTED", "Flow Agent confirmation settings are unavailable; nothing was submitted.", true);
     if (!root.FlowSettings?.nativeRadioSelected?.(confirmRadio)) confirmRadio.click();
     if (aspect) {
@@ -34,7 +41,7 @@
     for (let attempt = 0; attempt < 3; attempt++) {
       if (modeIs()) return;
       const settingsDialog = [...document.querySelectorAll('[role="dialog"],mat-dialog-container,.cdk-overlay-pane')].find(el =>
-        root.visible?.(el) && /Agent settings/i.test(el.innerText || el.textContent || ""));
+        root.visible?.(el) && /Agent settings|cài đặt trợ lý/i.test(el.innerText || el.textContent || ""));
       const save = settingsDialog && root.flowButton?.("Save", settingsDialog);
       if (save) { save.click(); await root.wait?.(400); }
       const focused = document.activeElement;
@@ -83,7 +90,7 @@
     if (!box || !root.replaceNativeEditableText?.(box, answer)) return false;
     await root.wait?.(200);
     const send = [...document.querySelectorAll("button,[role=button]")].find(el =>
-      root.visible?.(el) && !el.disabled && /^(send|submit|continue)$/i.test((root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim()));
+      root.visible?.(el) && !el.disabled && /^(send|submit|continue|gửi|tiếp tục)$/i.test((root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim()));
     if (send) send.click();
     else {
       box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true, cancelable: true }));

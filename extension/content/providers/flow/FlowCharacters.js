@@ -47,7 +47,7 @@
         if (!visible(tile)) continue;
         const hasAddIcon = [...tile.querySelectorAll("mat-icon")].some(icon => normalize(icon.innerText || icon.textContent) === "add");
         const tileText = normalize(cleanCharacterName(tile.innerText || tile.textContent || ""));
-        if (!hasAddIcon || !/(?:new character|nhân vật mới)/i.test(tileText)) continue;
+        if (!hasAddIcon || !/(?:new character|nhân vật mới|tạo nhân vật)/i.test(tileText)) continue;
         const button = [...tile.querySelectorAll('button,[role="button"],a[href]')].find(enabled);
         if (button) return button;
       }
@@ -56,7 +56,7 @@
     const isCreateAction = el => {
       const label = normalize(cleanCharacterName(accessibleName(el).replace(/\s+/g, " ").trim()))
         .replace(/^add\s+(?=new character$)/, "");
-      return /^(?:new character|create character|create new character|add character|add a character|nhân vật mới)$/.test(label);
+      return /^(?:new character|create character|create new character|add character|add a character|nhân vật mới|tạo nhân vật|thêm nhân vật)$/.test(label);
     };
     while (Date.now() < deadline) {
       const button = semanticCreateButton() || [...document.querySelectorAll('button,[role="button"],a[href]')].find(el => enabled(el) && isCreateAction(el));
@@ -87,7 +87,7 @@
   async function findPickerMatches(listGetter, title, label, match = value => normalize(value) === normalize(title)) {
     let list = await waitForPicker(listGetter, label);
     const search = [...document.querySelectorAll('input,[role="textbox"]')]
-      .find(el => visible(el) && /search (?:assets|voices)/i.test(accessibleName(el)));
+      .find(el => visible(el) && /search (?:assets|voices)|tìm kiếm/i.test(accessibleName(el) || el.placeholder || ""));
     if (search) {
       setEditable(search, title);
       await wait(550);
@@ -262,7 +262,7 @@
         enteredEditor = true;
         characterUrl = location.href;
 
-        const nameInput = [...document.querySelectorAll('input,[role="textbox"]')].find(el => visible(el) && /Character name/i.test(accessibleName(el)));
+        const nameInput = [...document.querySelectorAll('input,[role="textbox"]')].find(el => visible(el) && /(?:Character name|Tên nhân vật)/i.test(accessibleName(el) || el.placeholder || ""));
         if (!nameInput) throw flowError("FLOW_CHARACTER_FORM_MISSING", "Flow's character name field is not visible; the character may be partially created.", false, true);
         setEditable(nameInput, c.name);
         nameInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
@@ -271,7 +271,7 @@
         if (!exactEditable(nameInput, c.name)) throw flowError("FLOW_CHARACTER_NAME_UNCONFIRMED", "Flow did not accept the requested character name; the character may be partially created.", false, true);
 
         if (c.personality) {
-          const personality = [...document.querySelectorAll('textarea,input,[role="textbox"]')].find(el => visible(el) && /Character personality/i.test(accessibleName(el)));
+          const personality = [...document.querySelectorAll('textarea,input,[role="textbox"]')].find(el => visible(el) && /(?:Character personality|Tính cách nhân vật|Mô tả nhân vật)/i.test(accessibleName(el) || el.placeholder || ""));
           if (!personality) throw flowError("FLOW_CHARACTER_PERSONALITY_MISSING", "Flow's character personality field is unavailable; the character may be partially created.", false, true);
           setEditable(personality, c.personality);
           const deadline = Date.now() + 5000;
@@ -280,7 +280,7 @@
         }
 
         if (c.voice) {
-          const selectVoice = flowButton("Select a voice");
+          const selectVoice = flowButton("Select a voice") || flowButton("Chọn giọng nói") || flowButton("Giọng nói");
           if (!selectVoice) throw flowError("FLOW_VOICE_SELECTOR_MISSING", "The character editor does not show Select a voice; the character may be partially created.", false, true);
           selectVoice.click();
           const voicesGetter = () => [...document.querySelectorAll('[role="listbox"]')].find(visible);
@@ -296,7 +296,7 @@
             throw flowError("FLOW_VOICE_NOT_FOUND", `Voice "${c.voice}" not found. Character may be partially created. Visible voices: ${available.join("; ")}`, false, true);
           }
           voiceOptions[0].click();
-          const addVoice = await waitForEnabledFlowButton("Add to character", 8000);
+          const addVoice = await waitForEnabledFlowButton("Add to character", 8000) || await waitForEnabledFlowButton("Thêm vào nhân vật", 2000);
           if (!addVoice) throw flowError("FLOW_VOICE_ADD_MISSING", "Flow did not show Add to character; the character may be partially created.", false, true);
           addVoice.click();
           const voiceDeadline = Date.now() + 5000;
@@ -348,7 +348,7 @@
       await waitForFlowRoute(path => characterEditorRoute(path), 20_000, `Flow did not open character "${characterName}".`);
       await wait(500);
       try {
-        let portrait = document.querySelector('img[aria-label="Generated character image"]');
+        let portrait = document.querySelector('img[aria-label="Generated character image"], img[aria-label="Ảnh nhân vật đã tạo"], img[aria-label*="nhân vật"]');
         if (payload.change) {
           const box = [...document.querySelectorAll(".ProseMirror")].at(-1);
           if (!box) throw flowError("FLOW_CHARACTER_EDITOR_MISSING", "Character editor prompt is not visible.", true);
@@ -361,7 +361,7 @@
           await activateFlowSubmitButton(start, prompt);
           const deadline = Date.now() + Number(payload.timeoutMs || 4 * 60_000);
           while (Date.now() < deadline) {
-            await wait(2500); portrait = document.querySelector('img[aria-label="Generated character image"]');
+            await wait(2500); portrait = document.querySelector('img[aria-label="Generated character image"], img[aria-label="Ảnh nhân vật đã tạo"], img[aria-label*="nhân vật"]');
             const pct = (document.querySelector("main")?.innerText || "").match(/\d+%/)?.[0];
             emitFlowProgress(command, pct || "Waiting for character portrait");
             if (portrait?.getAttribute("src") && portrait.getAttribute("src") !== beforeSrc && !pct) break;
@@ -369,7 +369,7 @@
           if (!portrait?.getAttribute("src") || portrait.getAttribute("src") === beforeSrc) throw flowError("FLOW_CHARACTER_EDIT_TIMEOUT", "Timed out waiting for Flow to redraw the character. Check Flow before retrying.", false, true);
         }
         let downloadTriggered = false;
-        const picture = document.querySelector('img[aria-label="Generated character image"]');
+        const picture = document.querySelector('img[aria-label="Generated character image"], img[aria-label="Ảnh nhân vật đã tạo"], img[aria-label*="nhân vật"]');
         if (picture) {
           picture.scrollIntoView({ block: "center" });
           const rect = picture.getBoundingClientRect();

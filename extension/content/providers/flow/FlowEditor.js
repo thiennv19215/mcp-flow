@@ -176,11 +176,11 @@
     if (!el || !root.visible?.(el) || root.isFlowProjectNavigationControl?.(el)) return false;
     const name = (root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim().toLowerCase();
     const text = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
-    const submitPatterns = /^(?:start generation|generate|create|bắt đầu tạo|tạo video|tạo|bắt đầu)$/i;
+    const submitPatterns = /^(?:start generation|generate|create|bắt đầu tạo|tạo video|tạo ảnh|tạo|bắt đầu)$/i;
     if (submitPatterns.test(name) || submitPatterns.test(text)) return true;
     if (name.includes("start generation") || name.includes("bắt đầu tạo")) return true;
 
-    const icon = el.querySelector("mat-icon, .mat-icon, .google-symbols, i, svg");
+    const icon = el.querySelector?.("mat-icon, .mat-icon, .google-symbols, i, svg");
     if (icon) {
       const iconText = (icon.textContent || "").trim();
       if (/^(?:arrow_forward|send|sparkle|auto_awesome|play_arrow)$/i.test(iconText)) return true;
@@ -201,7 +201,7 @@
       const composerButtons = [...composer.querySelectorAll('button,[role="button"]')].filter(el => root.visible?.(el));
       const submitBtn = composerButtons.find(b => {
         if (b.disabled || b.getAttribute("aria-disabled") === "true") return false;
-        const icon = b.querySelector("mat-icon, .mat-icon, .google-symbols, i, svg");
+        const icon = b.querySelector?.("mat-icon, .mat-icon, .google-symbols, i, svg");
         const iconTxt = (icon?.textContent || "").trim();
         return /arrow_forward|send|sparkle|auto_awesome|play_arrow/i.test(iconTxt);
       });
@@ -211,7 +211,7 @@
       if (enabledButtons.length > 0) {
         const lastBtn = enabledButtons[enabledButtons.length - 1];
         const label = (root.accessibleName?.(lastBtn) || "").toLowerCase();
-        if (!label.includes("setting") && !label.includes("clear") && !label.includes("cài đặt")) {
+        if (!label.includes("setting") && !label.includes("clear") && !label.includes("cài đặt") && !label.includes("xóa")) {
           return lastBtn;
         }
       }
@@ -350,26 +350,29 @@
   }
 
   function currentFlowSubmitErrors() {
-    const errorWords = /(?:error|failed|could not|couldn't|unable|insufficient|not enough|quota|credit limit|try again|unusual activity|suspicious activity|safety guidelines|blocked|something went wrong)/i;
+    const errorWords = /(?:error|failed|could not|couldn't|unable|insufficient|not enough|quota|credit limit|try again|unusual activity|suspicious activity|safety guidelines|blocked|something went wrong|lỗi|không thể|thất bại|không đủ|hết hạn mức|thử lại|hoạt động bất thường|nguyên tắc an toàn|đã bị chặn|đã xảy ra lỗi)/i;
     return [...document.querySelectorAll('[role="alert"], [aria-live="assertive"], mat-error, .mat-mdc-form-field-error, snack-bar-container, .cdk-overlay-pane [class*="error"], .cdk-overlay-pane [class*="alert"]')]
       .filter(el => root.visible?.(el))
       .map(el => (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim())
       .filter(text => text && errorWords.test(text));
   }
 
+  const FLOW_CREDIT_QUOTE_REGEX = /(?:\b(?:generating\s+)?will\s+use\s+([\d,]+(?:\.\d+)?)\s+credits?\b|(?:quá trình tạo\s+)?(?:sẽ\s+dùng|sẽ\s+sử\s+dụng|tiêu\s+tốn)\s+([\d,]+(?:\.\d+)?)\s+(?:tín\s+dụng|điểm\s+tín\s+dụng|credits?))/i;
+  const FLOW_CREDIT_BARE_REGEX = /^([\d,]+(?:\.\d+)?)\s+(?:credits?|tín\s+dụng|điểm\s+tín\s+dụng)$/i;
+
   function readGenerationCreditQuote() {
     const pageText = (document.body?.innerText || "").replace(/\s+/g, " ").trim();
-    const pageUsage = pageText.match(/\b(?:generating\s+)?will\s+use\s+([\d,]+(?:\.\d+)?)\s+credits?\b/i);
-    if (pageUsage) return Number(pageUsage[1].replace(/,/g, ""));
+    const pageUsage = pageText.match(FLOW_CREDIT_QUOTE_REGEX);
+    if (pageUsage) return Number((pageUsage[1] || pageUsage[2]).replace(/,/g, ""));
     const candidates = [...document.querySelectorAll("a,button,[role],p,span")]
       .filter(el => root.visible?.(el))
       .map(el => (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim())
       .filter(Boolean);
-    const usage = candidates.map(text => ({ text, match: text.match(/\b(?:generating\s+)?will\s+use\s+([\d,]+(?:\.\d+)?)\s+credits?\b/i) }))
+    const usage = candidates.map(text => ({ text, match: text.match(FLOW_CREDIT_QUOTE_REGEX) }))
       .filter(item => item.match)
       .sort((a, b) => a.text.length - b.text.length)[0];
-    if (usage) return Number(usage.match[1].replace(/,/g, ""));
-    const bare = candidates.map(text => ({ text, match: text.match(/^([\d,]+(?:\.\d+)?)\s+credits?$/i) }))
+    if (usage) return Number((usage.match[1] || usage.match[2]).replace(/,/g, ""));
+    const bare = candidates.map(text => ({ text, match: text.match(FLOW_CREDIT_BARE_REGEX) }))
       .filter(item => item.match)
       .sort((a, b) => a.text.length - b.text.length)[0];
     return bare ? Number(bare.match[1].replace(/,/g, "")) : undefined;

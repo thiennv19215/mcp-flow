@@ -297,7 +297,7 @@
           const more = root.flowButton?.("More options", frame);
           if (!more) throw this.error("FLOW_TILE_MENU_MISSING", "Could not open the saved frame menu.", true);
           more.click(); await root.wait?.(350);
-          const animate = [...document.querySelectorAll('[role="menuitem"]')].find(el => root.visible?.(el) && (root.accessibleName?.(el) || "").trim() === "Animate");
+          const animate = [...document.querySelectorAll('[role="menuitem"]')].find(el => root.visible?.(el) && /^(?:Animate|Tạo hiệu ứng động|Làm chuyển động)$/i.test((root.accessibleName?.(el) || el.innerText || "").trim()));
           if (!animate) throw this.error("FLOW_ANIMATE_MISSING", "Flow did not show Animate for the saved frame.", true);
           animate.click();
           await root.waitForEnabledFlowButton?.("Start generation", 15000);
@@ -345,11 +345,11 @@
           const account = root.flowButton?.("Account details");
           if (account) {
             account.click(); await root.wait?.(500);
-            const creditLink = [...document.querySelectorAll("a")].find(a => /Google Flow credits/i.test(root.accessibleName?.(a)) && root.visible?.(a));
-            const creditText = creditLink ? root.accessibleName?.(creditLink) : "";
+            const creditLink = [...document.querySelectorAll("a")].find(a => /(?:Google Flow credits|credits?|tín dụng)/i.test(root.accessibleName?.(a) || a.innerText || "") && root.visible?.(a));
+            const creditText = creditLink ? (root.accessibleName?.(creditLink) || creditLink.innerText || "") : "";
             const n = Number(creditText.replace(/[^\d]/g, ""));
             state.credits_remaining = Number.isFinite(n) && creditText ? n : undefined;
-            state.plan = [...document.querySelectorAll("button")].find(b => /Account details/i.test(root.accessibleName?.(b)))?.innerText?.split("\n")[0];
+            state.plan = [...document.querySelectorAll("button")].find(b => /(?:Account details|Chi tiết tài khoản|Tài khoản)/i.test(root.accessibleName?.(b) || b.innerText || ""))?.innerText?.split("\n")[0];
             const close = root.flowButton?.("Close account panel"); if (close) close.click();
           }
         }
@@ -652,9 +652,15 @@
         tile.scrollIntoView({ block: "center" }); await root.wait?.(150);
         const more = root.flowButton?.("More options", tile); if (!more) throw this.error("FLOW_TILE_MENU_MISSING", `Could not open options for "${title}".`, true);
         more.click(); await root.wait?.(200);
-        const action = name === "flow.asset.trash" ? "Move to trash" : "Rename";
-        const menuEl = [...document.querySelectorAll('[role="menuitem"]')].find(item => root.visible?.(item) && (root.accessibleName?.(item) || "").trim() === action);
-        if (!menuEl) throw this.error("FLOW_MENU_ITEM_MISSING", `Flow did not show "${action}" for "${title}".`, true);
+        const actionPatterns = name === "flow.asset.trash"
+          ? /^(?:Move to trash|Chuyển vào thùng rác|Xóa)$/i
+          : /^(?:Rename|Đổi tên)$/i;
+        const menuEl = [...document.querySelectorAll('[role="menuitem"]')].find(item => {
+          if (!root.visible?.(item)) return false;
+          const label = (root.accessibleName?.(item) || item.innerText || item.textContent || "").trim();
+          return actionPatterns.test(label);
+        });
+        if (!menuEl) throw this.error("FLOW_MENU_ITEM_MISSING", `Flow did not show "${name === "flow.asset.trash" ? "Move to trash" : "Rename"}" for "${title}".`, true);
         menuEl.click(); await root.wait?.(250);
         if (name === "flow.asset.trash") return { trashed: title };
         const input = [...document.querySelectorAll('input:not([type="file"]),[contenteditable="true"]')].find(el => root.visible?.(el));

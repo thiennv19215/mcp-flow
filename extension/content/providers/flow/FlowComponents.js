@@ -25,17 +25,20 @@
     return matches[0] || null;
   }
   function chips() {
-    return [...document.querySelectorAll('button[aria-label="Ingredient"]')].filter(visible).map(button => {
-      const image = button.querySelector("img");
-      const kind = button.closest("flow-character-ingredient-chip") || /character/i.test(image?.alt || "") ? "character" : "image";
-      return { element: button, kind, source: identity(image?.getAttribute("src")), ...metadata.get(button) };
+    const enChips = [...document.querySelectorAll('button[aria-label="Ingredient"]')];
+    const viChips = [...document.querySelectorAll('button[aria-label="Thành phần"],button[aria-label="Nguyên liệu"]')];
+    const all = viChips.length ? enChips.concat(viChips) : enChips;
+    return all.filter(visible).map(button => {
+      const image = button.querySelector?.("img");
+      const kind = button.closest?.("flow-character-ingredient-chip") || /character|nhân vật/i.test(image?.alt || "") ? "character" : "image";
+      return { element: button, kind, source: identity(image?.getAttribute?.("src")), ...metadata.get(button) };
     });
   }
   function picker() { return [...document.querySelectorAll('[role="listbox"]')].find(visible); }
   const options = () => [...(picker()?.querySelectorAll('[role="option"]') || [])].filter(visible);
   function emptyPickerMessage() {
     return [...document.querySelectorAll('[role="dialog"],main,[role="listbox"]')].filter(visible)
-      .some(el => /no (?:assets|characters) found/i.test(el.innerText || el.textContent || ""));
+      .some(el => /no (?:assets|characters) found|không tìm thấy (?:nội dung|nhân vật|kết quả)/i.test(el.innerText || el.textContent || ""));
   }
   async function settled() {
     // Wait for both the picker and its loading state; an empty list is a valid settled state.
@@ -45,7 +48,7 @@
       const list = picker();
       const loading = [...document.querySelectorAll('[role="progressbar"],[aria-busy="true"]')].some(visible);
       if (list && !loading) {
-        if (options().length || /No (?:assets|characters) found/i.test(list.innerText || "")) return list;
+        if (options().length || /No (?:assets|characters) found|không tìm thấy/i.test(list.innerText || "")) return list;
         if (!stableAt) stableAt = Date.now();
         if (Date.now() - stableAt >= 700) return list;
       } else if (!loading && emptyPickerMessage()) {
@@ -64,8 +67,20 @@
     }
     await settled();
   }
+  const CATEGORY_SYNONYMS = {
+    "characters": ["characters", "nhân vật", "nhan vat"],
+    "all": ["all", "tất cả", "tat ca"],
+    "ingredients": ["ingredients", "thành phần", "nguyên liệu"],
+    "uploads": ["uploads", "tải lên", "tai len"]
+  };
   async function category(name) {
-    const findTab = () => [...document.querySelectorAll('[role="tab"]')].find(el => visible(el) && normalize(accessibleName(el)).replace(/^(?:accessibility_new|dashboard|face)\s*/, "") === normalize(name));
+    const norm = normalize(name);
+    const synonyms = CATEGORY_SYNONYMS[norm] || [norm];
+    const findTab = () => [...document.querySelectorAll('[role="tab"]')].find(el => {
+      if (!visible(el)) return false;
+      const label = normalize(accessibleName(el)).replace(/^(?:accessibility_new|dashboard|face)\s*/, "");
+      return synonyms.includes(label) || synonyms.some(syn => label.includes(syn));
+    });
     let tab = findTab();
     if (!tab) throw flowError("FLOW_REFERENCE_CATEGORY_MISSING", `Flow's picker has no ${name} category.`, true);
     if (tab.getAttribute("aria-selected") !== "true") {
@@ -100,7 +115,13 @@
     if (picker()) throw flowError("FLOW_ASSET_PICKER_CLOSE_FAILED", "Flow's reference picker stayed open and could not be dismissed.", true);
   }
   async function search(name) {
-    const input = [...document.querySelectorAll('input,[role="textbox"]')].find(el => visible(el) && /^Search assets$/i.test(accessibleName(el).trim()));
+    const input = [...document.querySelectorAll('input,[role="textbox"]')].find(el => {
+      if (!visible(el)) return false;
+      const aria = accessibleName(el).trim().toLowerCase();
+      const placeholder = (el.placeholder || "").trim().toLowerCase();
+      return /^(?:search assets|tìm kiếm nội dung nghe nhìn|tìm kiếm|search)$/i.test(aria) ||
+        /^(?:search assets|tìm kiếm nội dung nghe nhìn|tìm kiếm|search)$/i.test(placeholder);
+    });
     if (!input) return;
     setEditable(input, name);
     // Search is debounced by Flow; wait before accepting a possibly stale option.
@@ -504,8 +525,15 @@ async function chooseNativePickerAsset(assetName, slot) {
     }
     throw flowError("FLOW_ASSET_PICKER_LOADING", `Flow's ${slot} frame picker did not finish loading. Nothing was selected.`, true, false);
   };
-  const findTab = name => [...document.querySelectorAll('[role="tab"]')].find(tab => visible(tab) &&
-    accessibleName(tab).replace(/\s+/g, " ").trim().toLocaleLowerCase() === name.toLocaleLowerCase());
+  const findTab = name => {
+    const norm = normalize(name);
+    const synonyms = CATEGORY_SYNONYMS[norm] || [norm];
+    return [...document.querySelectorAll('[role="tab"]')].find(tab => {
+      if (!visible(tab)) return false;
+      const label = normalize(accessibleName(tab)).replace(/^(?:accessibility_new|dashboard|face)\s*/, "");
+      return synonyms.includes(label) || synonyms.some(syn => label.includes(syn));
+    });
+  };
   const optionNames = option => {
     const values = [accessibleName(option), option.getAttribute("aria-label"), option.getAttribute("title")];
     for (const node of option.querySelectorAll("[aria-label],[title],img[alt],flow-grid-tile-container")) {
@@ -569,7 +597,7 @@ async function chooseNativePickerAsset(assetName, slot) {
   let scroller = null;
   let pageIndex = 0;
   try {
-    let search = [...document.querySelectorAll('input,[role="textbox"]')].find(el => visible(el) && /search assets/i.test(accessibleName(el)));
+    let search = [...document.querySelectorAll('input,[role="textbox"]')].find(el => visible(el) && /(?:search assets|tìm kiếm)/i.test(accessibleName(el) || el.placeholder || ""));
     if (search) {
       setEditable(search, assetName);
       await wait(650);
@@ -590,7 +618,7 @@ async function chooseNativePickerAsset(assetName, slot) {
       }
       list = listGetter();
       if (!list) continue;
-      search = [...document.querySelectorAll('input,[role="textbox"]')].find(el => visible(el) && /search assets/i.test(accessibleName(el)));
+      search = [...document.querySelectorAll('input,[role="textbox"]')].find(el => visible(el) && /(?:search assets|tìm kiếm)/i.test(accessibleName(el) || el.placeholder || ""));
       if (search && String(search.value ?? "") !== assetName) {
         setEditable(search, assetName);
         await wait(650);

@@ -420,3 +420,89 @@ test('clearExistingIngredientChips removes stale reference chips before attachin
   assert.equal(removedCount, 1);
   assert.equal(chips.length, 0);
 });
+
+test('Vietnamese localization: readGenerationCreditQuote accurately parses Vietnamese credit text', () => {
+  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const makeContext = text => {
+    const ctx = vm.createContext({
+      globalThis: {},
+      window: {},
+      document: {
+        body: { innerText: text },
+        querySelectorAll: () => [],
+      },
+      location: { href: 'https://flow.google.com/u/0/?hl=vi' },
+      getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+      accessibleName: el => el.innerText || '',
+    });
+    vm.runInContext(domUtilsSource, ctx);
+    return ctx.globalThis.readGenerationCreditQuote;
+  };
+
+  assert.equal(makeContext('Quá trình tạo sẽ dùng 20 tín dụng.')(), 20);
+  assert.equal(makeContext('Sẽ sử dụng 10 tín dụng để tạo video')(), 10);
+  assert.equal(makeContext('Tiêu tốn 5 tín dụng')(), 5);
+  assert.equal(makeContext('Generating will use 30 credits')(), 30);
+});
+
+test('Vietnamese localization: flowButton recognizes Vietnamese button synonyms and icons', () => {
+  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const buttons = [
+    { innerText: 'Cài đặt', querySelector: () => null, getAttribute: () => null, disabled: false, getBoundingClientRect: () => ({ width: 100, height: 30 }) },
+    { innerText: 'Bắt đầu tạo', querySelector: () => null, getAttribute: () => null, disabled: false, getBoundingClientRect: () => ({ width: 100, height: 30 }) },
+    { innerText: 'Xóa câu lệnh', querySelector: () => null, getAttribute: () => null, disabled: false, getBoundingClientRect: () => ({ width: 100, height: 30 }) },
+    { innerText: 'Quay lại', querySelector: () => null, getAttribute: () => null, disabled: false, getBoundingClientRect: () => ({ width: 100, height: 30 }) },
+  ];
+
+  const ctx = vm.createContext({
+    globalThis: {},
+    window: {},
+    document: {
+      querySelectorAll: selector => selector.includes('button') ? buttons : [],
+    },
+    location: { href: 'https://flow.google.com/u/0/?hl=vi' },
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+    accessibleName: el => el.innerText || '',
+  });
+  vm.runInContext(domUtilsSource, ctx);
+  const flowButton = ctx.globalThis.flowButton;
+
+  assert.equal(flowButton('Settings trigger'), buttons[0]);
+  assert.equal(flowButton('Start generation'), buttons[1]);
+  assert.equal(flowButton('Clear prompt'), buttons[2]);
+  assert.equal(flowButton('Back'), buttons[3]);
+});
+
+test('Vietnamese localization: flowRadio and flowNavigationItem resolve Vietnamese labels', () => {
+  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const radios = [
+    { innerText: 'Hình ảnh', name: 'Hình ảnh', getAttribute: () => null, querySelectorAll: () => [], getBoundingClientRect: () => ({ width: 100, height: 30 }) },
+    { innerText: 'Thành phần', name: 'Thành phần', getAttribute: () => null, querySelectorAll: () => [], getBoundingClientRect: () => ({ width: 100, height: 30 }) },
+  ];
+  const navItems = [
+    { innerText: 'Tất cả nội dung nghe nhìn', name: 'Tất cả nội dung nghe nhìn', getAttribute: () => null, querySelectorAll: () => [], getBoundingClientRect: () => ({ width: 100, height: 30 }) },
+    { innerText: 'Nhân vật', name: 'Nhân vật', getAttribute: () => null, querySelectorAll: () => [], getBoundingClientRect: () => ({ width: 100, height: 30 }) },
+  ];
+
+  const ctx = vm.createContext({
+    globalThis: {},
+    window: {},
+    document: {
+      querySelectorAll: selector => {
+        if (selector.includes('role="radio"')) return radios;
+        if (selector.includes('role="button"]') || selector.includes('mat-list-item')) return navItems;
+        return [];
+      },
+      querySelector: () => null,
+    },
+    location: { href: 'https://flow.google.com/u/0/?hl=vi' },
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+    accessibleName: el => el.name || el.innerText || '',
+  });
+  vm.runInContext(domUtilsSource, ctx);
+
+  assert.equal(ctx.globalThis.flowRadio('Image'), radios[0]);
+  assert.equal(ctx.globalThis.flowRadio('Ingredients'), radios[1]);
+  assert.equal(ctx.globalThis.flowNavigationItem('All media'), navItems[0]);
+  assert.equal(ctx.globalThis.flowNavigationItem('Characters'), navItems[1]);
+});

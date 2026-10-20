@@ -102,6 +102,13 @@ extension/
 4. **Bảo tồn Chip Nhân vật khi Soạn thảo Prompt**:
    - Khi thay đổi prompt, `clearEditorTextPreservingChips()` duyệt qua cây DOM của ProseMirror và chỉ xóa các TextNode tự do, giữ nguyên toàn bộ các thẻ `<span contenteditable="false">` (chip nhân vật).
 
+5. **Hỗ trợ Đa Ngôn ngữ Song ngữ (Tiếng Anh & Tiếng Việt)**:
+   - Toàn bộ các selector, regex, button matching, category navigation, option aliases, frame picker, dialog confirmation và trích xuất hạn mức credit đều được tích hợp song ngữ Anh - Việt:
+     - **Buttons**: Nhận diện `"Cài đặt"`, `"Bắt đầu tạo"`, `"Xóa câu lệnh"`, `"Thêm thành phần"`, `"Thêm nguyên liệu"`, `"Quay lại"`, `"Xong"`, `"Tùy chọn khác"`, `"Tải xuống"`,... kết hợp fallback tự động qua Material Icon (`tune`, `settings`, `arrow_forward`, `add`, `more_vert`).
+     - **Credit Quote**: Regex nhận diện song ngữ `sẽ dùng X tín dụng`, `sẽ sử dụng X tín dụng`, `tiêu tốn X tín dụng`, `will use X credits`.
+     - **Options & Modes**: Hỗ trợ `"Hình ảnh"`, `"Video"`, `"Thành phần"`, `"Khung hình"`, tỉ lệ dọc/ngang/vuông (`"9:16"`, `"dọc"`, `"16:9"`, `"ngang"`, `"1:1"`, `"vuông"`), thời lượng (`"5s"`, `"5 giây"`).
+     - **Navigation & Library**: Nhận diện tab thư viện `"Tất cả nội dung nghe nhìn"`, `"Tất cả phương tiện"`, `"Nhân vật"`.
+
 ---
 
 ## 4. Hướng dẫn Mở Rộng Thêm Nền Tảng Mới (Gemini / ChatGPT)
@@ -166,4 +173,4 @@ Mọi thay đổi trong extension đều có thể kiểm thử tự động off
 bun test tests/native-references.test.mjs
 ```
 
-Đảm bảo 15/15 tests luôn pass trước khi commit và push mã nguồn.
+Đảm bảo 18/18 tests luôn pass trước khi commit và push mã nguồn.

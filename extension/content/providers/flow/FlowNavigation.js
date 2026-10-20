@@ -19,22 +19,31 @@
       .trim();
   }
 
+  const NAV_SYNONYMS = {
+    "characters": ["characters", "nhân vật", "nhan vat"],
+    "all media": ["all media", "tất cả nội dung nghe nhìn", "tất cả phương tiện", "tất cả media", "tất cả"]
+  };
+
   function flowNavigationItem(label) {
     const normalize = value => cleanCharacterName(String(value || "").replace(/\s+/g, " ").trim()).toLowerCase();
-    const navigation = [...document.querySelectorAll('nav,[role="navigation"]')].find(el =>
-      /project navigation/i.test(root.accessibleName?.(el) || "") || /project navigation/i.test(el.getAttribute?.("aria-label") || ""));
+    const navigation = [...document.querySelectorAll('nav,[role="navigation"],mat-sidenav')].find(el =>
+      /project navigation|điều hướng dự án|dự án/i.test(root.accessibleName?.(el) || "") ||
+      /project navigation|điều hướng dự án|dự án/i.test(el.getAttribute?.("aria-label") || "") ||
+      el.querySelector?.('mat-icon')
+    ) || document.querySelector('nav,[role="navigation"],mat-sidenav');
     const roots = navigation ? [navigation] : [document];
     const candidates = roots.flatMap(r => [...r.querySelectorAll(
       'a,button,[role="button"],[role="menuitem"],mat-list-item,button[mat-list-item]'
     )]);
     const wanted = normalize(label);
+    const synonyms = NAV_SYNONYMS[wanted] || [wanted];
     return candidates.find(el => {
       if (!root.visible?.(el) || el.disabled || el.getAttribute?.("aria-disabled") === "true") return false;
       const text = normalize(el.innerText || el.textContent || root.accessibleName?.(el));
-      const iconNames = [...el.querySelectorAll("mat-icon")].map(icon => normalize(icon.innerText || icon.textContent));
-      if (label === "Characters" && iconNames.includes("accessibility_new")) return true;
-      if (label === "All media" && iconNames.includes("dashboard")) return true;
-      return text === wanted || text.endsWith(` ${wanted}`);
+      const iconNames = [...(el.querySelectorAll?.("mat-icon") || [])].map(icon => normalize(icon.innerText || icon.textContent));
+      if ((wanted === "characters" || synonyms.includes("nhân vật")) && (iconNames.includes("accessibility_new") || iconNames.includes("person"))) return true;
+      if ((wanted === "all media" || synonyms.includes("tất cả nội dung nghe nhìn")) && (iconNames.includes("dashboard") || iconNames.includes("perm_media"))) return true;
+      return synonyms.some(syn => text === syn || text.endsWith(` ${syn}`));
     });
   }
 
@@ -156,13 +165,13 @@
         return;
       }
       if (/\/character(?:\/|$)/i.test(location.pathname)) {
-        const done = [...document.querySelectorAll("button,[role=button]")].find(el => root.visible?.(el) && /^Done( editing)?$/i.test(root.accessibleName?.(el).trim()));
+        const done = [...document.querySelectorAll("button,[role=button]")].find(el => root.visible?.(el) && /^(?:Done( editing)?|Xong|Hoàn tất)$/i.test(root.accessibleName?.(el).trim()));
         if (done) {
           done.click();
           const left = await waitForFlowRoute(path => !/\/character(?:\/|$)/i.test(path), 2000, "").catch(() => false);
           if (left) return;
         }
-        const goBack = root.flowButton?.("Go back") || root.flowButton?.("Back");
+        const goBack = root.flowButton?.("Go back") || root.flowButton?.("Back") || root.flowButton?.("Quay lại");
         if (goBack) {
           goBack.click();
           const left = await waitForFlowRoute(path => !/\/character(?:\/|$)/i.test(path), 2000, "").catch(() => false);
@@ -190,7 +199,7 @@
       const doneOrBack = [...document.querySelectorAll('button, [role="button"]')].find(el => {
         if (!root.visible?.(el)) return false;
         const name = root.accessibleName?.(el).trim();
-        return /^Done( editing)?$/i.test(name) || /^Back( button.*)?$/i.test(name) || /^(Go back|Quay lại)$/i.test(name);
+        return /^(?:Done( editing)?|Xong|Hoàn tất)$/i.test(name) || /^(?:Back( button.*)?|Quay lại|Quay về)$/i.test(name) || /^(Go back|Quay lại)$/i.test(name);
       });
       if (doneOrBack) {
         doneOrBack.click();
@@ -218,7 +227,7 @@
       if (!root.visible?.(btn)) return false;
       const label = (root.accessibleName?.(btn) || btn.innerText || btn.textContent || "").trim().toLowerCase();
       const hasAddIcon = [...btn.querySelectorAll('mat-icon')].some(i => /add|create|new/i.test((i.innerText || i.textContent || "").trim()));
-      return /new project|tạo dự án|create project/i.test(label) || (hasAddIcon && /project|dự án/i.test(label));
+      return /new project|tạo dự án|dự án mới|create project/i.test(label) || (hasAddIcon && /project|dự án/i.test(label));
     });
 
     if (newProjectBtn) {
@@ -262,7 +271,7 @@
       return addIcon && (/character/.test(text) || /nhân vật/.test(text));
     });
     const hasEmptyCharacterChooser = () => /\/character\/?$/i.test(location.pathname) &&
-      (root.flowButton?.("Go back") || root.flowButton?.("Add from project"));
+      (root.flowButton?.("Go back") || root.flowButton?.("Add from project") || root.flowButton?.("Quay lại") || root.flowButton?.("Thêm từ dự án"));
     const hasSectionMarker = () => label === "Characters"
       ? hasCharacterAction() || hasEmptyCharacterChooser()
       : label === "All media" && [...document.querySelectorAll("flow-grid-tile-container")].some(el => root.visible?.(el));
