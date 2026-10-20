@@ -27,6 +27,9 @@ function applyLanguage() {
   if (document.querySelector("#txtOpenFlow")) {
     document.querySelector("#txtOpenFlow").textContent = t("btnOpenFlow");
   }
+  if (document.querySelector("#txtOpenStudio")) {
+    document.querySelector("#txtOpenStudio").textContent = t("popup.btnStudio");
+  }
   if (document.querySelector("#txtOptions")) {
     document.querySelector("#txtOptions").textContent = t("btnOptions");
   }
@@ -175,6 +178,23 @@ document.querySelector("#preview").onclick = async () => {
 document.querySelector("#options").onclick = () => {
   chrome.runtime.openOptionsPage();
 };
+
+const openStudioBtn = document.querySelector("#openStudioBtn");
+if (openStudioBtn) {
+  openStudioBtn.onclick = async () => {
+    try {
+      const win = await chrome.windows.getCurrent();
+      if (chrome.sidePanel?.open) {
+        await chrome.sidePanel.open({ windowId: win.id });
+        window.close();
+      } else {
+        chrome.tabs.create({ url: chrome.runtime.getURL("ui/sidebar.html") });
+      }
+    } catch (_) {
+      chrome.tabs.create({ url: chrome.runtime.getURL("ui/sidebar.html") });
+    }
+  };
+}
 
 const openSidebarBtn = document.querySelector("#openSidebarBtn");
 if (openSidebarBtn) {

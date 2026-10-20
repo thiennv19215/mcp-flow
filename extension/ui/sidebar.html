@@ -81,12 +81,7 @@
       border-radius: var(--radius-sm);
       background: var(--card);
       border: 1px solid var(--border);
-      overflow: hidden;
-    }
-
-    .tobyflow-header-logo img {
-      width: 20px;
-      height: 20px;
+      color: var(--primary);
     }
 
     .tobyflow-header-title {
@@ -143,6 +138,7 @@
       background: var(--bg);
       border-bottom: 1px solid var(--border);
       flex-shrink: 0;
+      overflow-x: auto;
     }
 
     .tobyflow-tab {
@@ -157,6 +153,7 @@
       font-size: 12px;
       font-weight: 600;
       cursor: pointer;
+      white-space: nowrap;
       transition: all 0.15s ease;
     }
 
@@ -196,12 +193,52 @@
       display: flex;
     }
 
+    /* Segmented Mode Controller (Image / Video / Character) */
+    .mode-segments {
+      display: flex;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 3px;
+      gap: 3px;
+    }
+
+    .mode-segment-btn {
+      flex: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 8px 10px;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 700;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: all 0.18s ease;
+    }
+
+    .mode-segment-btn:hover {
+      color: var(--text-primary);
+    }
+
+    .mode-segment-btn.active {
+      background: var(--primary);
+      color: var(--primary-fg);
+      box-shadow: 0 1px 6px var(--primary-glow);
+    }
+
     /* Section Cards */
     .section-card {
       background: var(--card);
       border: 1px solid var(--border);
       border-radius: var(--radius);
       padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
     }
 
     .section-title {
@@ -210,7 +247,6 @@
       color: var(--text-muted);
       text-transform: uppercase;
       letter-spacing: 0.5px;
-      margin-bottom: 10px;
       display: flex;
       align-items: center;
       gap: 6px;
@@ -220,12 +256,128 @@
       color: var(--primary);
     }
 
-    /* Status indicator */
+    /* Form Fields */
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .form-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .form-textarea {
+      width: 100%;
+      min-height: 80px;
+      background: #181818;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+      color: var(--text-primary);
+      font-family: var(--font);
+      font-size: 13px;
+      line-height: 1.4;
+      resize: vertical;
+      outline: none;
+      transition: border-color 0.2s ease;
+    }
+
+    .form-textarea:focus {
+      border-color: var(--primary);
+    }
+
+    .form-input {
+      background: #181818;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 9px 12px;
+      color: var(--text-primary);
+      font-family: var(--font);
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.2s ease;
+    }
+
+    .form-input:focus {
+      border-color: var(--primary);
+    }
+
+    .form-select {
+      background: #181818;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 8px 12px;
+      color: var(--text-primary);
+      font-family: var(--font);
+      font-size: 12.5px;
+      outline: none;
+      cursor: pointer;
+    }
+
+    .form-select:focus {
+      border-color: var(--primary);
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 14px;
+      font-family: var(--font);
+      font-size: 13px;
+      font-weight: 700;
+      border-radius: var(--radius);
+      cursor: pointer;
+      border: none;
+      transition: all 0.18s ease;
+      width: 100%;
+    }
+
+    .btn:active {
+      transform: scale(0.98);
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: var(--primary-fg);
+      box-shadow: 0 2px 10px var(--primary-glow);
+    }
+
+    .btn-primary:hover {
+      background: var(--primary-hover);
+      box-shadow: 0 4px 14px rgba(204, 255, 0, 0.35);
+    }
+
+    .btn-secondary {
+      background: var(--card-elevated);
+      border: 1px solid var(--border);
+      color: var(--text-primary);
+    }
+
+    .btn-secondary:hover {
+      background: #36363c;
+      border-color: var(--border-hover);
+    }
+
+    /* Status Row */
     .status-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 10px;
     }
 
     .status-badge {
@@ -295,56 +447,6 @@
       border: 1px solid rgba(255, 255, 255, 0.05);
     }
 
-    /* Buttons */
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      padding: 10px 14px;
-      font-family: var(--font);
-      font-size: 12.5px;
-      font-weight: 600;
-      border-radius: var(--radius);
-      cursor: pointer;
-      border: none;
-      transition: all 0.18s ease;
-      width: 100%;
-    }
-
-    .btn:active {
-      transform: scale(0.98);
-    }
-
-    .btn-primary {
-      background: var(--primary);
-      color: var(--primary-fg);
-      font-weight: 700;
-      box-shadow: 0 2px 10px var(--primary-glow);
-    }
-
-    .btn-primary:hover {
-      background: var(--primary-hover);
-      box-shadow: 0 4px 14px rgba(204, 255, 0, 0.35);
-    }
-
-    .btn-secondary {
-      background: var(--card-elevated);
-      border: 1px solid var(--border);
-      color: var(--text-primary);
-    }
-
-    .btn-secondary:hover {
-      background: #36363c;
-      border-color: var(--border-hover);
-    }
-
-    .btn-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-    }
-
     /* Logs view */
     .logs-container {
       background: #181818;
@@ -361,7 +463,7 @@
     }
 
     .log-entry {
-      padding: 5px 8px;
+      padding: 6px 8px;
       border-radius: 4px;
       background: rgba(255, 255, 255, 0.02);
       border-left: 2px solid var(--text-dim);
@@ -376,7 +478,7 @@
 
     .log-entry.error {
       border-left-color: #ef4444;
-      background: rgba(239, 68, 68, 0.05);
+      background: rgba(239, 68, 68, 0.06);
     }
 
     .log-head {
@@ -403,54 +505,27 @@
       padding: 40px 10px;
     }
 
-    /* Form Inputs */
-    .form-group {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      margin-bottom: 12px;
-    }
-
-    .form-label {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text-muted);
-    }
-
-    .form-input {
-      background: #181818;
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      padding: 8px 12px;
-      color: var(--text-primary);
-      font-family: var(--font);
-      font-size: 13px;
-      outline: none;
-    }
-
-    .form-input:focus {
-      border-color: var(--primary);
-    }
-
-    /* Feedback notice */
     .feedback-box {
-      font-size: 11.5px;
+      font-size: 12px;
       text-align: center;
-      min-height: 18px;
+      min-height: 20px;
       color: #4ade80;
       font-weight: 600;
+      transition: all 0.2s ease;
     }
   </style>
 </head>
 <body>
-  <!-- Header TobyFlow style -->
+  <!-- Header TobyFlow style (Clean Sparkle Logo) -->
   <header class="tobyflow-header">
     <div class="tobyflow-header-brand">
       <div class="tobyflow-header-logo">
-        <img src="../icons/icon-32.png" alt="Logo">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 2L14.2 9.8L22 12L14.2 14.2L12 22L9.8 14.2L2 12L9.8 9.8L12 2Z"/>
+        </svg>
       </div>
       <span class="tobyflow-header-title">Flow MCP</span>
-      <span class="tobyflow-user-plan-badge">NATIVE</span>
+      <span class="tobyflow-user-plan-badge">STUDIO</span>
     </div>
     <div class="tobyflow-header-actions">
       <!-- Language switch -->
@@ -471,11 +546,17 @@
 
   <!-- Navigation Tabs -->
   <nav class="tobyflow-tabs">
-    <button class="tobyflow-tab active" data-tab="tab-control">
+    <button class="tobyflow-tab active" data-tab="tab-create">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 2L14.2 9.8L22 12L14.2 14.2L12 22L9.8 14.2L2 12L9.8 9.8L12 2Z"/>
+      </svg>
+      <span id="tabCreateLabel">Tạo nội dung</span>
+    </button>
+    <button class="tobyflow-tab" data-tab="tab-status">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
       </svg>
-      <span id="tabControlLabel">Điều khiển</span>
+      <span id="tabStatusLabel">Trạng thái</span>
     </button>
     <button class="tobyflow-tab" data-tab="tab-logs">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -483,7 +564,6 @@
         <polyline points="14 2 14 8 20 8"></polyline>
         <line x1="16" y1="13" x2="8" y2="13"></line>
         <line x1="16" y1="17" x2="8" y2="17"></line>
-        <polyline points="10 9 9 9 8 9"></polyline>
       </svg>
       <span id="tabLogsLabel">Nhật ký MCP</span>
     </button>
@@ -498,9 +578,159 @@
 
   <!-- Panes Content -->
   <div class="tabs-content">
-    <!-- TAB 1: CONTROL -->
-    <div id="tab-control" class="tab-pane active">
-      <!-- Status Card -->
+    <!-- TAB 1: CREATE (TẠO ẢNH / VIDEO / NHÂN VẬT) -->
+    <div id="tab-create" class="tab-pane active">
+      <!-- Mode Segment Switcher -->
+      <div class="mode-segments">
+        <button class="mode-segment-btn active" id="btnModeImage" data-mode="image">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            <circle cx="8.5" cy="8.5" r="1.5"></circle>
+            <polyline points="21 15 16 10 5 21"></polyline>
+          </svg>
+          <span id="txtModeImage">Tạo Ảnh</span>
+        </button>
+        <button class="mode-segment-btn" id="btnModeVideo" data-mode="video">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="m22 8-6 4 6 4V8Z"></path>
+            <rect x="2" y="6" width="14" height="12" rx="2" ry="2"></rect>
+          </svg>
+          <span id="txtModeVideo">Tạo Video</span>
+        </button>
+        <button class="mode-segment-btn" id="btnModeCharacter" data-mode="character">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="7" r="4"></circle>
+            <path d="M5.5 21v-2a6.5 6.5 0 0 1 13 0v2"></path>
+          </svg>
+          <span id="txtModeCharacter">Tạo Nhân Vật</span>
+        </button>
+      </div>
+
+      <!-- FORM TẠO ẢNH (IMAGE) -->
+      <div class="section-card" id="formImage">
+        <div class="form-group">
+          <label class="form-label" id="lblPromptImage">Câu lệnh Prompt:</label>
+          <textarea class="form-textarea" id="inputPromptImage" placeholder="Mô tả bức ảnh bạn muốn tạo..."></textarea>
+        </div>
+
+        <div class="grid-2">
+          <div class="form-group">
+            <label class="form-label" id="lblRatioImage">Tỷ lệ khung hình:</label>
+            <select class="form-select" id="selectRatioImage">
+              <option value="16:9">16:9 (Ngang)</option>
+              <option value="9:16">9:16 (Dọc Shorts/TikTok)</option>
+              <option value="1:1">1:1 (Vuông)</option>
+              <option value="4:3">4:3</option>
+              <option value="3:4">3:4</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" id="lblQtyImage">Số lượng:</label>
+            <select class="form-select" id="selectQtyImage">
+              <option value="1">1 ảnh</option>
+              <option value="2">2 ảnh</option>
+              <option value="3">3 ảnh</option>
+              <option value="4">4 ảnh</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" id="lblCharImage">Nhân vật tham chiếu (Tùy chọn):</label>
+          <select class="form-select" id="selectCharImage">
+            <option value="">Không chọn (Mặc định)</option>
+          </select>
+        </div>
+
+        <button class="btn btn-primary" id="btnSubmitImage">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 2L14.2 9.8L22 12L14.2 14.2L12 22L9.8 14.2L2 12L9.8 9.8L12 2Z"/>
+          </svg>
+          <span id="txtBtnSubmitImage">Tạo ảnh ngay</span>
+        </button>
+      </div>
+
+      <!-- FORM TẠO VIDEO (VIDEO) -->
+      <div class="section-card" id="formVideo" style="display: none;">
+        <div class="form-group">
+          <label class="form-label" id="lblPromptVideo">Câu lệnh Prompt Video:</label>
+          <textarea class="form-textarea" id="inputPromptVideo" placeholder="Mô tả chuyển động video, góc quay, hành động..."></textarea>
+        </div>
+
+        <div class="grid-2">
+          <div class="form-group">
+            <label class="form-label" id="lblRatioVideo">Tỷ lệ khung hình:</label>
+            <select class="form-select" id="selectRatioVideo">
+              <option value="16:9">16:9 (Ngang)</option>
+              <option value="9:16">9:16 (Dọc TikTok/Reels)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" id="lblDurationVideo">Thời lượng:</label>
+            <select class="form-select" id="selectDurationVideo">
+              <option value="5">5 giây</option>
+              <option value="10">10 giây</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="form-group">
+            <label class="form-label" id="lblModeVideo">Chế độ Video:</label>
+            <select class="form-select" id="selectModeVideo">
+              <option value="ingredients">Thành phần (Ingredients)</option>
+              <option value="frames">Khung hình (Frames)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" id="lblCharVideo">Nhân vật:</label>
+            <select class="form-select" id="selectCharVideo">
+              <option value="">Không chọn</option>
+            </select>
+          </div>
+        </div>
+
+        <button class="btn btn-primary" id="btnSubmitVideo">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+          </svg>
+          <span id="txtBtnSubmitVideo">Tạo video ngay</span>
+        </button>
+      </div>
+
+      <!-- FORM TẠO NHÂN VẬT (CHARACTER) -->
+      <div class="section-card" id="formCharacter" style="display: none;">
+        <div class="form-group">
+          <label class="form-label" id="lblCharName">Tên nhân vật:</label>
+          <input type="text" class="form-input" id="inputCharName" placeholder="Ví dụ: Cô gái áo dài, John Doe..." />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" id="lblCharDesc">Mô tả ngoại hình:</label>
+          <textarea class="form-textarea" id="inputCharDesc" placeholder="Mô tả khuôn mặt, trang phục, phong cách, độ tuổi..."></textarea>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Ảnh chân dung tham chiếu (Tùy chọn):</label>
+          <input type="file" id="inputCharFile" accept="image/*" class="form-input" style="padding: 6px;" />
+        </div>
+
+        <button class="btn btn-primary" id="btnSubmitCharacter">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+            <circle cx="9" cy="7" r="4"></circle>
+            <line x1="19" y1="8" x2="19" y2="14"></line>
+            <line x1="22" y1="11" x2="16" y2="11"></line>
+          </svg>
+          <span id="txtBtnSubmitChar">Tạo nhân vật Flow</span>
+        </button>
+      </div>
+
+      <div class="feedback-box" id="feedbackBox"></div>
+    </div>
+
+    <!-- TAB 2: STATUS & CONTROL -->
+    <div id="tab-status" class="tab-pane">
       <div class="section-card">
         <div class="status-row">
           <span class="status-badge" id="wsBadge">
@@ -522,7 +752,6 @@
         </div>
       </div>
 
-      <!-- Quick Actions Card -->
       <div class="section-card">
         <div class="section-title">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -539,7 +768,7 @@
             <span id="txtBtnReconnect">Kết nối lại tab Flow</span>
           </button>
 
-          <div class="btn-grid">
+          <div class="grid-2">
             <button class="btn btn-secondary" id="btnPreview">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
@@ -559,11 +788,9 @@
           </div>
         </div>
       </div>
-
-      <div class="feedback-box" id="feedbackBox"></div>
     </div>
 
-    <!-- TAB 2: LOGS -->
+    <!-- TAB 3: LOGS -->
     <div id="tab-logs" class="tab-pane">
       <div class="section-card" style="padding: 10px;">
         <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
@@ -576,11 +803,11 @@
       </div>
     </div>
 
-    <!-- TAB 3: SETTINGS -->
+    <!-- TAB 4: SETTINGS -->
     <div id="tab-settings" class="tab-pane">
       <div class="section-card">
         <div class="form-group">
-          <label class="form-label" id="lblBridgeUrlField">Địa chỉ Backend Bridge URL:</label>
+          <label class="form-label">Địa chỉ Backend Bridge URL:</label>
           <input type="text" class="form-input" id="inputBridgeUrl" value="http://127.0.0.1:18899" />
         </div>
 

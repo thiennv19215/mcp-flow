@@ -3,6 +3,7 @@
 
   let cachedStatus = null;
   const logs = [];
+  let currentCharacters = [];
 
   function t(key, params) {
     return typeof I18n !== "undefined" ? I18n.t(key, params) : key;
@@ -14,11 +15,41 @@
     document.querySelector("#langSwitchLabel").textContent = cur.toUpperCase();
 
     // Tabs
-    document.querySelector("#tabControlLabel").textContent = t("sidebar.tabGen");
+    document.querySelector("#tabCreateLabel").textContent = t("sidebar.tabGen");
+    document.querySelector("#tabStatusLabel").textContent = t("sidebar.tabStatus");
     document.querySelector("#tabLogsLabel").textContent = t("sidebar.tabLogs");
     document.querySelector("#tabSettingsLabel").textContent = t("sidebar.tabSettings");
 
-    // Control pane
+    // Mode Segments
+    document.querySelector("#txtModeImage").textContent = t("sidebar.typeImage");
+    document.querySelector("#txtModeVideo").textContent = t("sidebar.typeVideo");
+    document.querySelector("#txtModeCharacter").textContent = t("sidebar.typeCharacter");
+
+    // Form Image
+    document.querySelector("#lblPromptImage").textContent = t("sidebar.promptLabel") + ":";
+    document.querySelector("#inputPromptImage").placeholder = t("sidebar.promptPlaceholder");
+    document.querySelector("#lblRatioImage").textContent = t("sidebar.aspectRatio") + ":";
+    document.querySelector("#lblQtyImage").textContent = t("sidebar.quantity") + ":";
+    document.querySelector("#lblCharImage").textContent = t("sidebar.characterSelect") + ":";
+    document.querySelector("#txtBtnSubmitImage").textContent = t("sidebar.btnGenerateImage");
+
+    // Form Video
+    document.querySelector("#lblPromptVideo").textContent = t("sidebar.promptLabel") + ":";
+    document.querySelector("#inputPromptVideo").placeholder = t("sidebar.promptPlaceholderVideo");
+    document.querySelector("#lblRatioVideo").textContent = t("sidebar.aspectRatio") + ":";
+    document.querySelector("#lblDurationVideo").textContent = t("sidebar.videoDuration") + ":";
+    document.querySelector("#lblModeVideo").textContent = t("sidebar.videoMode") + ":";
+    document.querySelector("#lblCharVideo").textContent = t("sidebar.characterSelect") + ":";
+    document.querySelector("#txtBtnSubmitVideo").textContent = t("sidebar.btnGenerateVideo");
+
+    // Form Character
+    document.querySelector("#lblCharName").textContent = t("sidebar.charNameLabel") + ":";
+    document.querySelector("#inputCharName").placeholder = t("sidebar.charNamePlaceholder");
+    document.querySelector("#lblCharDesc").textContent = t("sidebar.charDescLabel") + ":";
+    document.querySelector("#inputCharDesc").placeholder = t("sidebar.charDescPlaceholder");
+    document.querySelector("#txtBtnSubmitChar").textContent = t("sidebar.btnCreateCharacter");
+
+    // Status pane
     document.querySelector("#lblFlowTabs").textContent = t("popup.flowTabs");
     document.querySelector("#lblSelectedTab").textContent = t("popup.selectedTab");
     document.querySelector("#lblQuickActions").textContent = t("sidebar.quickActions");
@@ -114,7 +145,39 @@
     }
   }
 
-  // Tab switching
+  async function loadFlowCharacters() {
+    try {
+      const res = await chrome.runtime.sendMessage({
+        type: "flow-mcp:dispatch",
+        operation: "flow.characters.list",
+        payload: {}
+      });
+      if (res?.ok && Array.isArray(res.value)) {
+        currentCharacters = res.value;
+        populateCharacterSelects();
+      }
+    } catch (_) {}
+  }
+
+  function populateCharacterSelects() {
+    const selects = [document.querySelector("#selectCharImage"), document.querySelector("#selectCharVideo")];
+    selects.forEach(sel => {
+      if (!sel) return;
+      const currentVal = sel.value;
+      sel.innerHTML = `<option value="">${t("sidebar.characterNone")}</option>`;
+      currentCharacters.forEach(c => {
+        const name = typeof c === "string" ? c : c.name;
+        if (!name) return;
+        const opt = document.createElement("option");
+        opt.value = name;
+        opt.textContent = `👤 ${name}`;
+        if (opt.value === currentVal) opt.selected = true;
+        sel.appendChild(opt);
+      });
+    });
+  }
+
+  // Navigation Tabs switching
   document.querySelectorAll(".tobyflow-tab").forEach(tab => {
     tab.addEventListener("click", () => {
       document.querySelectorAll(".tobyflow-tab").forEach(t => t.classList.remove("active"));
@@ -125,18 +188,150 @@
     });
   });
 
+  // Mode Segments switching (Image / Video / Character)
+  document.querySelectorAll(".mode-segment-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".mode-segment-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      const mode = btn.getAttribute("data-mode");
+      document.querySelector("#formImage").style.display = mode === "image" ? "flex" : "none";
+      document.querySelector("#formVideo").style.display = mode === "video" ? "flex" : "none";
+      document.querySelector("#formCharacter").style.display = mode === "character" ? "flex" : "none";
+      setFeedback("");
+    });
+  });
+
+  // SUBMIT TẠO ẢNH (GENERATE IMAGE)
+  document.querySelector("#btnSubmitImage").onclick = async () => {
+    const prompt = document.querySelector("#inputPromptImage").value.trim();
+    if (!prompt) {
+      setFeedback("Vui lòng nhập câu lệnh prompt cho ảnh!", false);
+      return;
+    }
+    const aspect_ratio = document.querySelector("#selectRatioImage").value;
+    const count = Number(document.querySelector("#selectQtyImage").value) || 1;
+    const character = document.querySelector("#selectCharImage").value;
+
+    const attachments = [];
+    if (character) {
+      attachments.push({ assetName: `character:${character}` });
+    }
+
+    setFeedback(t("sidebar.generating"), true);
+    addLog("flow.generation.submit", `[Image] ${prompt.slice(0, 40)}... (${aspect_ratio})`, true);
+
+    try {
+      const res = await chrome.runtime.sendMessage({
+        type: "flow-mcp:dispatch",
+        operation: "flow.generation.submit",
+        payload: {
+          type: "image",
+          prompt,
+          aspect_ratio,
+          count,
+          attachments
+        }
+      });
+      if (!res?.ok) throw new Error(res?.error?.message || "Lỗi tạo ảnh");
+      setFeedback(t("sidebar.genSuccess"), true);
+      addLog("flow.generation.submit", "Tạo ảnh thành công!", true);
+    } catch (err) {
+      setFeedback(err.message, false);
+      addLog("flow.generation.submit", err.message, false);
+    }
+  };
+
+  // SUBMIT TẠO VIDEO (GENERATE VIDEO)
+  document.querySelector("#btnSubmitVideo").onclick = async () => {
+    const prompt = document.querySelector("#inputPromptVideo").value.trim();
+    if (!prompt) {
+      setFeedback("Vui lòng nhập câu lệnh prompt cho video!", false);
+      return;
+    }
+    const aspect_ratio = document.querySelector("#selectRatioVideo").value;
+    const duration = Number(document.querySelector("#selectDurationVideo").value) || 5;
+    const mode = document.querySelector("#selectModeVideo").value || "ingredients";
+    const character = document.querySelector("#selectCharVideo").value;
+
+    const attachments = [];
+    if (character) {
+      attachments.push({ assetName: `character:${character}` });
+    }
+
+    setFeedback(t("sidebar.generating"), true);
+    addLog("flow.generation.submit", `[Video ${duration}s] ${prompt.slice(0, 40)}...`, true);
+
+    try {
+      const res = await chrome.runtime.sendMessage({
+        type: "flow-mcp:dispatch",
+        operation: "flow.generation.submit",
+        payload: {
+          type: "video",
+          prompt,
+          aspect_ratio,
+          video_settings: {
+            mode,
+            duration
+          },
+          attachments
+        }
+      });
+      if (!res?.ok) throw new Error(res?.error?.message || "Lỗi tạo video");
+      setFeedback(t("sidebar.genSuccess"), true);
+      addLog("flow.generation.submit", "Tạo video thành công!", true);
+    } catch (err) {
+      setFeedback(err.message, false);
+      addLog("flow.generation.submit", err.message, false);
+    }
+  };
+
+  // SUBMIT TẠO NHÂN VẬT (CREATE CHARACTER)
+  document.querySelector("#btnSubmitCharacter").onclick = async () => {
+    const name = document.querySelector("#inputCharName").value.trim();
+    if (!name) {
+      setFeedback("Vui lòng nhập tên nhân vật!", false);
+      return;
+    }
+    const description = document.querySelector("#inputCharDesc").value.trim();
+
+    setFeedback(t("sidebar.creatingChar"), true);
+    addLog("flow.character.create", `Tạo nhân vật: ${name}`, true);
+
+    try {
+      const res = await chrome.runtime.sendMessage({
+        type: "flow-mcp:dispatch",
+        operation: "flow.character.create",
+        payload: {
+          name,
+          description
+        }
+      });
+      if (!res?.ok) throw new Error(res?.error?.message || "Lỗi tạo nhân vật");
+      setFeedback(t("sidebar.charSuccess"), true);
+      addLog("flow.character.create", `Đã tạo nhân vật "${name}"!`, true);
+      document.querySelector("#inputCharName").value = "";
+      document.querySelector("#inputCharDesc").value = "";
+      await loadFlowCharacters();
+    } catch (err) {
+      setFeedback(err.message, false);
+      addLog("flow.character.create", err.message, false);
+    }
+  };
+
   // Language switch
   document.querySelector("#langSwitchBtn").onclick = async () => {
     if (typeof I18n === "undefined") return;
     const next = I18n.getLocale() === "vi" ? "en" : "vi";
     await I18n.setLocale(next);
     applyLanguage();
+    populateCharacterSelects();
   };
 
   // Reload status
   document.querySelector("#reloadBtn").onclick = () => {
     fetchStatus();
-    setFeedback("Đã cập nhật trạng thái", true);
+    loadFlowCharacters();
+    setFeedback("Đã làm mới dữ liệu", true);
     setTimeout(() => setFeedback(""), 2000);
   };
 
@@ -148,6 +343,7 @@
       await chrome.runtime.sendMessage({ type: "flow-mcp:connect" });
       setTimeout(async () => {
         await fetchStatus();
+        await loadFlowCharacters();
         setFeedback("");
       }, 700);
     } catch (err) {
@@ -207,8 +403,10 @@
   initLocale.then(() => {
     applyLanguage();
     return fetchStatus();
+  }).then(() => {
+    return loadFlowCharacters();
   });
 
-  // Auto poll status periodically while side panel is open
+  // Auto poll status periodically
   setInterval(fetchStatus, 3000);
 })();

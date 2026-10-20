@@ -361,8 +361,10 @@
   <!-- Header TobyFlow style -->
   <header class="header">
     <div class="brand">
-      <div class="logo-img">
-        <img src="../icons/icon-32.png" alt="Logo">
+      <div class="logo-img" style="color: var(--primary);">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 2L14.2 9.8L22 12L14.2 14.2L12 22L9.8 14.2L2 12L9.8 9.8L12 2Z"/>
+        </svg>
       </div>
       <div class="title-wrap">
         <div class="title-row">
@@ -429,7 +431,14 @@
 
   <!-- Actions -->
   <div class="actions">
-    <button class="btn btn-primary" id="connect">
+    <button class="btn btn-primary" id="openStudioBtn">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 2L14.2 9.8L22 12L14.2 14.2L12 22L9.8 14.2L2 12L9.8 9.8L12 2Z"/>
+      </svg>
+      <span id="txtOpenStudio">Mở Studio (Tạo Ảnh / Video / Nhân Vật)</span>
+    </button>
+
+    <button class="btn btn-secondary" id="connect">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
         <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
       </svg>

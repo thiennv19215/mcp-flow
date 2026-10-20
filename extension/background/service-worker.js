@@ -533,6 +533,22 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
     respond({ active: flowUrl(_sender.tab?.url) && (activeInteractiveCounts.get(tabId) || 0) > 0 });
     return;
   }
+  if (message?.type === "flow-mcp:dispatch") {
+    void (async () => {
+      const { operation, payload } = message;
+      const command = {
+        op: "flowOperation",
+        name: operation,
+        payload: payload || {},
+        id: "ui-" + Date.now(),
+      };
+      const result = await execute(null, "flow.dom.execute", [command]);
+      respond({ ok: true, value: result });
+    })().catch(err => {
+      respond({ ok: false, error: { message: err?.message || String(err), code: err?.code || "DISPATCH_FAILED" } });
+    });
+    return true;
+  }
   if (message?.type === "flow-mcp:status") {
     Promise.all([config(), chrome.tabs.query({ url: "https://flow.google.com/*" })]).then(([c, tabs]) => respond({ configured: true, bridge: c.bridge, flowTabs: tabs.length, selectedTabId, wsConnected: socket?.readyState === WebSocket.OPEN, error: lastError }));
     return true;
