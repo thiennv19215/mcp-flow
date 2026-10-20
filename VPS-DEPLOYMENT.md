@@ -33,7 +33,7 @@ The checked-in extension still restricts its bridge URL to localhost and does no
    ```
 
 4. Install Caddy on the host, copy `deploy/Caddyfile.example` to its Caddy configuration, replace `flow.example.com`, then reload Caddy. The reverse proxy must preserve the Host header and WebSocket upgrades; Caddy's `reverse_proxy` does this automatically. To use Cloudflare Tunnel instead, see the next section and do not expose the app port publicly.
-5. Open `https://<your-domain>`. The Studio is protected by the HTTP Basic username/password from `.env`; its API also requires `FLOW_MCP_TOKEN`.
+5. Open `https://<your-domain>`. The Studio displays a login page and uses the `FLOW_MCP_ADMIN_USER` and `FLOW_MCP_ADMIN_PASSWORD` credentials from `.env`. A successful login creates a 12-hour, HttpOnly, Secure, SameSite=Strict session cookie. The admin registry API accepts this browser session or HTTP Basic credentials for CLI use. Studio job APIs continue to require `FLOW_MCP_TOKEN`.
 
 The Compose port is published only on `127.0.0.1`. Do not change it to `0.0.0.0` or open port 18899 in the VPS firewall. Serve it through HTTPS at 443.
 

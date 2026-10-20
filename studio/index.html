@@ -168,6 +168,7 @@ audio{width:100%;margin-top:8px;filter:invert(1) hue-rotate(180deg)}
         <button id="studioLangVi" style="font:700 13px var(--mono);padding:4px 9px;border-radius:7px;border:none;cursor:pointer;background:var(--bone);color:var(--ink)">VI</button>
         <button id="studioLangEn" style="font:700 13px var(--mono);padding:4px 9px;border-radius:7px;border:none;cursor:pointer;background:transparent;color:var(--dim)">EN</button>
       </div>
+      <button id="studioLogout" type="button" class="btn small ghost" hidden>Đăng xuất</button>
     </div>
   </header>
   <div id="offline"></div>
@@ -1153,6 +1154,22 @@ $("#studioLangEn").onclick = () => {
     $("#home_projects").innerHTML = `<p class="empty">Danh sách dự án sẽ xuất hiện khi Studio kết nối backend.</p>`;
     renderAll(); showTab(S.tab); return;
   }
+  fetch("/api/auth/session", { cache: "no-store" }).then(async (response) => {
+    if (!response.ok) return;
+    const session = await response.json();
+    if (!session.local) $("#studioLogout").hidden = false;
+  }).catch(() => {});
+  $("#studioLogout").addEventListener("click", async () => {
+    const button = $("#studioLogout");
+    button.disabled = true;
+    try {
+      await fetch("/api/auth/logout", { method: "POST", cache: "no-store" });
+      location.replace("/");
+    } catch {
+      button.disabled = false;
+      toast("Không thể đăng xuất. Hãy thử lại.", true);
+    }
+  });
   try { [TECH, VOICES] = await Promise.all([api("techniques"), api("voices")]); } catch { VOICES = { gemini: [], mac: [] }; }
   applyPlace(VOICES.place);
   loadCast().then((c) => { CAST = c; renderCast(); }).catch(() => {});
