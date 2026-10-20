@@ -6,6 +6,7 @@ import { extractLastFrame } from "./chain.js";
 import { characterLook, createCharacter, downloadAsset, trashAsset, editCharacter, getFlowState, listAssets, listCharacters, listFlowProjects, openFlowProject, rememberCharacter, runAgentBatch, runContinue, runEdit, runGeneration, uploadFlowMediaToProject } from "./flow.js";
 import { JobQueue, type Job } from "./queue.js";
 import { attachReferences } from "./flow.js";
+import { buildAnglePrompt, listAnglePresets } from "./angles.js";
 import { BIN, COMPUTER, IS_MAC, IS_WIN, moveToBin } from "./platform.js";
 import { TECHNIQUES, techniqueById } from "./techniques.js";
 import { OUTPUT_ROOT, outputRootForContext, projectDir } from "./paths.js";
@@ -60,6 +61,8 @@ export interface Core {
   continue_shot(a: Args<"continue_shot">): Promise<unknown>;
   agent(a: Args<"agent">): Promise<unknown>;
   outputs(): Promise<unknown>;
+  reangle(a: Args<"reangle">): Promise<unknown>;
+  angle_presets(): Promise<unknown>;
 }
 
 // Flow's own voices: still offered when giving a character a voice, but narration no longer goes through Flow.
@@ -429,5 +432,59 @@ export class LocalCore implements Core {
 
   async techniques({ category }: Args<"techniques">) {
     return TECHNIQUES.filter((t) => !category || t.category === category);
+  }
+
+  async reangle({
+    project,
+    reference_image,
+    rotation,
+    tilt,
+    zoom,
+    preset,
+    custom_prompt,
+    extra_prompt,
+    aspect_ratio,
+    variants,
+  }: Args<"reangle">) {
+    if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
+    const angleResult = buildAnglePrompt({
+      preset,
+      rotation,
+      tilt,
+      zoom,
+      customPrompt: custom_prompt,
+      extraPrompt: extra_prompt,
+    });
+
+    const gen = await this.generate({
+      project: project || "Angles",
+      scenes: [
+        {
+          prompt: angleResult.prompt,
+          type: "image",
+          aspect_ratio: aspect_ratio || "9:16",
+          variants: variants || 1,
+          reference_images: [reference_image],
+          max_credits: 0,
+          retries: 1,
+        },
+      ],
+    });
+
+    return {
+      ...(typeof gen === "object" ? gen : {}),
+      angle: {
+        rotation: angleResult.rotation,
+        tilt: angleResult.tilt,
+        zoom: angleResult.zoom,
+        preset: angleResult.preset.name,
+        modifiers: angleResult.modifiers,
+        compiled_prompt: angleResult.prompt,
+      },
+    };
+  }
+
+  async angle_presets() {
+    return listAnglePresets();
   }
 }

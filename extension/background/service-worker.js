@@ -446,6 +446,17 @@ async function connect() {
       reconnectAttempt = 0;
       lastError = "";
       send(ws, { type: "event", method: "extension.initialized", params: [{ protocol: 2, version: chrome.runtime.getManifest().version, capabilities: [...nativeFlowOperations].map(name => `flow.native.${name.slice(5)}`) }] });
+      try {
+        const bridgeOrigin = new URL(settings.bridge).origin;
+        fetch(`${bridgeOrigin}/api/flow-selectors`)
+          .then(r => r.ok ? r.json() : null)
+          .then(data => {
+            if (data && typeof data === "object" && Object.keys(data).length > 0) {
+              chrome.storage.local.set({ flow_remote_selectors: data });
+            }
+          })
+          .catch(() => {});
+      } catch (_) {}
       heartbeat = setInterval(() => {
         send(ws, { type: "ping" });
         if (selectedTabId) {
@@ -457,6 +468,14 @@ async function connect() {
       if (socket !== ws) return;
       let command;
       try { command = JSON.parse(message.data); } catch { ws.close(1002, "Invalid JSON"); return; }
+      if (command.type === "event" && command.method === "flow.selectors.sync") {
+        const payload = command.params?.[0];
+        if (payload && typeof payload === "object") {
+          console.log("[Flow MCP] Dynamic selectors sync received from backend via WebSocket");
+          chrome.storage.local.set({ flow_remote_selectors: payload });
+        }
+        return;
+      }
       if (command.type !== "command") return;
       const commandId = command.id ?? command.request_id ?? command.requestId;
       if (commandId === undefined || commandId === null) { ws.close(1002, "Command is missing request id"); return; }

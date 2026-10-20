@@ -786,7 +786,9 @@ async function clearExistingIngredientChips() {
 }
 
 function checkFlowCreditLimitAlert() {
-  const alertTexts = [
+  const root = typeof globalThis !== "undefined" ? globalThis : (typeof window !== "undefined" ? window : self);
+  const config = root.FlowSelectors?.creditLimit;
+  const alertTexts = config?.patterns || [
     "run out of credits",
     "no credits remaining",
     "not enough credits",
@@ -797,7 +799,8 @@ function checkFlowCreditLimitAlert() {
     "public_error_user_quota_reached"
   ];
 
-  const candidates = [...document.querySelectorAll('[role="alert"], mat-error, .flow-alert, [class*="alert"], [class*="error"], [class*="quota"], [class*="credit"]')].filter(visible);
+  const candidates = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("creditLimit") : null) ||
+    [...document.querySelectorAll('[role="alert"], mat-error, .flow-alert, [class*="alert"], [class*="error"], [class*="quota"], [class*="credit"]')].filter(visible);
   for (const el of candidates) {
     const text = (el.innerText || el.textContent || "").trim().toLowerCase();
     if (alertTexts.some(alert => text.includes(alert))) {

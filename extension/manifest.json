@@ -70,6 +70,7 @@
       "js": [
         "content/shared/I18n.js",
         "content/shared/dom-utils.js",
+        "content/providers/flow/FlowSelectors.js",
         "content/shared/activity-overlay.js",
         "content/shared/native-file-transfer.js",
         "content/providers/BaseProviderDriver.js",

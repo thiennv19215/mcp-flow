@@ -1,5 +1,6 @@
 (() => {
   "use strict";
+  const root = typeof globalThis !== "undefined" ? globalThis : (typeof window !== "undefined" ? window : self);
   const normalize = value => String(value || "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
   const undecorate = value => normalize(value).replace(/\s+(?:image|video|character|avatar|ảnh|nhân vật)$/i, "");
   const identity = value => String(value || "").replace(/=(?:s\d+(?:-[a-z]+)*|mm,\d+,\d+)$/, "");
@@ -43,8 +44,14 @@
       return { element: button, kind, source: identity(image?.getAttribute?.("src")), ...metadata.get(button) };
     });
   }
-  function picker() { return [...document.querySelectorAll('[role="listbox"]')].find(visible); }
-  const options = () => [...(picker()?.querySelectorAll('[role="option"]') || [])].filter(visible);
+  function picker() {
+    return (typeof root.flowQuery === "function" ? root.flowQuery("components.listBox") : null) ||
+      [...document.querySelectorAll('[role="listbox"]')].find(visible);
+  }
+  const options = () => [
+    ...(((typeof root.flowQueryAll === "function" && picker()) ? root.flowQueryAll("components.optionItem", picker()) : null) ||
+      (picker()?.querySelectorAll('[role="option"]') || []))
+  ].filter(visible);
   function emptyPickerMessage() {
     return [...document.querySelectorAll('[role="dialog"],main,[role="listbox"]')].filter(visible)
       .some(el => /no (?:assets|characters) found|không tìm thấy (?:nội dung|nhân vật|kết quả)/i.test(el.innerText || el.textContent || ""));
@@ -160,8 +167,10 @@
       await waitForFlowRoute(path => !isCharacterRoute(path), 15_000, "Flow did not close the character editor.");
     }
     if (isCharacterRoute(location.pathname)) throw flowError("FLOW_CHARACTER_ROUTE_UNEXPECTED", "Flow is still on a character page; the character picker cannot be opened safely.", true, true);
-    if (!document.querySelector(".ProseMirror")) await ensureFlowLibrarySection("All media");
-    if (!document.querySelector(".ProseMirror")) throw flowError("FLOW_COMPOSER_MISSING", "Flow's project composer is not visible after returning from the character page.", true);
+    const hasComposer = (typeof root.flowQuery === "function" && root.flowQuery("editor")) || document.querySelector(".ProseMirror");
+    if (!hasComposer) await ensureFlowLibrarySection("All media");
+    const hasComposerAfter = (typeof root.flowQuery === "function" && root.flowQuery("editor")) || document.querySelector(".ProseMirror");
+    if (!hasComposerAfter) throw flowError("FLOW_COMPOSER_MISSING", "Flow's project composer is not visible after returning from the character page.", true);
   }
   async function listCharacters() {
     try {

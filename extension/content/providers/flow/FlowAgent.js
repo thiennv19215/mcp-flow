@@ -2,11 +2,12 @@
   "use strict";
 
   async function setNativeAgentSettings(confirm, aspect) {
-    const composer = document.querySelector("flow-base-prompt-box");
+    const composer = (typeof root.flowQuery === "function" ? root.flowQuery("composerRoot") : null) ||
+      document.querySelector("flow-base-prompt-box");
     const settings = composer && [...composer.querySelectorAll('button,[role="button"]')].find(el => {
       if (!root.visible?.(el)) return false;
       const label = (root.accessibleName?.(el) || el.innerText || "").replace(/\s+/g, " ").trim().toLowerCase();
-      const icon = el.querySelector?.("mat-icon, .mat-icon, .google-symbols")?.textContent?.trim().toLowerCase();
+      const icon = (root.flowFindIcon ? root.flowFindIcon(el) : el.querySelector?.("mat-icon, .mat-icon, .google-symbols"))?.textContent?.trim().toLowerCase();
       return /^(?:settings|cài đặt)$/i.test(label) || icon === "tune" || icon === "settings";
     });
     if (!settings) throw root.flowError("NATIVE_CAPABILITY_UNSUPPORTED", "Flow Agent settings are not available in this view; nothing was submitted.", true);
@@ -15,7 +16,8 @@
     const confirmPatterns = confirm === "Never"
       ? /^(?:never|không bao giờ)/i
       : /^(?:always|luôn luôn)/i;
-    const confirmRadio = [...document.querySelectorAll('[role="radio"],mat-radio-button')].find(el =>
+    const confirmRadio = ((typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.options") : null) ||
+      [...document.querySelectorAll('[role="radio"],mat-radio-button')]).find(el =>
       root.visible?.(el) && confirmPatterns.test((root.accessibleName?.(el) || el.innerText || "").replace(/\s+/g, " ").trim()));
     if (!confirmRadio) throw root.flowError("NATIVE_CAPABILITY_UNSUPPORTED", "Flow Agent confirmation settings are unavailable; nothing was submitted.", true);
     if (!root.FlowSettings?.nativeRadioSelected?.(confirmRadio)) confirmRadio.click();

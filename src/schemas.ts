@@ -167,6 +167,19 @@ export const shapes = {
     voice: z.string().optional().describe("Flow voice name, e.g. 'Charon' (male, informative) or 'Aoede' (female, breezy)."),
   },
   techniques: { category: z.enum(["camera", "product", "transition", "image"]).optional() },
+  reangle: {
+    project: z.string().min(1).default("Angles").describe("Folder name for outputs under films directory."),
+    reference_image: z.string().min(1).describe("Source image to re-angle: absolute file path, or 'asset:<title>' or 'character:<name>'."),
+    rotation: z.number().min(-180).max(180).default(0).describe("Camera yaw/rotation in degrees: -180 to 180 (0 = front view, 90 = right profile, -90 = left profile, 180 = full back view)."),
+    tilt: z.number().min(-60).max(90).default(0).describe("Camera pitch/tilt in degrees: -60 to 90 (-60 = worm's eye looking up, 0 = eye level, 30 = high angle, 90 = top-down view)."),
+    zoom: z.number().min(-2).max(2).default(0).describe("Camera zoom/distance: -2 to 2 (-2 = extreme wide shot, -1 = wide full body, 0 = medium shot waist up, 1 = close-up, 2 = extreme macro)."),
+    preset: z.string().optional().describe("Preset ID: 'portrait-reangle' | 'product-reangle' | 'cinematic-orbit' | 'character-turnaround'. Default: portrait-reangle."),
+    custom_prompt: z.string().optional().describe("Custom base prompt template containing {angle_modifier}, {tilt_modifier}, {zoom_modifier} placeholders."),
+    extra_prompt: z.string().optional().describe("Extra text appended to the prompt (e.g. lighting or background details)."),
+    aspect_ratio: z.enum(["16:9", "9:16", "1:1", "4:3", "3:4"]).default("9:16").describe("Image aspect ratio."),
+    variants: z.number().int().min(1).max(4).default(1).describe("Number of takes/variants to generate."),
+  },
+  angle_presets: {},
 };
 
 export type Args<K extends keyof typeof shapes> = z.infer<z.ZodObject<(typeof shapes)[K]>>;

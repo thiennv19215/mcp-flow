@@ -6,15 +6,17 @@
   function flowSettingsTrigger() {
     const tune = [...document.querySelectorAll('button,[role="button"]')].find(el => {
       if (!root.visible?.(el) || isNavControl(el)) return false;
-      const icon = el.querySelector?.("mat-icon,.mat-icon,.google-symbols")?.textContent?.trim()?.toLowerCase();
-      return icon === "tune";
+      const icon = (root.flowFindIcon ? root.flowFindIcon(el) : el.querySelector?.("mat-icon,.mat-icon,.google-symbols"))?.textContent?.trim()?.toLowerCase();
+      return icon === (root.FlowSelectors?.settings?.triggerButton?.icon || "tune");
     });
     return tune || root.flowButton?.("Settings trigger");
   }
 
   function flowComposerRoot() {
-    const editor = document.querySelector(".ProseMirror[contenteditable='true']");
+    const editor = (typeof root.flowQuery === "function" ? root.flowQuery("editor") : null) ||
+      document.querySelector(".ProseMirror[contenteditable='true']");
     return editor?.closest("flow-base-prompt-box, .flow-composer, form, [class*='composer']") ||
+      (typeof root.flowQuery === "function" ? root.flowQuery("composerRoot") : null) ||
       [...document.querySelectorAll("flow-base-prompt-box, .flow-composer, [class*='composer']")].find(el => root.visible?.(el)) || null;
   }
 
@@ -167,7 +169,7 @@
     if (!isOpen()) return;
 
     if (isOpen()) {
-      document.querySelector(".ProseMirror")?.click();
+      ((typeof root.flowQuery === "function" ? root.flowQuery("editor") : null) || document.querySelector(".ProseMirror"))?.click();
       const closeDeadline = Date.now() + 1500;
       while (Date.now() < closeDeadline && isOpen()) await root.wait?.(100);
     }

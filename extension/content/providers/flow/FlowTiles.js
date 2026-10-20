@@ -117,10 +117,12 @@
   }
 
   function hasTileProgressBar(tile) {
+    if (typeof root.flowQuery === "function" && root.flowQuery("tiles.progressBar", tile, { checkVisible: false })) return true;
     return Boolean(tile.querySelector('flow-progress-tile, mat-progress-bar, [role="progressbar"], [class*="progress-bar"], [class*="progressbar"]'));
   }
 
   function hasTileSpinner(tile) {
+    if (typeof root.flowQuery === "function" && root.flowQuery("tiles.spinner", tile, { checkVisible: false })) return true;
     return Boolean(tile.querySelector('mat-spinner, mat-progress-spinner, [class*="spinner"], [class*="loading"], [class*="loader"], [class*="shimmer"], [class*="skeleton"], svg[class*="spin"]'));
   }
 
@@ -157,7 +159,8 @@
     if (videos.length > 0) return true;
 
     // 4. Video/Scene tile with loaded poster
-    const videoTile = tile.querySelector("flow-video-tile, flow-scene-tile");
+    const videoTile = (typeof root.flowQuery === "function" ? root.flowQuery("tiles.video", tile, { checkVisible: false }) : null) ||
+      tile.querySelector("flow-video-tile, flow-scene-tile");
     if (videoTile) {
       const poster = videoTile.querySelector("img");
       if (poster && poster.complete && poster.naturalWidth > 1) return true;
@@ -173,27 +176,35 @@
     const spinner = hasTileSpinner(tile);
     const genText = hasTileGenerationText(tile);
     const ariaBusy = tile.getAttribute("aria-busy") === "true" || Boolean(tile.querySelector('[aria-busy="true"]'));
-    const placeholderTile = Boolean(tile.querySelector('flow-progress-tile, flow-rendering-tile, flow-generating-tile, flow-placeholder-tile, [class*="rendering"], [class*="generating"], [class*="placeholder"]'));
+    const placeholderTile = (typeof root.flowQuery === "function" && Boolean(root.flowQuery("tiles.placeholder", tile, { checkVisible: false }))) ||
+      Boolean(tile.querySelector('flow-progress-tile, flow-rendering-tile, flow-generating-tile, flow-placeholder-tile, [class*="rendering"], [class*="generating"], [class*="placeholder"]'));
     const hasActiveProgress = Boolean(pct || progressBar || spinner || genText || ariaBusy || placeholderTile);
     const rendered = hasRenderedMedia(tile);
-    const hasError = Boolean(tile.querySelector("flow-error-tile, [class*='error-tile']"));
+    const hasError = (typeof root.flowQuery === "function" && Boolean(root.flowQuery("tiles.error", tile, { checkVisible: false }))) ||
+      Boolean(tile.querySelector("flow-error-tile, [class*='error-tile']"));
 
     return hasActiveProgress || (!rendered && !hasError);
   }
 
   function isTileMediaReady(tile) {
     if (!tile) return false;
-    const hasError = Boolean(tile.querySelector("flow-error-tile, [class*='error-tile']"));
+    const hasError = (typeof root.flowQuery === "function" && Boolean(root.flowQuery("tiles.error", tile, { checkVisible: false }))) ||
+      Boolean(tile.querySelector("flow-error-tile, [class*='error-tile']"));
     if (hasError) return false;
     return !isTileBusy(tile) && hasRenderedMedia(tile);
   }
 
   function collectNativeMedia() {
-    return [...document.querySelectorAll("flow-grid-tile-container")].map(tile => {
+    const tileContainers = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", document, { checkVisible: false }) : null) ||
+      [...document.querySelectorAll("flow-grid-tile-container")];
+    return tileContainers.map(tile => {
       const busy = isTileBusy(tile);
       const mediaReady = isTileMediaReady(tile);
-      const error = tile.querySelector("flow-error-tile, [class*='error-tile']");
-      const kind = tile.querySelector("flow-scene-tile") ? "scene" : tile.querySelector("flow-video-tile") ? "video" : "image";
+      const error = (typeof root.flowQuery === "function" ? root.flowQuery("tiles.error", tile, { checkVisible: false }) : null) ||
+        tile.querySelector("flow-error-tile, [class*='error-tile']");
+      const kind = (typeof root.flowQuery === "function" && root.flowQuery("tiles.video", tile, { checkVisible: false }))
+        ? (tile.querySelector("flow-scene-tile") ? "scene" : "video")
+        : (tile.querySelector("flow-scene-tile") ? "scene" : tile.querySelector("flow-video-tile") ? "video" : "image");
       const id = root.mediaId?.(tile);
       const title = (tile.getAttribute("aria-label") || tile.getAttribute("title") || "").trim();
       const failureReason = error ? (error.innerText || error.textContent || "").replace(/\s+/g, " ").trim() : undefined;
@@ -210,7 +221,9 @@
     await root.wait?.(200);
 
     for (let step = 0; step < retries; step++) {
-      const tile = [...document.querySelectorAll("flow-grid-tile-container")].find(el => {
+      const tileContainers = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", document, { checkVisible: false }) : null) ||
+        [...document.querySelectorAll("flow-grid-tile-container")];
+      const tile = tileContainers.find(el => {
         const tTitle = norm(el.getAttribute("aria-label") || el.getAttribute("title"));
         return tTitle === wanted || tTitle.startsWith(wanted);
       });
@@ -236,7 +249,9 @@
       if (scroller) scroller.scrollTop = 0;
       await root.wait?.(200);
       for (let step = 0; step < 80; step++) {
-        for (const tile of document.querySelectorAll("flow-grid-tile-container")) {
+        const tileContainers = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", document, { checkVisible: false }) : null) ||
+          document.querySelectorAll("flow-grid-tile-container");
+        for (const tile of tileContainers) {
           const tTitle = norm(tile.getAttribute("aria-label") || tile.getAttribute("title"));
           if (tTitle === wanted || tTitle.startsWith(wanted)) {
             const id = root.mediaId?.(tile) || tTitle;
@@ -257,7 +272,9 @@
   }
 
   async function retryNativeErrorTile(item) {
-    let tile = [...document.querySelectorAll("flow-grid-tile-container")].find(candidate =>
+    const tileContainers = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", document, { checkVisible: false }) : null) ||
+      [...document.querySelectorAll("flow-grid-tile-container")];
+    let tile = tileContainers.find(candidate =>
       item.id && !item.id.startsWith("title:") ? root.mediaId?.(candidate) === item.id : candidate.getAttribute("aria-label") === item.title);
     if (!tile) return false;
     tile.scrollIntoView({ block: "center" });
@@ -267,11 +284,14 @@
     tile.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, clientX: x, clientY: y, pointerId: 1, pointerType: "mouse" }));
     tile.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, clientX: x, clientY: y }));
     await root.wait?.(250);
+    const retryBtnConfig = root.FlowSelectors?.tiles?.retryButton;
+    const labelRegex = retryBtnConfig?.textRegex || /^(?:retry|try again|thử lại)(?:\s+.*)?$/i;
+    const iconRegex = retryBtnConfig?.iconRegex || /refresh|replay|retry/i;
     const retry = [...tile.querySelectorAll("button,[role=button]")].find(el => {
       if (!root.visible?.(el) || el.disabled || el.getAttribute("aria-disabled") === "true") return false;
       const label = (root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim().toLowerCase();
-      const icon = el.querySelector("mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined,svg")?.textContent?.trim() || "";
-      return /^(?:retry|try again|thử lại)(?:\s+.*)?$/i.test(label) || /refresh|replay|retry/i.test(icon);
+      const icon = (root.flowFindIcon ? root.flowFindIcon(el) : el.querySelector("mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined,svg"))?.textContent?.trim() || "";
+      return labelRegex.test(label) || iconRegex.test(icon);
     });
     if (!retry) return false;
     const retryRect = retry.getBoundingClientRect();

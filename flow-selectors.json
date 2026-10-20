@@ -1,0 +1,212 @@
+{
+  "version": 2,
+  "description": "Google Flow Complete Dynamic Selectors Configuration (TobyFlow Compatible)",
+  "updatedAt": "2026-10-20T18:35:00Z",
+  "editor": {
+    "selectors": [
+      ".ProseMirror[contenteditable='true']",
+      ".ProseMirror",
+      "flow-base-prompt-box [contenteditable='true']",
+      "textarea[aria-label*='prompt']"
+    ]
+  },
+  "composerRoot": {
+    "selectors": [
+      ".flow-composer",
+      "flow-base-prompt-box",
+      "form[class*='composer']",
+      "[class*='composer']"
+    ]
+  },
+  "submitButton": {
+    "selectors": [
+      "button[type='submit']",
+      "button[data-action='submit']",
+      "button[data-action='generate']",
+      "button",
+      "[role='button']"
+    ],
+    "icons": ["arrow_forward", "send", "sparkle", "auto_awesome", "play_arrow"],
+    "textRegex": "^(?:start generation|generate|bắt đầu tạo|tạo video|tạo ảnh|tạo hình ảnh)$",
+    "nearComposerTextRegex": "^(?:create|tạo)$",
+    "excludedTextRegex": "(?:project|dự án|character|nhân vật|folder|thư mục|settings|cài đặt|tune|clear prompt|xóa câu lệnh|xóa văn bản|quay lại|back|upload|tải lên)",
+    "excludedComposerIcons": ["tune", "settings", "close", "clear", "add", "add_circle"],
+    "excludedComposerAria": "setting|cài đặt|clear|xóa|thành phần|ingredient|add media"
+  },
+  "tiles": {
+    "container": {
+      "selectors": [
+        "flow-grid-tile-container",
+        "[class*='grid-tile-container']",
+        "[class*='grid-tile']"
+      ],
+      "attribute": "data-tile-id"
+    },
+    "progressBar": {
+      "selectors": [
+        "flow-progress-tile",
+        "mat-progress-bar",
+        "[role='progressbar']",
+        "[class*='progress-bar']",
+        "[class*='progressbar']"
+      ]
+    },
+    "spinner": {
+      "selectors": [
+        "mat-spinner",
+        "mat-progress-spinner",
+        "[class*='spinner']",
+        "[class*='loading']",
+        "[class*='loader']",
+        "[class*='shimmer']",
+        "[class*='skeleton']",
+        "svg[class*='spin']"
+      ]
+    },
+    "placeholder": {
+      "selectors": [
+        "flow-progress-tile",
+        "flow-rendering-tile",
+        "flow-generating-tile",
+        "flow-placeholder-tile",
+        "[class*='rendering']",
+        "[class*='generating']",
+        "[class*='placeholder']"
+      ]
+    },
+    "error": {
+      "selectors": [
+        "flow-error-tile",
+        "[class*='error-tile']"
+      ]
+    },
+    "video": {
+      "selectors": [
+        "flow-video-tile",
+        "flow-scene-tile"
+      ]
+    },
+    "retryButton": {
+      "selectors": ["button", "[role='button']"],
+      "textRegex": "^(?:retry|try again|thử lại)(?:\\s+.*)?$",
+      "iconRegex": "refresh|replay|retry"
+    }
+  },
+  "settings": {
+    "triggerButton": {
+      "selectors": ["button", "[role='button']"],
+      "icon": "tune"
+    },
+    "options": {
+      "selectors": [
+        "[role='radio']",
+        "mat-radio-button",
+        "[role='tab']"
+      ]
+    }
+  },
+  "components": {
+    "inlineChips": {
+      "selectors": [
+        "[contenteditable=\"false\"]",
+        "button[aria-label=\"Ingredient\"]",
+        "[class*=\"ingredient-chip\"]"
+      ]
+    },
+    "characterTile": {
+      "selectors": [
+        "flow-character-tile"
+      ]
+    },
+    "listBox": {
+      "selectors": [
+        "[role=\"listbox\"]",
+        "mat-select-panel"
+      ]
+    },
+    "optionItem": {
+      "selectors": [
+        "[role=\"option\"]",
+        "mat-option"
+      ]
+    }
+  },
+  "navigation": {
+    "newProjectButton": {
+      "selectors": ["button", "a[role='button']"],
+      "icons": ["add", "create", "new"],
+      "textRegex": "new project|tạo dự án|dự án mới|create project"
+    },
+    "scrollContainer": {
+      "selectors": [
+        "[class*='scroll']",
+        "main",
+        ".flow-scroll-container",
+        "flow-app"
+      ]
+    }
+  },
+  "creditLimit": {
+    "selectors": [
+      "[role='alert']",
+      "mat-error",
+      ".flow-alert",
+      "[class*='alert']",
+      "[class*='error']",
+      "[class*='quota']",
+      "[class*='credit']"
+    ],
+    "patterns": [
+      "run out of credits",
+      "no credits remaining",
+      "not enough credits",
+      "credit limit reached",
+      "bạn đã hết credit",
+      "không đủ credit",
+      "hết hạn mức credit",
+      "public_error_user_quota_reached"
+    ]
+  },
+  "agent": {
+    "toggleButton": {
+      "selectors": ["button", "[role='button']"],
+      "textRegex": "^Agent$"
+    },
+    "closeButton": {
+      "selectors": ["button", "[role='button']"],
+      "icon": "close"
+    },
+    "instructionDoneButton": {
+      "selectors": ["button", "[role='button']"],
+      "textRegex": "^(?:Done|Xong|Hoàn tất)$"
+    }
+  },
+  "characters": {
+    "createTile": {
+      "selectors": ["flow-custom-tile"]
+    },
+    "characterTile": {
+      "selectors": ["flow-character-tile"]
+    },
+    "portrait": {
+      "selectors": [
+        "img[aria-label='Generated character image']",
+        "img[aria-label='Ảnh nhân vật đã tạo']",
+        "img[aria-label*='nhân vật']",
+        "img[aria-label*='character']"
+      ]
+    }
+  },
+  "common": {
+    "icons": {
+      "selectors": [
+        "mat-icon",
+        ".mat-icon",
+        ".google-symbols",
+        ".material-symbols-outlined",
+        "i",
+        "svg"
+      ]
+    }
+  }
+}

@@ -10,6 +10,7 @@ import { OUTPUT_ROOT, shapes, type Core } from "./core.js";
 import { extensionConnected, extensionRevokeDeviceConnection, extensionStatus, extensionSetWebSocket } from "./extension.js";
 import { runWithDeviceContext } from "./request-context.js";
 import { outputRootForContext, uploadDirForContext } from "./paths.js";
+import { getFlowSelectors } from "./selectors.js";
 import { authenticateDevice, createUser, listDevicesForUser, listUsers, loginDevice, pairDevice, revokeDevice, rotatePairingCode, setUserPassword, setUserStatus } from "./users.js";
 
 export const PORT = Number(process.env.FLOW_MCP_PORT ?? 18899);
@@ -184,6 +185,9 @@ export async function startServer(core: Core, getDeviceCore?: (deviceId: string)
         return json(res, 200, localOnly
           ? { name: "flow-mcp", driver: "native", extension_connected: extensionConnected(), connector: extensionStatus() }
           : { name: "flow-mcp", driver: "native" });
+      }
+      if (req.method === "GET" && url.pathname === "/api/flow-selectors") {
+        return json(res, 200, getFlowSelectors());
       }
       if (url.pathname === "/api/auth/session" && req.method === "GET") {
         const session = sessionFromRequest(req);

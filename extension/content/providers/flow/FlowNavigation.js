@@ -235,11 +235,13 @@
 
     // 3. Outside of project
     console.log("[FlowNavigation] Outside of project. Finding New project button or existing project...");
+    const navConfig = root.FlowSelectors?.navigation?.newProjectButton;
+    const navTextRegex = navConfig?.textRegex || /new project|tạo dự án|dự án mới|create project/i;
     const newProjectBtn = [...document.querySelectorAll('button, a[role="button"]')].find(btn => {
       if (!root.visible?.(btn)) return false;
       const label = (root.accessibleName?.(btn) || btn.innerText || btn.textContent || "").trim().toLowerCase();
       const hasAddIcon = [...btn.querySelectorAll('mat-icon')].some(i => /add|create|new/i.test((i.innerText || i.textContent || "").trim()));
-      return /new project|tạo dự án|dự án mới|create project/i.test(label) || (hasAddIcon && /project|dự án/i.test(label));
+      return navTextRegex.test(label) || (hasAddIcon && /project|dự án/i.test(label));
     });
 
     if (newProjectBtn) {

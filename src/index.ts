@@ -324,4 +324,27 @@ server.registerTool(
   (args) => reply(patient("flow_assemble", core.assemble(args))),
 );
 
+server.registerTool(
+  "flow_reangle_image",
+  {
+    title: "Re-angle image via 3D Camera Orbit",
+    description:
+      "Generate a new perspective of an existing character, product, or subject using Flow's reference image consistency and 3D spherical camera coordinates (rotation, tilt, zoom). Rotation: -180 to 180 deg (0 = front, 90 = right profile, -90 = left profile, 180 = back). Tilt: -60 to 90 deg (-60 = worm's eye looking up, 0 = eye level, 60 = high angle, 90 = top down). Zoom: -2 to 2 (-2 = wide, 0 = medium, 1 = close-up, 2 = macro).",
+    inputSchema: shapes.reangle,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  },
+  (args) => reply(core.reangle(args)),
+);
+
+server.registerTool(
+  "flow_angle_presets",
+  {
+    title: "List 3D camera angle presets",
+    description: "List available camera angle presets (portrait-reangle, product-reangle, cinematic-orbit, character-turnaround).",
+    inputSchema: shapes.angle_presets,
+    annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  },
+  () => reply(core.angle_presets()),
+);
+
 await server.connect(new StdioServerTransport());

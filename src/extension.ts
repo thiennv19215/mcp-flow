@@ -5,7 +5,7 @@ import { currentDeviceContext } from "./request-context.js";
 type ExtensionError = { code?: string; message?: string; retryable?: boolean; outcome_unknown?: boolean };
 type ExtensionResult = { ok: boolean; value?: unknown; error?: string | ExtensionError };
 type Pending = { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout };
-type Connection = {
+export type Connection = {
   deviceId: string;
   ws: WebSocket;
   pending: Map<string, Pending>;
@@ -18,6 +18,30 @@ type Connection = {
 const connections = new Map<string, Connection>();
 const lastErrors = new Map<string, string>();
 const events = new EventEmitter();
+const initListeners: ((connection: Connection) => void)[] = [];
+
+export function onExtensionInitialized(listener: (connection: Connection) => void): () => void {
+  initListeners.push(listener);
+  return () => {
+    const idx = initListeners.indexOf(listener);
+    if (idx >= 0) initListeners.splice(idx, 1);
+  };
+}
+
+export function extensionBroadcastEvent(method: string, params: unknown[]): void {
+  const message = JSON.stringify({ type: "event", method, params });
+  for (const connection of connections.values()) {
+    if (connection.ws.readyState === 1) {
+      try { connection.ws.send(message); } catch {}
+    }
+  }
+}
+
+export function extensionSendEvent(connection: Connection, method: string, params: unknown[]): void {
+  if (connection.ws.readyState === 1) {
+    try { connection.ws.send(JSON.stringify({ type: "event", method, params })); } catch {}
+  }
+}
 const selectedDevice = () => currentDeviceContext()?.deviceId ?? "local";
 const selectedConnection = () => connections.get(selectedDevice());
 
@@ -157,6 +181,9 @@ export function extensionSetWebSocket(ws: WebSocket, deviceId = "local"): void {
           connection.ready = true;
           lastErrors.delete(deviceId);
           clearTimeout(initTimer);
+          for (const listener of initListeners) {
+            try { listener(connection); } catch (e) { console.warn("[extension] initListener error:", e); }
+          }
         }
       }
     } catch (error) {

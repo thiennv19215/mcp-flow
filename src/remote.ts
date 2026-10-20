@@ -39,6 +39,8 @@ export class RemoteCore implements Core {
   continue_shot = (a: unknown) => call("continue_shot", a);
   agent = (a: unknown) => call("agent", a);
   outputs = () => call("outputs", {});
+  reangle = (a: unknown) => call("reangle", a);
+  angle_presets = () => call("angle_presets", {});
 
   // Long waits are split up so no single HTTP request outlives fetch's header timeout.
   async wait(a: { job_ids?: string[]; timeout_seconds: number }): Promise<unknown> {
