@@ -140,23 +140,23 @@ async function activateFlowSubmitButton(button, expectedPrompt) {
       innerIcon.dispatchEvent(new MouseEvent("click", point));
     }
 
-    // Call MAIN world Angular bridge to directly execute Angular click listener
+    // Call TobyFlow's slate-bridge in MAIN world to directly execute Angular click listener with isTrusted proxy
     const submitToken = crypto.randomUUID();
-    button.setAttribute("data-flow-submit-token", submitToken);
+    button.setAttribute("data-tobyflow-submit-token", submitToken);
     try {
       await new Promise(resolve => {
         const handler = ev => {
-          if (ev.data?.source === "flow-mcp-upload-v8-result") {
+          if (ev.data?.source === "flow-auto-slate-result") {
             window.removeEventListener("message", handler);
             resolve();
           }
         };
         window.addEventListener("message", handler);
-        window.postMessage({ source: "flow-mcp-upload-v8", action: "activateSubmit", submitToken, requestId: submitToken }, location.origin);
+        window.postMessage({ source: "flow-auto-slate", action: "activateV2Submit", submitToken, requestId: submitToken }, location.origin);
         setTimeout(resolve, 300);
       });
     } finally {
-      button.removeAttribute("data-flow-submit-token");
+      button.removeAttribute("data-tobyflow-submit-token");
     }
   } catch (error) {
     if (error?.code) throw error;
