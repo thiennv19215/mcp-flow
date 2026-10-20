@@ -159,9 +159,9 @@ audio{width:100%;margin-top:8px;filter:invert(1) hue-rotate(180deg)}
 </style>
 <style id="studio-theme">
 :root{
-  color-scheme:light;
-  --ink:#f5f7fa; --ink2:#fff; --ink3:#edf1f6; --line:#d9e1eb;
-  --bone:#172235; --dim:#58677c; --tally:#2468c5; --go:#16745e; --warn:#9b5b0b; --bad:#b4233b;
+  color-scheme:dark;
+  --ink:#111923; --ink2:#1b2634; --ink3:#263447; --line:#35465a;
+  --bone:#e8eef6; --dim:#a5b2c3; --tally:#6da8ff; --go:#41c897; --warn:#ffca70; --bad:#ff7889;
   --display:"Hanken Grotesk",Inter,system-ui,sans-serif; --body:"Hanken Grotesk",Inter,system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
   --r:14px;
 }
@@ -240,6 +240,47 @@ dialog::backdrop{background:rgba(15,23,42,.45);backdrop-filter:blur(3px)}
 .toast.bad{background:#9f1d32;color:#fff}
 #studioLogout{font-size:13px}
 @media(max-width:760px){body{padding:0 14px 112px}header{padding:18px 0 14px;margin-bottom:14px}h1{font-size:27px}.home-project-picker{padding:15px}.tabs{margin:0 -14px 14px;padding-left:14px;padding-right:14px}.tabs button{min-height:46px;padding:4px 12px}.card{padding:14px}.rollbar{padding-left:14px;padding-right:14px}.roll{padding:0 18px}.est b{font-size:18px}}
+body{background:var(--ink)}
+.tabs{background:rgba(17,25,35,.95);border-color:var(--line)}
+.tabs button{color:#b2bfd0;background:transparent}
+.tabs button:hover{color:var(--bone);background:#202d3d;border-color:#40536a}
+.tabs button.on{background:#263f62;border-color:#466b9d;color:#c6ddff}
+.home-project-picker{background:var(--ink2);border-color:var(--line);border-left-color:var(--tally);box-shadow:0 5px 18px rgba(0,0,0,.12)}
+.card{background:var(--ink2);border-color:var(--line);box-shadow:0 5px 18px rgba(0,0,0,.12)}
+label.f{color:#d0d9e5}
+input[type=text],input[type=number],input[type=password],select,textarea{color:var(--bone);background:#131d29;border-color:#405168;box-shadow:none}
+input:focus,select:focus,textarea:focus{border-color:var(--tally);box-shadow:0 0 0 3px rgba(109,168,255,.2)}
+input::placeholder,textarea::placeholder{color:#8493a7}
+.btn{color:#102033;background:#8bb9ff;border-color:#8bb9ff;box-shadow:0 2px 6px rgba(0,0,0,.18)}
+.btn:hover{color:#0c1725;background:#a3c9ff;border-color:#a3c9ff;box-shadow:0 3px 12px rgba(0,0,0,.24)}
+.btn.ghost{color:#d5dfec;background:#202c3b;border-color:#43556b}
+.btn.ghost:hover{color:#fff;background:#2a3b50;border-color:#617b9c}
+.seg button{color:#d1dbe8;background:#141e2a;border-color:#405168}
+.seg button:hover{border-color:#6b88ad;background:#202e3f}
+.seg button.on{color:#e8f2ff;background:#294a76;border-color:#6da8ff}
+.scene{background:#17212e;border-color:var(--line)}
+.scene .no{color:#253345}
+.slot{background:#141e2a;border-color:#4a5d74;color:#aab8ca}
+.slot:hover{border-color:var(--tally);background:#1a2a3d;color:#c6ddff}
+.lib button{color:#d9e3ef;background:#17212e;border-color:#3b4c60}
+.lib button:hover,.project-list button:hover{border-color:#6c8fb8;background:#202e3f}
+.lib button.on,.project-list button.on{border-color:#6da8ff;background:#263f62;color:#c6ddff}
+.lib em{color:#a5b2c3}
+.job{border-color:#35465a}
+.job p{color:#b4c0ce}
+.badge{background:#2b3746;color:#c9d4e1}
+.badge.running{background:#2d64a8;color:#fff}.badge.done{background:#174a3a;color:#a4f0cf}.badge.failed{background:#5b2832;color:#ffc0ca}.badge.cancelled{background:#2b3746;color:#b2bdcb}
+.meter{background:#2a3848}.meter i{background:#79afff}
+.rollbar{background:rgba(20,29,41,.97);border-color:#35465a;box-shadow:0 -6px 22px rgba(0,0,0,.24)}
+.roll{color:#102033;background:#8bb9ff;border-color:#8bb9ff}.roll:hover{background:#a3c9ff}.roll:disabled{background:#2a3747;color:#8998aa;border-color:#35465a}
+.take{border-color:var(--line)}.take b{color:var(--bone)}
+.cliprow{background:#141e2a;border-color:#405168}.cliprow b{color:#8bb9ff}.cliprow span{color:var(--bone)}
+.gal figure{background:#0c1118;border-color:var(--line)}.gal figcaption{color:var(--bone);background:var(--ink2)}
+dialog{border-color:var(--line);background:#1b2634;color:var(--bone)}
+dialog::backdrop{background:rgba(3,8,15,.7)}
+.toast{background:#e8eef6;color:#172235;border-color:rgba(255,255,255,.12)}.toast.bad{background:#782d3a;color:#fff}
+#studioLogout{color:#d5dfec}
+audio{filter:invert(1) hue-rotate(180deg)}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 </style></head>
 <body>
