@@ -3,6 +3,15 @@
 
   const isNavControl = el => root.isFlowProjectNavigationControl?.(el) || false;
 
+  function flowSettingsTrigger() {
+    const tune = [...document.querySelectorAll('button,[role="button"]')].find(el => {
+      if (!root.visible?.(el) || isNavControl(el)) return false;
+      const icon = el.querySelector?.("mat-icon,.mat-icon,.google-symbols")?.textContent?.trim()?.toLowerCase();
+      return icon === "tune";
+    });
+    return tune || root.flowButton?.("Settings trigger");
+  }
+
   const OPTION_ALIASES = {
     video: ["video", "clip"],
     image: ["image", "hình ảnh", "ảnh", "photo"],
@@ -43,7 +52,7 @@
     const expected = String(name).replace(/\s+/g, " ").trim().toLowerCase();
     const normalizedExpected = root.normalizeAspectRatio?.(expected) || expected;
     const aliases = OPTION_ALIASES[expected] || (normalizedExpected ? [expected, normalizedExpected] : [expected]);
-    const settingsTrigger = root.flowButton?.("Settings trigger");
+    const settingsTrigger = flowSettingsTrigger();
 
     const variantMatch = expected.match(/^x([1-4])$/);
     const variantNum = variantMatch ? variantMatch[1] : null;
@@ -85,11 +94,12 @@
   }
 
   function flowSettingsPanelVisible() {
-    // 1. Kiểm tra nếu có container overlay/dialog chứa settings đang mở
-    const openPanel = [...document.querySelectorAll('[role="dialog"], [role="menu"], mat-dialog-container, flow-dialog, .cdk-overlay-pane')]
-      .find(el => root.visible?.(el) && !isNavControl(el) &&
+    // A Flow project-navigation overlay can also contain “Image” and “Video”.
+    // Inspect each overlay and require settings-specific controls before treating it as open.
+    const openPanels = [...document.querySelectorAll('[role="dialog"], [role="menu"], mat-dialog-container, flow-dialog, .cdk-overlay-pane')]
+      .filter(el => root.visible?.(el) && !isNavControl(el) &&
         el.querySelector?.('[role="radio"], mat-radio-button, button[id*="-trigger-"]'));
-    if (openPanel) {
+    for (const openPanel of openPanels) {
       const controls = [...openPanel.querySelectorAll('[role="radio"], mat-radio-button, [role="tab"], button')];
       const names = controls.filter(r => root.visible?.(r)).map(r => {
         const name = root.accessibleName?.(r) || r.innerText || r.textContent || "";
@@ -104,7 +114,12 @@
       const hasVariants = [1, 2, 3, 4].some(count => names.some(name =>
         name === `x${count}` || name === String(count) ||
         new RegExp(`(?:^|\\s)${count}\\s*(?:kết quả|biến thể|ảnh|hình ảnh|video)(?:$|\\s)`, "i").test(name)));
-      const hasSettingsContent = hasOption("image") && hasOption("video") && hasVariants;
+      const hasAspectRatio = names.some(name => /(?:^|\s)(?:9:16|16:9|1:1|4:3|3:4)(?:$|\s)/.test(name));
+      const looksLikeProjectNavigation = names.some(name => /^(?:all media|tất cả nội dung nghe nhìn|tất cả phương tiện)$/.test(name)) &&
+        names.some(name => /^(?:characters|nhân vật)$/.test(name)) &&
+        names.some(name => /^(?:upload|uploads|tệp tải lên|tải lên)$/.test(name));
+      const hasSettingsContent = !looksLikeProjectNavigation &&
+        ((hasOption("image") && hasOption("video")) || hasVariants || hasAspectRatio);
       if (hasSettingsContent) return true;
     }
 
@@ -115,7 +130,7 @@
 
   async function openFlowSettings() {
     if (flowSettingsPanelVisible()) return true;
-    const trigger = root.flowButton?.("Settings trigger");
+    const trigger = flowSettingsTrigger();
     if (!trigger) throw root.flowError("FLOW_SETTINGS_UNAVAILABLE", "Flow's settings panel cannot be opened; no generation was submitted.", true);
     trigger.click();
     await root.wait?.(400);
@@ -137,7 +152,7 @@
     }
     if (!isOpen()) return;
 
-    const trigger = root.flowButton?.("Settings trigger");
+    const trigger = flowSettingsTrigger();
     if (trigger) {
       trigger.click();
       const closeDeadline = Date.now() + 2000;
@@ -291,7 +306,7 @@
     await root.wait?.(450);
 
     const summaryConfirms = () => {
-      const trigger = root.flowButton?.("Settings trigger");
+      const trigger = flowSettingsTrigger();
       const summary = (trigger?.innerText || trigger?.textContent || "").replace(/\s+/g, " ").trim();
       return new RegExp(`(?:^|\\s)${name}(?:\\s|$)`, "i").test(summary);
     };
