@@ -200,8 +200,10 @@
         const credits = Number.isFinite(renderedCredits) ? renderedCredits : (Number.isFinite(settingsCredits) ? settingsCredits : 0);
         if (payload.maxCredits !== undefined && credits > Number(payload.maxCredits)) throw this.error("FLOW_MAX_CREDITS_EXCEEDED", `Flow quotes ${credits} credits, above max_credits=${payload.maxCredits}. Nothing was submitted.`, false, false);
 
-        const start = await editor.waitForGenerationSubmitButton(payload.prompt, 10000);
-        if (!start) throw this.error("FLOW_SUBMIT_DISABLED", "Flow's Start generation button did not become ready within 10 seconds; nothing was submitted.", true);
+        const start = await editor.waitForGenerationSubmitButton(payload.prompt, 3000);
+        if (start && (start.disabled || start.getAttribute("aria-disabled") === "true")) {
+          throw this.error("FLOW_SUBMIT_DISABLED", "Flow's Start generation button is disabled; nothing was submitted.", true);
+        }
 
         const errorsBeforeSubmit = new Set(editor.currentFlowSubmitErrors());
         const projectId = (root.ProviderRegistry || root.FlowDriverRegistry).describeUrl(location.href)?.projectId;
@@ -240,7 +242,7 @@
           const currentBox = document.querySelector(".ProseMirror");
           const freshMedia = tiles.collectNativeMedia().filter(item => !before.includes(item.id || `title:${item.title}`));
 
-          const buttonDisabled = !currentStart || currentStart.disabled || currentStart.getAttribute("aria-disabled") === "true";
+          const buttonDisabled = currentStart && (currentStart.disabled || currentStart.getAttribute("aria-disabled") === "true");
           const editorCleared = currentBox && !editor.getEditorUserText(currentBox);
           const tileAppeared = freshMedia.length > 0;
 
@@ -250,21 +252,15 @@
           }
 
           if (
-            activation.allowEnterFallback &&
             !fallbackDispatched &&
-            Date.now() - submitStartedAt >= 1200 &&
+            Date.now() - submitStartedAt >= 1500 &&
             currentBox &&
-            editor.normalizeFlowPrompt(editor.getEditorUserText(currentBox)) === editor.normalizeFlowPrompt(payload.prompt) &&
-            currentStart &&
-            !currentStart.disabled &&
-            currentStart.getAttribute("aria-disabled") !== "true"
+            editor.getEditorUserText(currentBox)
           ) {
-            try {
-              editor.inspectFlowSubmitTarget(currentStart, payload.prompt);
-              fallbackDispatched = true;
-              editor.pressFlowEditorSubmit(currentBox);
-            } catch {
-              fallbackDispatched = true;
+            fallbackDispatched = true;
+            editor.pressFlowEditorSubmit(currentBox);
+            if (currentStart && !currentStart.disabled && currentStart.getAttribute("aria-disabled") !== "true") {
+              try { currentStart.click(); } catch {}
             }
           }
 
