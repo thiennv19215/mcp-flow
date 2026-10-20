@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { loadJobs, saveJob } from "./users.js";
 
 export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled";
 
@@ -61,7 +62,22 @@ export class JobQueue {
   private lastFinished = 0;
   pausedReason: string | null = null;
 
-  constructor(private runner: JobRunner) {}
+  constructor(private runner: JobRunner, private scopeId = "local") {
+    for (const job of loadJobs(scopeId)) {
+      // A restart cannot tell whether Flow accepted a request before the process stopped.
+      // Keep the result visible and block retry rather than risk a second paid generation.
+      if (job.status === "running") {
+        job.status = "failed";
+        job.finishedAt = new Date().toISOString();
+        job.outcomeUnknown = true;
+        job.error = "Backend restarted while this job was running. Check the Flow project before retrying; its outcome is unknown.";
+        saveJob(scopeId, job);
+      }
+      this.jobs.set(job.id, job);
+    }
+  }
+
+  resume(): void { void this.work(); }
 
   add(params: SceneParams): Job {
     const job: Job = {
@@ -73,6 +89,7 @@ export class JobQueue {
       createdAt: new Date().toISOString(),
     };
     this.jobs.set(job.id, job);
+    saveJob(this.scopeId, job);
     void this.work();
     return job;
   }
@@ -85,6 +102,8 @@ export class JobQueue {
     return this.jobs.get(id);
   }
 
+  persist(job: Job): void { saveJob(this.scopeId, job); }
+
   list(): Job[] {
     return [...this.jobs.values()];
   }
@@ -96,6 +115,7 @@ export class JobQueue {
       job.status = "queued";
       job.error = undefined;
       job.finishedAt = undefined;
+      saveJob(this.scopeId, job);
       void this.work();
     }
     return job;
@@ -106,8 +126,18 @@ export class JobQueue {
     if (job && job.status === "queued") {
       job.status = "cancelled";
       job.finishedAt = new Date().toISOString();
+      saveJob(this.scopeId, job);
     }
     return job;
+  }
+
+  cancelQueued(): void {
+    for (const job of this.jobs.values()) {
+      if (job.status !== "queued") continue;
+      job.status = "cancelled";
+      job.finishedAt = new Date().toISOString();
+      saveJob(this.scopeId, job);
+    }
   }
 
   private async work(): Promise<void> {
@@ -129,6 +159,7 @@ export class JobQueue {
         if (job.status !== "queued") continue;
         job.status = "running";
         job.attempts++;
+        saveJob(this.scopeId, job);
         try {
           job.files = await this.runner(job);
           job.status = "done";
@@ -143,6 +174,7 @@ export class JobQueue {
           job.status = retryable && job.attempts <= (job.params.retries ?? 1) ? "queued" : "failed";
         }
         job.finishedAt = new Date().toISOString();
+        saveJob(this.scopeId, job);
         this.lastFinished = Date.now();
       }
     } finally {

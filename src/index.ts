@@ -5,12 +5,19 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { LocalCore, shapes, type Core } from "./core.js";
 import { PLAYBOOK } from "./playbook.js";
 import { RemoteCore } from "./remote.js";
-import { PORT, startServer } from "./server.js";
+import { PORT, PUBLIC_URL, startServer } from "./server.js";
 
 const local = new LocalCore();
-const role = await startServer(local);
+const deviceCores = new Map<string, LocalCore>();
+const getDeviceCore = (deviceId: string): LocalCore => {
+  let deviceCore = deviceCores.get(deviceId);
+  if (!deviceCore) deviceCores.set(deviceId, (deviceCore = new LocalCore(deviceId)));
+  return deviceCore;
+};
+const suspendDeviceCore = (deviceId: string) => deviceCores.get(deviceId)?.suspendDevice();
+const role = await startServer(local, getDeviceCore, suspendDeviceCore);
 const core: Core = role === "client" ? new RemoteCore() : local;
-const studio = role === "none" ? undefined : `http://127.0.0.1:${PORT}`;
+const studio = role === "none" ? undefined : PUBLIC_URL ?? `http://127.0.0.1:${PORT}`;
 
 const server = new McpServer({ name: "flow-mcp", version: "0.2.0" });
 

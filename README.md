@@ -16,6 +16,7 @@ Claude / Codex → flow-mcp job queue → native extension commands → selected
 **MCP** = Model Context Protocol, the standard that lets Claude use outside tools.
 New here? [GETTING-STARTED.md](GETTING-STARTED.md) takes you from nothing to your first video, step by step, and
 [OVERVIEW.md](OVERVIEW.md) explains what it does in plain English, with no code names.
+For the backend-only Docker/Caddy VPS setup and its current limits, see [VPS-DEPLOYMENT.md](VPS-DEPLOYMENT.md).
 
 ---
 
@@ -24,7 +25,7 @@ New here? [GETTING-STARTED.md](GETTING-STARTED.md) takes you from nothing to you
 | | |
 |---|---|
 | **macOS or Windows 10/11** | Developed and tested on macOS. Windows is supported (Chrome, the computer's own voices, the Recycle Bin and the panel launcher all have Windows versions), but it hasn't been run on a real PC yet, so please report anything that breaks |
-| **Node.js 22 or newer** | `node --version` |
+| **Node.js 22.13 or newer** | `node --version` |
 | **Google Chrome** | Any recent version |
 | **A Google account** | Free. Flow gives every account 50 credits a day; a paid Google AI plan adds more and unlocks 1080p downloads. Developed on a Pro plan |
 | **FFmpeg** *(optional)* | Mac: `brew install ffmpeg` · Windows: `winget install Gyan.FFmpeg`. Needed only to join clips, mix music or record narration |

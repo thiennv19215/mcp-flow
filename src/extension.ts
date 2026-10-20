@@ -1,10 +1,12 @@
 import type { WebSocket } from "ws";
 import { EventEmitter } from "node:events";
+import { currentDeviceContext } from "./request-context.js";
 
 type ExtensionError = { code?: string; message?: string; retryable?: boolean; outcome_unknown?: boolean };
 type ExtensionResult = { ok: boolean; value?: unknown; error?: string | ExtensionError };
 type Pending = { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout };
 type Connection = {
+  deviceId: string;
   ws: WebSocket;
   pending: Map<string, Pending>;
   ready: boolean;
@@ -13,37 +15,53 @@ type Connection = {
   nextId: number;
 };
 
-let current: Connection | undefined;
-let lastError: string | undefined;
+const connections = new Map<string, Connection>();
+const lastErrors = new Map<string, string>();
 const events = new EventEmitter();
+const selectedDevice = () => currentDeviceContext()?.deviceId ?? "local";
+const selectedConnection = () => connections.get(selectedDevice());
 
-export function onExtensionProgress(listener: (progress: { requestId: string; tabId?: number; progress: unknown }) => void): () => void {
+export function onExtensionProgress(listener: (progress: { requestId: string; tabId?: number; progress: unknown; deviceId?: string }) => void): () => void {
   events.on("progress", listener);
   return () => events.off("progress", listener);
 }
 
 export function extensionConnected(): boolean {
-  return Boolean(current?.ready && current.ws.readyState === 1);
+  const context = currentDeviceContext();
+  const available = context ? [connections.get(context.deviceId)] : [...connections.values()];
+  return available.some((connection) => Boolean(connection?.ready && connection.ws.readyState === 1));
 }
 
 export function extensionSupportsCapability(capability: string): boolean {
-  return Boolean(current?.ready && current.capabilities.includes(capability));
+  const connection = selectedConnection();
+  return Boolean(connection?.ready && connection.capabilities.includes(capability));
 }
 
 export function extensionStatus() {
-  return { connected: extensionConnected(), transport: "websocket", protocol: 2, extension_version: current?.version, error: lastError };
+  const context = currentDeviceContext();
+  if (!context) return { connected: extensionConnected(), connectors: [...connections.values()].filter((item) => item.ready && item.ws.readyState === 1).length, transport: "websocket", protocol: 2 };
+  const connection = selectedConnection();
+  return { connected: Boolean(connection?.ready && connection.ws.readyState === 1), device_id: context.deviceId, transport: "websocket", protocol: 2, extension_version: connection?.version, error: lastErrors.get(context.deviceId) };
+}
+
+export function extensionRevokeDeviceConnection(deviceId: string): void {
+  const connection = connections.get(deviceId);
+  if (!connection) return;
+  dispose(connection, "This device's backend credential was revoked.");
+  connection.ws.close(1008, "Device credential revoked");
 }
 
 export async function extensionDownloads(): Promise<Array<{ id: number; filename: string; state: string; error?: string; bytesReceived: number; totalBytes: number }>> {
-  if (!current?.ready) throw new Error("Flow connector is offline.");
-  return call(current, "flow.downloads.recent");
+  const connection = selectedConnection();
+  if (!connection?.ready) throw new Error("Flow connector is offline.");
+  return call(connection, "flow.downloads.recent");
 }
 
 export async function executeFlowDom<T = unknown>(
   command: Record<string, unknown>,
   options: { timeoutMs?: number; onProgress?: (value: unknown) => void } = {},
 ): Promise<T> {
-  const connection = current;
+  const connection = selectedConnection();
   if (!connection?.ready) throw new Error("Flow extension is offline.");
   const capability = String(command.capability ?? "");
   if (!connection.capabilities.includes(capability)) {
@@ -53,8 +71,8 @@ export async function executeFlowDom<T = unknown>(
   }
   const requestId = String(++connection.nextId);
   const timeoutMs = options.timeoutMs ?? (Number(command.timeoutMs ?? command.timeout_ms) || 5 * 60_000);
-  const progressListener = (value: { requestId: string; progress: unknown }) => {
-    if (value.requestId === requestId) options.onProgress?.(value.progress);
+  const progressListener = (value: { requestId: string; progress: unknown; deviceId?: string }) => {
+    if (value.requestId === requestId && value.deviceId === connection.deviceId) options.onProgress?.(value.progress);
   };
   if (options.onProgress) events.on("progress", progressListener);
   try {
@@ -65,19 +83,19 @@ export async function executeFlowDom<T = unknown>(
 }
 
 function dispose(connection: Connection, reason: string): void {
-  if (current !== connection) return;
-  current = undefined;
-  lastError = reason;
+  if (connections.get(connection.deviceId) !== connection) return;
+  connections.delete(connection.deviceId);
+  lastErrors.set(connection.deviceId, reason);
   connection.ready = false;
   for (const pending of connection.pending.values()) {
     clearTimeout(pending.timer);
-    pending.reject(new Error(reason));
+    pending.reject(Object.assign(new Error(reason), { outcome_unknown: true }));
   }
   connection.pending.clear();
 }
 
 function call(connection: Connection, method: string, args: unknown[] = [], timeoutMs = 5 * 60_000): Promise<any> {
-  if (current !== connection || connection.ws.readyState !== 1) return Promise.reject(new Error("Flow extension disconnected. No command was sent."));
+  if (connections.get(connection.deviceId) !== connection || connection.ws.readyState !== 1) return Promise.reject(new Error("Flow extension disconnected. No command was sent."));
   const id = String(++connection.nextId);
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -95,17 +113,18 @@ function call(connection: Connection, method: string, args: unknown[] = [], time
   });
 }
 
-export function extensionSetWebSocket(ws: WebSocket): void {
-  if (current) {
-    ws.close(1008, "Another Flow connector is already connected");
-    return;
+export function extensionSetWebSocket(ws: WebSocket, deviceId = "local"): void {
+  const existing = connections.get(deviceId);
+  if (existing) {
+    dispose(existing, "A replacement connector connected for this device.");
+    existing.ws.close(1000, "Replaced by a newer device connection");
   }
-  const connection: Connection = { ws, pending: new Map(), ready: false, capabilities: [], nextId: 0 };
-  current = connection;
+  const connection: Connection = { deviceId, ws, pending: new Map(), ready: false, capabilities: [], nextId: 0 };
+  connections.set(deviceId, connection);
   const initTimer = setTimeout(() => dispose(connection, "Extension handshake timed out. Reload Flow MCP Connector."), 10_000);
 
   ws.on("message", data => {
-    if (current !== connection) return;
+    if (connections.get(deviceId) !== connection) return;
     try {
       const message = JSON.parse(data.toString());
       if (message.type === "ping") { ws.send(JSON.stringify({ type: "pong" })); return; }
@@ -129,14 +148,14 @@ export function extensionSetWebSocket(ws: WebSocket): void {
       if (message.type === "event" && Array.isArray(message.params)) {
         if (message.method === "extension.progress") {
           const progress = message.params[0];
-          if (progress && connection.pending.has(String(progress.requestId))) events.emit("progress", progress);
+          if (progress && connection.pending.has(String(progress.requestId))) events.emit("progress", { ...progress, deviceId });
         } else if (message.method === "extension.initialized") {
           const info = message.params[0];
           if (info?.protocol !== 2) throw new Error("Incompatible connector protocol. Reload Flow MCP Connector.");
           connection.version = info.version;
           connection.capabilities = Array.isArray(info.capabilities) ? info.capabilities : [];
           connection.ready = true;
-          lastError = undefined;
+          lastErrors.delete(deviceId);
           clearTimeout(initTimer);
         }
       }

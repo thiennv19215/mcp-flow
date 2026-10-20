@@ -1,7 +1,8 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { extname, join } from "node:path";
-import { CAST_DIR, HOME_DIR } from "./paths.js";
+import { dirname, extname, join } from "node:path";
+import { castDirForContext, HOME_DIR } from "./paths.js";
+import { currentDeviceContext } from "./request-context.js";
 import type { CharacterParams, NativeMedia } from "./types.js";
 import type { Job } from "./queue.js";
 import { nativeOperation, requireCapabilities } from "./flow.js";
@@ -9,17 +10,21 @@ import { stageNativeMedia, cleanStagedFiles } from "./flow-transfer.js";
 import { downloadNativeResults, extensionOf, nativeDownloadIds, waitForNativeDownload } from "./native-downloads.js";
 
 const ASSET_PREFIX = "asset:";
-const LOOKS_FILE = join(HOME_DIR, "characters.json");
+const looksFile = () => {
+  const context = currentDeviceContext();
+  return context ? join(HOME_DIR, "users", context.userId, context.deviceId, "characters.json") : join(HOME_DIR, "characters.json");
+};
 
 export const loadLooks = (): Record<string, string> => {
-  try { return JSON.parse(readFileSync(LOOKS_FILE, "utf8")) as Record<string, string>; } catch { return {}; }
+  try { return JSON.parse(readFileSync(looksFile(), "utf8")) as Record<string, string>; } catch { return {}; }
 };
 
 export const characterLook = (name: string): string | undefined => loadLooks()[name.toLowerCase()];
 
 export function rememberCharacter(name: string, look: string): void {
-  mkdirSync(HOME_DIR, { recursive: true });
-  writeFileSync(LOOKS_FILE, JSON.stringify({ ...loadLooks(), [name.toLowerCase()]: look.trim() }, null, 2));
+  const file = looksFile();
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, JSON.stringify({ ...loadLooks(), [name.toLowerCase()]: look.trim() }, null, 2));
 }
 
 export async function createCharacter(c: CharacterParams, job?: Job): Promise<{ name: string; url: string; portrait?: string }> {
@@ -52,11 +57,11 @@ export async function createCharacter(c: CharacterParams, job?: Job): Promise<{ 
     const result = await nativeOperation<{ name: string; url: string; portraitMedia?: NativeMedia }>("flow.character.create", { character }, "flow.native.character.create", flowContext, 10 * 60_000);
     let portrait: string | undefined;
     if (result.portraitMedia) {
-      const dir = CAST_DIR;
+      const dir = castDirForContext();
       try { portrait = (await downloadNativeResults([result.portraitMedia], dir, c.name.replace(/[^\w.-]+/g, "_"), "original", flowContext))[0]; }
       catch { /* The character is saved in Flow; its portrait can be fetched with the edit tool. */ }
     } else if (localImage) {
-      const dir = CAST_DIR;
+      const dir = castDirForContext();
       mkdirSync(dir, { recursive: true });
       portrait = join(dir, `${c.name.replace(/[^\w.-]+/g, "_")}${extname(c.image!).toLowerCase()}`);
       copyFileSync(c.image!, portrait);
@@ -82,7 +87,7 @@ export async function editCharacter(name: string, change?: string, job?: Job): P
   if (result.downloadTriggered) {
     try {
       const file = await waitForNativeDownload(before, 90_000, progress => { if (job) job.progress = progress; });
-      const dir = CAST_DIR;
+      const dir = castDirForContext();
       mkdirSync(dir, { recursive: true });
       portrait = join(dir, `${name.replace(/[^\w.-]+/g, "_")}${extensionOf(file.filename)}`);
       copyFileSync(file.filename, portrait);

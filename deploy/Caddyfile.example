@@ -1,0 +1,7 @@
+# Replace flow.example.com with the domain in .env. Caddy obtains and renews TLS automatically.
+flow.example.com {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:18899 {
+		header_up CF-Connecting-IP {remote_host}
+	}
+}

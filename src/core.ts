@@ -8,8 +8,9 @@ import { JobQueue, type Job } from "./queue.js";
 import { attachReferences } from "./flow.js";
 import { BIN, COMPUTER, IS_MAC, IS_WIN, moveToBin } from "./platform.js";
 import { TECHNIQUES, techniqueById } from "./techniques.js";
-import { OUTPUT_ROOT, projectDir } from "./paths.js";
+import { OUTPUT_ROOT, outputRootForContext, projectDir } from "./paths.js";
 import { shapes, type Args } from "./schemas.js";
+import { extensionConnected } from "./extension.js";
 
 export { OUTPUT_ROOT, projectDir };
 export { shapes, type Args };
@@ -85,7 +86,10 @@ const BUSY = "A generation is running in the Flow tab. Wait for it to finish (fl
 export class LocalCore implements Core {
   private detailedState: ReturnType<typeof getFlowState> | undefined;
   private mediaUploadActive = false;
-  private queue: JobQueue = new JobQueue(async (job) => {
+  private queue: JobQueue;
+
+  constructor(scopeId = "local") {
+    this.queue = new JobQueue(async (job) => {
     const { chain_from, reference_from } = job.params;
     if (reference_from) {
       const still = this.queue.get(reference_from)?.files.find((f) => /\.(jpe?g|png|webp)$/i.test(f));
@@ -101,7 +105,8 @@ export class LocalCore implements Core {
     if (job.params.agent_scenes) return await runAgentBatch(job);
     if (job.params.edit_asset) return await runEdit(job);
     return await runGeneration(job);
-  });
+    }, scopeId);
+  }
 
   async status({ detailed }: Args<"status">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
@@ -115,7 +120,12 @@ export class LocalCore implements Core {
     } catch (error) {
       flow = { url: "", signedIn: false, inProject: false, available: false, hint: `Flow extension did not return its status: ${error instanceof Error ? error.message : String(error)}` };
     }
-    return { flow, pacing: this.queue.pausedReason, output_root: OUTPUT_ROOT, jobs: this.queue.list().map(jobView) };
+    if (extensionConnected()) this.queue.resume();
+    return { flow, pacing: this.queue.pausedReason, output_root: outputRootForContext(), jobs: this.queue.list().map(jobView) };
+  }
+
+  suspendDevice(): void {
+    this.queue.cancelQueued();
   }
 
   async generate({ project, scenes }: Args<"generate">) {
@@ -197,6 +207,7 @@ export class LocalCore implements Core {
         const numbers = p.agent_numbers ?? p.agent_scenes.map((_, i) => base + i);
         const pick = job.failed_scenes.map((n) => numbers.indexOf(n)).filter((i) => i >= 0);
         job.failed_scenes = undefined;
+        this.queue.persist(job);
         jobs.push(
           this.queue.add({
             ...p,
@@ -271,12 +282,13 @@ export class LocalCore implements Core {
 
   // Everything already downloaded, newest project first, so the panel can show past work after a restart.
   async outputs() {
-    if (!existsSync(OUTPUT_ROOT)) return { root: OUTPUT_ROOT, projects: [] };
+    const root = outputRootForContext();
+    if (!existsSync(root)) return { root, projects: [] };
     const media = /\.(mp4|webm|mov|gif|jpe?g|png|webp|m4a|mp3|wav|aiff?)$/i;
-    const projects = readdirSync(OUTPUT_ROOT, { withFileTypes: true })
+    const projects = readdirSync(root, { withFileTypes: true })
       .filter((d) => d.isDirectory())
       .map((d) => {
-        const dir = join(OUTPUT_ROOT, d.name);
+        const dir = join(root, d.name);
         const files = readdirSync(dir)
           .filter((f) => media.test(f) && !f.endsWith("-lastframe.jpg"))
           .map((f) => ({ name: f, path: join(dir, f), kind: /\.(mp4|webm|mov)$/i.test(f) ? "video" : /\.(m4a|mp3|wav|aiff?)$/i.test(f) ? "audio" : "image", mtime: statSync(join(dir, f)).mtimeMs }))
@@ -285,7 +297,7 @@ export class LocalCore implements Core {
       })
       .filter((p) => p.files.length)
       .sort((a, b) => b.mtime - a.mtime);
-    return { root: OUTPUT_ROOT, projects };
+    return { root, projects };
   }
 
   private nextStem(output_dir: string, prefix: string): string {
@@ -358,7 +370,7 @@ export class LocalCore implements Core {
   async discard({ path }: Args<"discard">) {
     const target = resolve(path);
     // relative() works with either separator; a path that climbs out ("..") or lands on another drive is refused.
-    const rel = relative(OUTPUT_ROOT, target);
+    const rel = relative(outputRootForContext(), target);
     if (!rel || rel.startsWith("..") || isAbsolute(rel)) throw new Error("Only things inside your films folder can be moved to the bin from here.");
     if (!existsSync(target)) throw new Error("That file is already gone.");
     return { trashed: target, to: moveToBin(target), bin: BIN };
