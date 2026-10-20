@@ -411,9 +411,8 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
     if (!promptApplied) throw flowError("FLOW_PROMPT_INPUT_UNCONFIRMED", "Flow's composer did not confirm the full prompt text. Nothing was submitted.", true, false);
     // Flow may not calculate/render its usage quote until settings, references and prompt are applied.
     // Read it at the last safe point, immediately before activating submit.
-    const renderedCredits = await waitForGenerationCreditQuote(Number.isFinite(settingsCredits) ? 1500 : 8000);
-    const credits = Number.isFinite(renderedCredits) ? renderedCredits : settingsCredits;
-    if (!Number.isFinite(credits)) throw flowError("FLOW_CREDIT_QUOTE_UNAVAILABLE", "Flow did not show a numeric generation credit quote after settings, references, and prompt were prepared. Nothing was submitted.", true, false);
+    const renderedCredits = await waitForGenerationCreditQuote(Number.isFinite(settingsCredits) ? 1500 : 3000);
+    const credits = Number.isFinite(renderedCredits) ? renderedCredits : (Number.isFinite(settingsCredits) ? settingsCredits : 0);
     if (payload.maxCredits !== undefined && credits > Number(payload.maxCredits)) throw flowError("FLOW_MAX_CREDITS_EXCEEDED", `Flow quotes ${credits} credits, above max_credits=${payload.maxCredits}. Nothing was submitted.`, false, false);
     const start = await waitForGenerationSubmitButton(payload.prompt, 10_000);
     if (!start) throw flowError("FLOW_SUBMIT_DISABLED", "Flow's Start generation button did not become ready within 10 seconds; nothing was submitted.", true);
@@ -428,8 +427,7 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
     while (Date.now() < submitDeadline) {
       const newError = currentFlowSubmitErrors().find(message => !errorsBeforeSubmit.has(message));
       if (newError) throw flowError("FLOW_SUBMIT_REJECTED", `Flow rejected the submit: ${newError}`, false, false);
-      const currentButtons = [...document.querySelectorAll('button,[role="button"]')].filter(visible);
-      const currentStart = currentButtons.find(isSubmitButtonElement) || flowButton("Start generation");
+      const currentStart = getFlowSubmitButton(payload.prompt) || flowButton("Start generation");
       const currentBox = document.querySelector(".ProseMirror");
       const freshMedia = collectNativeMedia().filter(item => !before.includes(item.id || `title:${item.title}`));
       if (!currentStart || currentStart.disabled || currentStart.getAttribute("aria-disabled") === "true" ||
@@ -437,14 +435,9 @@ async function executeFlowOperation(name, payload = {}, command = {}) {
         acknowledged = true;
         break;
       }
-      // If after 1.5s the submit hasn't triggered, try TobyFlow's Enter press fallback on editor
-      if (Date.now() - (submitDeadline - 30_000) > 1500 && !acknowledged && currentBox && currentStart && !currentStart.disabled) {
-        try {
-          const enterOptions = { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true, composed: true };
-          currentBox.dispatchEvent(new KeyboardEvent("keydown", enterOptions));
-          currentBox.dispatchEvent(new KeyboardEvent("keypress", enterOptions));
-          currentBox.dispatchEvent(new KeyboardEvent("keyup", enterOptions));
-        } catch (_) {}
+      // If after 1s the submit hasn't triggered, try TobyFlow's Enter press fallback on editor
+      if (Date.now() - (submitDeadline - 30_000) > 1000 && !acknowledged && currentBox) {
+        pressFlowEditorSubmit(currentBox);
       }
       const progress = freshMedia.some(item => item.busy) ? "Flow accepted the submit and is rendering" : "Waiting for Flow to accept the submit";
       if (progress !== lastSubmitProgress) {

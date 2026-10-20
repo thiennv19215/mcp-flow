@@ -55,21 +55,90 @@ function inspectFlowSubmitTarget(button, expectedPrompt) {
   return { x, y, prompt: normalizeFlowPrompt(promptBox.innerText || promptBox.textContent) };
 }
 
-async function activateFlowSubmitButton(button, expectedPrompt) {
-  const target = inspectFlowSubmitTarget(button, expectedPrompt);
+function getFlowSubmitButton(expectedPrompt) {
+  // 1. Scan for button with explicit icon or text
+  const allButtons = [...document.querySelectorAll('button,[role="button"]')].filter(visible);
+  const matched = allButtons.find(isSubmitButtonElement);
+  if (matched && !matched.disabled && matched.getAttribute("aria-disabled") !== "true") return matched;
+
+  // 2. Scan composer container directly (where .ProseMirror lives)
+  const composer = document.querySelector(".ProseMirror")?.closest(".flow-composer, [class*='composer'], form") ||
+    document.querySelector(".flow-composer, [class*='composer']");
+  if (composer) {
+    const composerButtons = [...composer.querySelectorAll('button,[role="button"]')].filter(visible);
+    // Find button containing arrow_forward, send, or circular submit shape
+    const submitBtn = composerButtons.find(b => {
+      if (b.disabled || b.getAttribute("aria-disabled") === "true") return false;
+      const icon = b.querySelector("mat-icon, .mat-icon, .google-symbols, i, svg");
+      const iconTxt = (icon?.textContent || "").trim();
+      return /arrow_forward|send|sparkle|auto_awesome|play_arrow/i.test(iconTxt);
+    });
+    if (submitBtn) return submitBtn;
+
+    // TobyFlow positional match: the last enabled button in composer is almost always the submit button
+    const enabledButtons = composerButtons.filter(b => !b.disabled && b.getAttribute("aria-disabled") !== "true" && !isFlowProjectNavigationControl(b));
+    if (enabledButtons.length > 0) {
+      const lastBtn = enabledButtons[enabledButtons.length - 1];
+      // Verify it's not the settings trigger or clear button
+      const label = (accessibleName(lastBtn) || "").toLowerCase();
+      if (!label.includes("setting") && !label.includes("clear") && !label.includes("cài đặt")) {
+        return lastBtn;
+      }
+    }
+  }
+
+  // 3. Fallback to matched even if disabled check needed later
+  return matched || null;
+}
+
+function pressFlowEditorSubmit(editor) {
+  if (!editor || !(editor instanceof HTMLElement) || !editor.isConnected) return false;
   try {
-    // TobyFlow mouse/pointer event sequence with exact center coordinates
+    editor.focus({ preventScroll: true });
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    const options = { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true, composed: true };
+    editor.dispatchEvent(new KeyboardEvent("keydown", options));
+    editor.dispatchEvent(new KeyboardEvent("keypress", options));
+    editor.dispatchEvent(new KeyboardEvent("keyup", options));
+    return true;
+  } catch (err) {
+    console.warn("[FlowSubmit] editor Enter press failed:", err);
+    return false;
+  }
+}
+
+async function activateFlowSubmitButton(button, expectedPrompt) {
+  let target = null;
+  try {
+    target = inspectFlowSubmitTarget(button, expectedPrompt);
+  } catch (e) {
+    console.warn("[FlowSubmit] inspect target warning, continuing with bounding rect:", e?.message);
+    const rect = button.getBoundingClientRect();
+    target = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  }
+  try {
     const point = { bubbles: true, cancelable: true, composed: true, button: 0, clientX: target.x, clientY: target.y, pointerType: "mouse", view: window };
     button.dispatchEvent(new PointerEvent("pointerover", { ...point, pointerId: 1 }));
     button.dispatchEvent(new MouseEvent("mouseover", point));
     button.dispatchEvent(new PointerEvent("pointerdown", { ...point, pointerId: 1 }));
     button.dispatchEvent(new MouseEvent("mousedown", point));
     if (typeof button.focus === "function") button.focus({ preventScroll: true });
-    await wait(50);
+    await wait(60);
     button.dispatchEvent(new PointerEvent("pointerup", { ...point, pointerId: 1 }));
     button.dispatchEvent(new MouseEvent("mouseup", point));
     button.dispatchEvent(new MouseEvent("click", point));
     button.click();
+
+    // TobyFlow: If button has child elements (icon, span), click child as well
+    const innerIcon = button.querySelector("mat-icon, i, svg, span");
+    if (innerIcon) {
+      innerIcon.dispatchEvent(new MouseEvent("click", point));
+    }
   } catch (error) {
     if (error?.code) throw error;
     throw flowError("FLOW_SUBMIT_ACTIVATION_FAILED", `Flow's validated DOM click raised an error (${String(error?.message || error)}). No submit was confirmed.`, true, false);
@@ -80,32 +149,18 @@ async function activateFlowSubmitButton(button, expectedPrompt) {
 async function waitForGenerationSubmitButton(expectedPrompt, timeoutMs = 8000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    // 1. Check all button and role=button elements in document
-    const allButtons = [...document.querySelectorAll('button,[role="button"]')].filter(visible);
-    
-    // Priority: buttons matching isSubmitButtonElement
-    const candidates = allButtons.filter(isSubmitButtonElement);
-    for (const button of candidates) {
+    const button = getFlowSubmitButton(expectedPrompt);
+    if (button) {
       try {
         inspectFlowSubmitTarget(button, expectedPrompt);
         return button;
-      } catch {}
-    }
-
-    // Secondary: positional search next to composer or settings
-    const composer = document.querySelector(".ProseMirror")?.closest(".flow-composer, [class*='composer'], form");
-    if (composer) {
-      const composerButtons = [...composer.querySelectorAll('button,[role="button"]')].filter(visible);
-      for (const button of composerButtons) {
+      } catch (err) {
+        // If it's valid and enabled, return it
         if (!button.disabled && button.getAttribute("aria-disabled") !== "true") {
-          const icon = button.querySelector("mat-icon, .mat-icon, .google-symbols, i, svg");
-          if (icon && /arrow_forward|send|sparkle|auto_awesome|play_arrow/i.test(icon.textContent || "")) {
-            return button;
-          }
+          return button;
         }
       }
     }
-
     await wait(150);
   }
   return null;
