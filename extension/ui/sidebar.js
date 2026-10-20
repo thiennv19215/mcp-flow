@@ -208,6 +208,13 @@
     if (msg?.type === "flow-mcp:progress-broadcast" && msg.progress) {
       setFeedback(`⏳ ${msg.progress}`, true);
       addLog("Tiến trình", msg.progress, true);
+      if (isGenerating) {
+        const isImage = document.querySelector("#formImage")?.style.display !== "none";
+        const btnTextEl = isImage
+          ? document.querySelector("#txtBtnSubmitImage")
+          : document.querySelector("#txtBtnSubmitVideo");
+        if (btnTextEl) btnTextEl.textContent = msg.progress;
+      }
     }
   });
 
@@ -230,10 +237,12 @@
         payload: {
           type,
           prompt,
+          aspectRatio: aspect_ratio,
           aspect_ratio,
+          variants: count,
           count,
           attachments,
-          ...(video_settings ? { video_settings } : {})
+          ...(video_settings || {})
         }
       });
 
@@ -252,6 +261,7 @@
         payload: {
           before: info.before || [],
           expectedCount: count,
+          variants: count,
           correlationAttemptId: info.correlationAttemptId,
           kind: type,
           timeoutMs: type === "video" ? 600000 : 300000

@@ -22,8 +22,7 @@
   const NAV_SYNONYMS = {
     "characters": ["characters", "nhân vật", "nhan vat"],
     "all media": [
-      "all media", "tất cả nội dung nghe nhìn", "tất cả phương tiện", "tất cả media", "tất cả",
-      "nội dung nghe nhìn", "nội dung đa phương tiện", "phương tiện", "nội dung", "media", "thư viện", "library", "tất cả tệp"
+      "all media", "tất cả nội dung nghe nhìn", "tất cả phương tiện", "tất cả media", "thư viện", "tất cả tệp"
     ]
   };
 
@@ -48,7 +47,13 @@
       const iconNames = [...(el.querySelectorAll?.("mat-icon") || [])].map(icon => normalize(icon.innerText || icon.textContent));
       if ((wanted === "characters" || synonyms.includes("nhân vật")) && (iconNames.includes("accessibility_new") || iconNames.includes("person"))) return true;
       if ((wanted === "all media" || synonyms.includes("tất cả nội dung nghe nhìn")) && iconNames.some(ic => ALL_MEDIA_ICONS.includes(ic))) return true;
-      return synonyms.some(syn => text === syn || text.endsWith(` ${syn}`) || text.includes(syn));
+      
+      // So khớp an toàn: exact match hoặc prefix/suffix có icon ligature
+      return synonyms.some(syn => {
+        if (text === syn || text.endsWith(` ${syn}`) || text.startsWith(`${syn} `)) return true;
+        if (syn.includes(" ") && text.includes(syn)) return true;
+        return false;
+      });
     });
   }
 

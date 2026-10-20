@@ -32,7 +32,10 @@ extension/
         ├── BaseProviderDriver.js    # Base class & Interface chuẩn cho mọi AI Provider
         ├── ProviderRegistry.js      # Router URL: nhận diện domain (Flow, Gemini, ChatGPT...) và cấp Driver
         └── flow/                    # CÁC MÔ-ĐUN NGHIỆP VỤ RIÊNG BIỆT CỦA GOOGLE FLOW
-            ├── FlowDriver.js        # Driver chính kết nối và điều phối các sub-module
+            ├── FlowDriver.js        # Driver định tuyến operation tới nhóm xử lý
+            ├── FlowGenerationOperations.js # Upload, references, submit & observe generation
+            ├── FlowLibraryOperations.js    # Project state, assets, library & download
+            ├── FlowWorkflowOperations.js   # Character, edit, agent & continue workflows
             ├── FlowEditor.js        # ProseMirror editor, user text extraction, bảo tồn chip, submit & enter fallback
             ├── FlowSettings.js      # Bảng Cài đặt: Mode (Image/Video), Model, Ratio, Duration, Resolution, Quantity
             ├── FlowComponents.js    # Quản lý References, Ingredients, Frames, dọn chip cũ, upload staged media
@@ -69,7 +72,10 @@ extension/
 
 | File | Nghiệp vụ chính | Các hàm / tính năng quan trọng |
 | :--- | :--- | :--- |
-| **`FlowDriver.js`** | **Điều phối trung tâm** | Kế thừa `BaseProviderDriver`. Xử lý `flow.context`, kiểm tra context mismatch, kết nối các sub-module để thực hiện chuỗi hành động submit, observe, download, edit, agent. |
+| **`FlowDriver.js`** | **Router của Flow** | Kế thừa `BaseProviderDriver`, xác thực project/target rồi chuyển từng operation tới một nhóm nghiệp vụ. Không giữ toàn bộ chuỗi xử lý trong một dispatcher dài. |
+| **`FlowGenerationOperations.js`** | **Tạo media** | Upload staging, gắn references, chuẩn bị settings, submit yêu cầu và theo dõi kết quả render. |
+| **`FlowLibraryOperations.js`** | **Project & thư viện** | Đọc trạng thái, liệt kê project/assets/characters, tải media, đổi tên và chuyển asset vào thùng rác. |
+| **`FlowWorkflowOperations.js`** | **Workflow nhiều bước** | Tạo/sửa character, chỉnh sửa video, Agent batch và tiếp tục video. |
 | **`FlowEditor.js`** | **Soạn thảo & Submit** | • `getEditorUserText()`: Đọc text thuần của prompt, loại trừ 100% các inline chips.<br>• `clearEditorTextPreservingChips()`: Dọn sạch prompt cũ nhưng bảo toàn các chip reference/nhân vật.<br>• `insertNativeFlowPrompt()`: Chèn prompt an toàn và xác minh.<br>• `activateFlowSubmitButton()`: Bấm submit qua Slate bridge.<br>• `pressFlowEditorSubmit()`: Enter fallback khi click không kích hoạt listener.<br>• `waitForGenerationCreditQuote()`: Đọc credit quote trước khi bấm submit. |
 | **`FlowSettings.js`** | **Cài đặt tham số sinh** | • `openFlowSettings()` / `closeFlowSettings()`: Mở/đóng panel cài đặt an toàn (bằng Escape hoặc click composer).<br>• `chooseRadio()`, `chooseAspectRatio()`, `chooseDuration()`, `chooseResolution()`, `chooseNativeVariantCount()`: Chọn chính xác tham số.<br>• `chooseNativeModel()`: Chọn model thông minh qua aliases (Nano Banana, Veo 2, Imagen 3, Quality/Fast).<br>• `FlowImageActions.prepare()` & `FlowVideoActions.prepare()`: Chuẩn bị toàn bộ settings cho ảnh/video. |
 | **`FlowComponents.js`** | **Thành phần đính kèm** | • `clearExistingIngredientChips()`: Dọn sạch các chip đính kèm cũ trước khi gắn chip mới.<br>• `FlowReferenceActions.attach()`: Đính kèm reference (`character:<name>`, `asset:<name>`) kèm xác nhận thẻ chip hiển thị.<br>• `chooseNativePickerAsset()`: Chọn asset/frame từ picker popup.<br>• `uploadStagedFlowMedia()`: Tải file media nhị phân lên Flow. |

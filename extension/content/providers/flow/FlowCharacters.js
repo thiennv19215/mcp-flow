@@ -244,7 +244,7 @@
           const exactTitle = value => normalize(value) === normalize(sourceTitle);
           let matches = await findPickerMatches(listGetter, sourceTitle, "project asset", exactTitle);
           if (!matches.length) {
-            const uploads = [...document.querySelectorAll('[role="tab"]')].find(el => visible(el) && normalize(accessibleName(el)) === "uploads");
+            const uploads = [...document.querySelectorAll('[role="tab"]')].find(el => visible(el) && /^(?:uploads|tải lên|nội dung tải lên)$/i.test(normalize(accessibleName(el))));
             if (uploads) {
               uploads.click();
               list = await waitForPicker(listGetter, "uploaded asset");

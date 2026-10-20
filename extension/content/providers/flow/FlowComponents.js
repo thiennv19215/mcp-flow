@@ -27,7 +27,16 @@
   function chips() {
     const enChips = [...document.querySelectorAll('button[aria-label="Ingredient"]')];
     const viChips = [...document.querySelectorAll('button[aria-label="Thành phần"],button[aria-label="Nguyên liệu"]')];
-    const all = viChips.length ? enChips.concat(viChips) : enChips;
+    const dynamicChips = [...document.querySelectorAll('button,[role="button"]')].filter(btn => {
+      if (!visible(btn)) return false;
+      const aria = (accessibleName(btn) || "").toLowerCase();
+      const alt = (btn.querySelector?.("img")?.alt || "").toLowerCase();
+      const isChipElement = Boolean(btn.closest?.("flow-character-ingredient-chip, [data-chip]"));
+      return isChipElement ||
+        aria.startsWith("thành phần") || aria.startsWith("nguyên liệu") ||
+        alt.startsWith("thành phần") || alt.startsWith("nguyên liệu");
+    });
+    const all = [...new Set([...enChips, ...viChips, ...dynamicChips])];
     return all.filter(visible).map(button => {
       const image = button.querySelector?.("img");
       const kind = button.closest?.("flow-character-ingredient-chip") || /character|nhân vật/i.test(image?.alt || "") ? "character" : "image";
@@ -217,7 +226,7 @@
           return result;
         }
         if (slot && !picker()) return { name: ref.name, kind, confirmed: true, slot };
-        const add = flowButton("Add to prompt");
+        const add = (picker() && flowButton("Add to prompt", picker().closest('[role="dialog"]') || picker())) || flowButton("Add to prompt");
         if (!confirmedClick && add && !add.disabled && picker()) { add.click(); confirmedClick = true; }
         await wait(150);
       }
@@ -236,10 +245,11 @@ function validStagedLocalImage(value, suffixPattern) {
 
 function findAddMediaButton() {
   const direct = flowButton("Add media menu");
-  if (direct) return direct;
-  const addNames = new Set(["add media menu", "add media", "thêm nội dung nghe nhìn", "thêm tệp", "thêm", "add"]);
+  if (direct && !isFlowProjectNavigationControl(direct)) return direct;
+  const addNames = new Set(["add media menu", "add media", "thêm nội dung nghe nhìn", "thêm tệp", "add"]);
   return [...document.querySelectorAll('button,[role="button"]')].find(el => {
     if (!visible(el) || el.disabled || el.getAttribute("aria-disabled") === "true") return false;
+    if (isFlowProjectNavigationControl(el)) return false;
     const label = accessibleName(el).replace(/\s+/g, " ").trim().toLowerCase();
     if (addNames.has(label) || label === "+" || label.endsWith(" add")) return true;
     const icon = el.querySelector("mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined,svg")?.textContent?.trim() || "";

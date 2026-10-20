@@ -94,13 +94,15 @@
     while (Date.now() < deadline) {
       if (!tile.isConnected) throw root.flowError("FLOW_ASSET_CHANGED", `The tile for "${title}" changed while preparing its download.`, true);
       const errorTile = tile.querySelector("flow-error-tile");
-      const retryControl = [...tile.querySelectorAll('button,[role="button"]')].find(el => /^(retry|try again|thử lại)$/i.test(flowMenuLabel(el) || (root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim()));
+      const retryControl = [...tile.querySelectorAll('button,[role="button"]')].find(el =>
+        /^(?:retry|try again|thử lại)(?:\s+.*)?$/i.test(flowMenuLabel(el) || (root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim()) ||
+        /^(?:refresh|replay|retry)$/i.test(el.querySelector?.("mat-icon, .mat-icon, .google-symbols")?.textContent?.trim() || ""));
       if (errorTile || retryControl) {
         const reason = (errorTile?.innerText || errorTile?.textContent || flowMenuLabel(retryControl) || "").replace(/\s+/g, " ").trim();
         throw root.flowError("FLOW_GENERATION_FAILED", `Flow marked "${title}" as failed${reason ? `: ${reason}` : ""}.`, false, true);
       }
 
-      const isBusy = Boolean(tile.querySelector('flow-progress-tile,mat-progress-bar,[role="progressbar"]'));
+      const isBusy = Boolean(root.isTileBusy?.(tile) ?? tile.querySelector('flow-progress-tile,mat-progress-bar,[role="progressbar"]'));
       const optionsBtn = flowTileOptionsButton(tile);
 
       // Search for media elements in light DOM and shadow roots
@@ -141,7 +143,7 @@
 
     // Graceful fallback: If tile is connected and finished rendering (not failed, not busy), allow download
     const finalError = tile.querySelector("flow-error-tile");
-    const finalBusy = Boolean(tile.querySelector('flow-progress-tile,mat-progress-bar,[role="progressbar"]'));
+    const finalBusy = Boolean(root.isTileBusy?.(tile) ?? tile.querySelector('flow-progress-tile,mat-progress-bar,[role="progressbar"]'));
     if (tile.isConnected && !finalError && !finalBusy) {
       return tile;
     }

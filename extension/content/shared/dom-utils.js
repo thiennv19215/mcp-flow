@@ -7,7 +7,7 @@ function visible(el) {
 function accessibleName(el) {
   if (!el) return "";
   const labels = el.labels ? [...el.labels].map(l => l.innerText).join(" ") : "";
-  const labelledBy = (el.getAttribute?.("aria-labelledby") || "").split(/\s+/).filter(Boolean).map(id => document.getElementById(id)?.innerText || document.getElementById(id)?.textContent || "").join(" ").trim();
+  const labelledBy = (el.getAttribute?.("aria-labelledby") || "").split(/\s+/).filter(Boolean).map(id => document.getElementById?.(id)?.innerText || document.getElementById?.(id)?.textContent || "").join(" ").trim();
   return el.getAttribute?.("aria-label") || labelledBy || el.getAttribute?.("title") || el.getAttribute?.("alt") || labels || el.getAttribute?.("placeholder") || el.innerText || el.textContent || "";
 }
 
@@ -15,7 +15,7 @@ function semanticActionText(el) {
   if (!el) return "";
   const labels = el.labels ? [...el.labels].map(label => label.innerText || label.textContent || "").join(" ").trim() : "";
   const labelledBy = (el.getAttribute?.("aria-labelledby") || "").split(/\s+/).filter(Boolean)
-    .map(id => document.getElementById(id)?.innerText || document.getElementById(id)?.textContent || "").join(" ").trim();
+    .map(id => document.getElementById?.(id)?.innerText || document.getElementById?.(id)?.textContent || "").join(" ").trim();
   const explicit = el.getAttribute?.("aria-label") || labelledBy || el.getAttribute?.("title") || labels || el.getAttribute?.("alt");
   if (explicit) return explicit;
   if (typeof document.createTreeWalker !== "function" || typeof NodeFilter === "undefined") {
@@ -140,24 +140,26 @@ function classifyFlowError(rawText) {
 
 var BUTTON_SYNONYMS = {
   "settings trigger": ["settings trigger", "cài đặt", "kích hoạt cài đặt", "cài đặt tham số", "tune", "settings"],
-  "start generation": ["start generation", "bắt đầu tạo", "tạo video", "tạo ảnh", "tạo", "bắt đầu", "generate", "create"],
+  "start generation": ["start generation", "bắt đầu tạo", "tạo video", "tạo ảnh", "tạo hình ảnh", "tạo", "generate", "create"],
   "clear prompt": ["clear prompt", "xóa câu lệnh", "xóa lời nhắc", "xóa văn bản", "xóa prompt", "clear text"],
   "add ingredients to the prompt box": [
     "add ingredients to the prompt box", "thêm thành phần vào hộp câu lệnh", "thêm thành phần vào hộp lời nhắc",
     "thêm thành phần", "thêm nguyên liệu", "add ingredients", "add media", "thêm nội dung nghe nhìn", "thêm tệp"
   ],
-  "add to prompt": ["add to prompt", "thêm vào câu lệnh", "thêm vào lời nhắc", "thêm vào lời nhắc văn bản", "thêm vào prompt", "thêm"],
-  "start": ["start", "bắt đầu", "khung bắt đầu", "start frame"],
-  "end": ["end", "kết thúc", "khung kết thúc", "end frame"],
-  "go back": ["go back", "back", "quay lại", "quay về", "trở lại"],
+  "add to prompt": ["add to prompt", "thêm vào câu lệnh", "thêm vào lời nhắc", "thêm vào lời nhắc văn bản", "thêm vào prompt"],
+  "add media": ["add media", "thêm nội dung nghe nhìn", "thêm tệp", "thêm phương tiện", "thêm ảnh"],
+  "start": ["start frame", "khung bắt đầu", "khung đầu", "bắt đầu", "start"],
+  "end": ["end frame", "khung kết thúc", "khung cuối", "kết thúc", "end"],
+  "go back": ["go back", "back", "quay lại", "quay về", "trở lại", "nút quay lại"],
   "back": ["back", "go back", "quay lại", "quay về", "back button to go to previous page", "nút quay lại"],
-  "done": ["done", "done editing", "xong", "hoàn tất", "lưu"],
+  "done": ["done editing", "done", "xong", "hoàn tất", "xong việc chỉnh sửa", "xong chỉnh sửa"],
   "done editing": ["done editing", "done", "xong", "hoàn tất"],
-  "close": ["close", "đóng", "dismiss", "hủy", "got it", "bỏ qua"],
-  "save": ["save", "lưu", "áp dụng"],
-  "more options": ["more options", "tùy chọn khác", "tác vụ khác", "thêm tùy chọn", "thêm", "more"],
+  "close": ["close", "đóng", "dismiss", "got it", "bỏ qua", "đóng lại"],
+  "cancel": ["cancel", "hủy", "hủy bỏ"],
+  "save": ["save", "lưu", "áp dụng", "lưu lại"],
+  "more options": ["more options", "tùy chọn khác", "tác vụ khác", "thêm tùy chọn", "các tùy chọn khác", "menu tùy chọn"],
   "download scene": ["download scene", "tải xuống cảnh", "tải cảnh"],
-  "download image": ["download image", "tải xuống hình ảnh", "tải xuống ảnh", "tải ảnh"],
+  "download image": ["download image", "tải xuống hình ảnh", "tải xuống ảnh", "tải ảnh", "tải hình ảnh"],
   "download video": ["download video", "tải xuống video", "tải video"],
   "reuse prompt": ["reuse prompt", "sử dụng lại câu lệnh", "dùng lại lời nhắc", "dùng lại câu lệnh", "sử dụng lại lời nhắc"],
   "start new session": ["start new session", "bắt đầu phiên mới", "phiên mới"],
@@ -168,48 +170,83 @@ var BUTTON_SYNONYMS = {
   "save frame": ["save frame", "lưu khung hình", "lưu khung ảnh", "lưu khung"],
   "animate": ["animate", "tạo hiệu ứng động", "làm chuyển động", "tạo animation"],
   "agent": ["agent", "trợ lý"],
-  "select a voice": ["select a voice", "chọn giọng nói", "giọng nói"],
-  "add to character": ["add to character", "thêm vào nhân vật", "thêm giọng nói"],
-  "add from project": ["add from project", "thêm từ dự án", "chọn từ dự án"],
-  "upload": ["upload", "tải lên", "tải tệp lên"],
+  "select a voice": ["select a voice", "chọn giọng nói", "giọng nói", "chọn một giọng nói"],
+  "add to character": ["add to character", "thêm vào nhân vật", "thêm giọng nói vào nhân vật", "thêm giọng nói"],
+  "add from project": ["add from project", "thêm từ dự án", "chọn từ dự án", "từ dự án"],
+  "upload": ["upload", "tải lên", "tải tệp lên", "tải ảnh lên"],
 };
 
 function flowButton(name, root = document) {
   const normName = String(name || "").trim().toLowerCase();
-  const direct = [...root.querySelectorAll('button,[role="button"]')].find(el =>
-    visible(el) && matchesName(semanticActionText(el).replace(/\s+/g, " ").trim(), name, null, true));
+  const candidates = [...root.querySelectorAll('button,[role="button"]')].filter(visible);
+  
+  // 1. Direct match: so khớp chính xác tên truyền vào
+  const direct = candidates.find(el =>
+    matchesName(semanticActionText(el).replace(/\s+/g, " ").trim(), name, null, true));
   if (direct) return direct;
 
   const synonyms = (globalThis.I18n?.getPatterns?.(normName)?.length ? globalThis.I18n.getPatterns(normName) : BUTTON_SYNONYMS[normName]);
-  if (synonyms && synonyms.length) {
-    const candidates = [...root.querySelectorAll('button,[role="button"]')].filter(visible);
-    const matched = candidates.find(el => {
-      const text = semanticActionText(el).replace(/\s+/g, " ").trim().toLowerCase();
-      const aria = (accessibleName(el) || "").replace(/\s+/g, " ").trim().toLowerCase();
-      const inner = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
-      const icon = el.querySelector?.("mat-icon, .mat-icon, .google-symbols, svg")?.textContent?.trim()?.toLowerCase() || "";
-      return synonyms.some(syn =>
-        text === syn || aria === syn || inner === syn ||
-        text.includes(syn) || aria.includes(syn) ||
-        (icon && syn === icon)
-      );
-    });
-    if (matched) return matched;
+  if (!synonyms || !synonyms.length) return null;
 
-    // Phục hồi bằng icon đặc trưng của Flow
-    if (normName === "settings trigger") {
-      const iconTrigger = candidates.find(el => {
-        const icon = el.querySelector?.("mat-icon, .mat-icon, .google-symbols")?.textContent?.trim()?.toLowerCase();
-        return icon === "tune" || icon === "settings";
-      });
-      if (iconTrigger) return iconTrigger;
+  // Helper để lấy text sạch không dính icon ligatures
+  const getCleanTexts = el => {
+    const rawText = semanticActionText(el).replace(/\s+/g, " ").trim().toLowerCase();
+    const rawAria = (accessibleName(el) || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const rawInner = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const icon = el.querySelector?.("mat-icon, .mat-icon, .google-symbols, svg")?.textContent?.trim()?.toLowerCase() || "";
+    
+    // Tách bỏ tên icon ligature nếu bị dính vào đầu hoặc cuối text
+    const cleanText = icon ? rawText.replace(new RegExp(`^${icon}\\s*|\\s*${icon}$`, "i"), "").trim() : rawText;
+    const cleanAria = icon ? rawAria.replace(new RegExp(`^${icon}\\s*|\\s*${icon}$`, "i"), "").trim() : rawAria;
+    const cleanInner = icon ? rawInner.replace(new RegExp(`^${icon}\\s*|\\s*${icon}$`, "i"), "").trim() : rawInner;
+
+    return { rawText, rawAria, rawInner, cleanText, cleanAria, cleanInner, icon };
+  };
+
+  // PASS 1: So khớp CHÍNH XÁC (Exact match toàn bộ chuỗi) - Ngăn chặn 100% click nhầm DOM
+  for (const el of candidates) {
+    const { rawText, rawAria, rawInner, cleanText, cleanAria, cleanInner } = getCleanTexts(el);
+    for (const syn of synonyms) {
+      if (rawText === syn || rawAria === syn || rawInner === syn ||
+          cleanText === syn || cleanAria === syn || cleanInner === syn) {
+        return el;
+      }
     }
-    if (normName === "add ingredients to the prompt box" || normName === "add media menu") {
-      const iconAdd = candidates.find(el => {
-        const icon = el.querySelector?.("mat-icon, .mat-icon, .google-symbols")?.textContent?.trim()?.toLowerCase();
-        return (icon === "add" || icon === "add_circle") && !isFlowProjectNavigationControl(el);
-      });
-      if (iconAdd) return iconAdd;
+  }
+
+  // PASS 2: Phục hồi bằng Icon đặc trưng của Flow
+  for (const el of candidates) {
+    const { icon } = getCleanTexts(el);
+    if (!icon) continue;
+
+    if (normName === "settings trigger" && (icon === "tune" || icon === "settings")) return el;
+    if (normName === "more options" && (icon === "more_vert" || icon === "more_horiz")) return el;
+    if ((normName === "back" || normName === "go back") && (icon === "arrow_back" || icon === "arrow-back" || icon === "arrow_left")) return el;
+    if (normName === "close" && (icon === "close" || icon === "clear")) return el;
+    if ((normName === "add ingredients to the prompt box" || normName === "add media menu" || normName === "add media") &&
+        (icon === "add" || icon === "add_circle") && !isFlowProjectNavigationControl(el)) return el;
+    if (normName === "download scene" || normName === "download image" || normName === "download video") {
+      if (icon === "download" || icon === "file_download") return el;
+    }
+  }
+
+  // PASS 3: So khớp Cụm từ an toàn (CHỈ áp dụng cho từ có dấu cách hoặc dài >= 6 ký tự)
+  for (const el of candidates) {
+    const { rawText, rawAria, cleanText, cleanAria } = getCleanTexts(el);
+    for (const syn of synonyms) {
+      if (syn.includes(" ") || syn.length >= 6) {
+        // Starts with hoặc ends with có khoảng cách ranh giới từ
+        if (rawText.startsWith(syn + " ") || rawText.endsWith(" " + syn) ||
+            rawAria.startsWith(syn + " ") || rawAria.endsWith(" " + syn) ||
+            cleanText.startsWith(syn + " ") || cleanText.endsWith(" " + syn) ||
+            cleanAria.startsWith(syn + " ") || cleanAria.endsWith(" " + syn)) {
+          return el;
+        }
+        // Substring includes CHỈ cho cụm từ dài >= 8 ký tự (ví dụ: "bắt đầu tạo", "thêm thành phần vào hộp câu lệnh")
+        if (syn.length >= 8 && (rawText.includes(syn) || rawAria.includes(syn) || cleanText.includes(syn) || cleanAria.includes(syn))) {
+          return el;
+        }
+      }
     }
   }
 
@@ -248,21 +285,39 @@ function normalizeAspectRatio(input) {
 
 var OPTION_ALIASES = {
   video: ["video", "clip"],
-  image: ["image", "hình ảnh", "ảnh"],
-  ingredients: ["ingredients", "thành phần", "nguyên liệu"],
-  frames: ["frames", "khung hình", "khung ảnh", "khung"],
+  image: ["image", "hình ảnh", "ảnh", "photo"],
+  ingredients: ["ingredients", "thành phần", "nguyên liệu", "ingredient"],
+  frames: ["frames", "khung hình", "khung ảnh", "khung", "frame"],
 };
 
 function flowRadio(name) {
   const wanted = String(name || "").trim().toLowerCase();
   const normalizedWanted = normalizeAspectRatio(wanted);
   const aliases = (globalThis.I18n?.getPatterns?.(wanted)?.length ? globalThis.I18n.getPatterns(wanted) : OPTION_ALIASES[wanted]) || (normalizedWanted ? [wanted, normalizedWanted] : [wanted]);
-  return [...document.querySelectorAll('[role="radio"],mat-radio-button')].find(el => {
+  
+  // Hỗ trợ thêm biến thể số lượng output x1, x2, x3, x4 trong tiếng Việt
+  const variantMatch = wanted.match(/^x([1-4])$/);
+  const variantNum = variantMatch ? variantMatch[1] : null;
+
+  return [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"]')].find(el => {
     if (!visible(el) || isFlowProjectNavigationControl(el)) return false;
-    const label = accessibleName(el).replace(/\s+/g, " ").trim().toLowerCase();
-    if (aliases.some(a => label === a || label.endsWith(` ${a}`))) return true;
-    if (normalizedWanted && (label.includes(normalizedWanted) || label.endsWith(` ${normalizedWanted}`))) return true;
-    return matchesName(accessibleName(el).replace(/\s+/g, " ").trim(), name, null, true);
+    const label = (accessibleName(el) || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const inner = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+
+    if (aliases.some(a => label === a || inner === a || label.endsWith(` ${a}`) || inner.endsWith(` ${a}`) || label.startsWith(`${a} `) || inner.startsWith(`${a} `))) return true;
+    if (normalizedWanted && (label === normalizedWanted || inner === normalizedWanted || label.includes(normalizedWanted) || inner.includes(normalizedWanted))) return true;
+    
+    if (variantNum) {
+      if (label === `x${variantNum}` || inner === `x${variantNum}` || label === variantNum || inner === variantNum) return true;
+      if (label.includes(`${variantNum} kết quả`) || inner.includes(`${variantNum} kết quả`)) return true;
+      if (label.includes(`${variantNum} biến thể`) || inner.includes(`${variantNum} biến thể`)) return true;
+      if (label.includes(`${variantNum} ảnh`) || inner.includes(`${variantNum} ảnh`)) return true;
+      if (label.includes(`${variantNum} hình ảnh`) || inner.includes(`${variantNum} hình ảnh`)) return true;
+      if (label.includes(`${variantNum} video`) || inner.includes(`${variantNum} video`)) return true;
+    }
+
+    return matchesName(accessibleName(el).replace(/\s+/g, " ").trim(), name, null, true) ||
+      matchesName((el.innerText || el.textContent || "").replace(/\s+/g, " ").trim(), name, null, true);
   });
 }
 
@@ -270,15 +325,28 @@ function flowOption(name) {
   const expected = String(name).replace(/\s+/g, " ").trim().toLowerCase();
   const normalizedExpected = normalizeAspectRatio(expected);
   const aliases = (globalThis.I18n?.getPatterns?.(expected)?.length ? globalThis.I18n.getPatterns(expected) : OPTION_ALIASES[expected]) || (normalizedExpected ? [expected, normalizedExpected] : [expected]);
-  // The closed settings trigger carries a summary such as "Video · 720p · 10s x1".
-  // It is a button, but never an option; allowing it here makes x1 falsely imply
-  // that the settings panel is open and can also toggle the panel during selection.
   const settingsTrigger = flowButton("Settings trigger");
+  
+  const variantMatch = expected.match(/^x([1-4])$/);
+  const variantNum = variantMatch ? variantMatch[1] : null;
+
   return [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')].find(el => {
-    const label = accessibleName(el).replace(/\s+/g, " ").trim().toLowerCase();
+    const label = (accessibleName(el) || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const inner = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
     if (!visible(el) || el === settingsTrigger || isFlowProjectNavigationControl(el)) return false;
-    if (aliases.some(a => label === a || label.endsWith(` ${a}`))) return true;
-    if (normalizedExpected && (label === normalizedExpected || label.includes(normalizedExpected))) return true;
+    
+    if (aliases.some(a => label === a || inner === a || label.endsWith(` ${a}`) || inner.endsWith(` ${a}`) || label.startsWith(`${a} `) || inner.startsWith(`${a} `))) return true;
+    if (normalizedExpected && (label === normalizedExpected || inner === normalizedExpected || label.includes(normalizedExpected) || inner.includes(normalizedExpected))) return true;
+    
+    if (variantNum) {
+      if (label === `x${variantNum}` || inner === `x${variantNum}` || label === variantNum || inner === variantNum) return true;
+      if (label.includes(`${variantNum} kết quả`) || inner.includes(`${variantNum} kết quả`)) return true;
+      if (label.includes(`${variantNum} biến thể`) || inner.includes(`${variantNum} biến thể`)) return true;
+      if (label.includes(`${variantNum} ảnh`) || inner.includes(`${variantNum} ảnh`)) return true;
+      if (label.includes(`${variantNum} hình ảnh`) || inner.includes(`${variantNum} hình ảnh`)) return true;
+      if (label.includes(`${variantNum} video`) || inner.includes(`${variantNum} video`)) return true;
+    }
+
     return false;
   });
 }
@@ -588,8 +656,7 @@ function cleanCharacterName(value) {
 var NAV_SYNONYMS = {
   "characters": ["characters", "nhân vật", "nhan vat"],
   "all media": [
-    "all media", "tất cả nội dung nghe nhìn", "tất cả phương tiện", "tất cả media", "tất cả",
-    "nội dung nghe nhìn", "nội dung đa phương tiện", "phương tiện", "nội dung", "media", "thư viện", "library", "tất cả tệp"
+    "all media", "tất cả nội dung nghe nhìn", "tất cả phương tiện", "tất cả media", "thư viện", "tất cả tệp"
   ]
 };
 
@@ -614,8 +681,13 @@ function flowNavigationItem(label) {
     const iconNames = [...(el.querySelectorAll?.("mat-icon") || [])].map(icon => normalize(icon.innerText || icon.textContent));
     if ((wanted === "characters" || synonyms.includes("nhân vật")) && (iconNames.includes("accessibility_new") || iconNames.includes("person"))) return true;
     if ((wanted === "all media" || synonyms.includes("tất cả nội dung nghe nhìn")) && iconNames.some(ic => ALL_MEDIA_ICONS.includes(ic))) return true;
-    // Material icon ligatures can prefix the visible navigation label (for example "image All media").
-    return synonyms.some(syn => text === syn || text.endsWith(` ${syn}`) || text.includes(syn));
+    
+    // So khớp an toàn: exact match hoặc prefix/suffix có icon
+    return synonyms.some(syn => {
+      if (text === syn || text.endsWith(` ${syn}`) || text.startsWith(`${syn} `)) return true;
+      if (syn.includes(" ") && text.includes(syn)) return true;
+      return false;
+    });
   });
 }
 

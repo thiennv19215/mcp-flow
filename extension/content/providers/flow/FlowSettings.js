@@ -5,21 +5,37 @@
 
   const OPTION_ALIASES = {
     video: ["video", "clip"],
-    image: ["image", "hình ảnh", "ảnh"],
-    ingredients: ["ingredients", "thành phần", "nguyên liệu"],
-    frames: ["frames", "khung hình", "khung ảnh", "khung"],
+    image: ["image", "hình ảnh", "ảnh", "photo"],
+    ingredients: ["ingredients", "thành phần", "nguyên liệu", "ingredient"],
+    frames: ["frames", "khung hình", "khung ảnh", "khung", "frame"],
   };
 
   function flowRadio(name) {
     const wanted = String(name || "").trim().toLowerCase();
     const normalizedWanted = root.normalizeAspectRatio?.(wanted) || wanted;
     const aliases = OPTION_ALIASES[wanted] || (normalizedWanted ? [wanted, normalizedWanted] : [wanted]);
-    return [...document.querySelectorAll('[role="radio"],mat-radio-button')].find(el => {
+    
+    const variantMatch = wanted.match(/^x([1-4])$/);
+    const variantNum = variantMatch ? variantMatch[1] : null;
+
+    return [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"]')].find(el => {
       if (!root.visible?.(el) || isNavControl(el)) return false;
       const label = (root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim().toLowerCase();
-      if (aliases.some(a => label === a || label.endsWith(` ${a}`))) return true;
-      if (normalizedWanted && (label.includes(normalizedWanted) || label.endsWith(` ${normalizedWanted}`))) return true;
-      return root.matchesName?.(label, name, null, true);
+      const inner = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+
+      if (aliases.some(a => label === a || inner === a || label.endsWith(` ${a}`) || inner.endsWith(` ${a}`) || label.startsWith(`${a} `) || inner.startsWith(`${a} `))) return true;
+      if (normalizedWanted && (label === normalizedWanted || inner === normalizedWanted || label.includes(normalizedWanted) || inner.includes(normalizedWanted))) return true;
+
+      if (variantNum) {
+        if (label === `x${variantNum}` || inner === `x${variantNum}` || label === variantNum || inner === variantNum) return true;
+        if (label.includes(`${variantNum} kết quả`) || inner.includes(`${variantNum} kết quả`)) return true;
+        if (label.includes(`${variantNum} biến thể`) || inner.includes(`${variantNum} biến thể`)) return true;
+        if (label.includes(`${variantNum} ảnh`) || inner.includes(`${variantNum} ảnh`)) return true;
+        if (label.includes(`${variantNum} hình ảnh`) || inner.includes(`${variantNum} hình ảnh`)) return true;
+        if (label.includes(`${variantNum} video`) || inner.includes(`${variantNum} video`)) return true;
+      }
+
+      return root.matchesName?.(label, name, null, true) || root.matchesName?.(inner, name, null, true);
     });
   }
 
@@ -28,11 +44,27 @@
     const normalizedExpected = root.normalizeAspectRatio?.(expected) || expected;
     const aliases = OPTION_ALIASES[expected] || (normalizedExpected ? [expected, normalizedExpected] : [expected]);
     const settingsTrigger = root.flowButton?.("Settings trigger");
+
+    const variantMatch = expected.match(/^x([1-4])$/);
+    const variantNum = variantMatch ? variantMatch[1] : null;
+
     return [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')].find(el => {
       const label = (root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim().toLowerCase();
+      const inner = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
       if (!root.visible?.(el) || el === settingsTrigger || isNavControl(el)) return false;
-      if (aliases.some(a => label === a || label.endsWith(` ${a}`))) return true;
-      if (normalizedExpected && (label === normalizedExpected || label.includes(normalizedExpected))) return true;
+
+      if (aliases.some(a => label === a || inner === a || label.endsWith(` ${a}`) || inner.endsWith(` ${a}`) || label.startsWith(`${a} `) || inner.startsWith(`${a} `))) return true;
+      if (normalizedExpected && (label === normalizedExpected || inner === normalizedExpected || label.includes(normalizedExpected) || inner.includes(normalizedExpected))) return true;
+
+      if (variantNum) {
+        if (label === `x${variantNum}` || inner === `x${variantNum}` || label === variantNum || inner === variantNum) return true;
+        if (label.includes(`${variantNum} kết quả`) || inner.includes(`${variantNum} kết quả`)) return true;
+        if (label.includes(`${variantNum} biến thể`) || inner.includes(`${variantNum} biến thể`)) return true;
+        if (label.includes(`${variantNum} ảnh`) || inner.includes(`${variantNum} ảnh`)) return true;
+        if (label.includes(`${variantNum} hình ảnh`) || inner.includes(`${variantNum} hình ảnh`)) return true;
+        if (label.includes(`${variantNum} video`) || inner.includes(`${variantNum} video`)) return true;
+      }
+
       return false;
     });
   }
@@ -53,6 +85,19 @@
   }
 
   function flowSettingsPanelVisible() {
+    // 1. Kiểm tra nếu có container overlay/dialog chứa settings đang mở
+    const openPanel = [...document.querySelectorAll('[role="dialog"], [role="menu"], mat-dialog-container, flow-dialog, .cdk-overlay-pane')]
+      .find(el => root.visible?.(el) && !isNavControl(el) &&
+        el.querySelector?.('[role="radio"], mat-radio-button, button[id*="-trigger-"]'));
+    if (openPanel) {
+      const controls = [...openPanel.querySelectorAll('[role="radio"], mat-radio-button, [role="tab"], button')];
+      const hasSettingsContent = controls.some(r => {
+        const name = (root.accessibleName?.(r) || r.innerText || "").toLowerCase();
+        return /image|video|hình ảnh|ảnh|9:16|16:9|1:1|x1|x2|x3|x4|frames|ingredients|thành phần|khung hình/i.test(name);
+      });
+      if (hasSettingsContent) return true;
+    }
+
     const hasTypeOption = Boolean(flowRadio("Image") || flowOption("Image")) && Boolean(flowRadio("Video") || flowOption("Video"));
     const hasVariantOption = [1, 2, 3, 4].some(count => flowRadio(`x${count}`) || flowOption(`x${count}`));
     return hasTypeOption && hasVariantOption;
@@ -104,7 +149,7 @@
     const str = `${num}s`;
 
     await openFlowSettings();
-    const panel = flowSettingsPanelVisible() ? (document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog') || document) : document;
+    const panel = flowSettingsPanelVisible() ? (document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane') || document) : document;
 
     const tryClickDuration = () => {
       const idBtn = panel.querySelector(`button[id$="-trigger-${num}"]`);
@@ -117,8 +162,11 @@
       const candidates = [...panel.querySelectorAll('button[role="tab"], [role="radio"], mat-radio-button, button')].filter(el => root.visible?.(el) && !isNavControl(el));
       const match = candidates.find(el => {
         const txt = (el.innerText || el.textContent || "").trim().toLowerCase();
-        if (txt === str || txt === String(num) || txt === `${num} giây` || txt === `${num}s`) return true;
-        const m = txt.match(/^(\d{1,2})[\p{L}\p{M}.]*$/u);
+        const aria = (root.accessibleName?.(el) || "").trim().toLowerCase();
+        if (txt === str || aria === str || txt === String(num) || aria === String(num)) return true;
+        if (txt === `${num} giây` || aria === `${num} giây` || txt.includes(`${num} giây`) || aria.includes(`${num} giây`)) return true;
+        if (txt === `${num}s` || aria === `${num}s`) return true;
+        const m = txt.match(/^(\d{1,2})[\p{L}\p{M}.]*$/u) || aria.match(/^(\d{1,2})[\p{L}\p{M}.]*$/u);
         return m && Number(m[1]) === num;
       });
       if (match) {
@@ -142,13 +190,22 @@
     if (!aspectRatio) return;
     const normalized = root.normalizeAspectRatio?.(aspectRatio) || String(aspectRatio).trim();
     await openFlowSettings();
-    const panel = flowSettingsPanelVisible() ? (document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog') || document) : document;
+    const panel = flowSettingsPanelVisible() ? (document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane') || document) : document;
 
     const candidates = [...panel.querySelectorAll('[role="radio"], mat-radio-button, [role="tab"], [role="option"], button, [role="button"]')].filter(el => root.visible?.(el) && !isNavControl(el));
     const match = candidates.find(el => {
       const label = (root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim().toLowerCase();
       const txt = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
-      return label === normalized || txt === normalized || label.endsWith(` ${normalized}`) || txt.endsWith(` ${normalized}`);
+
+      if (label === normalized || txt === normalized || label.endsWith(` ${normalized}`) || txt.endsWith(` ${normalized}`)) return true;
+      if (label.includes(normalized) || txt.includes(normalized)) return true;
+
+      // Hỗ trợ từ khóa định dạng tiếng Việt
+      if (normalized === "9:16" && (/^(?:dọc|portrait|vertical)$/i.test(label) || /^(?:dọc|portrait|vertical)$/i.test(txt))) return true;
+      if (normalized === "16:9" && (/^(?:ngang|landscape|horizontal|widescreen)$/i.test(label) || /^(?:ngang|landscape|horizontal|widescreen)$/i.test(txt))) return true;
+      if (normalized === "1:1" && (/^(?:vuông|square)$/i.test(label) || /^(?:vuông|square)$/i.test(txt))) return true;
+
+      return false;
     });
 
     if (match) {
@@ -278,10 +335,10 @@
 
   function findModelPickerButton() {
     let button = root.flowButton?.("Select model family") || root.flowButton?.("Model") || root.flowButton?.("Model family") ||
-      root.flowButton?.("Chọn dòng mô hình") || root.flowButton?.("Dòng mô hình") || root.flowButton?.("Mô hình");
+      root.flowButton?.("Chọn dòng mô hình") || root.flowButton?.("Chọn mô hình") || root.flowButton?.("Dòng mô hình") || root.flowButton?.("Mô hình");
     if (button) return button;
 
-    const panel = flowSettingsPanelVisible() ? (document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog') || document) : document;
+    const panel = flowSettingsPanelVisible() ? (document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane') || document) : document;
     const candidates = [...panel.querySelectorAll('button, [role="button"], [role="combobox"]')].filter(el => root.visible?.(el) && !isNavControl(el));
 
     const isExcluded = el => {
@@ -297,7 +354,7 @@
       if (isExcluded(el)) return false;
       const txt = (el.innerText || el.textContent || "").trim().toLowerCase();
       const aria = (root.accessibleName?.(el) || "").toLowerCase();
-      return /select model|model family|model picker|chọn dòng mô hình|dòng mô hình|mô hình/i.test(aria) || /veo|imagen|nano banana/i.test(txt) || /veo|imagen|nano banana/i.test(aria);
+      return /select model|model family|model picker|chọn dòng mô hình|chọn mô hình|dòng mô hình|mô hình/i.test(aria) || /veo|imagen|nano banana/i.test(txt) || /veo|imagen|nano banana/i.test(aria);
     });
     return button || null;
   }
@@ -419,7 +476,7 @@
   }
 
   async function prepareNativeImageSettings(payload, variants) {
-    const aspectRatio = payload?.aspectRatio;
+    const aspectRatio = payload?.aspectRatio || payload?.aspect_ratio;
     const requestedModel = payload?.model || "Nano Banana";
 
     await openFlowSettings();
@@ -491,22 +548,25 @@
 
   async function prepareNativeVideoSettings(payload, variants, framesMode) {
     const type = payload.type || "video";
-    const requestedModel = payload.model;
+    const requestedModel = payload.model || payload.video_settings?.model;
     const modeName = framesMode ? "Frames" : "Ingredients";
+    const aspectRatio = payload.aspectRatio || payload.aspect_ratio;
+    const duration = payload.duration || payload.video_settings?.duration;
+    const resolution = payload.resolution || payload.video_settings?.resolution;
 
     await openFlowSettings();
     await chooseRadio("Video");
-    if (payload.aspectRatio) await chooseAspectRatio(payload.aspectRatio);
+    if (aspectRatio) await chooseAspectRatio(aspectRatio);
 
     if (requestedModel) {
       await chooseNativeModel(requestedModel, type);
       await openFlowSettings();
       await chooseRadio("Video");
-      if (payload.aspectRatio) await chooseAspectRatio(payload.aspectRatio);
+      if (aspectRatio) await chooseAspectRatio(aspectRatio);
     }
 
-    if (payload.duration) await chooseDuration(payload.duration);
-    if (payload.resolution) await chooseResolution(payload.resolution);
+    if (duration) await chooseDuration(duration);
+    if (resolution) await chooseResolution(resolution);
     await chooseNativeVariantCount(variants);
 
     await openFlowSettings();

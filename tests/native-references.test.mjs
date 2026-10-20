@@ -459,6 +459,7 @@ test('Vietnamese localization: flowButton recognizes Vietnamese button synonyms 
     window: {},
     document: {
       querySelectorAll: selector => selector.includes('button') ? buttons : [],
+      getElementById: () => null,
     },
     location: { href: 'https://flow.google.com/u/0/?hl=vi' },
     getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
@@ -569,4 +570,219 @@ test('I18n core: translations, plurals, string interpolation and UI pattern look
   assert.ok(enPatterns.includes('start generation'));
   assert.ok(enPatterns.includes('generate'));
   assert.ok(enPatterns.includes('tạo'));
+});
+
+test('Vietnamese localization anti-misclick: flowButton("More options") never matches "Thêm thành phần" or "Thêm"', () => {
+  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const buttons = [
+    { innerText: 'Thêm thành phần', name: 'Thêm thành phần', querySelector: () => null, getAttribute: () => null, disabled: false, getBoundingClientRect: () => ({ width: 100, height: 30 }) },
+    { innerText: 'Thêm vào dự án', name: 'Thêm vào dự án', querySelector: () => null, getAttribute: () => null, disabled: false, getBoundingClientRect: () => ({ width: 100, height: 30 }) },
+    { innerText: '', name: 'Tùy chọn khác', querySelector: (s) => s.includes('mat-icon') ? { textContent: 'more_vert' } : null, getAttribute: () => 'Tùy chọn khác', disabled: false, getBoundingClientRect: () => ({ width: 30, height: 30 }) },
+  ];
+
+  const ctx = vm.createContext({
+    globalThis: {},
+    window: {},
+    document: {
+      querySelectorAll: selector => selector.includes('button') ? buttons : [],
+      getElementById: () => null,
+    },
+    location: { href: 'https://flow.google.com/u/0/?hl=vi' },
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+    accessibleName: el => el.name || el.innerText || '',
+  });
+  vm.runInContext(domUtilsSource, ctx);
+  const flowButton = ctx.globalThis.flowButton;
+
+  const matched = flowButton('More options');
+  // Must match the 3-dots button, NOT "Thêm thành phần"
+  assert.equal(matched, buttons[2]);
+});
+
+test('Vietnamese localization anti-misclick: getFlowSubmitButton prioritizes composer submit button over header "+ Tạo" or "Tạo dự án"', () => {
+  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const editorSource = readFileSync(new URL('../extension/content/providers/flow/FlowEditor.js', import.meta.url), 'utf8');
+
+  const headerCreateBtn = {
+    innerText: 'Tạo dự án',
+    name: 'Tạo dự án',
+    disabled: false,
+    getAttribute: () => null,
+    getBoundingClientRect: () => ({ width: 100, height: 36 }),
+    closest: (s) => s.includes('header') ? {} : null,
+    querySelector: () => null,
+  };
+
+  const composerSubmitBtn = {
+    innerText: 'Bắt đầu tạo',
+    name: 'Bắt đầu tạo',
+    disabled: false,
+    getAttribute: (a) => a === 'type' ? 'submit' : null,
+    getBoundingClientRect: () => ({ width: 120, height: 40 }),
+    closest: (s) => s.includes('composer') ? {} : null,
+    querySelector: (s) => s.includes('mat-icon') ? { textContent: 'arrow_forward' } : null,
+  };
+
+  const composerContainer = {
+    querySelectorAll: (s) => s.includes('button') ? [composerSubmitBtn] : [],
+  };
+
+  const proseMirror = {
+    isContentEditable: true,
+    innerText: 'A magical landscape in Vietnam',
+    closest: (s) => s.includes('composer') ? composerContainer : null,
+    getBoundingClientRect: () => ({ width: 500, height: 80 }),
+  };
+
+  const allButtons = [headerCreateBtn, composerSubmitBtn];
+
+  const ctx = vm.createContext({
+    globalThis: {},
+    window: {},
+    document: {
+      querySelectorAll: (selector) => {
+        if (selector.includes('.ProseMirror')) return [proseMirror];
+        if (selector.includes('button')) return allButtons;
+        return [];
+      },
+      querySelector: (selector) => {
+        if (selector.includes('.ProseMirror')) return proseMirror;
+        if (selector.includes('composer')) return composerContainer;
+        return null;
+      },
+    },
+    location: { href: 'https://flow.google.com/u/0/?hl=vi' },
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+    accessibleName: el => el.name || el.innerText || '',
+  });
+
+  vm.runInContext(domUtilsSource, ctx);
+  vm.runInContext(editorSource, ctx);
+
+  const getFlowSubmitButton = ctx.globalThis.getFlowSubmitButton;
+  const submitButton = getFlowSubmitButton('A magical landscape in Vietnam');
+
+  assert.equal(submitButton, composerSubmitBtn);
+});
+
+test('Vietnamese localization anti-misclick: flowNavigationItem never misclicks "Nội dung tải lên" or "Tất cả dự án" as All media', () => {
+  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const navItems = [
+    { innerText: 'Nội dung tải lên', name: 'Nội dung tải lên', getAttribute: () => null, querySelectorAll: () => [], getBoundingClientRect: () => ({ width: 150, height: 30 }) },
+    { innerText: 'Tất cả dự án', name: 'Tất cả dự án', getAttribute: () => null, querySelectorAll: () => [], getBoundingClientRect: () => ({ width: 150, height: 30 }) },
+    { innerText: 'Tất cả nội dung nghe nhìn', name: 'Tất cả nội dung nghe nhìn', getAttribute: () => null, querySelectorAll: () => [{ textContent: 'perm_media' }], getBoundingClientRect: () => ({ width: 150, height: 30 }) },
+  ];
+
+  const ctx = vm.createContext({
+    globalThis: {},
+    window: {},
+    document: {
+      querySelectorAll: selector => selector.includes('button') || selector.includes('a') ? navItems : [],
+      querySelector: () => null,
+    },
+    location: { href: 'https://flow.google.com/u/0/?hl=vi' },
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+    accessibleName: el => el.name || el.innerText || '',
+  });
+  vm.runInContext(domUtilsSource, ctx);
+  const flowNavigationItem = ctx.globalThis.flowNavigationItem;
+
+  const matched = flowNavigationItem('All media');
+  // Must match exact "Tất cả nội dung nghe nhìn", NOT "Nội dung tải lên" or "Tất cả dự án"
+  assert.equal(matched, navItems[2]);
+});
+
+test('FlowTiles: isTileBusy and isTileMediaReady correctly distinguish rendering vs finished tiles', () => {
+  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const tilesSource = readFileSync(new URL('../extension/content/providers/flow/FlowTiles.js', import.meta.url), 'utf8');
+
+  const ctx = vm.createContext({
+    globalThis: {},
+    window: {},
+    document: { querySelectorAll: () => [], querySelector: () => null },
+    location: { href: 'https://flow.google.com/u/0/?hl=vi' },
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+    accessibleName: el => el.innerText || '',
+  });
+  vm.runInContext(domUtilsSource, ctx);
+  vm.runInContext(tilesSource, ctx);
+
+  const { isTileBusy, isTileMediaReady } = ctx.globalThis.FlowTiles;
+
+  // Case 1: Tile with mat-progress-spinner / loading spinner
+  const spinnerTile = {
+    innerText: '',
+    textContent: '',
+    getAttribute: () => null,
+    querySelector: sel => sel.includes('spinner') ? {} : null,
+    querySelectorAll: () => [],
+  };
+  assert.equal(isTileBusy(spinnerTile), true, 'Spinner tile must be flagged as busy');
+  assert.equal(isTileMediaReady(spinnerTile), false, 'Spinner tile must NOT be mediaReady');
+
+  // Case 2: Tile with Vietnamese progress text: "Đang tạo... 45%"
+  const viProgressTile = {
+    innerText: 'Đang tạo... 45%',
+    textContent: 'Đang tạo... 45%',
+    getAttribute: () => null,
+    querySelector: () => null,
+    querySelectorAll: () => [],
+  };
+  assert.equal(isTileBusy(viProgressTile), true, 'Tile with Vietnamese percentage must be busy');
+  assert.equal(isTileMediaReady(viProgressTile), false, 'Tile with Vietnamese percentage must NOT be mediaReady');
+
+  // Case 3: Tile with English text: "Generating 80%"
+  const enProgressTile = {
+    innerText: 'Generating 80%',
+    textContent: 'Generating 80%',
+    getAttribute: () => null,
+    querySelector: () => null,
+    querySelectorAll: () => [],
+  };
+  assert.equal(isTileBusy(enProgressTile), true, 'Tile with English percentage must be busy');
+  assert.equal(isTileMediaReady(enProgressTile), false, 'Tile with English percentage must NOT be mediaReady');
+
+  // Case 4: Newly created empty tile without loaded media and without spinner yet
+  const emptyTile = {
+    innerText: 'scene-01',
+    textContent: 'scene-01',
+    getAttribute: () => null,
+    querySelector: () => null,
+    querySelectorAll: () => [],
+  };
+  assert.equal(isTileBusy(emptyTile), true, 'Empty newly created tile must be busy/pending');
+  assert.equal(isTileMediaReady(emptyTile), false, 'Empty newly created tile must NOT be mediaReady');
+
+  // Case 5: Completed image tile with loaded image
+  const finishedImgTile = {
+    innerText: 'scene-01',
+    textContent: 'scene-01',
+    getAttribute: attr => attr === 'aria-label' ? 'scene-01' : null,
+    querySelector: () => null,
+    querySelectorAll: sel => sel.includes('img') ? [{
+      src: 'https://flow.google.com/asb/test-image-123',
+      currentSrc: 'https://flow.google.com/asb/test-image-123',
+      complete: true,
+      naturalWidth: 1024,
+      naturalHeight: 768,
+    }] : [],
+  };
+  assert.equal(isTileBusy(finishedImgTile), false, 'Finished image tile must NOT be busy');
+  assert.equal(isTileMediaReady(finishedImgTile), true, 'Finished image tile MUST be mediaReady');
+
+  // Case 6: Completed video tile with loaded poster
+  const finishedVideoTile = {
+    innerText: 'scene-02',
+    textContent: 'scene-02',
+    getAttribute: attr => attr === 'aria-label' ? 'scene-02' : null,
+    querySelector: sel => sel.includes('flow-video-tile') ? {
+      querySelector: sub => sub.includes('img') ? {
+        complete: true,
+        naturalWidth: 1280,
+      } : null,
+    } : null,
+    querySelectorAll: () => [],
+  };
+  assert.equal(isTileBusy(finishedVideoTile), false, 'Finished video tile must NOT be busy');
+  assert.equal(isTileMediaReady(finishedVideoTile), true, 'Finished video tile MUST be mediaReady');
 });

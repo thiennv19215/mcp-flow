@@ -174,11 +174,25 @@
 
   function isSubmitButtonElement(el) {
     if (!el || !root.visible?.(el) || root.isFlowProjectNavigationControl?.(el)) return false;
+    if (el.closest?.('nav, [role="navigation"], mat-sidenav, header, mat-toolbar, [role="banner"]')) return false;
+
     const name = (root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim().toLowerCase();
     const text = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
-    const submitPatterns = /^(?:start generation|generate|create|bắt đầu tạo|tạo video|tạo ảnh|tạo|bắt đầu)$/i;
+
+    // Loại trừ 100% các nút tạo dự án, tạo nhân vật hoặc quản lý thư mục
+    if (/(?:project|dự án|character|nhân vật|folder|thư mục)/i.test(name) || /(?:project|dự án|character|nhân vật|folder|thư mục)/i.test(text)) return false;
+    if (/(?:settings|cài đặt|tune|clear prompt|xóa câu lệnh|xóa văn bản|quay lại|back|upload|tải lên)/i.test(name)) return false;
+
+    const submitPatterns = /^(?:start generation|generate|bắt đầu tạo|tạo video|tạo ảnh|tạo hình ảnh)$/i;
     if (submitPatterns.test(name) || submitPatterns.test(text)) return true;
     if (name.includes("start generation") || name.includes("bắt đầu tạo")) return true;
+
+    // Nếu nhãn là từ đơn "tạo" hoặc "create", CHỈ chấp nhận khi nó thuộc hoặc nằm cạnh composer / ProseMirror
+    if (/^(?:create|tạo)$/i.test(name) || /^(?:create|tạo)$/i.test(text)) {
+      const isNearComposer = Boolean(el.closest?.(".flow-composer, flow-base-prompt-box, form, [class*='composer']")) ||
+        Boolean(el.parentElement?.querySelector?.(".ProseMirror"));
+      if (isNearComposer) return true;
+    }
 
     const icon = el.querySelector?.("mat-icon, .mat-icon, .google-symbols, i, svg");
     if (icon) {
@@ -191,32 +205,62 @@
   }
 
   function getFlowSubmitButton(expectedPrompt) {
-    const allButtons = [...document.querySelectorAll('button,[role="button"]')].filter(el => root.visible?.(el));
-    const matched = allButtons.find(isSubmitButtonElement);
-    if (matched && !matched.disabled && matched.getAttribute("aria-disabled") !== "true") return matched;
-
-    const composer = document.querySelector(".ProseMirror")?.closest(".flow-composer, [class*='composer'], form") ||
-      document.querySelector(".flow-composer, [class*='composer']");
+    // 1. ƯU TIÊN TUYỆT ĐỐI: Tìm nút Submit TRONG Composer Container trước!
+    // Tránh click nhầm vào các nút ở Header, Sidebar, Navigation khi giao diện là tiếng Việt.
+    const composer = document.querySelector(".ProseMirror")?.closest(".flow-composer, flow-base-prompt-box, form, [class*='composer']") ||
+      document.querySelector(".flow-composer, flow-base-prompt-box, [class*='composer']");
     if (composer) {
-      const composerButtons = [...composer.querySelectorAll('button,[role="button"]')].filter(el => root.visible?.(el));
-      const submitBtn = composerButtons.find(b => {
+      const composerButtons = [...composer.querySelectorAll('button,[role="button"]')].filter(el =>
+        root.visible?.(el) && !root.isFlowProjectNavigationControl?.(el));
+
+      // 1.1 Tìm nút có icon đặc thù của Submit trong Google Flow
+      const submitIconBtn = composerButtons.find(b => {
         if (b.disabled || b.getAttribute("aria-disabled") === "true") return false;
         const icon = b.querySelector?.("mat-icon, .mat-icon, .google-symbols, i, svg");
         const iconTxt = (icon?.textContent || "").trim();
-        return /arrow_forward|send|sparkle|auto_awesome|play_arrow/i.test(iconTxt);
+        return /^(?:arrow_forward|send|sparkle|auto_awesome|play_arrow)$/i.test(iconTxt);
       });
-      if (submitBtn) return submitBtn;
+      if (submitIconBtn) return submitIconBtn;
 
-      const enabledButtons = composerButtons.filter(b => !b.disabled && b.getAttribute("aria-disabled") !== "true" && !root.isFlowProjectNavigationControl?.(b));
-      if (enabledButtons.length > 0) {
-        const lastBtn = enabledButtons[enabledButtons.length - 1];
-        const label = (root.accessibleName?.(lastBtn) || "").toLowerCase();
-        if (!label.includes("setting") && !label.includes("clear") && !label.includes("cài đặt") && !label.includes("xóa")) {
-          return lastBtn;
-        }
+      // 1.2 Tìm nút match pattern submit trong composer
+      const submitMatchedBtn = composerButtons.find(b => {
+        if (b.disabled || b.getAttribute("aria-disabled") === "true") return false;
+        return isSubmitButtonElement(b);
+      });
+      if (submitMatchedBtn) return submitMatchedBtn;
+
+      // 1.3 Nút type="submit" hoặc data-action="submit"
+      const typeSubmitBtn = composerButtons.find(b => {
+        if (b.disabled || b.getAttribute("aria-disabled") === "true") return false;
+        return b.getAttribute?.("type") === "submit" || b.getAttribute?.("data-action") === "submit";
+      });
+      if (typeSubmitBtn) return typeSubmitBtn;
+
+      // 1.4 Fallback trong composer: Nút cuối cùng không phải settings hay clear hay add
+      const enabledComposerButtons = composerButtons.filter(b => {
+        if (b.disabled || b.getAttribute("aria-disabled") === "true") return false;
+        const aria = (root.accessibleName?.(b) || "").toLowerCase();
+        const icon = b.querySelector?.("mat-icon, .mat-icon, .google-symbols")?.textContent?.trim()?.toLowerCase() || "";
+        if (icon === "tune" || icon === "settings" || /setting|cài đặt/i.test(aria)) return false;
+        if (icon === "close" || icon === "clear" || /clear|xóa/i.test(aria)) return false;
+        if (icon === "add" || icon === "add_circle" || /thành phần|ingredient|add media/i.test(aria)) return false;
+        return true;
+      });
+      if (enabledComposerButtons.length > 0) {
+        return enabledComposerButtons[enabledComposerButtons.length - 1];
       }
     }
-    return matched || null;
+
+    // 2. Fallback tìm trên toàn trang (chỉ khi không có composer DOM thông thường)
+    // Loại trừ triệt để header, navigation, sidebar và các nút tạo dự án / nhân vật
+    const allButtons = [...document.querySelectorAll('button,[role="button"]')].filter(el => {
+      if (!root.visible?.(el) || el.disabled || el.getAttribute("aria-disabled") === "true") return false;
+      if (root.isFlowProjectNavigationControl?.(el)) return false;
+      if (el.closest?.('nav, [role="navigation"], mat-sidenav, header, mat-toolbar, [role="banner"]')) return false;
+      return isSubmitButtonElement(el);
+    });
+
+    return allButtons[0] || null;
   }
 
   function inspectFlowSubmitTarget(button, expectedPrompt) {

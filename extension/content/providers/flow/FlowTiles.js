@@ -116,17 +116,89 @@
     return { id: item.id, title: item.title, kind: item.kind };
   }
 
+  function hasTileProgressBar(tile) {
+    return Boolean(tile.querySelector('flow-progress-tile, mat-progress-bar, [role="progressbar"], [class*="progress-bar"], [class*="progressbar"]'));
+  }
+
+  function hasTileSpinner(tile) {
+    return Boolean(tile.querySelector('mat-spinner, mat-progress-spinner, [class*="spinner"], [class*="loading"], [class*="loader"], [class*="shimmer"], [class*="skeleton"], svg[class*="spin"]'));
+  }
+
+  function getTileProgressText(tile) {
+    const text = (tile.innerText || tile.textContent || "").replace(/\s+/g, " ").trim();
+    const pctMatch = text.match(/(\d{1,3})\s*%/);
+    if (pctMatch) return `${pctMatch[1]}%`;
+    return "";
+  }
+
+  function hasTileGenerationText(tile) {
+    const text = (tile.innerText || tile.textContent || "").toLowerCase();
+    return /(?:generating|rendering|processing|creating|queued|pending|starting|in progress|đang tạo|đang kết xuất|đang xử lý|đang chờ|hàng đợi|chuẩn bị)/i.test(text);
+  }
+
+  function hasRenderedMedia(tile) {
+    // 1. Check for valid, loaded image
+    const imgs = [...tile.querySelectorAll("img")].filter(img => {
+      const src = img.currentSrc || img.getAttribute("src") || "";
+      if (!src || src.startsWith("data:image/svg") || src.includes("placeholder") || src.includes("loading") || src.includes("spinner")) return false;
+      return img.complete && (img.naturalWidth > 1 || img.width > 20);
+    });
+    if (imgs.length > 0) return true;
+
+    // 2. Check for canvas with content
+    const canvases = [...tile.querySelectorAll("canvas")].filter(c => c.width > 20 && c.height > 20);
+    if (canvases.length > 0) return true;
+
+    // 3. Check for valid video element
+    const videos = [...tile.querySelectorAll("video")].filter(v => {
+      const src = v.currentSrc || v.src || v.querySelector("source")?.src || "";
+      return Boolean(src && (v.readyState >= 1 || v.duration > 0 || (v.videoWidth && v.videoWidth > 0)));
+    });
+    if (videos.length > 0) return true;
+
+    // 4. Video/Scene tile with loaded poster
+    const videoTile = tile.querySelector("flow-video-tile, flow-scene-tile");
+    if (videoTile) {
+      const poster = videoTile.querySelector("img");
+      if (poster && poster.complete && poster.naturalWidth > 1) return true;
+    }
+
+    return false;
+  }
+
+  function isTileBusy(tile) {
+    if (!tile) return false;
+    const pct = getTileProgressText(tile);
+    const progressBar = hasTileProgressBar(tile);
+    const spinner = hasTileSpinner(tile);
+    const genText = hasTileGenerationText(tile);
+    const ariaBusy = tile.getAttribute("aria-busy") === "true" || Boolean(tile.querySelector('[aria-busy="true"]'));
+    const placeholderTile = Boolean(tile.querySelector('flow-progress-tile, flow-rendering-tile, flow-generating-tile, flow-placeholder-tile, [class*="rendering"], [class*="generating"], [class*="placeholder"]'));
+    const hasActiveProgress = Boolean(pct || progressBar || spinner || genText || ariaBusy || placeholderTile);
+    const rendered = hasRenderedMedia(tile);
+    const hasError = Boolean(tile.querySelector("flow-error-tile, [class*='error-tile']"));
+
+    return hasActiveProgress || (!rendered && !hasError);
+  }
+
+  function isTileMediaReady(tile) {
+    if (!tile) return false;
+    const hasError = Boolean(tile.querySelector("flow-error-tile, [class*='error-tile']"));
+    if (hasError) return false;
+    return !isTileBusy(tile) && hasRenderedMedia(tile);
+  }
+
   function collectNativeMedia() {
     return [...document.querySelectorAll("flow-grid-tile-container")].map(tile => {
-      const hasProgressBar = Boolean(tile.querySelector('flow-progress-tile,mat-progress-bar,[role="progressbar"]'));
-      const hasProgressBadge = !hasProgressBar && Boolean([...tile.querySelectorAll("div,span")].find(el => el.children.length <= 1 && /^\d{1,3}%$/.test((el.textContent || "").trim())));
-      const busy = hasProgressBar || hasProgressBadge;
+      const busy = isTileBusy(tile);
+      const mediaReady = isTileMediaReady(tile);
       const error = tile.querySelector("flow-error-tile, [class*='error-tile']");
       const kind = tile.querySelector("flow-scene-tile") ? "scene" : tile.querySelector("flow-video-tile") ? "video" : "image";
       const id = root.mediaId?.(tile);
       const title = (tile.getAttribute("aria-label") || tile.getAttribute("title") || "").trim();
       const failureReason = error ? (error.innerText || error.textContent || "").replace(/\s+/g, " ").trim() : undefined;
-      return { ...(id ? { id } : {}), title, busy, failed: Boolean(error), failureReason, kind };
+      const progress = getTileProgressText(tile) || (busy ? (hasTileGenerationText(tile) ? "Đang render..." : "") : "");
+      return { ...(id ? { id } : {}), title, busy, mediaReady, failed: Boolean(error), failureReason, kind, progress, element: tile };
     });
   }
 
@@ -199,7 +271,7 @@
       if (!root.visible?.(el) || el.disabled || el.getAttribute("aria-disabled") === "true") return false;
       const label = (root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim().toLowerCase();
       const icon = el.querySelector("mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined,svg")?.textContent?.trim() || "";
-      return /^(retry|try again|thử lại)$/i.test(label) || /refresh|replay|retry/i.test(icon);
+      return /^(?:retry|try again|thử lại)(?:\s+.*)?$/i.test(label) || /refresh|replay|retry/i.test(icon);
     });
     if (!retry) return false;
     const retryRect = retry.getBoundingClientRect();
@@ -221,9 +293,12 @@
 
   async function waitForProgressResult(command, before, expected, kind, timeoutMs, selector = "flow-grid-tile-container", allowConfirmedPartial = false) {
     const until = Date.now() + timeoutMs;
+    const startedAt = Date.now();
     let hadProgress = false, last = "", lastTitleOnlyResult = "", retriesLeft = Math.max(1, Number(command?.retries ?? 2));
+    let renderObservedInFlight = false;
     while (Date.now() < until) {
-      const fresh = collectNativeMedia().filter(item => !before.includes(item.id || `title:${item.title}`) && (!kind || item.kind === kind));
+      const allMedia = collectNativeMedia();
+      const fresh = allMedia.filter(item => !before.includes(item.id || `title:${item.title}`) && (!kind || item.kind === kind));
       const failed = fresh.filter(item => item.failed);
       if (failed.length) {
         const failureReason = failed[0]?.failureReason || "";
@@ -233,13 +308,13 @@
         }
         if (retriesLeft > 0 && await retryNativeErrorTile(failed[0])) {
           retriesLeft--;
-          emitFlowProgress(command, `Flow failed this render; retrying its failed tile (${retriesLeft} retries remaining)`);
+          emitFlowProgress(command, `Flow thất bại render; đang thử lại (${retriesLeft} lần thử còn lại)`);
           continue;
         }
-        if (!allowConfirmedPartial || fresh.filter(item => !item.busy).length >= expected) {
-          const ready = fresh.filter(item => !item.busy && !item.failed);
+        if (!allowConfirmedPartial || fresh.filter(item => item.mediaReady).length >= expected) {
+          const ready = fresh.filter(item => item.mediaReady && !item.failed);
           const failure = failed[0];
-          const error = root.flowError("FLOW_GENERATION_FAILED", `Flow failed while processing "${failure.title}"${failure.failureReason ? `: ${failure.failureReason}` : ""}. Nothing was charged for the failed render.`, false, false);
+          const error = root.flowError("FLOW_GENERATION_FAILED", `Flow gặp lỗi khi xử lý "${failure.title}"${failure.failureReason ? `: ${failure.failureReason}` : ""}. Chưa bị trừ tín dụng cho lượt tạo lỗi này.`, false, false);
           if (allowConfirmedPartial && ready.length + failed.length >= expected) {
             error.partialMedia = ready.map(descriptor);
             error.failedMedia = failed.map(descriptor);
@@ -247,24 +322,45 @@
           throw error;
         }
       }
-      const ready = fresh.filter(item => !item.busy && !item.failed);
-      if (ready.length >= expected) {
+
+      const busyItems = fresh.filter(item => item.busy);
+      if (busyItems.length > 0) renderObservedInFlight = true;
+
+      const ready = fresh.filter(item => item.mediaReady && !item.busy && !item.failed);
+      const isEarly = Date.now() - startedAt < 2000 && !renderObservedInFlight;
+
+      if (!isEarly && ready.length >= expected) {
         const picked = ready.slice(0, expected);
         const titleOnly = picked.some(item => !item.id || item.id.startsWith("title:"));
         const signature = picked.map(item => item.id || `title:${item.title}`).join("|");
-        if (!titleOnly || signature === lastTitleOnlyResult) return picked.map(descriptor);
+        if (!titleOnly || signature === lastTitleOnlyResult) {
+          emitFlowProgress(command, kind === "video" ? "Tạo video hoàn tất 100%" : "Tạo ảnh hoàn tất 100%");
+          return picked.map(descriptor);
+        }
         lastTitleOnlyResult = signature;
-        emitFlowProgress(command, "Flow is finishing the video title");
+        emitFlowProgress(command, "Flow đang cập nhật tiêu đề file...");
         await root.wait?.(1500);
         continue;
       }
-      const pct = [...document.querySelectorAll(selector)].slice(0, 10).map(el => (el.innerText || "").match(/\d+%/)?.[0]).filter(Boolean);
-      if (pct.length) hadProgress = true;
-      const text = pct.join(", ") || (hadProgress ? "Flow is finishing the result" : "Waiting for Flow");
+
+      const pctList = [...document.querySelectorAll(selector)].slice(0, 10).map(el => (el.innerText || "").match(/(\d{1,3})\s*%/)?.[0]).filter(Boolean);
+      if (pctList.length) hadProgress = true;
+      const currentPct = pctList.find(p => /^\d{1,3}%$/.test(p.replace(/\s+/g, "")));
+      let text = "";
+      if (currentPct) {
+        text = `Đang render (${currentPct.replace(/\s+/g, "")})`;
+      } else if (busyItems.length > 0) {
+        text = kind === "video" ? "Flow đang render video..." : "Flow đang render ảnh...";
+      } else if (hadProgress || renderObservedInFlight) {
+        text = "Flow đang hoàn tất kết quả...";
+      } else {
+        text = "Đang chờ Flow bắt đầu render...";
+      }
+
       if (text !== last) { emitFlowProgress(command, text); last = text; }
-      await root.wait?.(2500);
+      await root.wait?.(2000);
     }
-    throw root.flowError("FLOW_OPERATION_TIMEOUT", "Timed out waiting for Flow. The operation may have completed; inspect Flow before retrying.", false, true);
+    throw root.flowError("FLOW_OPERATION_TIMEOUT", "Hết thời gian chờ Flow. Tác vụ có thể đã được tiếp nhận; vui lòng kiểm tra giao diện Flow trước khi thử lại.", false, true);
   }
 
   async function waitForNativeEditorCompletion(command, timeoutMs, description) {
@@ -291,6 +387,9 @@
 
   const FlowTiles = Object.freeze({
     collectNativeMedia,
+    isTileBusy,
+    isTileMediaReady,
+    hasRenderedMedia,
     findFlowTile,
     countFlowTitleAcrossGrid,
     retryNativeErrorTile,
@@ -306,6 +405,9 @@
 
   root.FlowTiles = FlowTiles;
   root.collectNativeMedia = collectNativeMedia;
+  root.isTileBusy = isTileBusy;
+  root.isTileMediaReady = isTileMediaReady;
+  root.hasRenderedMedia = hasRenderedMedia;
   root.findFlowTile = findFlowTile;
   root.countFlowTitleAcrossGrid = countFlowTitleAcrossGrid;
   root.waitForProgressResult = waitForProgressResult;
