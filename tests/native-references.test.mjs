@@ -7,7 +7,7 @@ import { extensionSetWebSocket } from '../dist/extension.js';
 import { runGeneration } from '../dist/flow.js';
 import { getCachedProjectMedia, cacheProjectMedia } from '../dist/flow-transfer.js';
 
-const source = readFileSync(new URL('../extension/content/reference-actions.js', import.meta.url), 'utf8');
+const source = readFileSync(new URL('../extension/content/providers/flow/FlowComponents.js', import.meta.url), 'utf8');
 function harness({ names = ['MCP Test Mug'], addedKind = 'character', hideAttached = false } = {}) {
   let open = true, ticks = 0;
   const attached = [];
@@ -100,7 +100,7 @@ test('generation transports character:<name> as a named reference, not a local f
 });
 
 test('classifyFlowError identifies quota, unusual activity, policy, and rate limits correctly', () => {
-  const domUtilsSource = readFileSync(new URL('../extension/content/dom-utils.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
   const context = vm.createContext({ window: {}, document: {}, location: { href: 'https://flow.google.com' } });
   vm.runInContext(domUtilsSource, context);
   const classify = context.classifyFlowError;
@@ -142,7 +142,7 @@ test('getCachedProjectMedia reuses previously uploaded asset by sha256', () => {
 });
 
 test('getEditorUserText extracts plain prompt text while completely excluding inline chips', () => {
-  const domUtilsSource = readFileSync(new URL('../extension/content/dom-utils.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
   const context = vm.createContext({ window: {}, document: {}, location: { href: 'https://flow.google.com' } });
   vm.runInContext(domUtilsSource, context);
   const getEditorUserText = context.getEditorUserText;
@@ -174,7 +174,7 @@ test('getEditorUserText extracts plain prompt text while completely excluding in
 });
 
 test('clearEditorTextPreservingChips wipes user text without removing reference chips', async () => {
-  const domUtilsSource = readFileSync(new URL('../extension/content/dom-utils.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
   const dispatchedEvents = [];
   const context = vm.createContext({
     window: { getSelection: () => null },
@@ -228,7 +228,7 @@ test('clearEditorTextPreservingChips wipes user text without removing reference 
 });
 
 test('dismissBlockingOverlays clicks close buttons or dispatches Escape for open dialogs', async () => {
-  const domUtilsSource = readFileSync(new URL('../extension/content/dom-utils.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
   let closeClicked = false;
   let escapeCount = 0;
 
@@ -276,7 +276,7 @@ test('dismissBlockingOverlays clicks close buttons or dispatches Escape for open
 });
 
 test('FlowDriverRegistry correctly flags sub-routes like /character as not project editor', () => {
-  const registrySource = readFileSync(new URL('../extension/content/flow-driver-registry.js', import.meta.url), 'utf8');
+  const registrySource = readFileSync(new URL('../extension/content/providers/ProviderRegistry.js', import.meta.url), 'utf8');
   const rootObj = {};
   const context = vm.createContext({ globalThis: rootObj, URL });
   vm.runInContext(registrySource, context);
@@ -299,8 +299,8 @@ test('FlowDriverRegistry correctly flags sub-routes like /character as not proje
 });
 
 test('ensureFlowProjectEditor navigates to project root when stuck on sub-routes', async () => {
-  const registrySource = readFileSync(new URL('../extension/content/flow-driver-registry.js', import.meta.url), 'utf8');
-  const domUtilsSource = readFileSync(new URL('../extension/content/dom-utils.js', import.meta.url), 'utf8');
+  const registrySource = readFileSync(new URL('../extension/content/providers/ProviderRegistry.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
 
   let assignedUrl = null;
   const mockLocation = {
@@ -342,7 +342,7 @@ test('ensureFlowProjectEditor navigates to project root when stuck on sub-routes
 });
 
 test('checkFlowCreditLimitAlert detects quota exhaustion banners immediately', () => {
-  const domUtilsSource = readFileSync(new URL('../extension/content/dom-utils.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
   const alertEl = {
     nodeType: 1,
     innerText: "You've run out of credits. Upgrade your account or wait for reset.",
@@ -384,7 +384,7 @@ test('checkFlowCreditLimitAlert detects quota exhaustion banners immediately', (
 });
 
 test('clearExistingIngredientChips removes stale reference chips before attaching new ones', async () => {
-  const domUtilsSource = readFileSync(new URL('../extension/content/dom-utils.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
   let removedCount = 0;
   const chips = [
     {

@@ -37,7 +37,7 @@ function leaveTabOperation(tabId) {
   else activeTabOperations.delete(tabId);
 }
 async function ensureActivityOverlay(tabId) {
-  await chrome.scripting.executeScript({ target: { tabId }, files: ["content/activity-overlay.js"] });
+  await chrome.scripting.executeScript({ target: { tabId }, files: ["content/shared/activity-overlay.js"] });
 }
 async function reloadFlowTabOnce(tabId) {
   let loadTimedOut = false;
@@ -82,7 +82,7 @@ async function clearStaleFlowSubmitBridge(tabId) {
 async function ensureFlowUploadBridge(tabId) {
   if (tabOperationActive(tabId)) return;
   let injectionError = "";
-  await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["content/flow-upload-main.js"] })
+  await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["content/bridge/flow-upload-main.js"] })
     .catch(error => { injectionError = [injectionError, String(error?.message || error)].filter(Boolean).join("; "); });
   const readBridge = () => chrome.scripting.executeScript({
     target: { tabId },
@@ -131,19 +131,24 @@ async function sendFlowCommand(tabId, message) {
     await chrome.scripting.executeScript({
       target: { tabId },
       files: [
-        "content/activity-overlay.js",
-        "content/native-file-transfer.js",
-        "content/flow-page-driver.js",
-        "content/flow-driver-registry.js",
-        "content/flow-v2-driver.js",
-        "content/character-actions.js",
-        "content/image-actions.js",
-        "content/video-actions.js",
-        "content/reference-actions.js",
+        "content/shared/dom-utils.js",
+        "content/shared/activity-overlay.js",
+        "content/shared/native-file-transfer.js",
+        "content/providers/BaseProviderDriver.js",
+        "content/providers/ProviderRegistry.js",
+        "content/providers/flow/FlowNavigation.js",
+        "content/providers/flow/FlowEditor.js",
+        "content/providers/flow/FlowSettings.js",
+        "content/providers/flow/FlowComponents.js",
+        "content/providers/flow/FlowCharacters.js",
+        "content/providers/flow/FlowTiles.js",
+        "content/providers/flow/FlowMediaMenu.js",
+        "content/providers/flow/FlowAgent.js",
+        "content/providers/flow/FlowDriver.js",
         "content/dom-actions.js",
       ],
     });
-    await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["content/flow-upload-main.js"] });
+    await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["content/bridge/flow-upload-main.js"] });
     return chrome.tabs.sendMessage(tabId, message);
   }
 }

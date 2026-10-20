@@ -1,8 +1,8 @@
 (function (root) {
   "use strict";
 
-  class FlowDriverRegistry {
-    static parseV2Path(pathname) {
+  class ProviderRegistry {
+    static parseFlowPath(pathname) {
       const segments = String(pathname || "").split("/").filter(Boolean);
       const projectAt = segments.indexOf("project");
       const prefix = projectAt >= 0 ? segments.slice(0, projectAt) : segments;
@@ -33,30 +33,51 @@
       };
     }
 
+    // Alias for backward compatibility
+    static parseV2Path(pathname) {
+      return this.parseFlowPath(pathname);
+    }
+
     static register(key, factory) {
-      if (!Object.prototype.hasOwnProperty.call(this.ORIGINS, key)) throw new TypeError(`Unknown Flow driver key: ${key}`);
-      if (typeof factory !== "function") throw new TypeError("Flow driver factory is required.");
+      if (!Object.prototype.hasOwnProperty.call(this.ORIGINS, key)) throw new TypeError(`Unknown provider driver key: ${key}`);
+      if (typeof factory !== "function") throw new TypeError("Provider driver factory is required.");
       this.factories.set(key, factory);
     }
 
     static describeUrl(value) {
       try {
         const url = new URL(value);
-        if (url.origin !== this.ORIGINS.flow_v2) return null;
-        const route = this.parseV2Path(url.pathname);
-        return route ? { driverKey: "flow_v2", origin: url.origin, ...route } : null;
+        if (url.origin === this.ORIGINS.flow) {
+          const route = this.parseFlowPath(url.pathname);
+          return route ? { driverKey: "flow", origin: url.origin, ...route } : null;
+        }
+        if (url.origin === this.ORIGINS.gemini) {
+          return { driverKey: "gemini", origin: url.origin, isProjectEditor: true, routePrefix: "" };
+        }
+        if (url.origin === this.ORIGINS.chatgpt) {
+          return { driverKey: "chatgpt", origin: url.origin, isProjectEditor: true, routePrefix: "" };
+        }
+        return null;
       } catch { return null; }
     }
 
     static resolveForUrl(value, options = {}) {
       const context = this.describeUrl(value);
       if (!context) return null;
-      const factory = this.factories.get(context.driverKey);
+      // Look up driver by driverKey ("flow", or fallback "flow_v2")
+      const factory = this.factories.get(context.driverKey) || (context.driverKey === "flow" ? this.factories.get("flow_v2") : null);
       return { ...context, driver: factory ? factory({ ...options, ...context }) : null };
     }
   }
 
-  FlowDriverRegistry.ORIGINS = Object.freeze({ flow_v2: "https://flow.google.com" });
-  FlowDriverRegistry.factories = new Map();
-  root.FlowDriverRegistry = FlowDriverRegistry;
+  ProviderRegistry.ORIGINS = Object.freeze({
+    flow: "https://flow.google.com",
+    flow_v2: "https://flow.google.com", // Backward compatibility
+    gemini: "https://gemini.google.com",
+    chatgpt: "https://chatgpt.com",
+  });
+  ProviderRegistry.factories = new Map();
+
+  root.ProviderRegistry = ProviderRegistry;
+  root.FlowDriverRegistry = ProviderRegistry; // Backward compatibility alias
 })(globalThis);

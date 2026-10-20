@@ -2,15 +2,20 @@
   "use strict";
   const VERSION = 1;
   const OBSERVER_REVISION = 23;
-  const ARM = "TOBY_FLOW_V2_CORRELATION_ARM";
-  const DISARM = "TOBY_FLOW_V2_CORRELATION_DISARM";
-  const RECEIPT = "TOBY_FLOW_V2_CORRELATION_RECEIPT";
-  const MEDIA_IDENTITIES = "TOBY_FLOW_V2_MEDIA_IDENTITIES";
-  const MEDIA_IDENTITIES_READ = "TOBY_FLOW_V2_MEDIA_IDENTITIES_READ";
+  const ARM = "TOBY_FLOW_CORRELATION_ARM";
+  const ARM_V2 = "TOBY_FLOW_V2_CORRELATION_ARM";
+  const DISARM = "TOBY_FLOW_CORRELATION_DISARM";
+  const DISARM_V2 = "TOBY_FLOW_V2_CORRELATION_DISARM";
+  const RECEIPT = "TOBY_FLOW_CORRELATION_RECEIPT";
+  const RECEIPT_V2 = "TOBY_FLOW_V2_CORRELATION_RECEIPT";
+  const MEDIA_IDENTITIES = "TOBY_FLOW_MEDIA_IDENTITIES";
+  const MEDIA_IDENTITIES_V2 = "TOBY_FLOW_V2_MEDIA_IDENTITIES";
+  const MEDIA_IDENTITIES_READ = "TOBY_FLOW_MEDIA_IDENTITIES_READ";
+  const MEDIA_IDENTITIES_READ_V2 = "TOBY_FLOW_V2_MEDIA_IDENTITIES_READ";
   const mediaIdentities = new Map();
   const mediaIdentityTypes = new Map();
   let mediaIdentityProject = null;
-  const old = window.__tobyFlowV2CorrelationObserver;
+  const old = window.__tobyFlowCorrelationObserver || window.__tobyFlowV2CorrelationObserver;
   if (old?.health) {
     try {
       if (old.health()?.activeAttempts !== 0) return;
@@ -586,21 +591,19 @@
     });
   };
   const emit = (attempt, stage, detail = {}) => {
-    window.dispatchEvent(
-      new CustomEvent(RECEIPT, {
-        detail: {
-          schemaVersion: VERSION,
-          nonce: attempt.nonce,
-          attemptId: attempt.attemptId,
-          stage,
-          mediaType: attempt.mediaType,
-          expectedQuantity: attempt.expectedQuantity,
-          projectId: projectId(),
-          observedAt: Date.now(),
-          ...detail,
-        },
-      })
-    );
+    const payload = {
+      schemaVersion: VERSION,
+      nonce: attempt.nonce,
+      attemptId: attempt.attemptId,
+      stage,
+      mediaType: attempt.mediaType,
+      expectedQuantity: attempt.expectedQuantity,
+      projectId: projectId(),
+      observedAt: Date.now(),
+      ...detail,
+    };
+    window.dispatchEvent(new CustomEvent(RECEIPT, { detail: payload }));
+    window.dispatchEvent(new CustomEvent(RECEIPT_V2, { detail: payload }));
   };
   const parseCalls = (raw) => {
     try {
@@ -964,7 +967,7 @@
       );
     if (changed) {
       console.info(
-        "[FlowV2MediaIdentity] project media identities observed",
+        "[FlowMediaIdentity] project media identities observed",
         JSON.stringify({ projectId: currentProject, count: mediaIdentities.size })
       );
       publishMediaIdentities();
@@ -1625,7 +1628,7 @@
       lastChildStatuses: new Map(),
       expiresAt: Date.now() + Math.max(5e3, Math.min(9e5, Number(d.ttlMs) || 6e4)),
     });
-    console.info("[FlowV2CorrelationObserver] armed", {
+    console.info("[FlowCorrelationObserver] armed", {
       attempt: d.attemptId.slice(0, 8),
       mediaType: d.mediaType,
       expectedQuantity,
@@ -1675,7 +1678,7 @@
       emit(attempt, "acceptance_unknown", { reason: "trusted_interaction_before_request" });
       if (attempt.manualInteractionCount <= 2)
         console.info(
-          "[FlowV2CorrelationObserver] trusted interaction observed while awaiting exact request",
+          "[FlowCorrelationObserver] trusted interaction observed while awaiting exact request",
           {
             attempt: attempt.attemptId.slice(0, 8),
             eventType: event.type,
@@ -1687,7 +1690,9 @@
   window.addEventListener("pointerdown", onTrustedInteraction, true);
   window.addEventListener("keydown", onTrustedInteraction, true);
   window.addEventListener(ARM, onArm);
+  window.addEventListener(ARM_V2, onArm);
   window.addEventListener(DISARM, onDisarm);
+  window.addEventListener(DISARM_V2, onDisarm);
   XMLHttpRequest.prototype.open = function (method, url, ...rest) {
     let absolute = String(url || "");
     try {
@@ -1714,7 +1719,7 @@
           if (attempts.size > 0 && diagnosticBudget-- > 0) {
             const bodyType = body == null ? "null" : body.constructor?.name || typeof body;
             console.info(
-              "[FlowV2CorrelationObserver] batchexecute observed",
+              "[FlowCorrelationObserver] batchexecute observed",
               JSON.stringify({
                 bodyType,
                 parsedRpcIds: calls.map((call) => call.rpcId).filter(Boolean),
@@ -1850,8 +1855,11 @@
   const dispose = () => {
     disposed = true;
     window.removeEventListener(ARM, onArm);
+    window.removeEventListener(ARM_V2, onArm);
     window.removeEventListener(DISARM, onDisarm);
+    window.removeEventListener(DISARM_V2, onDisarm);
     window.removeEventListener(MEDIA_IDENTITIES_READ, publishMediaIdentities);
+    window.removeEventListener(MEDIA_IDENTITIES_READ_V2, publishMediaIdentities);
     window.removeEventListener(MEDIA_SCHEMA, onMediaSchema);
     pendingMediaResponses.length = 0;
     pendingMediaBytes = 0;
@@ -1867,7 +1875,7 @@
   const patchedOpen = XMLHttpRequest.prototype.open;
   const patchedSend = XMLHttpRequest.prototype.send;
   const patchedFetch = window.fetch;
-  window.__tobyFlowV2CorrelationObserver = Object.freeze({
+  const observerInstance = Object.freeze({
     version: VERSION,
     observerRevision: OBSERVER_REVISION,
     dispose,
@@ -1883,6 +1891,17 @@
       const xhrHookActive =
         XMLHttpRequest.prototype.open === patchedOpen &&
         XMLHttpRequest.prototype.send === patchedSend;
+      return {
+        activeAttempts: attempts.size,
+        retiredCount: retired.entries.length,
+        retiredSaturated: retired.saturated,
+        xhrHookActive,
+        fetchHookActive: !!nativeFetch && window.fetch === patchedFetch,
+      };
+    },
+  });
+  window.__tobyFlowCorrelationObserver = observerInstance;
+  window.__tobyFlowV2CorrelationObserver = observerInstance;
       const fetchHookActive = !!nativeFetch && window.fetch === patchedFetch;
       return {
         ready: !disposed && xhrHookActive && (!nativeFetch || fetchHookActive),

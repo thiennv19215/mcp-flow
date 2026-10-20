@@ -71,6 +71,14 @@ function isFlowMediaSource(value) {
   } catch { return false; }
 }
 
+var nativeUploadAssemblers = globalThis.nativeUploadAssemblers || (globalThis.nativeUploadAssemblers = new Map());
+var stagedNativeFiles = globalThis.stagedNativeFiles || (globalThis.stagedNativeFiles = new Map());
+
+function validStagedLocalImage(value, suffixPattern) {
+  return Boolean(value && typeof value.transferId === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(value.transferId) && stagedNativeFiles.has(value.transferId) &&
+    typeof value.name === "string" && new RegExp(`^fm-[A-Za-z0-9_-]{1,32}-${suffixPattern.source}\\.(?:png|jpe?g|webp|gif|heic|heif|avif)$`, "i").test(value.name));
+}
+
 function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -776,6 +784,19 @@ async function ensureFlowLibrarySection(label) {
 }
 
 if (typeof globalThis !== "undefined") {
+  globalThis.visible = visible;
+  globalThis.accessibleName = accessibleName;
+  globalThis.wait = wait;
+  globalThis.flowError = flowError;
+  globalThis.classifyFlowError = classifyFlowError;
+  globalThis.flowButton = flowButton;
+  globalThis.waitForEnabledFlowButton = waitForEnabledFlowButton;
+  globalThis.isFlowProjectNavigationControl = isFlowProjectNavigationControl;
+  globalThis.normalizeAspectRatio = normalizeAspectRatio;
+  globalThis.scrollContainer = scrollContainer;
+  globalThis.validStagedLocalImage = validStagedLocalImage;
+  globalThis.stagedNativeFiles = stagedNativeFiles;
+  globalThis.nativeUploadAssemblers = nativeUploadAssemblers;
   globalThis.getEditorUserText = getEditorUserText;
   globalThis.countInlineChips = countInlineChips;
   globalThis.clearEditorTextPreservingChips = clearEditorTextPreservingChips;
@@ -785,4 +806,6 @@ if (typeof globalThis !== "undefined") {
   globalThis.exitFlowMediaViewer = exitFlowMediaViewer;
   globalThis.clearExistingIngredientChips = clearExistingIngredientChips;
   globalThis.checkFlowCreditLimitAlert = checkFlowCreditLimitAlert;
+  globalThis.ensureFlowLibrarySection = ensureFlowLibrarySection;
+  globalThis.waitForFlowRoute = waitForFlowRoute;
 }

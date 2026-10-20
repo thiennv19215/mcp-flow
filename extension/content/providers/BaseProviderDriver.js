@@ -1,9 +1,9 @@
 (function (root) {
   "use strict";
 
-  class FlowPageDriver {
+  class BaseProviderDriver {
     constructor({ key, origin, context, operationHandler, operations = [] } = {}) {
-      if (!key || !origin) throw new TypeError("FlowPageDriver requires key and origin");
+      if (!key || !origin) throw new TypeError("BaseProviderDriver requires key and origin");
       this.key = key;
       this.origin = origin;
       this.context = Object.freeze({ ...(context || {}) });
@@ -20,9 +20,9 @@
         return Promise.reject(this.error("UNSUPPORTED_OPERATION", `${this.key} does not implement ${operation}.`));
       }
       if (operation !== "flow.state" && operation !== "flow.context" && operation !== "flow.projects.list" && !this.context.projectId) {
-        return Promise.reject(this.error("FLOW_PROJECT_REQUIRED", "Open a Flow project before running this operation.", true));
+        return Promise.reject(this.error("FLOW_PROJECT_REQUIRED", "Open a project before running this operation.", true));
       }
-      const expected = command?._flowTarget || command?.flowTarget;
+      const expected = command?._flowTarget || command?.flowTarget || command?._target || command?.target;
       const mismatch = this.targetMismatch(expected);
       if (mismatch) return Promise.reject(this.error(mismatch.error, mismatch.message, false, false, mismatch.details));
       return Promise.resolve().then(() => this.operationHandler(operation, payload, command));
@@ -38,7 +38,11 @@
       ];
       for (const [field, actual, code] of checks) {
         if (expected[field] != null && expected[field] !== actual) {
-          return this.failure(code, `Flow ${field} changed before the operation could run.`, {
+          // Allow "flow" and "flow_v2" compatibility
+          if (field === "driverKey" && ((expected[field] === "flow_v2" && actual === "flow") || (expected[field] === "flow" && actual === "flow_v2"))) {
+            continue;
+          }
+          return this.failure(code, `${this.key} ${field} changed before the operation could run.`, {
             expected: expected[field], actual,
           });
         }
@@ -60,7 +64,7 @@
     }
   }
 
-  FlowPageDriver.OPERATIONS = Object.freeze([
+  BaseProviderDriver.OPERATIONS = Object.freeze([
     "flow.context", "flow.state", "flow.projects.list", "flow.assets.list", "flow.characters.list",
     "flow.generation.upload.preflight", "flow.file.upload.begin", "flow.file.upload.chunk",
     "flow.file.upload.finish", "flow.file.upload.abort", "flow.media.upload",
@@ -69,5 +73,6 @@
     "flow.edit.run", "flow.agent.batch", "flow.continue.run",
   ]);
 
-  root.FlowPageDriver = FlowPageDriver;
+  root.BaseProviderDriver = BaseProviderDriver;
+  root.FlowPageDriver = BaseProviderDriver; // Backward compatibility alias
 })(globalThis);

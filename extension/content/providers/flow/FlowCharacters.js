@@ -397,4 +397,5 @@
       }
     },
   });
+  globalThis.FlowCharacters = globalThis.FlowCharacterActions;
 })();
