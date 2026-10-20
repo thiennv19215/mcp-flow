@@ -534,6 +534,9 @@ async function connectHttp(settings, token) {
   if (response.status === 404 || response.status === 405) return false;
   if (!response.ok) {
     const detail = await response.json().catch(() => ({}));
+    // The previous backend routes unknown bearer-authenticated paths through
+    // its Studio-token guard and answers with this legacy 401 body.
+    if (response.status === 401 && detail.error === "Missing or wrong token.") return false;
     throw new Error(detail.error || `Backend connection failed (HTTP ${response.status}).`);
   }
   const session = { bridge, token, stopped: false, pollAbort: null };
