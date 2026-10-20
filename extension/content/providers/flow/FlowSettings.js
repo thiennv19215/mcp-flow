@@ -91,10 +91,20 @@
         el.querySelector?.('[role="radio"], mat-radio-button, button[id*="-trigger-"]'));
     if (openPanel) {
       const controls = [...openPanel.querySelectorAll('[role="radio"], mat-radio-button, [role="tab"], button')];
-      const hasSettingsContent = controls.some(r => {
-        const name = (root.accessibleName?.(r) || r.innerText || "").toLowerCase();
-        return /image|video|hình ảnh|ảnh|9:16|16:9|1:1|x1|x2|x3|x4|frames|ingredients|thành phần|khung hình/i.test(name);
+      const names = controls.filter(r => root.visible?.(r)).map(r => {
+        const name = root.accessibleName?.(r) || r.innerText || r.textContent || "";
+        return String(name).replace(/\b(accessibility_new|person|movie|image|videocam|mic|dashboard)\b/gi, " ")
+          .replace(/\s+/g, " ").trim().toLocaleLowerCase("vi");
       });
+      const hasOption = option => {
+        const aliases = OPTION_ALIASES[option] || [option];
+        return names.some(name => aliases.some(alias =>
+          name === alias || name.startsWith(`${alias} `) || name.endsWith(` ${alias}`)));
+      };
+      const hasVariants = [1, 2, 3, 4].some(count => names.some(name =>
+        name === `x${count}` || name === String(count) ||
+        new RegExp(`(?:^|\\s)${count}\\s*(?:kết quả|biến thể|ảnh|hình ảnh|video)(?:$|\\s)`, "i").test(name)));
+      const hasSettingsContent = hasOption("image") && hasOption("video") && hasVariants;
       if (hasSettingsContent) return true;
     }
 
