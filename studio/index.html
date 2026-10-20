@@ -281,21 +281,96 @@ dialog::backdrop{background:rgba(3,8,15,.7)}
 .toast{background:#e8eef6;color:#172235;border-color:rgba(255,255,255,.12)}.toast.bad{background:#782d3a;color:#fff}
 #studioLogout{color:#d5dfec}
 audio{filter:invert(1) hue-rotate(180deg)}
+ :root{--sidebar-width:252px}
+body{padding:0;background:var(--ink)}
+.app-shell{display:grid;grid-template-columns:var(--sidebar-width) minmax(0,1fr);align-items:start;min-height:100vh;max-width:none;margin:0}
+.app-sidebar{position:sticky;top:0;z-index:45;height:100vh;min-height:560px;display:flex;flex-direction:column;padding:22px 14px 16px;background:#151e2b;border-right:1px solid #2c3b4d;color:#e8eef6;overflow-y:auto}
+.sidebar-brand{display:flex;align-items:center;gap:11px;padding:4px 10px 24px}
+.sidebar-mark{display:grid;place-items:center;width:38px;height:38px;flex:none;border-radius:11px;background:#8bb9ff;color:#102033;font:800 20px var(--display)}
+.sidebar-brand b{display:block;font:750 16px/1.2 var(--body);color:#f2f6fb;letter-spacing:-.02em}
+.sidebar-brand small{display:block;margin-top:4px;color:#9aabbe;font:600 9px var(--mono);letter-spacing:.12em}
+.sidebar-label{padding:12px 12px 7px;color:#8393a8;font:700 10px var(--mono);letter-spacing:.12em}
+.app-sidebar .tabs{position:static;display:flex;flex-direction:column;gap:5px;overflow:visible;margin:0;padding:0;border:0;background:transparent;backdrop-filter:none}
+.app-sidebar .tabs button{position:relative;display:grid;grid-template-columns:34px minmax(0,1fr);grid-template-rows:auto auto;align-items:center;min-height:54px;padding:7px 10px;color:#bdc8d7;background:transparent;border:1px solid transparent;border-radius:10px;text-align:left;font:650 14px var(--body);white-space:normal}
+.app-sidebar .tabs button::before{grid-row:1/3;grid-column:1;content:attr(data-step);display:grid;place-items:center;width:25px;height:25px;border-radius:8px;background:#202c3b;color:#9eafc3;font:700 10px var(--mono)}
+.app-sidebar .tabs button[data-tab="cast"]::before{content:"01"}.app-sidebar .tabs button[data-tab="frames"]::before{content:"02"}.app-sidebar .tabs button[data-tab="shots"]::before{content:"03"}.app-sidebar .tabs button[data-tab="narrate"]::before{content:"04"}.app-sidebar .tabs button[data-tab="restyle"]::before{content:"05"}.app-sidebar .tabs button[data-tab="cut"]::before{content:"06"}.app-sidebar .tabs button[data-tab="library"]::before{content:"07"}
+.app-sidebar .tabs button:hover{color:#fff;background:#202c3b;border-color:#2b3b4f}
+.app-sidebar .tabs button.on{color:#eaf3ff;background:#263c58;border-color:#3e5d83;box-shadow:inset 3px 0 #8bb9ff}
+.app-sidebar .tabs button.on::before{color:#102033;background:#8bb9ff}
+.app-sidebar .tabs button small{grid-column:2;margin-top:2px;color:#96a7bb;font:500 11px var(--body);opacity:1}
+.app-sidebar .tabs button.on small{color:#c1d7f2}
+.sidebar-footer{margin-top:auto;padding-top:16px;border-top:1px solid #2c3b4d}
+.sidebar-footer .status{display:flex;flex-direction:column;align-items:stretch;gap:6px}
+.sidebar-footer .pill{justify-content:flex-start;min-height:34px;padding:6px 9px;border-color:#334458;background:#1b2735;color:#d8e2ee;font:550 12px var(--body)}
+.sidebar-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:12px}
+.sidebar-actions .lang-switch{border:1px solid #34465a!important;border-radius:9px!important;background:#1b2735!important}
+.sidebar-actions .lang-switch button{min-width:34px;min-height:30px}
+.app-content{min-width:0;padding:0 34px 148px}
+.app-content>header{min-height:86px;padding:16px 0;border-bottom:1px solid #2e3d50;margin-bottom:20px}
+.page-title .step{margin:0 0 3px;color:#9db9dc;font-size:10px;letter-spacing:.1em}
+.page-title h1{font-size:27px;line-height:1.1}
+.home-project-picker{margin-top:0}
+.cols{display:grid;grid-template-columns:minmax(0,1fr);gap:28px;margin-top:0}
+.cols>main{min-width:0}
+.cols>.side{min-width:0}
+.side>section>h2{font-size:20px}
+.rollbar{left:var(--sidebar-width);padding-left:26px;padding-right:26px}
+.rollbar .in{max-width:1200px}
+.tabs button:focus-visible{outline:3px solid rgba(139,185,255,.5);outline-offset:2px}
+@media(min-width:1280px){.cols{grid-template-columns:minmax(0,1fr) 320px;align-items:start}.cols>.side{position:sticky;top:18px;max-height:calc(100vh - 36px);overflow-y:auto;overscroll-behavior:contain;padding-right:4px}}
+@media(max-width:1050px){:root{--sidebar-width:218px}.app-content{padding-left:24px;padding-right:24px}}
+@media(max-width:850px){
+  .app-shell{display:block}
+  .app-sidebar{position:sticky;top:0;z-index:45;width:100%;height:auto;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"brand footer" "label label" "nav nav";gap:0;padding:9px 14px 0;border-right:0;border-bottom:1px solid #2c3b4d;overflow:visible}
+  .sidebar-brand{grid-area:brand;padding:0 0 8px}.sidebar-brand small{display:none}.sidebar-mark{width:32px;height:32px;border-radius:9px;font-size:17px}.sidebar-label{grid-area:label;padding:5px 2px 4px}
+  .app-sidebar .tabs{grid-area:nav;flex-direction:row;gap:5px;overflow-x:auto;padding:2px 0 9px;scrollbar-width:thin}
+  .app-sidebar .tabs button{display:flex;flex:0 0 auto;min-height:38px;gap:0;padding:0 12px;border-radius:8px;white-space:nowrap}
+  .app-sidebar .tabs button::before{display:none}.app-sidebar .tabs button small{display:none}
+  .app-sidebar .tabs button.on{box-shadow:inset 0 -2px #8bb9ff}
+  .sidebar-footer{grid-area:footer;display:flex;align-items:center;gap:8px;margin:0;padding:0;border:0}
+  .sidebar-footer .status{display:flex;flex-direction:row;align-items:center;gap:5px}.sidebar-footer .status .pill:not(:first-child){display:none}.sidebar-actions{margin:0;flex-wrap:nowrap}.sidebar-actions .btn{min-height:34px}
+  .app-content{padding:0 20px 124px}.app-content>header{min-height:70px;margin-bottom:16px;padding:12px 0}
+  .rollbar{left:0}
+}
+@media(max-width:600px){
+  .app-sidebar{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"brand footer" "nav nav";padding-left:12px;padding-right:12px}
+  .sidebar-label{display:none}.sidebar-brand{padding-bottom:7px}
+  .app-content{padding:0 12px 112px}.app-content>header{min-height:60px;margin-bottom:12px;padding:10px 0}
+  .page-title h1{font-size:23px}.home-project-picker{padding:13px}.home-project-head{align-items:flex-start}.home-project-head h2{font-size:21px}.home-project-head .btn{min-height:38px;padding:0 9px;font-size:12px}
+  .cols{gap:20px}.side>section>h2{font-size:19px}
+  .sidebar-actions .lang-switch{display:none!important}.sidebar-actions .btn{font-size:12px;padding:0 9px}.sidebar-footer .status .pill{font-size:10px;padding:5px 7px}
+  .rollbar{padding:8px 12px calc(8px + env(safe-area-inset-bottom))}.roll{min-height:42px;padding:0 16px}.est b{font-size:16px}.est span{font-size:11px}
+}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 </style></head>
 <body>
-<div class="clapper"></div>
-<div class="wrap">
-  <header>
-    <h1>Flow <span>Studio</span></h1>
-    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+<div class="app-shell">
+  <aside class="app-sidebar">
+    <div class="sidebar-brand"><span class="sidebar-mark" aria-hidden="true">F</span><span><b>Flow Studio</b><small>VIDEO WORKSPACE</small></span></div>
+    <div class="sidebar-label">TẠO NỘI DUNG</div>
+    <nav class="tabs" id="tabs" aria-label="Studio navigation">
+      <button data-tab="cast" class="on">Cast<small>characters</small></button>
+      <button data-tab="frames">Frames<small>still images</small></button>
+      <button data-tab="shots">Shots<small>video clips</small></button>
+      <button data-tab="narrate">Voice<small>narration</small></button>
+      <button data-tab="restyle">Restyle<small>edit a clip</small></button>
+      <button data-tab="cut">Cut<small>assemble film</small></button>
+      <button data-tab="library">Library<small>in Flow</small></button>
+    </nav>
+    <div class="sidebar-footer">
       <div class="status" id="status"><span class="pill"><i class="tally"></i>Connecting…</span></div>
-      <div class="lang-switch" style="display:inline-flex;background:var(--ink2);border:2px solid var(--line);border-radius:10px;padding:2px;gap:2px">
-        <button id="studioLangVi" style="font:700 13px var(--mono);padding:4px 9px;border-radius:7px;border:none;cursor:pointer;background:var(--bone);color:var(--ink)">VI</button>
-        <button id="studioLangEn" style="font:700 13px var(--mono);padding:4px 9px;border-radius:7px;border:none;cursor:pointer;background:transparent;color:var(--dim)">EN</button>
+      <div class="sidebar-actions">
+        <div class="lang-switch" style="display:inline-flex;background:var(--ink2);border:2px solid var(--line);border-radius:10px;padding:2px;gap:2px">
+          <button id="studioLangVi" style="font:700 13px var(--mono);padding:4px 9px;border-radius:7px;border:none;cursor:pointer;background:var(--bone);color:var(--ink)">VI</button>
+          <button id="studioLangEn" style="font:700 13px var(--mono);padding:4px 9px;border-radius:7px;border:none;cursor:pointer;background:transparent;color:var(--dim)">EN</button>
+        </div>
+        <button id="studioLogout" type="button" class="btn small ghost" hidden>Đăng xuất</button>
       </div>
-      <button id="studioLogout" type="button" class="btn small ghost" hidden>Đăng xuất</button>
     </div>
+  </aside>
+  <div class="app-content">
+  <header>
+    <div class="page-title"><div class="step">KHÔNG GIAN LÀM VIỆC</div><h1>Flow <span>Studio</span></h1></div>
   </header>
   <div id="offline"></div>
   <div id="hint"></div>
@@ -307,16 +382,6 @@ audio{filter:invert(1) hue-rotate(180deg)}
     </div>
     <div class="lib project-list" id="home_projects"><p class="empty">Đang tìm dự án Flow…</p></div>
   </section>
-
-  <nav class="tabs" id="tabs">
-    <button data-tab="cast" class="on">Cast<small>characters</small></button>
-    <button data-tab="frames">Frames<small>still images</small></button>
-    <button data-tab="shots">Shots<small>video clips</small></button>
-    <button data-tab="narrate">Voice<small>narration</small></button>
-    <button data-tab="restyle">Restyle<small>edit a clip</small></button>
-    <button data-tab="cut">Cut<small>assemble film</small></button>
-    <button data-tab="library">Library<small>in Flow</small></button>
-  </nav>
 
   <div class="cols">
     <main>
@@ -513,6 +578,7 @@ audio{filter:invert(1) hue-rotate(180deg)}
         </div>
       </section>
     </aside>
+  </div>
   </div>
 </div>
 
