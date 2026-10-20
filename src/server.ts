@@ -398,14 +398,33 @@ export async function startServer(core: Core, getDeviceCore?: (deviceId: string)
   const socketDevices = new WeakMap<IncomingMessage, string>();
 
   server.on("upgrade", (request, socket, head) => {
-    if (!allowedHosts.has(request.headers.host ?? "") || !isExtensionOrigin(request.headers.origin)) { socket.destroy(); return; }
+    const host = request.headers.host ?? "";
+    const extensionOrigin = isExtensionOrigin(request.headers.origin);
+    if (!allowedHosts.has(host)) {
+      console.warn(`[ws] rejected upgrade: host not allowed (host=${host || "<missing>"})`);
+      socket.destroy();
+      return;
+    }
+    if (!extensionOrigin) {
+      console.warn(`[ws] rejected upgrade: invalid extension origin (originPresent=${Boolean(request.headers.origin)})`);
+      socket.destroy();
+      return;
+    }
     const url = new URL(request.url ?? "/", `http://${request.headers.host}`);
     if (url.pathname === "/ws/bridge") {
       const credential = url.searchParams.get("token") ?? "";
       const device = credential ? authenticateDevice(credential) : undefined;
       if (device) socketDevices.set(request, device.device_id);
-      else if (!localOnly && credential !== wsToken) { socket.destroy(); return; }
-      else if (credential && credential !== wsToken && localOnly) { socket.destroy(); return; }
+      else if (!localOnly && credential !== wsToken) {
+        console.warn(`[ws] rejected upgrade: invalid credential (credentialPresent=${Boolean(credential)})`);
+        socket.destroy();
+        return;
+      }
+      else if (credential && credential !== wsToken && localOnly) {
+        console.warn("[ws] rejected upgrade: invalid local credential");
+        socket.destroy();
+        return;
+      }
       wss.handleUpgrade(request, socket, head, (ws) => {
         wss.emit("connection", ws, request);
       });
