@@ -5,21 +5,33 @@
   <title>Flow MCP Connector</title>
   <style>
     :root {
-      --bg: #0f1117;
-      --card-bg: #171b24;
-      --card-border: #262c3d;
-      --text-main: #f1f5f9;
-      --text-muted: #94a3b8;
-      --text-dim: #64748b;
-      --accent: #10b981;
-      --accent-glow: rgba(16, 185, 129, 0.25);
-      --primary: #3b82f6;
-      --primary-hover: #2563eb;
-      --warn: #f59e0b;
-      --warn-bg: rgba(245, 158, 11, 0.12);
+      --bg: #1e1e1e;
+      --card: #292929;
+      --card-elevated: #2e2e33;
+      --border: rgba(255, 255, 255, 0.08);
+      --border-hover: rgba(255, 255, 255, 0.16);
+      --text: #dedede;
+      --text-primary: #f8fafc;
+      --text-muted: #8b8b92;
+      --text-dim: #65656c;
+      
+      /* TobyFlow signature Neon Lime theme */
+      --primary: #ccff00;
+      --primary-hover: #b8e600;
+      --primary-fg: #1e1e1e;
+      --primary-glow: rgba(204, 255, 0, 0.25);
+
+      --success: #22c55e;
+      --success-bg: rgba(34, 197, 94, 0.12);
       --danger: #ef4444;
       --danger-bg: rgba(239, 68, 68, 0.12);
-      --font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --warning: #f59e0b;
+      --warning-bg: rgba(245, 158, 11, 0.12);
+      
+      --radius: 8px;
+      --radius-sm: 6px;
+      --radius-pill: 20px;
+      --font: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
     }
 
     * {
@@ -29,24 +41,24 @@
     }
 
     body {
-      width: 340px;
+      width: 350px;
       padding: 16px;
       font-family: var(--font);
       background-color: var(--bg);
-      color: var(--text-main);
+      color: var(--text);
       font-size: 13px;
       line-height: 1.5;
       user-select: none;
     }
 
-    /* Header */
+    /* Header TobyFlow style */
     .header {
       display: flex;
       align-items: center;
       justify-content: space-between;
       margin-bottom: 14px;
       padding-bottom: 12px;
-      border-bottom: 1px solid var(--card-border);
+      border-bottom: 1px solid var(--border);
     }
 
     .brand {
@@ -55,22 +67,22 @@
       gap: 10px;
     }
 
-    .logo-icon {
-      width: 28px;
-      height: 28px;
+    .logo-img {
+      width: 30px;
+      height: 30px;
+      border-radius: var(--radius-sm);
       display: flex;
       align-items: center;
       justify-content: center;
-      background: linear-gradient(135deg, #10b981 0%, #3b82f6 100%);
-      border-radius: 8px;
-      box-shadow: 0 2px 8px var(--accent-glow);
-      flex-shrink: 0;
+      background: var(--card);
+      border: 1px solid var(--border);
+      overflow: hidden;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
     }
 
-    .logo-icon svg {
-      width: 18px;
-      height: 18px;
-      fill: #ffffff;
+    .logo-img img {
+      width: 22px;
+      height: 22px;
     }
 
     .title-wrap {
@@ -78,31 +90,60 @@
       flex-direction: column;
     }
 
+    .title-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
     .title {
-      font-size: 14px;
+      font-size: 14.5px;
       font-weight: 700;
+      color: var(--text-primary);
       letter-spacing: -0.2px;
-      color: #fff;
     }
 
     .version-badge {
       font-size: 10px;
       font-weight: 600;
-      color: var(--text-dim);
-      background: rgba(255, 255, 255, 0.05);
-      padding: 1px 5px;
-      border-radius: 4px;
-      display: inline-block;
-      width: fit-content;
-      margin-top: 2px;
+      color: var(--text-muted);
+      background: rgba(255, 255, 255, 0.06);
+      padding: 1px 6px;
+      border-radius: var(--radius-pill);
+      border: 1px solid var(--border);
     }
 
-    /* Language Switcher */
-    .lang-switch {
+    .header-actions {
       display: flex;
-      background: #1e2433;
-      border: 1px solid var(--card-border);
-      border-radius: 6px;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .icon-btn {
+      width: 28px;
+      height: 28px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .icon-btn:hover {
+      background: var(--card-elevated);
+      color: var(--text-primary);
+      border-color: var(--border-hover);
+    }
+
+    .lang-toggle {
+      display: flex;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
       padding: 2px;
       gap: 2px;
     }
@@ -111,25 +152,25 @@
       background: transparent;
       border: none;
       color: var(--text-muted);
-      font-size: 11px;
+      font-size: 10.5px;
       font-weight: 700;
-      padding: 3px 6px;
+      padding: 2px 6px;
       border-radius: 4px;
       cursor: pointer;
       transition: all 0.15s ease;
     }
 
     .lang-btn.active {
-      background: #3b82f6;
-      color: #ffffff;
-      box-shadow: 0 1px 4px rgba(59, 130, 246, 0.3);
+      background: var(--primary);
+      color: var(--primary-fg);
+      box-shadow: 0 1px 4px var(--primary-glow);
     }
 
     /* Status Card */
     .status-card {
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 10px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
       padding: 12px;
       margin-bottom: 12px;
     }
@@ -144,30 +185,31 @@
     .status-badge {
       display: inline-flex;
       align-items: center;
-      gap: 7px;
-      font-size: 12px;
+      gap: 6px;
+      font-size: 11.5px;
       font-weight: 600;
-      padding: 3px 8px;
-      border-radius: 20px;
-      background: rgba(148, 163, 184, 0.1);
+      padding: 3px 9px;
+      border-radius: var(--radius-pill);
+      background: rgba(255, 255, 255, 0.05);
       color: var(--text-muted);
+      border: 1px solid var(--border);
     }
 
     .status-badge.connected {
-      background: rgba(16, 185, 129, 0.12);
-      color: #34d399;
-      border: 1px solid rgba(16, 185, 129, 0.25);
+      background: var(--success-bg);
+      color: #4ade80;
+      border: 1px solid rgba(34, 197, 94, 0.3);
     }
 
     .status-badge.disconnected {
       background: var(--danger-bg);
       color: #f87171;
-      border: 1px solid rgba(239, 68, 68, 0.25);
+      border: 1px solid rgba(239, 68, 68, 0.3);
     }
 
     .pulse-dot {
-      width: 7px;
-      height: 7px;
+      width: 6.5px;
+      height: 6.5px;
       border-radius: 50%;
       background: currentColor;
     }
@@ -177,15 +219,21 @@
     }
 
     @keyframes pulse {
-      0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
-      70% { box-shadow: 0 0 0 5px rgba(16, 185, 129, 0); }
-      100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+      0% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.7); }
+      70% { box-shadow: 0 0 0 5px rgba(74, 222, 128, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
+    }
+
+    .bridge-tag {
+      font-size: 11px;
+      color: var(--text-dim);
+      font-family: ui-monospace, monospace;
     }
 
     .info-list {
       display: flex;
       flex-direction: column;
-      gap: 6px;
+      gap: 7px;
       font-size: 12px;
     }
 
@@ -198,20 +246,24 @@
 
     .info-val {
       font-weight: 600;
-      color: var(--text-main);
+      color: var(--text-primary);
       font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
       font-size: 11.5px;
+      background: rgba(255, 255, 255, 0.04);
+      padding: 1px 6px;
+      border-radius: 4px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
     }
 
     /* Alert / Error Box */
     .alert-box {
       margin-top: 10px;
       padding: 8px 10px;
-      border-radius: 6px;
+      border-radius: var(--radius-sm);
       font-size: 11.5px;
       display: none;
       align-items: flex-start;
-      gap: 6px;
+      gap: 7px;
       line-height: 1.4;
     }
 
@@ -220,7 +272,7 @@
     }
 
     .alert-box.warn {
-      background: var(--warn-bg);
+      background: var(--warning-bg);
       border: 1px solid rgba(245, 158, 11, 0.3);
       color: #fbbf24;
     }
@@ -231,7 +283,7 @@
       color: #f87171;
     }
 
-    /* Actions */
+    /* Action Buttons TobyFlow style */
     .actions {
       display: flex;
       flex-direction: column;
@@ -243,11 +295,11 @@
       align-items: center;
       justify-content: center;
       gap: 8px;
-      padding: 10px 14px;
+      padding: 9px 14px;
       font-family: var(--font);
       font-size: 12.5px;
       font-weight: 600;
-      border-radius: 8px;
+      border-radius: var(--radius);
       cursor: pointer;
       border: none;
       transition: all 0.18s ease;
@@ -258,33 +310,35 @@
       transform: scale(0.98);
     }
 
+    /* TobyFlow signature Neon Button */
     .btn-primary {
-      background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-      color: #ffffff;
-      box-shadow: 0 3px 10px rgba(16, 185, 129, 0.3);
+      background: var(--primary);
+      color: var(--primary-fg);
+      font-weight: 700;
+      box-shadow: 0 2px 10px var(--primary-glow);
     }
 
     .btn-primary:hover {
-      background: linear-gradient(135deg, #059669 0%, #047857 100%);
-      box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);
+      background: var(--primary-hover);
+      box-shadow: 0 4px 14px rgba(204, 255, 0, 0.35);
     }
 
     .btn-row {
       display: grid;
-      grid-template-columns: 1.4fr 1fr;
+      grid-template-columns: 1fr 1fr;
       gap: 8px;
     }
 
     .btn-secondary {
-      background: #1e2433;
-      border: 1px solid var(--card-border);
-      color: var(--text-main);
+      background: var(--card);
+      border: 1px solid var(--border);
+      color: var(--text);
     }
 
     .btn-secondary:hover {
-      background: #272e42;
-      border-color: #3b445e;
-      color: #ffffff;
+      background: var(--card-elevated);
+      border-color: var(--border-hover);
+      color: var(--text-primary);
     }
 
     /* Feedback notice */
@@ -293,33 +347,52 @@
       font-size: 11.5px;
       text-align: center;
       color: var(--text-muted);
-      margin-top: 6px;
+      margin-top: 8px;
       transition: all 0.2s ease;
     }
 
     .feedback.active {
-      color: #34d399;
+      color: #4ade80;
       font-weight: 500;
     }
   </style>
 </head>
 <body>
-  <!-- Header -->
+  <!-- Header TobyFlow style -->
   <header class="header">
     <div class="brand">
-      <div class="logo-icon">
-        <svg viewBox="0 0 24 24">
-          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-        </svg>
+      <div class="logo-img">
+        <img src="../icons/icon-32.png" alt="Logo">
       </div>
       <div class="title-wrap">
-        <div class="title">Flow MCP Connector</div>
-        <div class="version-badge" id="versionBadge">v...</div>
+        <div class="title-row">
+          <span class="title">Flow MCP</span>
+          <span class="version-badge" id="versionBadge">v0.2.18</span>
+        </div>
       </div>
     </div>
-    <div class="lang-switch" title="Chuyển đổi ngôn ngữ / Switch language">
-      <button class="lang-btn" id="langVi">VI</button>
-      <button class="lang-btn" id="langEn">EN</button>
+    <div class="header-actions">
+      <!-- Language switch -->
+      <div class="lang-toggle" title="Ngôn ngữ / Language">
+        <button class="lang-btn" id="langVi">VI</button>
+        <button class="lang-btn" id="langEn">EN</button>
+      </div>
+
+      <!-- Side panel button -->
+      <button class="icon-btn" id="openSidebarBtn" title="Mở Side Panel (Thanh bên)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+          <line x1="15" y1="3" x2="15" y2="21"></line>
+        </svg>
+      </button>
+
+      <!-- Settings button -->
+      <button class="icon-btn" id="options" title="Cài đặt">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+      </button>
     </div>
   </header>
 
@@ -330,7 +403,7 @@
         <span class="pulse-dot"></span>
         <span id="wsText">Đang kiểm tra…</span>
       </span>
-      <span style="font-size: 11px; color: var(--text-dim);" id="bridgeSummary">127.0.0.1:18899</span>
+      <span class="bridge-tag" id="bridgeSummary">127.0.0.1:18899</span>
     </div>
 
     <div class="info-list">
@@ -357,10 +430,10 @@
   <!-- Actions -->
   <div class="actions">
     <button class="btn btn-primary" id="connect">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
         <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
       </svg>
-      <span id="txtConnect">Kết nối tab Flow hiện tại</span>
+      <span id="txtConnect">Kết nối lại tab Flow</span>
     </button>
 
     <div class="btn-row">
@@ -372,12 +445,13 @@
         <span id="txtPreview">Xem viền (5s)</span>
       </button>
 
-      <button class="btn btn-secondary" id="options">
+      <button class="btn btn-secondary" id="openFlowBtn">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="3"></circle>
-          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+          <polyline points="15 3 21 3 21 9"></polyline>
+          <line x1="10" y1="14" x2="21" y2="3"></line>
         </svg>
-        <span id="txtOptions">Cài đặt</span>
+        <span id="txtOpenFlow">Mở Flow</span>
       </button>
     </div>
   </div>
@@ -388,4 +462,3 @@
   <script src="popup.js"></script>
 </body>
 </html>
-

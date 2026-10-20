@@ -24,7 +24,15 @@ function applyLanguage() {
   document.querySelector("#lblBridgeUrl").textContent = t("bridgeUrl");
   document.querySelector("#txtConnect").textContent = t("btnConnect");
   document.querySelector("#txtPreview").textContent = t("btnPreview");
-  document.querySelector("#txtOptions").textContent = t("btnOptions");
+  if (document.querySelector("#txtOpenFlow")) {
+    document.querySelector("#txtOpenFlow").textContent = t("btnOpenFlow");
+  }
+  if (document.querySelector("#txtOptions")) {
+    document.querySelector("#txtOptions").textContent = t("btnOptions");
+  }
+  if (document.querySelector("#openSidebarBtn")) {
+    document.querySelector("#openSidebarBtn").title = t("btnSidebar");
+  }
 
   if (cachedStatus) {
     renderStatus(cachedStatus);
@@ -167,3 +175,34 @@ document.querySelector("#preview").onclick = async () => {
 document.querySelector("#options").onclick = () => {
   chrome.runtime.openOptionsPage();
 };
+
+const openSidebarBtn = document.querySelector("#openSidebarBtn");
+if (openSidebarBtn) {
+  openSidebarBtn.onclick = async () => {
+    try {
+      const win = await chrome.windows.getCurrent();
+      if (chrome.sidePanel?.open) {
+        await chrome.sidePanel.open({ windowId: win.id });
+        window.close();
+      } else {
+        chrome.tabs.create({ url: chrome.runtime.getURL("ui/sidebar.html") });
+      }
+    } catch (_) {
+      chrome.tabs.create({ url: chrome.runtime.getURL("ui/sidebar.html") });
+    }
+  };
+}
+
+const openFlowBtn = document.querySelector("#openFlowBtn");
+if (openFlowBtn) {
+  openFlowBtn.onclick = async () => {
+    const tabs = await chrome.tabs.query({ url: "https://flow.google.com/*" });
+    if (tabs.length > 0) {
+      await chrome.tabs.update(tabs[0].id, { active: true });
+      if (tabs[0].windowId) await chrome.windows.update(tabs[0].windowId, { focused: true });
+    } else {
+      await chrome.tabs.create({ url: "https://flow.google.com/" });
+    }
+    window.close();
+  };
+}

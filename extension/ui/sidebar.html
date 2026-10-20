@@ -1,0 +1,597 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flow MCP Studio</title>
+  <style>
+    :root {
+      --bg: #1e1e1e;
+      --card: #292929;
+      --card-elevated: #2e2e33;
+      --border: rgba(255, 255, 255, 0.08);
+      --border-hover: rgba(255, 255, 255, 0.16);
+      --text: #dedede;
+      --text-primary: #f8fafc;
+      --text-muted: #8b8b92;
+      --text-dim: #65656c;
+      
+      /* TobyFlow signature Neon Lime theme */
+      --primary: #ccff00;
+      --primary-hover: #b8e600;
+      --primary-fg: #1e1e1e;
+      --primary-glow: rgba(204, 255, 0, 0.25);
+
+      --success: #22c55e;
+      --success-bg: rgba(34, 197, 94, 0.12);
+      --danger: #ef4444;
+      --danger-bg: rgba(239, 68, 68, 0.12);
+      --warning: #f59e0b;
+      --warning-bg: rgba(245, 158, 11, 0.12);
+      
+      --radius: 8px;
+      --radius-sm: 6px;
+      --radius-pill: 20px;
+      --font: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      width: 100%;
+      height: 100vh;
+      font-family: var(--font);
+      background-color: var(--bg);
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.5;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* TobyFlow Header */
+    .tobyflow-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .tobyflow-header-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .tobyflow-header-logo {
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: var(--radius-sm);
+      background: var(--card);
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
+
+    .tobyflow-header-logo img {
+      width: 20px;
+      height: 20px;
+    }
+
+    .tobyflow-header-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text-primary);
+      letter-spacing: -0.2px;
+    }
+
+    .tobyflow-user-plan-badge {
+      font-size: 10px;
+      font-weight: 700;
+      background: rgba(204, 255, 0, 0.12);
+      color: var(--primary);
+      border: 1px solid rgba(204, 255, 0, 0.3);
+      padding: 1px 7px;
+      border-radius: var(--radius-pill);
+      letter-spacing: 0.2px;
+      text-transform: uppercase;
+    }
+
+    .tobyflow-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .tobyflow-header-btn {
+      width: 28px;
+      height: 28px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .tobyflow-header-btn:hover {
+      background: var(--card-elevated);
+      color: var(--text-primary);
+      border-color: var(--border-hover);
+    }
+
+    /* Tabs Bar TobyFlow style */
+    .tobyflow-tabs {
+      display: flex;
+      align-items: center;
+      padding: 8px 16px;
+      gap: 6px;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .tobyflow-tab {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: var(--radius-pill);
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .tobyflow-tab:hover {
+      color: var(--text-primary);
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .tobyflow-tab.active {
+      background: var(--card);
+      border-color: var(--border);
+      color: var(--text-primary);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    }
+
+    .tobyflow-tab.active svg {
+      color: var(--primary);
+    }
+
+    /* Tab Panes */
+    .tabs-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .tab-pane {
+      display: none;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .tab-pane.active {
+      display: flex;
+    }
+
+    /* Section Cards */
+    .section-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px;
+    }
+
+    .section-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .section-title svg {
+      color: var(--primary);
+    }
+
+    /* Status indicator */
+    .status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: var(--radius-pill);
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+    }
+
+    .status-badge.connected {
+      background: var(--success-bg);
+      color: #4ade80;
+      border: 1px solid rgba(34, 197, 94, 0.3);
+    }
+
+    .status-badge.disconnected {
+      background: var(--danger-bg);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+
+    .pulse-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .status-badge.connected .pulse-dot {
+      animation: pulse 1.8s infinite;
+    }
+
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.7); }
+      70% { box-shadow: 0 0 0 5px rgba(74, 222, 128, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
+    }
+
+    .info-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      font-size: 12.5px;
+    }
+
+    .info-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--text-muted);
+    }
+
+    .info-tag {
+      font-weight: 600;
+      color: var(--text-primary);
+      font-family: ui-monospace, monospace;
+      font-size: 12px;
+      background: rgba(255, 255, 255, 0.04);
+      padding: 2px 7px;
+      border-radius: 4px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 14px;
+      font-family: var(--font);
+      font-size: 12.5px;
+      font-weight: 600;
+      border-radius: var(--radius);
+      cursor: pointer;
+      border: none;
+      transition: all 0.18s ease;
+      width: 100%;
+    }
+
+    .btn:active {
+      transform: scale(0.98);
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: var(--primary-fg);
+      font-weight: 700;
+      box-shadow: 0 2px 10px var(--primary-glow);
+    }
+
+    .btn-primary:hover {
+      background: var(--primary-hover);
+      box-shadow: 0 4px 14px rgba(204, 255, 0, 0.35);
+    }
+
+    .btn-secondary {
+      background: var(--card-elevated);
+      border: 1px solid var(--border);
+      color: var(--text-primary);
+    }
+
+    .btn-secondary:hover {
+      background: #36363c;
+      border-color: var(--border-hover);
+    }
+
+    .btn-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    /* Logs view */
+    .logs-container {
+      background: #181818;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 10px;
+      height: 380px;
+      overflow-y: auto;
+      font-family: ui-monospace, monospace;
+      font-size: 11.5px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .log-entry {
+      padding: 5px 8px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.02);
+      border-left: 2px solid var(--text-dim);
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .log-entry.ok {
+      border-left-color: #22c55e;
+    }
+
+    .log-entry.error {
+      border-left-color: #ef4444;
+      background: rgba(239, 68, 68, 0.05);
+    }
+
+    .log-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--text-primary);
+      font-weight: 600;
+    }
+
+    .log-time {
+      font-size: 10px;
+      color: var(--text-dim);
+    }
+
+    .log-detail {
+      color: var(--text-muted);
+      font-size: 11px;
+    }
+
+    .logs-empty {
+      color: var(--text-dim);
+      text-align: center;
+      padding: 40px 10px;
+    }
+
+    /* Form Inputs */
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+
+    .form-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+
+    .form-input {
+      background: #181818;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 8px 12px;
+      color: var(--text-primary);
+      font-family: var(--font);
+      font-size: 13px;
+      outline: none;
+    }
+
+    .form-input:focus {
+      border-color: var(--primary);
+    }
+
+    /* Feedback notice */
+    .feedback-box {
+      font-size: 11.5px;
+      text-align: center;
+      min-height: 18px;
+      color: #4ade80;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <!-- Header TobyFlow style -->
+  <header class="tobyflow-header">
+    <div class="tobyflow-header-brand">
+      <div class="tobyflow-header-logo">
+        <img src="../icons/icon-32.png" alt="Logo">
+      </div>
+      <span class="tobyflow-header-title">Flow MCP</span>
+      <span class="tobyflow-user-plan-badge">NATIVE</span>
+    </div>
+    <div class="tobyflow-header-actions">
+      <!-- Language switch -->
+      <button class="tobyflow-header-btn" id="langSwitchBtn" title="Chuyển ngôn ngữ / Switch Language">
+        <span id="langSwitchLabel" style="font-weight: 700; font-size: 11px;">VI</span>
+      </button>
+
+      <!-- Reload button -->
+      <button class="tobyflow-header-btn" id="reloadBtn" title="Làm mới trạng thái">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="23 4 23 10 17 10"></polyline>
+          <polyline points="1 20 1 14 7 14"></polyline>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Navigation Tabs -->
+  <nav class="tobyflow-tabs">
+    <button class="tobyflow-tab active" data-tab="tab-control">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+      </svg>
+      <span id="tabControlLabel">Điều khiển</span>
+    </button>
+    <button class="tobyflow-tab" data-tab="tab-logs">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+        <polyline points="14 2 14 8 20 8"></polyline>
+        <line x1="16" y1="13" x2="8" y2="13"></line>
+        <line x1="16" y1="17" x2="8" y2="17"></line>
+        <polyline points="10 9 9 9 8 9"></polyline>
+      </svg>
+      <span id="tabLogsLabel">Nhật ký MCP</span>
+    </button>
+    <button class="tobyflow-tab" data-tab="tab-settings">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"></circle>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+      </svg>
+      <span id="tabSettingsLabel">Cài đặt</span>
+    </button>
+  </nav>
+
+  <!-- Panes Content -->
+  <div class="tabs-content">
+    <!-- TAB 1: CONTROL -->
+    <div id="tab-control" class="tab-pane active">
+      <!-- Status Card -->
+      <div class="section-card">
+        <div class="status-row">
+          <span class="status-badge" id="wsBadge">
+            <span class="pulse-dot"></span>
+            <span id="wsText">Đang kiểm tra…</span>
+          </span>
+          <span class="info-tag" id="bridgeSummary">127.0.0.1:18899</span>
+        </div>
+
+        <div class="info-list">
+          <div class="info-item">
+            <span id="lblFlowTabs">Tab Google Flow:</span>
+            <span class="info-tag" id="valFlowTabs">0</span>
+          </div>
+          <div class="info-item">
+            <span id="lblSelectedTab">Tab điều khiển:</span>
+            <span class="info-tag" id="valSelectedTab">Chưa chọn</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Actions Card -->
+      <div class="section-card">
+        <div class="section-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+          </svg>
+          <span id="lblQuickActions">Thao tác nhanh</span>
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          <button class="btn btn-primary" id="btnReconnect">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+            </svg>
+            <span id="txtBtnReconnect">Kết nối lại tab Flow</span>
+          </button>
+
+          <div class="btn-grid">
+            <button class="btn btn-secondary" id="btnPreview">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+              </svg>
+              <span id="txtBtnPreview">Xem viền 5s</span>
+            </button>
+
+            <button class="btn btn-secondary" id="btnOpenFlow">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                <polyline points="15 3 21 3 21 9"></polyline>
+                <line x1="10" y1="14" x2="21" y2="3"></line>
+              </svg>
+              <span id="txtBtnOpenFlow">Mở Flow</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="feedback-box" id="feedbackBox"></div>
+    </div>
+
+    <!-- TAB 2: LOGS -->
+    <div id="tab-logs" class="tab-pane">
+      <div class="section-card" style="padding: 10px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+          <span style="font-weight: 700; font-size: 12px; color: var(--text-muted);" id="lblLogsTitle">Nhật ký tác vụ</span>
+          <button class="btn btn-secondary" id="btnClearLogs" style="width: auto; padding: 4px 10px; font-size: 11px;">Xóa</button>
+        </div>
+        <div class="logs-container" id="logsContainer">
+          <div class="logs-empty" id="logsEmpty">Chưa có hoạt động MCP nào.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: SETTINGS -->
+    <div id="tab-settings" class="tab-pane">
+      <div class="section-card">
+        <div class="form-group">
+          <label class="form-label" id="lblBridgeUrlField">Địa chỉ Backend Bridge URL:</label>
+          <input type="text" class="form-input" id="inputBridgeUrl" value="http://127.0.0.1:18899" />
+        </div>
+
+        <button class="btn btn-primary" id="btnSaveSettings">
+          <span id="txtSaveSettings">Lưu cài đặt</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="../content/shared/I18n.js"></script>
+  <script src="sidebar.js"></script>
+</body>
+</html>
