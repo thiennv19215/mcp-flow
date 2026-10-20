@@ -20,6 +20,7 @@ const isExtensionOrigin = (origin: string | undefined): origin is string => /^ch
 const UPLOAD_DIR = join(HOME_DIR, "uploads");
 const STUDIO_HTML = fileURLToPath(new URL("../studio/index.html", import.meta.url));
 const LOGIN_HTML = fileURLToPath(new URL("../studio/login.html", import.meta.url));
+const ADMIN_HTML = fileURLToPath(new URL("../studio/admin.html", import.meta.url));
 const MAX_UPLOAD = 200 * 1024 * 1024;
 const ADMIN_SESSION_COOKIE = "__Host-flow_admin_session";
 const ADMIN_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -282,6 +283,14 @@ export async function startServer(core: Core, getDeviceCore?: (deviceId: string)
         return json(res, revoked ? 200 : 404, { ok: revoked });
       }
       if (url.pathname === "/favicon.ico") return void res.writeHead(204).end();
+      if (req.method === "GET" && url.pathname === "/admin") {
+        if (!localOnly && !sessionAuthAllowed(req)) {
+          res.writeHead(302, { location: "/", "cache-control": "no-store" });
+          return res.end();
+        }
+        res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" });
+        return res.end(readFileSync(ADMIN_HTML, "utf8"));
+      }
       if (req.method === "GET" && url.pathname === "/") {
         if (!localOnly && !sessionAuthAllowed(req)) {
           res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" });

@@ -338,7 +338,7 @@ body{padding:0;background:var(--ink)}
   .app-content{padding:0 12px 112px}.app-content>header{min-height:60px;margin-bottom:12px;padding:10px 0}
   .page-title h1{font-size:23px}.home-project-picker{padding:13px}.home-project-head{align-items:flex-start}.home-project-head h2{font-size:21px}.home-project-head .btn{min-height:38px;padding:0 9px;font-size:12px}
   .cols{gap:20px}.side>section>h2{font-size:19px}
-  .sidebar-actions .lang-switch{display:none!important}.sidebar-actions .btn{font-size:12px;padding:0 9px}.sidebar-footer .status .pill{font-size:10px;padding:5px 7px}
+  .sidebar-actions .lang-switch{display:none!important}.sidebar-actions .btn{font-size:12px;padding:0 9px}.sidebar-footer .status .pill{width:26px;min-width:26px;height:26px;min-height:26px;padding:0;justify-content:center;gap:0;font-size:0}.sidebar-footer .status .pill .tally{display:block;flex:none}
   .rollbar{padding:8px 12px calc(8px + env(safe-area-inset-bottom))}.roll{min-height:42px;padding:0 16px}.est b{font-size:16px}.est span{font-size:11px}
 }
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
@@ -364,6 +364,7 @@ body{padding:0;background:var(--ink)}
           <button id="studioLangVi" style="font:700 13px var(--mono);padding:4px 9px;border-radius:7px;border:none;cursor:pointer;background:var(--bone);color:var(--ink)">VI</button>
           <button id="studioLangEn" style="font:700 13px var(--mono);padding:4px 9px;border-radius:7px;border:none;cursor:pointer;background:transparent;color:var(--dim)">EN</button>
         </div>
+        <a id="studioUsers" class="btn small ghost" href="/admin" hidden>Quản lý user</a>
         <button id="studioLogout" type="button" class="btn small ghost" hidden>Đăng xuất</button>
       </div>
     </div>
@@ -1349,7 +1350,10 @@ $("#studioLangEn").onclick = () => {
   fetch("/api/auth/session", { cache: "no-store" }).then(async (response) => {
     if (!response.ok) return;
     const session = await response.json();
-    if (!session.local) $("#studioLogout").hidden = false;
+    if (!session.local) {
+      $("#studioUsers").hidden = false;
+      $("#studioLogout").hidden = false;
+    }
   }).catch(() => {});
   $("#studioLogout").addEventListener("click", async () => {
     const button = $("#studioLogout");
