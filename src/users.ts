@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { HOME_DIR } from "./paths.js";
-import type { Job } from "./queue.js";
+import type { Job } from "./job-types.js";
 
 const databasePath = process.env.FLOW_MCP_DB_PATH ?? join(HOME_DIR, "flow-users.sqlite");
 mkdirSync(dirname(databasePath), { recursive: true });
@@ -179,11 +179,13 @@ export function revokeDevice(userId: string, deviceId: string): boolean {
   return Number(result.changes) === 1;
 }
 
+/** Legacy job storage retained for reading old local MCP data; production Flow work uses the extension queue. */
 export function loadJobs(scopeId: string): Job[] {
   const rows = db.prepare("SELECT data FROM jobs WHERE scope_id = ? ORDER BY updated_at, id").all(scopeId) as Array<{ data: string }>;
   return rows.map(({ data }) => JSON.parse(data) as Job);
 }
 
+/** Legacy local MCP queue compatibility; new Flow submissions are stored by the extension. */
 export function saveJob(scopeId: string, job: Job): void {
   db.prepare(`
     INSERT INTO jobs (scope_id, id, status, data, updated_at) VALUES (?, ?, ?, ?, ?)

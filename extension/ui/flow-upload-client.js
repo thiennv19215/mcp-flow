@@ -28,17 +28,22 @@ class FlowUploadClient {
     const safeName = options.name || ("ref-" + Date.now() + "." + ext);
 
     // 1. Khởi tạo phiên chuyển nhượng nhị phân
-    await chrome.runtime.sendMessage({
+    const beginRes = await chrome.runtime.sendMessage({
       type: "flow-mcp:dispatch",
       operation: "flow.file.upload.begin",
       payload: {
-        transferId,
-        name: safeName,
-        type: file.type || (kind === "video" ? "video/mp4" : "image/png"),
-        size,
-        sha256
+        transfer: {
+          transferId,
+          name: safeName,
+          type: file.type || (kind === "video" ? "video/mp4" : "image/png"),
+          size,
+          sha256
+        }
       }
     });
+    if (!beginRes?.ok) {
+      throw new Error(beginRes?.error?.message || "Không thể khởi tạo phiên tải file lên Flow");
+    }
 
     // 2. Stream các chunk 256KB kèm checksum
     const chunkSize = 256 * 1024;
@@ -57,17 +62,22 @@ class FlowUploadClient {
       }
       const b64 = btoa(binary);
 
-      await chrome.runtime.sendMessage({
+      const chunkRes = await chrome.runtime.sendMessage({
         type: "flow-mcp:dispatch",
         operation: "flow.file.upload.chunk",
         payload: {
-          transferId,
-          index,
-          offset,
-          data: b64,
-          chunkSha256
+          chunk: {
+            transferId,
+            index,
+            offset,
+            data: b64,
+            chunkSha256
+          }
         }
       });
+      if (!chunkRes?.ok) {
+        throw new Error(chunkRes?.error?.message || `Lỗi truyền dữ liệu chunk ${index}`);
+      }
 
       offset = end;
       index++;
@@ -75,11 +85,14 @@ class FlowUploadClient {
     }
 
     // 3. Hoàn tất phiên chuyển nhượng nhị phân
-    await chrome.runtime.sendMessage({
+    const finishRes = await chrome.runtime.sendMessage({
       type: "flow-mcp:dispatch",
       operation: "flow.file.upload.finish",
       payload: { transferId }
     });
+    if (!finishRes?.ok) {
+      throw new Error(finishRes?.error?.message || "Không thể hoàn tất phiên tải file lên Flow");
+    }
 
     // 4. Kích hoạt upload staging vào Flow Tab
     const uploadRes = await chrome.runtime.sendMessage({
@@ -96,7 +109,13 @@ class FlowUploadClient {
       throw new Error(uploadRes?.error?.message || "Lỗi tải media lên Google Flow");
     }
 
-    return uploadRes.value?.name || safeName;
+    const resultName = uploadRes.value?.name || safeName;
+    const resultId = uploadRes.value?.id || uploadRes.value?.mediaId || uploadRes.value?.receipt?.id || null;
+    return {
+      name: resultName,
+      id: resultId,
+      toString() { return this.name; }
+    };
   }
 }
 

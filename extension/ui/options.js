@@ -1,58 +1,50 @@
-const BACKEND_ORIGIN = "https://mcp.shopcongngheso5.io.vn";
-const LOCAL_BACKEND_ORIGIN = "http://127.0.0.1:18897";
+const AUTH_ORIGIN = "https://mcp.shopcongngheso5.io.vn";
+const LOCAL_MCP_ORIGIN = "http://127.0.0.1:18899";
 
 const I18N = {
   vi: {
     pageTitle: "Cài đặt Flow MCP Connector",
     title: "Cài đặt Flow MCP Connector",
-    subtitle: "Kết nối extension với MCP local hoặc VPS.",
-    cardTitle: "Đăng nhập backend",
-    txtHelp: `Máy chủ: ${BACKEND_ORIGIN}`,
+    subtitle: "Flow chạy trực tiếp trong extension; tài khoản được xác thực riêng.",
+    cardTitle: "Xác thực tài khoản",
+    txtHelp: `Máy chủ xác thực: ${AUTH_ORIGIN}`,
     lblAccount: "Tài khoản",
     lblPassword: "Mật khẩu",
     txtPasswordHelp: "Mật khẩu do quản trị viên đặt. Extension chỉ lưu token thiết bị, không lưu mật khẩu.",
-    btnSave: "Đăng nhập và kết nối",
-    savedSuccess: "Đã đăng nhập và kết nối backend. Hãy mở hoặc tải lại tab Google Flow nếu cần.",
+    btnSave: "Xác thực tài khoản",
+    savedSuccess: "Tài khoản đã được xác thực. MCP local có thể chạy riêng khi bạn cần dùng AI.",
     guideTitle: "Hướng dẫn nhanh",
     step1: "Mở <code>flow.google.com</code> và đăng nhập Google Flow.",
     step2: "Nhập tài khoản và mật khẩu backend do quản trị viên cấp.",
-    step3: "Chọn backend local hoặc đăng nhập VPS. Extension và MCP phải cùng kết nối một backend.",
-    useLocal: "Dùng MCP local (127.0.0.1:18897)",
+    step3: "MCP cho AI chạy riêng trên máy này; nghiệp vụ Flow của extension không đi qua backend.",
+    useLocal: "Dùng MCP local (127.0.0.1:18899)",
     localConnected: "Đã chuyển extension sang MCP local.",
     saving: "Đang đăng nhập…",
     credentialsRequired: "Nhập cả tài khoản và mật khẩu.",
-    loginRequired: "Hãy đăng nhập tài khoản để kết nối extension này.",
-    connectFailed: "Chưa kết nối được backend. Kiểm tra HTTPS trên VPS và phiên bản backend.",
-    mcpTitle: "MCP kết nối trực tiếp tới VPS",
-    mcpToken: "Token thiết bị là bí mật. Chỉ dán vào cấu hình MCP cá nhân của bạn.",
-    tokenLabel: "Device token",
-    configLabel: "Codex config (~/.codex/config.toml)",
+    loginRequired: "Hãy đăng nhập tài khoản để xác thực extension này.",
+    connectFailed: "Chưa kết nối được MCP cục bộ. Hãy khởi động Flow MCP trên máy này.",
   },
   en: {
     pageTitle: "Flow MCP Connector Settings",
     title: "Flow MCP Connector Settings",
-    subtitle: "Connect the extension to the local MCP or the VPS.",
-    cardTitle: "Backend Sign In",
-    txtHelp: `Server: ${BACKEND_ORIGIN}`,
+    subtitle: "Flow runs directly in the extension; account verification stays separate.",
+    cardTitle: "Account Verification",
+    txtHelp: `Authentication server: ${AUTH_ORIGIN}`,
     lblAccount: "Account",
     lblPassword: "Password",
     txtPasswordHelp: "Your administrator sets this password. The extension stores a device token, never the password.",
-    btnSave: "Sign in and connect",
-    savedSuccess: "Signed in and connected. Open or refresh a Google Flow tab if needed.",
+    btnSave: "Verify account",
+    savedSuccess: "Account verified. The local MCP can run separately when you need AI access.",
     guideTitle: "Quick Guide",
     step1: "Open <code>flow.google.com</code> and sign in to Google Flow.",
     step2: "Enter the backend account and password provided by your administrator.",
-    step3: "Select the local backend or sign in to the VPS. The extension and MCP must use the same backend.",
-    useLocal: "Use local MCP (127.0.0.1:18897)",
+    step3: "The AI MCP runs separately on this computer; extension Flow work does not pass through the backend.",
+    useLocal: "Use local MCP (127.0.0.1:18899)",
     localConnected: "The extension is now set to the local MCP.",
     saving: "Signing in…",
     credentialsRequired: "Enter both the account name and password.",
-    loginRequired: "Sign in to connect this extension.",
-    connectFailed: "Could not connect to the backend. Check VPS HTTPS and the deployed backend version.",
-    mcpTitle: "Connect MCP directly to the VPS",
-    mcpToken: "The device token is secret. Only paste it into your personal MCP configuration.",
-    tokenLabel: "Device token",
-    configLabel: "Codex config (~/.codex/config.toml)",
+    loginRequired: "Sign in to verify this extension.",
+    connectFailed: "Could not connect to the local MCP. Start Flow MCP on this computer.",
   },
 };
 
@@ -81,26 +73,13 @@ function applyLanguage() {
   document.querySelector("#step1").textContent = t("step1");
   document.querySelector("#step2").innerHTML = t("step2");
   document.querySelector("#step3").innerHTML = t("step3");
-  document.querySelector("#mcpConfig summary").textContent = t("mcpTitle");
-  document.querySelector("#mcpConfig .help-text").textContent = t("mcpToken");
-  document.querySelector('label[for="deviceToken"]').textContent = t("tokenLabel");
-  document.querySelector('label[for="mcpSnippet"]').textContent = t("configLabel");
   document.querySelector("#langVi").classList.toggle("active", currentLang === "vi");
   document.querySelector("#langEn").classList.toggle("active", currentLang === "en");
-}
-
-async function showMcpConfig(token, backendMode = "vps") {
-  const section = document.querySelector("#mcpConfig");
-  if (!token || backendMode !== "vps") { section.hidden = true; return; }
-  section.hidden = false;
-  document.querySelector("#deviceToken").value = token;
-  document.querySelector("#mcpSnippet").value = `[mcp_servers.flow]\nurl = "${BACKEND_ORIGIN}/mcp"\nbearer_token_env_var = "FLOW_MCP_DEVICE_TOKEN"`;
 }
 
 chrome.storage.local.get({ lang: "vi", loginAccount: "", deviceToken: "" }).then((stored) => {
   currentLang = stored.lang === "en" ? "en" : "vi";
   accountInput.value = stored.loginAccount || "";
-  void showMcpConfig(stored.deviceToken, stored.backendMode || "local");
   applyLanguage();
 });
 
@@ -134,12 +113,12 @@ document.querySelector("#save").addEventListener("click", async () => {
       "deviceId",
       "tokenBridgeOrigin",
     ]);
-    let token = existing.tokenBridgeOrigin === BACKEND_ORIGIN ? existing.deviceToken : "";
+    let token = existing.tokenBridgeOrigin === AUTH_ORIGIN ? existing.deviceToken : "";
 
     const sameAccount = account && existing.loginAccount &&
       account.toLocaleLowerCase() === existing.loginAccount.toLocaleLowerCase();
     if (account && password) {
-      const response = await fetch(`${BACKEND_ORIGIN}/api/device/login`, {
+      const response = await fetch(`${AUTH_ORIGIN}/api/device/login`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -154,16 +133,16 @@ document.querySelector("#save").addEventListener("click", async () => {
       }
       token = result.device_token;
       await chrome.storage.local.set({
-        backendMode: "vps",
-        bridge: BACKEND_ORIGIN,
+        backendMode: "local",
+        bridge: LOCAL_MCP_ORIGIN,
         loginAccount: account,
         deviceToken: result.device_token,
         deviceId: result.device_id,
-        tokenBridgeOrigin: BACKEND_ORIGIN,
+        tokenBridgeOrigin: AUTH_ORIGIN,
       });
       passwordInput.value = "";
     } else if (account && sameAccount && token) {
-      // Reuse this profile's saved device token for reconnects; never persist its password.
+      // Verify the saved device token below without storing the password.
     } else if (!account && !password && token) {
       accountInput.value = existing.loginAccount || "";
     } else if (!token) {
@@ -172,23 +151,17 @@ document.querySelector("#save").addEventListener("click", async () => {
       throw new Error(t("credentialsRequired"));
     }
 
+    if (!password && token) {
+      const response = await fetch(`${AUTH_ORIGIN}/api/user/me`, {
+        headers: { authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
+      const profile = await response.json().catch(() => ({}));
+      if (!response.ok || profile.device_id !== existing.deviceId) {
+        throw new Error(profile.error || "This device sign-in has expired or been revoked. Sign in again.");
+      }
+    }
     if (!token) throw new Error(t("loginRequired"));
-    await chrome.storage.local.set({ backendMode: "vps", bridge: BACKEND_ORIGIN });
-    await chrome.runtime.sendMessage({ type: "flow-mcp:connect" });
-
-    let connectionStatus;
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      connectionStatus = await chrome.runtime.sendMessage({ type: "flow-mcp:status" });
-      if (connectionStatus?.connected) break;
-      if (connectionStatus?.error && attempt >= 3) throw new Error(connectionStatus.error);
-    }
-    if (!connectionStatus?.connected) {
-      throw new Error(connectionStatus?.error || t("connectFailed"));
-    }
-
-    await showMcpConfig(token, "vps");
-
     statusMsg.className = "status-msg success show";
     statusMsg.textContent = t("savedSuccess");
   } catch (error) {
@@ -207,7 +180,7 @@ document.querySelector("#useLocal").addEventListener("click", async () => {
   statusMsg.textContent = t("saving");
 
   try {
-    await chrome.storage.local.set({ backendMode: "local", bridge: LOCAL_BACKEND_ORIGIN });
+    await chrome.storage.local.set({ backendMode: "local", bridge: LOCAL_MCP_ORIGIN });
     await chrome.runtime.sendMessage({ type: "flow-mcp:connect" });
 
     let connectionStatus;

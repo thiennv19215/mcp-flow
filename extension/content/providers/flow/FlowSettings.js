@@ -253,7 +253,7 @@
       control.getAttribute("data-selected") === "true" ||
       control.getAttribute("data-state") === "checked" ||
       control.getAttribute("data-state") === "active" ||
-      [...control.classList].some(className => /(?:^|[-_])(?:checked|selected|active|activated)(?:$|[-_])/i.test(className))
+      [...(control.classList || [])].some(className => /(?:^|[-_])(?:checked|selected|active|activated)(?:$|[-_])/i.test(className))
     ) || Boolean(stateControl.querySelector('input[type="radio"]:checked,input[type="checkbox"]:checked,[aria-checked="true"],[aria-pressed="true"],[aria-selected="true"],[data-state="checked"]'));
   }
 
@@ -870,49 +870,50 @@
   }
 
   async function prepareNativeImageSettings(payload, variants, options = {}) {
-    options = { ...options, imagePreparation: true };
-    try {
-    emitImagePreparationProgress(options, "validating requested settings");
-    await assertNativeModelCapabilities(payload, "image", false, options);
-    emitImagePreparationProgress(options, "reading composer controls");
-    const aspectRatio = payload?.aspectRatio || payload?.aspect_ratio;
-    const requestedModel = payload?.model || "Nano Banana";
-    const composer = flowComposerRoot();
-    const composerModel = composer && findModelPickerButton(composer);
-    const modernComposer = Boolean(composer && composerModel);
-
-    if (!modernComposer) {
-      emitImagePreparationProgress(options, "opening legacy settings");
+    let ownsSettingsSurface = false;
+    options = {
+      ...options,
+      imagePreparation: true,
+      onSettingsOpened: () => { ownsSettingsSurface = true; },
+    };
+    const ensureSettingsSurface = async () => {
+      const wasVisible = flowSettingsPanelVisible();
       await openFlowSettings(options);
+      if (!wasVisible && flowSettingsPanelVisible()) ownsSettingsSurface = true;
+    };
+    try {
+      emitImagePreparationProgress(options, "validating requested settings");
+      await assertNativeModelCapabilities(payload, "image", false, options);
+      emitImagePreparationProgress(options, "reading composer controls");
+      const aspectRatio = payload?.aspectRatio || payload?.aspect_ratio;
+      const requestedModel = payload?.model || "Nano Banana";
+
       emitImagePreparationProgress(options, "selecting image mode");
+      await ensureSettingsSurface();
       await chooseRadio("Image", options);
       if (aspectRatio) await chooseAspectRatio(aspectRatio, options);
-    }
 
-    if (requestedModel) {
-      emitImagePreparationProgress(options, "selecting requested model");
-      await chooseNativeModel(requestedModel, "image", options);
-      if (!modernComposer) {
-        await openFlowSettings(options);
+      if (requestedModel) {
+        emitImagePreparationProgress(options, "selecting requested model");
+        await chooseNativeModel(requestedModel, "image", options);
+        await ensureSettingsSurface();
         await chooseRadio("Image", options);
         if (aspectRatio) await chooseAspectRatio(aspectRatio, options);
       }
-    }
 
-    if (modernComposer && aspectRatio && root.normalizeAspectRatio?.(aspectRatio) !== "16:9") {
-      throw root.flowError("FLOW_ASPECT_RATIO_UNAVAILABLE", "This Flow composer does not expose aspect-ratio controls yet. Choose 16:9 or use the standard Flow settings page. Nothing was submitted.", true);
-    }
-    emitImagePreparationProgress(options, "selecting output count");
-    await chooseNativeVariantCount(variants, { ...options, composerOnly: modernComposer });
-    if (!modernComposer) {
-      emitImagePreparationProgress(options, "closing legacy settings");
-      await closeFlowSettings(options);
-    }
-    finishImagePreparationDiagnostics("completed", { result: { modernComposer } });
-    return undefined;
+      emitImagePreparationProgress(options, "selecting output count");
+      await chooseNativeVariantCount(variants, options);
+
+      finishImagePreparationDiagnostics("completed", { result: { model: requestedModel, aspectRatio, variants } });
+      return undefined;
     } catch (error) {
-      finishImagePreparationDiagnostics("failed", { error: `${error?.code || "FLOW_SETTINGS_ERROR"}: ${error?.message || String(error)}`, quoteDiagnostics: safeCreditQuoteDiagnostics() });
+      finishImagePreparationDiagnostics("failed", {
+        error: `${error?.code || "FLOW_SETTINGS_ERROR"}: ${error?.message || String(error)}`,
+        quoteDiagnostics: safeCreditQuoteDiagnostics(),
+      });
       throw error;
+    } finally {
+      await closeOwnedSettingsSurface(ownsSettingsSurface, options);
     }
   }
 

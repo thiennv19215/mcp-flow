@@ -12,18 +12,22 @@ Mã nguồn được phân tách theo mô hình **Modular Provider Pattern**:
 extension/
 ├── manifest.json                    # Khai báo quyền, DNR rules, content scripts nạp tuần tự
 ├── background/
-│   └── service-worker.js            # Kết nối WebSocket với backend MCP, quản lý tab và auto-inject
+│   ├── service-worker.js            # Kết nối bridge, quản lý tab, lập kế hoạch workflow và điều phối Flow operations
+│   ├── flow-job-queue.js            # Hàng đợi Flow dùng chung side panel/MCP, lưu bền trong chrome.storage.local
+│   └── flow-workflows.js            # Lập kế hoạch batch scene, prompt, numbering và dependency
 ├── rules/
 │   └── flow-media-headers.json      # DeclarativeNetRequest rules gỡ bỏ CORP headers để tải media
 ├── ui/
 │   ├── popup.html / popup.js        # Giao diện popup kết nối trạng thái
-│   └── options.html / options.js    # Đăng nhập tài khoản vào backend VPS
+│   ├── sidebar.html / sidebar.js    # Giao diện thao tác Flow và hàng đợi
+│   ├── flow-queue-panel.js          # Panel thêm, chạy, tạm dừng và sắp xếp tác vụ
+│   └── options.html / options.js    # Xác thực tài khoản riêng; MCP vẫn chạy cục bộ
 └── content/
     ├── dom-actions.js               # Entry point router (~40 dòng), ủy quyền cho ProviderRegistry
     ├── shared/                      # CÁC TIỆN ÍCH DÙNG CHUNG (SHARED UTILS)
     │   ├── dom-utils.js             # Helper DOM nền tảng (visible, accessibleName, wait, error taxonomy...)
     │   ├── activity-overlay.js      # Overlay visual lock thông báo khi automation đang chạy
-    │   └── native-file-transfer.js  # UploadAssembler xử lý chunk upload nhị phân từ backend
+    │   └── native-file-transfer.js  # UploadAssembler xử lý chunk upload nhị phân từ MCP local
     ├── bridge/                      # CẦU NỐI MAIN WORLD (TRUY CẬP DOM GỐC CỦA TRANG)
     │   ├── flow-upload-main.js      # Hook file picker & drag-and-drop trong MAIN world
     │   ├── flow-correlation-observer.js # Intercept batchexecute RPC trong MAIN world (bắt media ID thời gian thực)
@@ -48,7 +52,15 @@ extension/
 
 ---
 
-## 2. Chi tiết Nghiệp vụ Từng File trong `extension/content/`
+## 2. Hàng đợi Flow trong extension
+
+Side panel lưu các tác vụ Flow trong `chrome.storage.local` và chạy lần lượt qua content driver. Tác vụ tạo ảnh/video được submit rồi theo dõi kết quả ngay trong extension; edit, continue, Agent batch và tạo/chỉnh sửa nhân vật cũng được gửi qua driver từ queue. Queue hỗ trợ pause/resume, stop sau tác vụ đang chạy, xóa/sắp xếp tác vụ và khoảng nghỉ ngẫu nhiên 5–10 giây giữa các lượt.
+
+Nếu service worker khởi động lại giữa một tác vụ đang chạy, queue đánh dấu kết quả là chưa xác định và không cho retry tác vụ đó. Các tác vụ đang chờ cần được người dùng chạy tiếp từ side panel. Queue của MCP local là luồng riêng dành cho yêu cầu từ AI.
+
+---
+
+## 3. Chi tiết Nghiệp vụ Từng File trong `extension/content/`
 
 ### A. Tầng Điều hướng & Entry Point
 - **`dom-actions.js`**:
@@ -87,7 +99,7 @@ extension/
 
 ---
 
-## 3. Các Cơ Chế Ổn Định Trọng Yếu
+## 4. Các Cơ Chế Ổn Định Trọng Yếu
 
 1. **Vòng đời Submit 3 Tín hiệu (Triple Confirmation Signals)**:
    - Khi kích hoạt nút Submit, extension không chỉ dựa vào sự kiện click mà chờ ít nhất 1 trong 3 tín hiệu để khẳng định Flow đã nhận lệnh:
@@ -117,7 +129,7 @@ extension/
 
 ---
 
-## 4. Hướng dẫn Mở Rộng Thêm Nền Tảng Mới (Gemini / ChatGPT)
+## 5. Hướng dẫn Mở Rộng Thêm Nền Tảng Mới (Gemini / ChatGPT)
 
 Để tích hợp thêm nền tảng AI mới mà không ảnh hưởng đến Flow:
 
@@ -156,7 +168,7 @@ extension/
 
 ---
 
-## 5. Hướng dẫn Nạp & Cập nhật Extension trên Google Chrome
+## 6. Hướng dẫn Nạp & Cập nhật Extension trên Google Chrome
 
 1. Mở trình duyệt Chrome và truy cập: `chrome://extensions/`
 2. Bật công tắc **Developer mode** (Chế độ dành cho nhà phát triển) ở góc trên bên phải.
@@ -173,7 +185,7 @@ extension/
 
 ---
 
-## 6. Kiểm thử Đơn vị (Unit Tests)
+## 7. Kiểm thử Đơn vị (Unit Tests)
 
 Mọi thay đổi trong extension đều có thể kiểm thử tự động offline bằng runner Bun / Node VM:
 

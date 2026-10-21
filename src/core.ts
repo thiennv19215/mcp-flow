@@ -1,22 +1,20 @@
-import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { assemble } from "./assemble.js";
-import { extractLastFrame } from "./chain.js";
-import { characterLook, clearFlowPrompt, createCharacter, createFlowProject, downloadAsset, renameAsset, trashAsset, editCharacter, getCorrelationObserverHealth, getFlowState, listAssets, listCharacters, listFlowProjects, listFlowVoiceOptions, openFlowProject, rememberCharacter, runAgentBatch, runContinue, runEdit, runGeneration, uploadFlowMediaToProject } from "./flow.js";
-import { JobQueue, type Job } from "./queue.js";
+import { clearFlowPrompt, createFlowProject, downloadAsset, renameAsset, trashAsset, getCorrelationObserverHealth, getFlowState, listAssets, listCharacters, listFlowProjects, listFlowVoiceOptions, openFlowProject, rememberCharacter, uploadFlowMediaToProject } from "./flow.js";
+import type { Job } from "./job-types.js";
 import { attachReferences, clearFlowReferences } from "./flow.js";
 import { BIN, COMPUTER, IS_MAC, IS_WIN, moveToBin } from "./platform.js";
-import { TECHNIQUES, techniqueById } from "./techniques.js";
-import { OUTPUT_ROOT, outputRootForContext, projectDir } from "./paths.js";
+import { TECHNIQUES } from "./techniques.js";
+import { OUTPUT_ROOT, castDirForContext, outputRootForContext, projectDir } from "./paths.js";
 import { shapes, type Args } from "./schemas.js";
-import { extensionConnected } from "./extension.js";
-import { validateFlowSceneCapabilities } from "./flow-capabilities.js";
+import { executeFlowDom } from "./extension.js";
 import { sanitizeFlowOperationDiagnostics, sanitizeUnknownSubmitDiagnostics } from "./flow-request-diagnostics.js";
+import { downloadNativeResults, extensionOf, materializeQueuedNativeDownloads, nativeDownloadIds, waitForNativeDownload } from "./native-downloads.js";
+import { characterLook, loadLooks } from "./characters.js";
 
 export { OUTPUT_ROOT, projectDir };
 export { shapes, type Args };
-
-const words = (s: string) => s.split(/[^a-z0-9]+/i).filter((w) => w.length > 3).map((w) => w.toLowerCase());
 
 export const jobView = ({ id, status, params, files, attempts, credits, progress, note, error, errorCategory, retryAfterAt, failed_scenes, outcomeUnknown, requestDispatched, serverAcceptanceObserved, creditQuoteVerified, requestDiagnostics, operationDiagnostics }: Job) => ({
   id,
@@ -94,194 +92,251 @@ export const VOICES = [
 
 const BUSY = "A generation is running in the Flow tab. Wait for it to finish (flow_wait), then retry.";
 
+type ExtensionQueueJob = {
+  id: string; operation: string; payload?: Record<string, any>; metadata?: Record<string, any>;
+  label?: string; status: string; result?: any; progress?: any; error?: string; errorCode?: string;
+  outcomeUnknown?: boolean; retrySafe?: boolean; attempts?: number; addedAt?: number;
+  requestDispatched?: boolean; serverAcceptanceObserved?: boolean; creditQuoteVerified?: boolean; credits?: number;
+};
+type ExtensionQueueSnapshot = { jobs: ExtensionQueueJob[]; items?: ExtensionQueueJob[]; isRunning?: boolean; isPaused?: boolean; isStopped?: boolean };
+
+async function extensionQueueCall<T = any>(name: string, payload: Record<string, unknown> = {}, timeoutMs = 30_000): Promise<T> {
+  const capability = `flow.native.${name.slice("flow.".length)}`;
+  return executeFlowDom<T>({ op: "flowOperation", name, payload, capability, timeoutMs }, { timeoutMs: timeoutMs + 10_000 });
+}
+
+async function extensionQueueSnapshot(): Promise<ExtensionQueueSnapshot> {
+  try {
+    const result = await extensionQueueCall<ExtensionQueueSnapshot>("flow.queue.get", {}, 20_000);
+    return { ...result, jobs: Array.isArray(result?.jobs) ? result.jobs : Array.isArray(result?.items) ? result.items : [] };
+  } catch {
+    return { jobs: [], isRunning: false, isPaused: false, isStopped: true };
+  }
+}
+
+function extensionJobParams(job: ExtensionQueueJob): any {
+  return job.operation === "flow.generation.submit" ? job.payload || {} : job.payload?.params || job.payload || {};
+}
+
+function extensionJobAsLegacy(job: ExtensionQueueJob): Job {
+  const params = extensionJobParams(job);
+  const outcome = job.result?.result || job.result || {};
+  const workflow = job.metadata?.workflow || job.payload?.workflow || params.workflow || {};
+  const outputDir = job.metadata?.output_dir || params.output_dir || workflow.output_dir || "";
+  const fileStem = job.metadata?.file_stem || params.file_stem || (workflow.sceneNumber ? `scene-${String(workflow.sceneNumber).padStart(2, "0")}` : "");
+  const status = ({ pending: "queued", completed: "done", cancelled: "cancelled" } as Record<string, string>)[job.status] || job.status;
+  return {
+    id: job.id,
+    status,
+    params: { ...params, output_dir: outputDir, file_stem: fileStem },
+    files: job.metadata?.files || [],
+    attempts: job.attempts || 0,
+    credits: typeof job.credits === "number" ? job.credits : typeof outcome.credits === "number" ? outcome.credits : null,
+    creditQuoteVerified: typeof job.creditQuoteVerified === "boolean"
+      ? job.creditQuoteVerified
+      : typeof outcome.creditQuoteVerified === "boolean" ? outcome.creditQuoteVerified
+        : job.operation === "flow.generation.submit" && params.type === "video" && typeof outcome.credits === "number",
+    progress: typeof job.progress === "string" ? job.progress : job.progress?.message,
+    note: outcome.downloadError || (Array.isArray(outcome.failedScenes) && outcome.failedScenes.length
+      ? `Still failed: ${outcome.failedScenes.map((number: number) => `scene ${number}`).join(", ")}`
+      : undefined),
+    failed_scenes: Array.isArray(outcome.failedScenes) ? outcome.failedScenes : undefined,
+    error: job.error || job.metadata?.downloadError,
+    errorCategory: job.errorCode?.includes("DOWNLOAD") || job.metadata?.downloadError ? "download" : undefined,
+    outcomeUnknown: job.outcomeUnknown === true,
+    requestDispatched: job.requestDispatched === true || job.result?.requestDispatched === true,
+    serverAcceptanceObserved: job.serverAcceptanceObserved === true || job.result?.result?.serverAcceptanceObserved === true,
+    requestDiagnostics: undefined,
+    operationDiagnostics: undefined,
+  } as unknown as Job;
+}
+
+async function queueIsActive(): Promise<boolean> {
+  const snapshot = await extensionQueueSnapshot();
+  return snapshot.isRunning === true || snapshot.jobs.some(job => ["pending", "running"].includes(job.status));
+}
+
+async function materializeQueueJob(job: ExtensionQueueJob): Promise<ExtensionQueueJob> {
+  if (job.status !== "completed" || job.metadata?.submit_only === true) return job;
+  const params = extensionJobParams(job);
+  if (params.submit_only === true || params.submitOnly === true) return job;
+  const outputDir = job.metadata?.output_dir || params.output_dir;
+  const fileStem = job.metadata?.file_stem || params.file_stem;
+  const result = job.result?.result || job.result || {};
+  const media = result.media || result.result?.media || (result.portraitMedia ? [result.portraitMedia] : undefined);
+  const browserDownloads = result.browserDownloads || result.result?.browserDownloads;
+  const downloadError = result.downloadError ? String(result.downloadError) : undefined;
+  if (downloadError && (!Array.isArray(browserDownloads) || !browserDownloads.length)) {
+    const updated = await extensionQueueCall<{ job: ExtensionQueueJob }>("flow.queue.metadata", {
+      id: job.id, patch: { downloadError },
+    }, 20_000).catch(() => null);
+    return updated?.job || { ...job, metadata: { ...job.metadata, downloadError } };
+  }
+  if (!outputDir || !fileStem || ((!Array.isArray(media) || !media.length) && (!Array.isArray(browserDownloads) || !browserDownloads.length))) return job;
+  const current = job.metadata?.files;
+  if (job.metadata?.downloadComplete === true && Array.isArray(current)) return job;
+  const legacy = extensionJobAsLegacy(job);
+  let files: string[];
+  try {
+    files = Array.isArray(browserDownloads) && browserDownloads.length
+      ? await materializeQueuedNativeDownloads(browserDownloads, outputDir, fileStem, legacy)
+      : await downloadNativeResults(media, outputDir, fileStem, params.download_quality || "original", legacy);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const updated = await extensionQueueCall<{ job: ExtensionQueueJob }>("flow.queue.metadata", {
+      id: job.id, patch: { downloadError: message },
+    }, 20_000).catch(() => null);
+    return updated?.job || { ...job, metadata: { ...job.metadata, downloadError: message } };
+  }
+  const updated = await extensionQueueCall<{ job: ExtensionQueueJob }>("flow.queue.metadata", {
+    id: job.id, patch: { files, downloadComplete: true, ...(downloadError ? { downloadError } : {}) },
+  }, 20_000);
+  return updated.job || { ...job, metadata: { ...job.metadata, files, downloadComplete: true, ...(downloadError ? { downloadError } : {}) } };
+}
+
+async function waitExtensionJob(id: string, timeoutMs: number): Promise<ExtensionQueueJob> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() <= deadline) {
+    const result = await extensionQueueCall<{ job: ExtensionQueueJob | null }>("flow.queue.get", { id }, 20_000);
+    const job = result.job;
+    if (!job) throw new Error(`No Flow queue job with id ${id}.`);
+    if (["completed", "failed", "cancelled"].includes(job.status)) return materializeQueueJob(job);
+    await new Promise(resolve => setTimeout(resolve, 1_500));
+  }
+  throw Object.assign(new Error(`Timed out waiting for Flow queue job ${id}; check flow_status before retrying.`), { code: "FLOW_QUEUE_WAIT_TIMEOUT", outcome_unknown: true });
+}
+
+async function enqueueWorkflow(operation: string, payload: Record<string, unknown>, metadata: Record<string, unknown> = {}, timeoutMs = 45_000): Promise<ExtensionQueueJob> {
+  const result = await extensionQueueCall<{ job?: ExtensionQueueJob; jobs?: ExtensionQueueJob[] }>("flow.queue.add", {
+    job: { operation, payload, metadata, label: String(metadata.label || operation) },
+  }, timeoutMs);
+  const job = result.job || result.jobs?.[0];
+  if (!job) throw new Error("The extension did not return the queued Flow job.");
+  return waitExtensionJob(job.id, 12 * 60_000);
+}
+
+const castOutputDir = () => castDirForContext();
+
 export class LocalCore implements Core {
   private detailedState: ReturnType<typeof getFlowState> | undefined;
   private mediaUploadActive = false;
-  private queue: JobQueue;
-
-  constructor(scopeId = "local") {
-    this.queue = new JobQueue(async (job) => {
-    const { chain_from, reference_from } = job.params;
-    if (reference_from) {
-      const still = this.queue.get(reference_from)?.files.find((f) => /\.(jpe?g|png|webp)$/i.test(f));
-      if (!still) throw new Error(`reference_previous: the previous scene (${reference_from}) produced no image.`);
-      job.params.reference_images = [still, ...(job.params.reference_images ?? [])].slice(0, 3);
-    }
-    if (chain_from) {
-      const clip = this.queue.get(chain_from)?.files.find((f) => /\.(mp4|webm|mov)$/i.test(f));
-      if (!clip) throw new Error(`chain_previous: the previous scene (${chain_from}) produced no video, so this scene was skipped.`);
-      job.params.first_frame = await extractLastFrame(clip);
-    }
-    if (job.params.continue_from) return await runContinue(job);
-    if (job.params.agent_scenes) return await runAgentBatch(job);
-    if (job.params.edit_asset) return await runEdit(job);
-    return await runGeneration(job);
-    }, scopeId);
-  }
+  constructor(_scopeId = "local") {}
 
   async status({ detailed }: Args<"status">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
+    const queue = await extensionQueueSnapshot();
     // Studio and MCP can poll at once. Share the account-panel read so one
     // request cannot release focus/close a panel another request is using.
     let flow;
     try {
-      flow = detailed && !this.queue.busy
+      flow = detailed && !queue.isRunning
         ? await (this.detailedState ??= getFlowState(true).finally(() => { this.detailedState = undefined; }))
         : await getFlowState(false);
     } catch (error) {
       flow = { url: "", signedIn: false, inProject: false, available: false, hint: `Flow extension did not return its status: ${error instanceof Error ? error.message : String(error)}` };
     }
-    if (extensionConnected()) this.queue.resume();
-    return { flow, pacing: this.queue.pausedReason, output_root: outputRootForContext(), jobs: this.queue.list().map(jobView) };
+    return { flow, pacing: queue.isPaused ? "paused" : undefined, output_root: outputRootForContext(), jobs: queue.jobs.map(job => jobView(extensionJobAsLegacy(job))) };
   }
 
   async observer_health(_args: Args<"observer_health">) {
-    if (this.mediaUploadActive || this.queue.busy) throw new Error("Flow is processing another operation. Check observer health after it finishes.");
+    if (this.mediaUploadActive || await queueIsActive()) throw new Error("Flow is processing another operation. Check observer health after it finishes.");
     return getCorrelationObserverHealth();
   }
 
   async clear_prompt({ expected_prompt }: Args<"clear_prompt">) {
-    if (this.mediaUploadActive || this.queue.list().some(job => job.status === "queued" || job.status === "running")) throw new Error(BUSY);
+    if (this.mediaUploadActive || await queueIsActive()) throw new Error(BUSY);
     this.mediaUploadActive = true;
     try { return await clearFlowPrompt(expected_prompt); }
     finally { this.mediaUploadActive = false; }
   }
 
   suspendDevice(): void {
-    this.queue.cancelQueued();
+    void extensionQueueSnapshot().then(snapshot => Promise.all(snapshot.jobs.filter(job => job.status === "pending").map(job =>
+      extensionQueueCall("flow.queue.cancel", { id: job.id }, 10_000),
+    ))).catch(() => {});
   }
 
   async generate({ project, scenes }: Args<"generate">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
-    const invalid = scenes.findIndex((s, i) => s.chain_previous && (i === 0 || s.first_frame || s.type === "image"));
-    if (invalid >= 0) {
-      throw new Error(`Scene ${invalid + 1}: chain_previous needs a preceding video scene in the same call and cannot be combined with first_frame.`);
-    }
-    const noPrev = scenes.findIndex((s, i) => s.reference_previous && i === 0);
-    if (noPrev >= 0) throw new Error("Scene 1 has no previous scene to reference.");
-    const unknown = scenes.find((s) => s.technique && !techniqueById(s.technique));
-    if (unknown) throw new Error(`Unknown technique "${unknown.technique}". Call flow_techniques for valid ids.`);
-    for (const [index, scene] of scenes.entries()) validateFlowSceneCapabilities(scene, index);
-    const videoReferenceScene = scenes.findIndex(scene => scene.video_reference);
-    if (videoReferenceScene >= 0) {
-      throw Object.assign(new Error(`Scene ${videoReferenceScene + 1}: Toby-style video-reference editing requires Flow's dynamic video_edit_submit RPC configuration, which is not available in the native extension yet. Nothing was submitted.`), {
-        code: "FLOW_VIDEO_REFERENCE_CONFIG_UNAVAILABLE",
-        category: "unsupported",
-        retryable: false,
-        outcome_unknown: false,
-      });
-    }
-
     const output_dir = projectDir(project);
-    // Continue numbering after whatever is already on disk or queued, so reruns never overwrite earlier scenes.
-    const onDisk = existsSync(output_dir) ? readdirSync(output_dir).map((f) => Number(f.match(/^scene-(\d+)/)?.[1] ?? 0)) : [];
-    const queued = this.queue.list().filter((j) => j.params.output_dir === output_dir).map((j) => Number(j.params.file_stem.match(/\d+/)?.[0] ?? 0));
-    const offset = Math.max(0, ...onDisk, ...queued);
-    const jobs: Job[] = [];
-    for (const [i, { chain_previous, reference_previous, technique, ...scene }] of scenes.entries()) {
-      const phrase = technique ? techniqueById(technique)!.phrase : "";
-      // A referenced character must come out identical, not merely similar, so the scene says so explicitly. The
-      // wording stays medium-neutral: the same lock has to serve a flat cartoon character and a photoreal avatar.
-      const cast = (scene.reference_images ?? [])
-        .flatMap(r => /^character:/i.test(r) ? [r.slice(10).trim()] : r.startsWith("asset:") && characterLook(r.slice(6).trim()) !== undefined ? [r.slice(6).trim()] : []);
-      const lock = cast.length
-        ? ` CHARACTER LOCK — ${cast.join(" and ")} must match the reference image exactly, as if copying it: same head shape and size, same face, same eyes, same hair, same skin, same build and proportions, same clothing items in the same colours, same hands, and the same rendering style and level of realism as the reference. Never redesign, restyle, re-proportion, re-age or re-colour them, and never swap an item for a similar one.${cast
-            .map((n) => (characterLook(n) ? ` ${n} is exactly: ${characterLook(n)}.` : ""))
-            .join("")}`
-        : "";
-      const inherit = reference_previous
-        ? " Match the previous image exactly for the subject's appearance, colour palette, lighting and rendering style; this is the same scene a moment later."
-        : "";
-      jobs.push(
-        this.queue.add({
-          ...scene,
-          prompt: `${scene.prompt.trim().replace(/\.?$/, ".")}${phrase ? ` ${phrase}` : ""}${lock}${inherit}`,
-          chain_from: chain_previous ? jobs[i - 1].id : undefined,
-          reference_from: reference_previous ? jobs[i - 1].id : undefined,
-          output_dir,
-          file_stem: `scene-${String(offset + i + 1).padStart(2, "0")}`,
-        }),
-      );
-    }
-    return { output_dir, jobs: jobs.map(jobView) };
+    const knownAssets = await listAssets();
+    const outputAssets = existsSync(output_dir) ? readdirSync(output_dir).map(name => ({ name, project: output_dir })) : [];
+    const { flowCapabilityRegistry } = await import("./flow-capabilities.js");
+    const result = await extensionQueueCall<{ jobs: ExtensionQueueJob[] }>("flow.queue.generate", {
+      project, output_dir, scenes, knownAssets, outputAssets,
+      techniques: TECHNIQUES.map(({ id, phrase }) => ({ id, phrase })),
+      characterLooks: loadLooks(), capabilityRegistry: flowCapabilityRegistry,
+    }, 60_000);
+    return { output_dir, jobs: (result.jobs || []).map(job => jobView(extensionJobAsLegacy(job))) };
   }
-
   async wait({ job_ids, timeout_seconds }: Args<"wait">) {
-    const pick = () => (job_ids ? job_ids.map((id) => this.queue.get(id)).filter((j): j is Job => Boolean(j)) : this.queue.list());
     const deadline = Date.now() + timeout_seconds * 1000;
-    while (Date.now() < deadline && pick().some((j) => j.status === "queued" || j.status === "running")) {
-      await new Promise((r) => setTimeout(r, 3000));
+    let queue = await extensionQueueSnapshot();
+    let selected = job_ids ? queue.jobs.filter(job => job_ids.includes(job.id)) : queue.jobs;
+    while (Date.now() < deadline && selected.some(job => ["pending", "running"].includes(job.status))) {
+      await new Promise(resolve => setTimeout(resolve, 2_000));
+      queue = await extensionQueueSnapshot();
+      selected = job_ids ? queue.jobs.filter(job => job_ids.includes(job.id)) : queue.jobs;
     }
-    const jobs = pick();
+    const jobs: Job[] = [];
+    for (const original of selected) {
+      const job = await materializeQueueJob(original);
+      jobs.push(jobView(extensionJobAsLegacy(job)) as unknown as Job);
+    }
     return {
-      finished: jobs.every((j) => j.status !== "queued" && j.status !== "running"),
-      pacing: this.queue.pausedReason,
-      jobs: jobs.map(jobView),
+      finished: selected.every(job => !["pending", "running"].includes(job.status)),
+      pacing: queue.isPaused ? "paused" : undefined,
+      jobs,
     };
   }
 
   async cancel({ job_id }: Args<"cancel">) {
-    const job = this.queue.cancel(job_id);
-    if (!job) throw new Error(`No job with id ${job_id}. Use flow_status to list jobs.`);
-    return jobView(job);
+    const result = await extensionQueueCall<any>("flow.queue.cancel", { id: job_id }, 20_000);
+    if (!result?.job) throw new Error(`No job with id ${job_id}. Use flow_status to list jobs.`);
+    return jobView(extensionJobAsLegacy(result.job));
   }
 
   async retry({ job_ids }: Args<"retry">) {
-    const ids = job_ids ?? this.queue.list().filter((j) => (j.status === "failed" && !j.outcomeUnknown) || j.failed_scenes?.length).map((j) => j.id);
+    const queue = await extensionQueueSnapshot();
+    for (const id of job_ids || []) {
+      const job = queue.jobs.find(item => item.id === id);
+      if (job?.outcomeUnknown) throw new Error(`Job ${id} may already have been submitted to Flow. Check the project before retrying to avoid duplicate generation or charges.`);
+      if (job?.metadata?.downloadError || (job?.result?.result || job?.result)?.downloadError) throw new Error(`Job ${id} generated media but could not download it. Do not retry generation; use flow_assets and flow_download for the existing result.`);
+    }
+    const ids = job_ids ?? queue.jobs.filter(job =>
+      (job.status === "failed" && job.retrySafe === true) ||
+      (job.operation === "flow.agent.batch" && job.status === "completed" && Array.isArray((job.result?.result || job.result)?.failedScenes) && (job.result?.result || job.result).failedScenes.length > 0),
+    ).map(job => job.id);
     const jobs: Job[] = [];
     for (const id of ids) {
-      const job = this.queue.get(id);
-      if (job?.outcomeUnknown) throw new Error(`Job ${id} may already have been submitted to Flow. Check the project for its result before retrying; automatic replay is blocked to avoid duplicate generation or charges.`);
-      if (job?.errorCategory === "download") throw new Error(`Job ${id} generated media but could not download it. Do not retry the generation; check flow_assets, then use flow_download for the existing result.`);
-      const p = job?.params;
-      if (job?.failed_scenes?.length && p?.agent_scenes && job.status === "done") {
-        // A batch that finished with some images still failed: make just those again, under their own scene numbers,
-        // instead of re-running the whole batch. The list moves to the new job, so it is never retried twice.
-        const base = Number(p.file_stem.match(/\d+/)?.[0] ?? 1);
-        const numbers = p.agent_numbers ?? p.agent_scenes.map((_, i) => base + i);
-        const pick = job.failed_scenes.map((n) => numbers.indexOf(n)).filter((i) => i >= 0);
-        job.failed_scenes = undefined;
-        this.queue.persist(job);
-        jobs.push(
-          this.queue.add({
-            ...p,
-            prompt: `Agent batch: ${pick.length} failed image(s) again`,
-            agent_scenes: pick.map((i) => p.agent_scenes![i]),
-            agent_numbers: pick.map((i) => numbers[i]),
-            file_stem: `scene-${String(numbers[pick[0]]).padStart(2, "0")}`,
-          }),
-        );
-        continue;
-      }
-      const again = this.queue.retry(id);
-      if (again) jobs.push(again);
+      const result = await extensionQueueCall<any>("flow.queue.retry", { id }, 30_000);
+      if (result?.job) jobs.push(jobView(extensionJobAsLegacy(result.job)) as unknown as Job);
     }
-    if (!jobs.length) throw new Error("Nothing to retry: no failed jobs, and no batch with failed images.");
-    return { jobs: jobs.map(jobView) };
+    if (!jobs.length) throw new Error("Nothing to retry: the extension queue has no explicitly safe failed jobs.");
+    return { jobs };
   }
-
   async assets({ kind }: Args<"assets">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
-    if (this.queue.busy) throw new Error(BUSY);
+    if (await queueIsActive()) throw new Error(BUSY);
     return (await listAssets()).filter((a) => !kind || a.kind === kind).map(({ name, kind }) => ({ name, kind }));
   }
 
   async upload_media({ path }: Args<"upload_media">) {
-    if (this.mediaUploadActive || this.queue.list().some(job => job.status === "queued" || job.status === "running")) throw new Error(BUSY);
+    if (this.mediaUploadActive || await queueIsActive()) throw new Error(BUSY);
     this.mediaUploadActive = true;
     try { return await uploadFlowMediaToProject(path); }
     finally { this.mediaUploadActive = false; }
   }
 
   async attach_references({ references, inspect_only }: Args<"attach_references">) {
-    if (this.mediaUploadActive || this.queue.busy) throw new Error(BUSY);
+    if (this.mediaUploadActive || await queueIsActive()) throw new Error(BUSY);
     this.mediaUploadActive = true;
     try { return await attachReferences(references, inspect_only === true); }
     finally { this.mediaUploadActive = false; }
   }
 
   async clear_references(_args: Args<"clear_references">) {
-    if (this.mediaUploadActive || this.queue.busy) throw new Error(BUSY);
+    if (this.mediaUploadActive || await queueIsActive()) throw new Error(BUSY);
     this.mediaUploadActive = true;
     try { return await clearFlowReferences(); }
     finally { this.mediaUploadActive = false; }
@@ -293,26 +348,26 @@ export class LocalCore implements Core {
   }
 
   async voice_options() {
-    if (this.mediaUploadActive || this.queue.busy) throw new Error(BUSY);
+    if (this.mediaUploadActive || await queueIsActive()) throw new Error(BUSY);
     this.mediaUploadActive = true;
     try { return await listFlowVoiceOptions(); }
     finally { this.mediaUploadActive = false; }
   }
 
   async create_project() {
-    if (this.mediaUploadActive || this.queue.busy) throw new Error(BUSY);
+    if (this.mediaUploadActive || await queueIsActive()) throw new Error(BUSY);
     return createFlowProject();
   }
 
   async open_project({ project_id, language = "en" }: Args<"open_project">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
-    if (this.queue.busy) throw new Error(BUSY);
+    if (await queueIsActive()) throw new Error(BUSY);
     return openFlowProject(project_id, language);
   }
 
   async download({ project, assets, quality }: Args<"download">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
-    if (this.queue.busy) throw new Error(BUSY);
+    if (await queueIsActive()) throw new Error(BUSY);
     const dir = projectDir(project);
     mkdirSync(dir, { recursive: true });
     const files: string[] = [];
@@ -353,75 +408,39 @@ export class LocalCore implements Core {
     return { root, projects };
   }
 
-  private nextStem(output_dir: string, prefix: string): string {
-    const onDisk = existsSync(output_dir) ? readdirSync(output_dir).map((f) => Number(f.match(new RegExp(`^${prefix}-(\\d+)`))?.[1] ?? 0)) : [];
-    const queued = this.queue.list().filter((j) => j.params.output_dir === output_dir && j.params.file_stem.startsWith(prefix)).map((j) => Number(j.params.file_stem.match(/\d+/)?.[0] ?? 0));
-    return `${prefix}-${String(Math.max(0, ...onDisk, ...queued) + 1).padStart(2, "0")}`;
+  private localAssets(output_dir: string): string[] {
+    return existsSync(output_dir) ? readdirSync(output_dir) : [];
   }
-
   async agent({ project, scenes, aspect_ratio, download_quality, submit_only }: Args<"agent">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     const output_dir = projectDir(project);
-    const job = this.queue.add({
-      prompt: `Agent batch: ${scenes.length} images`,
-      type: "image",
-      max_credits: 0,
-      retries: submit_only ? 0 : undefined,
-      aspect_ratio,
-      download_quality,
-      submit_only,
-      agent_scenes: scenes,
-      output_dir,
-      file_stem: this.nextStem(output_dir, "scene"),
-    });
-    return { output_dir, jobs: [jobView(job)] };
+    const result = await extensionQueueCall<any>("flow.queue.agent", {
+      project, output_dir, scenes, aspect_ratio, download_quality, submit_only,
+      outputAssets: this.localAssets(output_dir).map(name => ({ name, project: output_dir })),
+    }, 45_000);
+    return { output_dir, jobs: (result.jobs || []).map((job: ExtensionQueueJob) => jobView(extensionJobAsLegacy(job))) };
   }
-
   async edit({ project, asset, prompt, download_quality, submit_only }: Args<"edit">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     const output_dir = projectDir(project);
-    const job = this.queue.add({ prompt, type: "video", max_credits: 0, edit_asset: asset, download_quality, submit_only, retries: submit_only ? 0 : undefined, output_dir, file_stem: this.nextStem(output_dir, "edit") });
-    return { output_dir, jobs: [jobView(job)] };
+    const result = await extensionQueueCall<any>("flow.queue.edit", {
+      project, output_dir, asset, prompt, download_quality, submit_only,
+      outputAssets: this.localAssets(output_dir).map(name => ({ name, project: output_dir })),
+    }, 45_000);
+    return { output_dir, jobs: (result.jobs || []).map((job: ExtensionQueueJob) => jobView(extensionJobAsLegacy(job))) };
   }
-
   // Flow's composer takes a start frame OR a character, never both; agent mode takes both, so this goes that way.
   async continue_shot({ project, from_asset, prompt, attach, aspect_ratio, mode, download_quality, force, submit_only }: Args<"continue_shot">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
-    // A lost queue entry is not proof that nothing ran: when the owner process is replaced mid-job the job vanishes
-    // while Flow carries on and charges for it. Re-running then spends twice, which is exactly what happened on
-    // 2026-09-20. Flow's own grid is the only honest record, so ask it before starting another paid generation.
-    if (!force) {
-      const recent = (await listAssets()).slice(0, 6).filter((a) => a.kind === "video");
-      const source = from_asset.toLowerCase();
-      const echo = recent.find((a) => {
-        const n = a.name.toLowerCase();
-        return n !== source && !n.startsWith(source) && words(n).some((w) => words(source).includes(w));
-      });
-      if (echo) {
-        throw new Error(
-          `Flow already holds a recent clip called "${echo.name}", which looks like a continuation of "${from_asset}" that may have just been generated and charged for. ` +
-            `Check it with flow_assets / flow_download before spending again. Pass force: true if you really do want another take.`,
-        );
-      }
-    }
     const output_dir = projectDir(project);
-    const job = this.queue.add({
-      prompt,
-      type: "video",
-      max_credits: 0,
-      retries: submit_only ? 0 : undefined,
-      continue_from: from_asset,
-      attach,
-      continue_mode: mode,
-      submit_only,
-      aspect_ratio,
-      download_quality,
-      output_dir,
-      file_stem: this.nextStem(output_dir, "shot"),
-    });
-    return { output_dir, jobs: [jobView(job)] };
+    const knownAssets = await listAssets();
+    const result = await extensionQueueCall<any>("flow.queue.continue", {
+      project, output_dir, from_asset, prompt, attach, aspect_ratio, mode, download_quality, force, submit_only,
+      knownAssets,
+      outputAssets: this.localAssets(output_dir).map(name => ({ name, project: output_dir })),
+    }, 45_000);
+    return { output_dir, jobs: (result.jobs || []).map((job: ExtensionQueueJob) => jobView(extensionJobAsLegacy(job))) };
   }
-
   // Moves a file or a project folder from the films folder to the system's bin - recoverable from there, never
   // erased. Anything outside the films folder is refused, so a bad path can never reach the rest of the Mac.
   async discard({ path }: Args<"discard">) {
@@ -435,39 +454,70 @@ export class LocalCore implements Core {
 
   async trash({ name }: Args<"trash">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
-    if (this.queue.busy) throw new Error(BUSY);
+    if (await queueIsActive()) throw new Error(BUSY);
     return trashAsset(name);
   }
 
   async rename_asset({ name, id, new_name }: Args<"rename_asset">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
-    if (this.queue.busy) throw new Error(BUSY);
+    if (await queueIsActive()) throw new Error(BUSY);
     return renameAsset(name, new_name, id);
   }
 
   async character(a: Args<"character">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
-    if (this.queue.busy) throw new Error(BUSY);
+    if (await queueIsActive()) throw new Error(BUSY);
     if (!a.image && !a.describe) throw new Error("Pass either `describe` (Flow draws the portrait) or `image`.");
-    const made = await createCharacter(a);
+    let characterInput = { ...a };
+    if (a.image && !/^asset:/i.test(a.image)) {
+      const uploaded = await uploadFlowMediaToProject(a.image);
+      characterInput = { ...characterInput, image: `asset:${uploaded.name}` };
+    }
+    const output_dir = castOutputDir();
+    const file_stem = a.name.replace(/[^\w.-]+/g, "_");
+    const job = await enqueueWorkflow("flow.character.create", { character: characterInput }, {
+      output_dir, file_stem, character: true, label: `Create character ${a.name}`,
+    }, 30_000);
+    if (job.status !== "completed") throw new Error(job.error || `Character creation did not complete (${job.status}).`);
+    const result = job.result?.result || job.result || {};
+    const portrait = job.metadata?.files?.[0];
     if (a.describe) rememberCharacter(a.name, a.describe);
-    return { ...made, use_as: `character:${a.name}` };
+    return { name: result.name || a.name, url: result.url, portrait, ...(result.cleanupWarning ? { cleanupWarning: result.cleanupWarning } : {}), use_as: `character:${a.name}` };
   }
 
   async character_edit({ name, rename, change, look }: Args<"character_edit">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
-    if (this.queue.busy) throw new Error(BUSY);
-    const out = await editCharacter(name, change, undefined, rename);
+    if (await queueIsActive()) throw new Error(BUSY);
+    const output_dir = castOutputDir();
+    const targetName = rename || name;
+    const before = await nativeDownloadIds();
+    const job = await enqueueWorkflow("flow.character.edit", { name, change, rename, timeoutMs: 4 * 60_000 }, {
+      output_dir, file_stem: targetName.replace(/[^\w.-]+/g, "_"), character: true, label: `Edit character ${name}`,
+    }, 30_000);
+    if (job.status !== "completed") throw new Error(job.error || `Character edit did not complete (${job.status}).`);
+    const result = job.result?.result || job.result || {};
+    let portrait: string | undefined;
+    let note = result.note;
+    if (result.downloadTriggered) {
+      try {
+        const downloaded = await waitForNativeDownload(before, 90_000);
+        mkdirSync(output_dir, { recursive: true });
+        portrait = join(output_dir, `${targetName.replace(/[^\w.-]+/g, "_")}${extensionOf(downloaded.filename)}`);
+        copyFileSync(downloaded.filename, portrait);
+      } catch (error) {
+        note = `${change ? `${name} was changed in Flow, but the new` : "The"} portrait could not be saved (${error instanceof Error ? error.message : String(error)}). Call flow_character_edit with just the name to save it.`;
+      }
+    }
     // Every scene that references the character quotes this description in its character lock, so it has to describe
     // the NEW look - "deep navy coat" left in it would argue with a portrait whose coat is now red.
-    if (look) rememberCharacter(name, look);
-    else if (change) rememberCharacter(name, `${characterLook(name) ?? ""} Changed since, and this wins over anything above: ${change.replace(/[.\s]+$/, "")}`.trim());
-    return { ...out, use_as: `character:${rename || name}` };
+    if (look) rememberCharacter(targetName, look);
+    else if (change) rememberCharacter(targetName, `${characterLook(name) ?? ""} Changed since, and this wins over anything above: ${change.replace(/[.\s]+$/, "")}`.trim());
+    return { name: result.name || targetName, portrait: portrait || job.metadata?.files?.[0], note, ...(result.cleanupWarning ? { cleanupWarning: result.cleanupWarning } : {}), use_as: `character:${targetName}` };
   }
 
   async characters() {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
-    if (this.queue.busy) throw new Error(BUSY);
+    if (await queueIsActive()) throw new Error(BUSY);
     return (await listCharacters()).map((character) => ({
       ...character,
       use_as: `character:${character.name}`,

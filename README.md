@@ -1,6 +1,6 @@
 # Flow MCP Native Automation
 
-MCP tools and job orchestration stay in the backend while the Chrome extension executes every Flow page operation through its content driver. Unsupported inputs fail before dispatch. See [ARCHITECTURE.md](ARCHITECTURE.md) and [NATIVE-MIGRATION-RUNBOOK.md](NATIVE-MIGRATION-RUNBOOK.md) for operation coverage and limitations.
+The Chrome extension owns Flow operations and its queue. A separate local stdio MCP process remains available for AI clients. The VPS service handles account and device verification only. Unsupported extension inputs fail before dispatch. See [ARCHITECTURE.md](ARCHITECTURE.md) and [NATIVE-MIGRATION-RUNBOOK.md](NATIVE-MIGRATION-RUNBOOK.md) for operation coverage and limitations.
 
 Windows: double-click **Start Flow.cmd** to build and start Studio in the background. Double-click **Stop Flow.cmd** to stop that Studio and release port **18899** (or `FLOW_MCP_PORT`). Logs are saved under `%LOCALAPPDATA%\FlowMCP\port-18899`. If another launcher already owns the port, close it first so both shortcuts can manage the same process.
 
@@ -10,13 +10,14 @@ panel, using Flow's own credits (free with any Google account: 50 a day), not th
 It runs on your machine and uses this repo's Flow MCP Connector to control an existing, signed-in Chrome Flow tab with the native content-script driver by default. See [EXTENSION-PORT.md](EXTENSION-PORT.md) for setup.
 
 ```
-Claude / Codex → flow-mcp job queue → native extension commands → selected Chrome tab → Flow
+AI client → local stdio MCP → selected Chrome tab → Flow
+Extension side panel → extension queue → selected Chrome tab → Flow
 ```
 
 **MCP** = Model Context Protocol, the standard that lets Claude use outside tools.
 New here? [GETTING-STARTED.md](GETTING-STARTED.md) takes you from nothing to your first video, step by step, and
 [OVERVIEW.md](OVERVIEW.md) explains what it does in plain English, with no code names.
-For the backend-only Docker/Caddy VPS setup and its current limits, see [VPS-DEPLOYMENT.md](VPS-DEPLOYMENT.md).
+For the account-verification-only Docker/Caddy VPS setup, see [VPS-DEPLOYMENT.md](VPS-DEPLOYMENT.md).
 
 ---
 
@@ -61,7 +62,7 @@ npm run login
 That opens Flow in your regular browser. Load this repository's extension folder in Chrome (Developer mode → Load unpacked). For an existing installation, click Reload and confirm version 0.2.24. The extension connects automatically to the active Flow tab and follows when you switch to another Flow tab. The popup's reconnect button is only a recovery fallback. No token entry is required.
 You sign in yourself; the program never handles your Google password.
 
-With the VPS backend, the extension connects directly to the VPS over HTTPS long polling. The VPS also serves the MCP endpoint, so Codex and other remote MCP clients do not need a local Flow MCP process. The Flow browser tab stays on your computer; generation jobs, queues, uploads and outputs are handled by the VPS. Sign in to the extension first, then configure the MCP client with the device token shown in extension Options (keep it private).
+The extension handles Flow operations and its queue locally in the browser. The VPS is used only to verify the extension account and issue a revocable device token. MCP remains available as a separate local stdio process for AI clients; it uses the local extension connector and does not send Flow jobs through the account backend.
 
 ---
 
@@ -83,15 +84,15 @@ claude mcp add --scope user flow -- node /absolute/path/to/flow-mcp/dist/index.j
 { "mcpServers": { "flow": { "command": "node", "args": ["/absolute/path/to/flow-mcp/dist/index.js"] } } }
 ```
 
-**Codex**: set the environment variable `FLOW_MCP_DEVICE_TOKEN` to the device token shown in extension Options, then add to `~/.codex/config.toml` (on Windows, `%USERPROFILE%\.codex\config.toml`):
+**Codex**: add to `~/.codex/config.toml` (on Windows, `%USERPROFILE%\.codex\config.toml`):
 
 ```toml
 [mcp_servers.flow]
-url = "https://mcp.shopcongngheso5.io.vn/mcp"
-bearer_token_env_var = "FLOW_MCP_DEVICE_TOKEN"
+command = "node"
+args = ["/absolute/path/to/flow-mcp/dist/index.js"]
 ```
 
-Or run `codex mcp add flow --url https://mcp.shopcongngheso5.io.vn/mcp`. Then set `FLOW_MCP_DEVICE_TOKEN` in the environment used by Codex and configure `bearer_token_env_var` as above. No timeout setting is needed:
+The local MCP process uses the extension on the same computer. The extension side panel and MCP calls share its persistent Flow queue; MCP is the separate AI-facing entry point. No device token is needed by the MCP client. No timeout setting is needed:
 Codex, like most MCP apps, gives up on a tool call after 60 seconds, so any call that runs longer than about
 45 seconds (creating a character, a 1080p download) answers with a task id instead and keeps working, and
 `flow_wait` collects the result.
@@ -104,7 +105,7 @@ Codex, like most MCP apps, gives up on a tool call after 60 seconds, so any call
 { "mcpServers": { "flow": { "command": "node", "args": ["/absolute/path/to/flow-mcp/dist/index.js"] } } }
 ```
 
-**Other MCP apps** that support Streamable HTTP can connect to `https://mcp.shopcongngheso5.io.vn/mcp` with the same bearer token. This endpoint requires a signed-in device token and serves that device's own queue.
+Other MCP apps can use the same local stdio command format supported by their MCP client.
 
 Developed and tested with Claude. Codex and Antigravity speak the same protocol, so they should work the
 same way, but neither has been tried yet, so please report how it goes. Running two of them at once is safe:
@@ -145,7 +146,7 @@ npm run studio     # then open http://127.0.0.1:18899
 
 The Flow MCP Connector driver is the default. Build the project, start `npm start` (or `npm run studio`), and load/reload this repo's extension in your existing Flow Chrome profile. See [setup and maintenance notes](EXTENSION-PORT.md).
 
-The backend uses the selected Flow tab through this repository's extension. There is no driver setting or separate Chrome profile.
+The local MCP uses the selected Flow tab through this repository's extension. Extension-side queue tasks run in the browser independently of the MCP process and VPS account service.
 
 or double-click **Flow Studio.command** (Mac) or **Flow Studio.cmd** (Windows).
 
@@ -174,10 +175,10 @@ The panel ships with the repo but is not started for you: run `npm run studio` w
 Opening `studio/index.html` as a plain file does nothing; the page needs the server behind it, and
 says so in red if you try.
 
-Claude's own process serves the same panel while it runs. Whichever process starts first owns the
-Chrome tab and the job queue; the other talks to it over a local API, so Claude and the panel always
-agree on what is running. That API listens on 127.0.0.1 only and needs a per-run token
-(`~/.flow-mcp/token`).
+The optional Studio server and MCP process use a loopback relay to reach the extension connector.
+Flow jobs themselves stay in extension storage, so the side panel and MCP see the same queue. The
+relay listens on 127.0.0.1 by default and uses a local per-run token (`~/.flow-mcp/token`); the VPS
+authentication service is not in this Flow command path.
 
 ---
 

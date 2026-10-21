@@ -4,6 +4,62 @@
   let cachedStatus = null;
   const logs = [];
   let currentCharacters = [];
+  let flowProjects = [];
+  let flowAssets = [];
+
+  async function dispatchFlowOperation(operation, payload = {}) {
+    const response = await chrome.runtime.sendMessage({ type: "flow-mcp:dispatch", operation, payload });
+    if (!response?.ok) throw new Error(response?.error?.message || `Flow operation failed: ${operation}`);
+    return response.value;
+  }
+
+  async function assertQueueIdleForDirectAction() {
+    const response = await chrome.runtime.sendMessage({ type: "flow-queue:get" });
+    const jobs = response?.snapshot?.jobs || response?.jobs || [];
+    if (!response?.ok || response.isRunning || jobs.some(job => ["running", "queued", "pending"].includes(job.status))) {
+      throw new Error("Hãy đợi hàng đợi Flow trống trước khi thực hiện thao tác này.");
+    }
+  }
+
+  function showLibraryResult(value) {
+    const output = document.querySelector("#flowLibraryResult");
+    if (output) output.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  }
+
+  function fillSelect(select, items, getValue, getLabel, placeholder) {
+    if (!select) return;
+    const previous = select.value;
+    select.replaceChildren();
+    const empty = document.createElement("option");
+    empty.value = "";
+    empty.textContent = placeholder;
+    select.appendChild(empty);
+    for (const item of items) {
+      const value = String(getValue(item) || "");
+      if (!value) continue;
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = String(getLabel(item) || value);
+      select.appendChild(option);
+    }
+    if ([...select.options].some(option => option.value === previous)) select.value = previous;
+  }
+
+  async function runLibraryAction(button, action) {
+    if (button) button.disabled = true;
+    try {
+      const result = await action();
+      showLibraryResult(result ?? "Hoàn tất.");
+      setFeedback("Thao tác Flow hoàn tất.", true);
+      return result;
+    } catch (error) {
+      showLibraryResult(error.message || String(error));
+      setFeedback(error.message || String(error), false);
+      return null;
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
 
   function t(key, params) {
     return typeof I18n !== "undefined" ? I18n.t(key, params) : key;
@@ -140,7 +196,7 @@
         wsConnected: false,
         flowTabs: 0,
         selectedTabId: null,
-        bridge: "https://mcp.shopcongngheso5.io.vn",
+        bridge: "http://127.0.0.1:18899",
         error: err.message
       });
     }
@@ -203,9 +259,28 @@
   });
 
   let isGenerating = false;
+  let flowQueuePanel = null;
 
   // Listen for real-time progress broadcast from background/Flow
   chrome.runtime.onMessage.addListener(msg => {
+    if (msg?.type === "flow-queue:changed") {
+      const jobs = msg.snapshot?.jobs || msg.snapshot?.items || [];
+      const active = jobs.find(job => job.status === "running");
+      if (active?.progress?.message) setFeedback(`⏳ ${active.progress.message}`, true);
+      if (msg.reason === "job-finished") {
+        const finished = [...jobs].reverse().find(job => job.status === "completed" || job.status === "failed");
+        if (finished?.status === "completed") {
+          const isCharacter = finished.operation === "flow.character.create" || finished.operation === "flow.character.edit";
+          setFeedback(isCharacter ? "✅ Đã hoàn tất thao tác nhân vật trong Flow." : "✅ Tác vụ Flow hoàn tất.", true);
+          addLog(isCharacter ? "flow.character.create" : "flow.operation.complete", finished.label || finished.name || "Flow job", true);
+          if (isCharacter) void loadFlowCharacters();
+        } else if (finished?.status === "failed") {
+          setFeedback(`❌ ${finished.error || "Tác vụ Flow thất bại."}`, false);
+          addLog("flow.generation.failed", finished.error || "Flow job failed", false);
+        }
+      }
+      return;
+    }
     if (msg?.type === "flow-mcp:progress-broadcast" && msg.progress) {
       setFeedback(`⏳ ${msg.progress}`, true);
       addLog("Tiến trình", msg.progress, true);
@@ -219,7 +294,7 @@
     }
   });
 
-  async function executeGenerationTask({ type, prompt, aspect_ratio, count = 1, attachments = [], video_settings, btn, btnTextEl, defaultTextKey }) {
+  async function executeGenerationTask({ type, prompt, aspect_ratio, count = 1, model, attachments = [], video_settings, btn, btnTextEl, defaultTextKey }) {
     if (isGenerating) {
       setFeedback("Đang có tác vụ đang chạy, vui lòng đợi!", false);
       return;
@@ -228,62 +303,29 @@
     if (btn) btn.disabled = true;
 
     try {
-      setFeedback(t("sidebar.generating") || "Đang gửi lệnh tạo...", true);
-      addLog("flow.generation.submit", `[${type.toUpperCase()}] ${prompt.slice(0, 40)}...`, true);
-
-      // Bước 1: Gửi lệnh submit vào Google Flow
-      const submitRes = await chrome.runtime.sendMessage({
-        type: "flow-mcp:dispatch",
-        operation: "flow.generation.submit",
-        payload: {
+      const payload = {
           type,
           prompt,
+          ...(model ? { model } : {}),
           aspectRatio: aspect_ratio,
           aspect_ratio,
           variants: count,
           count,
           attachments,
           ...(video_settings || {})
-        }
+      };
+      const addResult = await chrome.runtime.sendMessage({
+        type: "flow-queue:add",
+        job: { operation: "flow.generation.submit", payload, label: `[${type.toUpperCase()}] ${prompt.slice(0, 96)}` }
       });
-
-      if (!submitRes?.ok) {
-        throw new Error(submitRes?.error?.message || "Lỗi gửi lệnh tạo");
-      }
-
-      const info = submitRes.value || {};
-      setFeedback("Đã gửi yêu cầu tạo. Đang theo dõi tiến trình render...", true);
-      addLog("flow.generation.observe", "Bắt đầu theo dõi render...", true);
-
-      // Bước 2: Theo dõi đến khi Flow render xong 100%
-      const observeRes = await chrome.runtime.sendMessage({
-        type: "flow-mcp:dispatch",
-        operation: "flow.generation.observe",
-        payload: {
-          before: info.before || [],
-          expectedCount: count,
-          variants: count,
-          correlationAttemptId: info.correlationAttemptId,
-          kind: type,
-          timeoutMs: type === "video" ? 600000 : 300000
-        }
-      });
-
-      if (!observeRes?.ok) {
-        throw new Error(observeRes?.error?.message || "Lỗi trong quá trình render");
-      }
-
-      const mediaList = observeRes.value?.media || [];
-      const countFinished = mediaList.length || count;
-      const doneMsg = type === "video"
-        ? `Tạo video hoàn tất! (${countFinished} video đã sẵn sàng)`
-        : `Tạo ảnh hoàn tất! (${countFinished} ảnh đã sẵn sàng)`;
-
-      setFeedback(`✅ ${doneMsg}`, true);
-      addLog("flow.generation.complete", doneMsg, true);
+      if (!addResult?.ok) throw new Error(addResult?.error?.message || "Không thể thêm tác vụ vào hàng đợi Flow");
+      const startResult = await chrome.runtime.sendMessage({ type: "flow-queue:resume" });
+      if (!startResult?.ok) throw new Error(startResult?.error?.message || "Không thể chạy hàng đợi Flow");
+      setFeedback("Đã thêm vào hàng đợi Flow.", true);
+      addLog("flow.queue.add", `[${type.toUpperCase()}] ${prompt.slice(0, 96)}`, true);
     } catch (err) {
       setFeedback(`❌ ${err.message}`, false);
-      addLog("Lỗi", err.message, false);
+      addLog("flow.queue.error", err.message, false);
     } finally {
       isGenerating = false;
       if (btn) btn.disabled = false;
@@ -400,8 +442,17 @@
     throw new Error("Dịch vụ tải ảnh lên Flow chưa được khởi tạo");
   }
 
+  async function assertQueueIdleForReferenceUpload() {
+    const state = await chrome.runtime.sendMessage({ type: "flow-queue:get" });
+    if (!state?.ok || state.isRunning) {
+      throw new Error("Hàng đợi Flow đang chạy. Hãy đợi tác vụ hiện tại hoàn tất rồi tải ảnh tham chiếu.");
+    }
+  }
+
   // SUBMIT TẠO ẢNH (GENERATE IMAGE)
   document.querySelector("#btnSubmitImage").onclick = async () => {
+    const btn = document.querySelector("#btnSubmitImage");
+    const btnTextEl = document.querySelector("#txtBtnSubmitImage");
     const prompt = document.querySelector("#inputPromptImage").value.trim();
     if (!prompt) {
       setFeedback("Vui lòng nhập câu lệnh prompt cho ảnh!", false);
@@ -417,32 +468,47 @@
       attachments.push({ assetName: `character:${character}` });
     }
 
-    // Upload các ảnh tham chiếu nếu có
-    if (refFilesImage.length > 0) {
-      for (let i = 0; i < refFilesImage.length; i++) {
-        setFeedback(`Đang tải ảnh tham chiếu ${i + 1}/${refFilesImage.length} lên Flow...`, true);
-        const uploadedName = await uploadReferenceImage(refFilesImage[i]);
-        attachments.push({ assetName: `asset:${uploadedName}` });
+    try {
+      if (btn) btn.disabled = true;
+      // Upload các ảnh tham chiếu nếu có
+      if (refFilesImage.length > 0) {
+        try { await assertQueueIdleForReferenceUpload(); }
+        catch (error) { setFeedback(error.message, false); return; }
+        for (let i = 0; i < refFilesImage.length; i++) {
+          setFeedback(`Đang tải ảnh tham chiếu ${i + 1}/${refFilesImage.length} lên Flow...`, true);
+          const uploaded = await uploadReferenceImage(refFilesImage[i]);
+          const uploadedName = typeof uploaded === "string" ? uploaded : (uploaded?.name || uploaded?.title || String(uploaded));
+          const uploadedId = typeof uploaded === "object" ? (uploaded?.id || uploaded?.mediaId) : undefined;
+          attachments.push({
+            assetName: `asset:${uploadedName}`,
+            ...(uploadedId ? { expectedId: uploadedId } : {})
+          });
+        }
       }
-    }
 
-    const btn = document.querySelector("#btnSubmitImage");
-    const btnTextEl = document.querySelector("#txtBtnSubmitImage");
-    await executeGenerationTask({
-      type: "image",
-      prompt,
-      aspect_ratio,
-      count,
-      model,
-      attachments,
-      btn,
-      btnTextEl,
-      defaultTextKey: "sidebar.btnGenerateImage"
-    });
+      await executeGenerationTask({
+        type: "image",
+        prompt,
+        aspect_ratio,
+        count,
+        model,
+        attachments,
+        btn,
+        btnTextEl,
+        defaultTextKey: "sidebar.btnGenerateImage"
+      });
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+    } finally {
+      if (btn) btn.disabled = false;
+      if (btnTextEl) btnTextEl.textContent = t("sidebar.btnGenerateImage");
+    }
   };
 
   // SUBMIT TẠO VIDEO (GENERATE VIDEO)
   document.querySelector("#btnSubmitVideo").onclick = async () => {
+    const btn = document.querySelector("#btnSubmitVideo");
+    const btnTextEl = document.querySelector("#txtBtnSubmitVideo");
     const prompt = document.querySelector("#inputPromptVideo").value.trim();
     if (!prompt) {
       setFeedback("Vui lòng nhập câu lệnh prompt cho video!", false);
@@ -460,33 +526,47 @@
       attachments.push({ assetName: `character:${character}` });
     }
 
-    // Upload các ảnh tham chiếu nếu có
-    if (refFilesVideo.length > 0) {
-      for (let i = 0; i < refFilesVideo.length; i++) {
-        setFeedback(`Đang tải ảnh tham chiếu ${i + 1}/${refFilesVideo.length} lên Flow...`, true);
-        const uploadedName = await uploadReferenceImage(refFilesVideo[i]);
-        attachments.push({ assetName: `asset:${uploadedName}` });
+    try {
+      if (btn) btn.disabled = true;
+      // Upload các ảnh tham chiếu nếu có
+      if (refFilesVideo.length > 0) {
+        try { await assertQueueIdleForReferenceUpload(); }
+        catch (error) { setFeedback(error.message, false); return; }
+        for (let i = 0; i < refFilesVideo.length; i++) {
+          setFeedback(`Đang tải ảnh tham chiếu ${i + 1}/${refFilesVideo.length} lên Flow...`, true);
+          const uploaded = await uploadReferenceImage(refFilesVideo[i]);
+          const uploadedName = typeof uploaded === "string" ? uploaded : (uploaded?.name || uploaded?.title || String(uploaded));
+          const uploadedId = typeof uploaded === "object" ? (uploaded?.id || uploaded?.mediaId) : undefined;
+          attachments.push({
+            assetName: `asset:${uploadedName}`,
+            ...(uploadedId ? { expectedId: uploadedId } : {})
+          });
+        }
       }
-    }
 
-    const btn = document.querySelector("#btnSubmitVideo");
-    const btnTextEl = document.querySelector("#txtBtnSubmitVideo");
-    await executeGenerationTask({
-      type: "video",
-      prompt,
-      aspect_ratio,
-      count: 1,
-      video_settings: {
-        mode,
-        duration,
-        model,
-        resolution
-      },
-      attachments,
-      btn,
-      btnTextEl,
-      defaultTextKey: "sidebar.btnGenerateVideo"
-    });
+      await executeGenerationTask({
+        type: "video",
+        prompt,
+        aspect_ratio,
+        count: 1,
+        video_settings: {
+          mode,
+          duration,
+          model,
+          resolution,
+          ...(document.querySelector("#flowVoiceSelect")?.value ? { voice: document.querySelector("#flowVoiceSelect").value } : {})
+        },
+        attachments,
+        btn,
+        btnTextEl,
+        defaultTextKey: "sidebar.btnGenerateVideo"
+      });
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+    } finally {
+      if (btn) btn.disabled = false;
+      if (btnTextEl) btnTextEl.textContent = t("sidebar.btnGenerateVideo");
+    }
   };
 
   // SUBMIT TẠO NHÂN VẬT (CREATE CHARACTER)
@@ -499,28 +579,165 @@
     const description = document.querySelector("#inputCharDesc").value.trim();
 
     setFeedback(t("sidebar.creatingChar"), true);
-    addLog("flow.character.create", `Tạo nhân vật: ${name}`, true);
+    addLog("flow.queue.add", `Tạo nhân vật: ${name}`, true);
 
     try {
       const res = await chrome.runtime.sendMessage({
-        type: "flow-mcp:dispatch",
-        operation: "flow.character.create",
-        payload: {
-          name,
-          description
-        }
+        type: "flow-queue:add",
+        job: { operation: "flow.character.create", payload: { name, describe: description }, label: `Nhân vật: ${name}` }
       });
-      if (!res?.ok) throw new Error(res?.error?.message || "Lỗi tạo nhân vật");
-      setFeedback(t("sidebar.charSuccess"), true);
-      addLog("flow.character.create", `Đã tạo nhân vật "${name}"!`, true);
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể thêm tác vụ tạo nhân vật vào hàng đợi");
+      const started = await chrome.runtime.sendMessage({ type: "flow-queue:resume" });
+      if (!started?.ok) throw new Error(started?.error?.message || "Không thể chạy hàng đợi Flow");
+      setFeedback("Đã thêm tác vụ tạo nhân vật vào hàng đợi Flow.", true);
       document.querySelector("#inputCharName").value = "";
       document.querySelector("#inputCharDesc").value = "";
-      await loadFlowCharacters();
     } catch (err) {
       setFeedback(err.message, false);
-      addLog("flow.character.create", err.message, false);
+      addLog("flow.character.create.error", err.message, false);
     }
   };
+
+  document.querySelector("#btnRefreshProjects").onclick = event => runLibraryAction(event.currentTarget, async () => {
+    const result = await dispatchFlowOperation("flow.projects.list");
+    flowProjects = Array.isArray(result) ? result : (result?.projects || []);
+    fillSelect(document.querySelector("#flowProjectSelect"), flowProjects,
+      project => project.id || project.projectId || project.project_id,
+      project => project.name || project.title || project.id || project.projectId,
+      "Chọn dự án");
+    return { projects: flowProjects.length };
+  });
+
+  document.querySelector("#btnCreateProject").onclick = event => runLibraryAction(event.currentTarget, async () => {
+    await assertQueueIdleForDirectAction();
+    const result = await dispatchFlowOperation("flow.project.create");
+    await dispatchFlowOperation("flow.projects.list").then(items => {
+      flowProjects = Array.isArray(items) ? items : (items?.projects || []);
+      fillSelect(document.querySelector("#flowProjectSelect"), flowProjects,
+        project => project.id || project.projectId || project.project_id,
+        project => project.name || project.title || project.id || project.projectId,
+        "Chọn dự án");
+    }).catch(() => {});
+    return result;
+  });
+
+  document.querySelector("#btnOpenProject").onclick = event => runLibraryAction(event.currentTarget, async () => {
+    const projectId = document.querySelector("#flowProjectSelect").value;
+    if (!projectId) throw new Error("Hãy chọn một dự án.");
+    await assertQueueIdleForDirectAction();
+    return dispatchFlowOperation("flow.project.open", { projectId, language: "en" });
+  });
+
+  document.querySelector("#btnRefreshAssets").onclick = event => runLibraryAction(event.currentTarget, async () => {
+    const result = await dispatchFlowOperation("flow.assets.list");
+    flowAssets = Array.isArray(result) ? result : (result?.assets || []);
+    fillSelect(document.querySelector("#flowAssetSelect"), flowAssets,
+      (asset, index) => asset.id || asset.name || String(index),
+      asset => asset.name || asset.title || asset.id,
+      "Chọn tài sản");
+    return { assets: flowAssets.length };
+  });
+
+  function selectedFlowAsset() {
+    const value = document.querySelector("#flowAssetSelect").value;
+    return flowAssets.find((asset, index) => String(asset.id || asset.name || index) === value) || null;
+  }
+
+  document.querySelector("#btnDownloadAsset").onclick = event => runLibraryAction(event.currentTarget, async () => {
+    const asset = selectedFlowAsset();
+    if (!asset) throw new Error("Hãy chọn một tài sản.");
+    await assertQueueIdleForDirectAction();
+    return dispatchFlowOperation("flow.asset.download", { name: asset.name || asset.title, id: asset.id, quality: "original" });
+  });
+
+  document.querySelector("#btnRenameAsset").onclick = event => runLibraryAction(event.currentTarget, async () => {
+    const asset = selectedFlowAsset();
+    const newName = document.querySelector("#flowAssetNewName").value.trim();
+    if (!asset || !newName) throw new Error("Chọn tài sản và nhập tên mới.");
+    await assertQueueIdleForDirectAction();
+    const result = await dispatchFlowOperation("flow.asset.rename", { name: asset.name || asset.title, id: asset.id, newName });
+    document.querySelector("#flowAssetNewName").value = "";
+    return result;
+  });
+
+  document.querySelector("#btnTrashAsset").onclick = event => runLibraryAction(event.currentTarget, async () => {
+    const asset = selectedFlowAsset();
+    if (!asset) throw new Error("Hãy chọn một tài sản.");
+    if (!window.confirm(`Chuyển “${asset.name || asset.title}” vào thùng rác Flow?`)) return "Đã hủy.";
+    await assertQueueIdleForDirectAction();
+    const result = await dispatchFlowOperation("flow.asset.trash", { name: asset.name || asset.title, id: asset.id });
+    return result;
+  });
+
+  document.querySelector("#btnRefreshLibraryCharacters").onclick = event => runLibraryAction(event.currentTarget, async () => {
+    const result = await dispatchFlowOperation("flow.characters.list");
+    currentCharacters = Array.isArray(result) ? result : (result?.characters || []);
+    populateCharacterSelects();
+    fillSelect(document.querySelector("#flowLibraryCharacterSelect"), currentCharacters,
+      character => typeof character === "string" ? character : character.name,
+      character => typeof character === "string" ? character : character.name,
+      "Chọn nhân vật");
+    return { characters: currentCharacters.length };
+  });
+
+  document.querySelector("#btnEditCharacter").onclick = async event => {
+    const selected = document.querySelector("#flowLibraryCharacterSelect").value;
+    const rename = document.querySelector("#flowCharacterNewName").value.trim();
+    const change = document.querySelector("#flowCharacterChange").value.trim();
+    if (!selected || (!rename && !change)) {
+      setFeedback("Chọn nhân vật và nhập tên mới hoặc mô tả thay đổi.", false);
+      return;
+    }
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      const response = await chrome.runtime.sendMessage({ type: "flow-queue:add", job: {
+        operation: "flow.character.edit", payload: { name: selected, ...(rename ? { rename } : {}), ...(change ? { change } : {}) },
+        label: `Chỉnh sửa nhân vật: ${selected}`
+      }});
+      if (!response?.ok) throw new Error(response?.error?.message || "Không thể thêm chỉnh sửa vào hàng đợi.");
+      const started = await chrome.runtime.sendMessage({ type: "flow-queue:resume" });
+      if (!started?.ok) throw new Error(started?.error?.message || "Không thể chạy hàng đợi Flow.");
+      document.querySelector("#flowCharacterNewName").value = "";
+      document.querySelector("#flowCharacterChange").value = "";
+      setFeedback("Đã đưa chỉnh sửa nhân vật vào hàng đợi Flow.", true);
+      showLibraryResult({ queued: true, operation: "flow.character.edit", name: selected });
+    } catch (error) { setFeedback(error.message, false); showLibraryResult(error.message); }
+    finally { button.disabled = false; }
+  };
+
+  document.querySelector("#btnAttachReferences").onclick = event => runLibraryAction(event.currentTarget, async () => {
+    const references = document.querySelector("#flowReferenceInput").value.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+    if (!references.length) throw new Error("Nhập ít nhất một tham chiếu.");
+    await assertQueueIdleForDirectAction();
+    return dispatchFlowOperation("flow.references.attach", { references });
+  });
+
+  document.querySelector("#btnClearReferences").onclick = event => runLibraryAction(event.currentTarget, async () => {
+    await assertQueueIdleForDirectAction();
+    return dispatchFlowOperation("flow.references.clear", {});
+  });
+
+  document.querySelector("#btnUploadMedia").onclick = event => runLibraryAction(event.currentTarget, async () => {
+    const file = document.querySelector("#flowUploadFile").files?.[0];
+    if (!file) throw new Error("Chọn một tệp ảnh hoặc video.");
+    if (!window.FlowUploadClient) throw new Error("Dịch vụ tải media lên chưa sẵn sàng.");
+    await assertQueueIdleForDirectAction();
+    const kind = file.type.startsWith("video/") ? "video" : "image";
+    const uploaded = await window.FlowUploadClient.upload(file, { kind, onProgress: progress => setFeedback(`Đang tải tệp lên Flow: ${progress}%`, true) });
+    document.querySelector("#flowUploadFile").value = "";
+    return uploaded;
+  });
+
+  document.querySelector("#btnLoadVoices").onclick = event => runLibraryAction(event.currentTarget, async () => {
+    const result = await dispatchFlowOperation("flow.voices.options");
+    const voices = Array.isArray(result?.voices) ? result.voices : [];
+    fillSelect(document.querySelector("#flowVoiceSelect"), voices,
+      voice => typeof voice === "string" ? voice : voice.name,
+      voice => typeof voice === "string" ? voice : voice.name,
+      "Không dùng giọng nói");
+    return result;
+  });
 
   // Language switch
   document.querySelector("#langSwitchBtn").onclick = async () => {
@@ -591,6 +808,8 @@
 
   // Initialize
   const initLocale = typeof I18n !== "undefined" ? I18n.init() : Promise.resolve();
+  const queueContainer = document.querySelector("#flowQueuePanel");
+  if (queueContainer && window.FlowQueuePanel) flowQueuePanel = new window.FlowQueuePanel(queueContainer).mount();
   initLocale.then(() => {
     applyLanguage();
     return fetchStatus();

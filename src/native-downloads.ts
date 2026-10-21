@@ -5,7 +5,7 @@ import { extname, join } from "node:path";
 import { extensionDownloadChunk, extensionDownloads } from "./extension.js";
 import { extractZip } from "./platform.js";
 import type { DownloadQuality, NativeMedia } from "./types.js";
-import type { Job } from "./queue.js";
+import type { Job } from "./job-types.js";
 import { nativeOperation } from "./flow.js";
 import { DEFAULT_TRANSFER_LIMITS, DownloadChunkCollector } from "./native-file-transfer.js";
 
@@ -143,6 +143,56 @@ export async function downloadNativeResults(
       }
     } finally {
       if (source.startsWith(join(outputDir, `flow-transfer-`))) rmSync(source, { force: true });
+    }
+  }
+  return files;
+}
+
+/** Materialize browser downloads that the extension already completed inside its queue runner. */
+export async function materializeQueuedNativeDownloads(
+  downloads: Array<{ id: number; fileStem?: string }>,
+  outputDir: string,
+  fileStem: string,
+  job?: Job,
+): Promise<string[]> {
+  mkdirSync(outputDir, { recursive: true });
+  const files: string[] = [];
+  for (const [index, queued] of downloads.entries()) {
+    const stem = join(outputDir, queued.fileStem || (downloads.length > 1 ? `${fileStem}-v${index + 1}` : fileStem));
+    let download: NativeDownload | undefined;
+    const deadline = Date.now() + 12 * 60_000;
+    while (Date.now() < deadline) {
+      download = (await extensionDownloads()).find(item => item.id === queued.id);
+      if (!download) {
+        await new Promise(resolve => setTimeout(resolve, 750));
+        continue;
+      }
+      if (download.state === "complete" && download.filename && (download.totalBytes > 0 || download.bytesReceived > 0)) break;
+      if (download.state === "interrupted") {
+        throw Object.assign(new Error(`Chrome download failed: ${download.error ?? "unknown error"} (${download.bytesReceived}/${download.totalBytes} bytes). The media remains in Flow.`), {
+          code: "FLOW_DOWNLOAD_FAILED", retryable: false, outcome_unknown: false,
+        });
+      }
+      job && (job.progress = download.totalBytes > 0
+        ? `Downloading ${Math.min(100, Math.floor(download.bytesReceived * 100 / download.totalBytes))}%`
+        : "Waiting for Chrome download");
+      await new Promise(resolve => setTimeout(resolve, 750));
+    }
+    if (!download || download.state !== "complete" || !download.filename) {
+      throw Object.assign(new Error("The extension queue's Flow download did not finish in time. The media remains in Flow."), {
+        code: "FLOW_DOWNLOAD_FAILED", retryable: false, outcome_unknown: false,
+      });
+    }
+    const source = await materializeNativeDownload(download, outputDir, progress => { if (job) job.progress = progress; });
+    try {
+      if (extname(source).toLowerCase() === ".zip") files.push(...unpackTakes(source, stem));
+      else {
+        const destination = `${stem}${extensionOf(source)}`;
+        copyFileSync(source, destination);
+        files.push(destination);
+      }
+    } finally {
+      if (source.startsWith(join(outputDir, "flow-transfer-"))) rmSync(source, { force: true });
     }
   }
   return files;

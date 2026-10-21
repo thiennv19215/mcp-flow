@@ -982,6 +982,64 @@
       </div>
 
       <div class="feedback-box" id="feedbackBox"></div>
+      <div class="section-card" id="flowQueuePanel" aria-label="Hàng đợi Flow"></div>
+
+      <details class="section-card" id="flowLibraryTools">
+        <summary class="section-title" style="cursor:pointer">Thư viện và thao tác Flow</summary>
+        <div class="form-group">
+          <label class="form-label" for="flowProjectSelect">Dự án</label>
+          <select class="form-select" id="flowProjectSelect"><option value="">Tải danh sách dự án</option></select>
+          <div class="grid-2" style="margin-top:8px">
+            <button type="button" class="btn btn-secondary" id="btnRefreshProjects">Làm mới dự án</button>
+            <button type="button" class="btn btn-secondary" id="btnOpenProject">Mở dự án</button>
+          </div>
+          <button type="button" class="btn btn-primary" id="btnCreateProject" style="margin-top:8px">Tạo dự án mới</button>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="flowAssetSelect">Tài sản</label>
+          <select class="form-select" id="flowAssetSelect"><option value="">Tải danh sách tài sản</option></select>
+          <div class="grid-2" style="margin-top:8px">
+            <button type="button" class="btn btn-secondary" id="btnRefreshAssets">Làm mới tài sản</button>
+            <button type="button" class="btn btn-secondary" id="btnDownloadAsset">Tải xuống</button>
+          </div>
+          <div class="grid-2" style="margin-top:8px">
+            <input type="text" class="form-input" id="flowAssetNewName" placeholder="Tên mới" aria-label="Tên tài sản mới">
+            <button type="button" class="btn btn-secondary" id="btnRenameAsset">Đổi tên</button>
+          </div>
+          <button type="button" class="btn btn-secondary" id="btnTrashAsset" style="margin-top:8px">Chuyển vào thùng rác</button>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="flowLibraryCharacterSelect">Nhân vật</label>
+          <select class="form-select" id="flowLibraryCharacterSelect"><option value="">Tải danh sách nhân vật</option></select>
+          <button type="button" class="btn btn-secondary" id="btnRefreshLibraryCharacters" style="margin-top:8px">Làm mới nhân vật</button>
+          <input type="text" class="form-input" id="flowCharacterNewName" placeholder="Tên nhân vật mới" style="margin-top:8px">
+          <textarea class="form-textarea" id="flowCharacterChange" placeholder="Mô tả thay đổi cho nhân vật" style="margin-top:8px"></textarea>
+          <button type="button" class="btn btn-secondary" id="btnEditCharacter" style="margin-top:8px">Đưa chỉnh sửa vào hàng đợi</button>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="flowReferenceInput">Gắn tham chiếu (mỗi dòng một tên, ví dụ asset:Tên ảnh)</label>
+          <textarea class="form-textarea" id="flowReferenceInput" placeholder="asset:Tên ảnh\ncharacter:Tên nhân vật"></textarea>
+          <div class="grid-2" style="margin-top:8px">
+            <button type="button" class="btn btn-secondary" id="btnAttachReferences">Gắn tham chiếu</button>
+            <button type="button" class="btn btn-secondary" id="btnClearReferences">Xóa tham chiếu</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="flowUploadFile">Tải media lên Flow</label>
+          <input type="file" class="form-input" id="flowUploadFile" accept="image/*,video/*">
+          <button type="button" class="btn btn-secondary" id="btnUploadMedia" style="margin-top:8px">Tải tệp lên</button>
+        </div>
+
+        <div class="form-group">
+          <button type="button" class="btn btn-secondary" id="btnLoadVoices">Xem tùy chọn giọng nói</button>
+          <select class="form-select" id="flowVoiceSelect" style="margin-top:8px"><option value="">Không dùng giọng nói</option></select>
+        </div>
+        <pre id="flowLibraryResult" style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;color:var(--text-muted);margin:8px 0 0"></pre>
+      </details>
     </div>
 
     <!-- TAB 2: STATUS & CONTROL -->
@@ -992,7 +1050,7 @@
             <span class="pulse-dot"></span>
             <span id="wsText">Đang kiểm tra…</span>
           </span>
-          <span class="info-tag" id="bridgeSummary">mcp.shopcongngheso5.io.vn</span>
+          <span class="info-tag" id="bridgeSummary">MCP local · 127.0.0.1:18899</span>
         </div>
 
         <div class="info-list">
@@ -1062,9 +1120,9 @@
     <div id="tab-settings" class="tab-pane">
       <div class="section-card">
         <div class="form-group">
-          <label class="form-label">Backend Flow MCP:</label>
-          <span class="info-tag">mcp.shopcongngheso5.io.vn</span>
-          <small style="display:block;margin-top:8px;color:var(--text-muted)">Đăng nhập một lần bằng tài khoản và mật khẩu trong Cài đặt extension.</small>
+          <label class="form-label">Xác thực tài khoản:</label>
+          <span class="info-tag">https://mcp.shopcongngheso5.io.vn</span>
+          <small style="display:block;margin-top:8px;color:var(--text-muted)">Flow chạy trực tiếp trong extension; AI MCP chạy riêng trên máy này.</small>
         </div>
 
         <button class="btn btn-primary" id="btnPairSettings">Đăng nhập tài khoản</button>
@@ -1074,6 +1132,7 @@
 
   <script src="../content/shared/I18n.js"></script>
   <script src="flow-upload-client.js"></script>
+  <script src="flow-queue-panel.js"></script>
   <script src="sidebar.js"></script>
 </body>
 </html>

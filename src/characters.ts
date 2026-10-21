@@ -4,7 +4,7 @@ import { dirname, extname, join } from "node:path";
 import { castDirForContext, HOME_DIR } from "./paths.js";
 import { currentDeviceContext } from "./request-context.js";
 import type { CharacterParams, NativeMedia } from "./types.js";
-import type { Job } from "./queue.js";
+import type { Job } from "./job-types.js";
 import { nativeOperation, requireCapabilities } from "./flow.js";
 import { stageNativeMedia, cleanStagedFiles } from "./flow-transfer.js";
 import { downloadNativeResults, extensionOf, nativeDownloadIds, waitForNativeDownload } from "./native-downloads.js";

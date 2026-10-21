@@ -3,7 +3,14 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
+const uploaderSource = readFileSync(new URL('../extension/content/providers/flow/FlowUploader.js', import.meta.url), 'utf8');
 const source = readFileSync(new URL('../extension/content/providers/flow/FlowComponents.js', import.meta.url), 'utf8');
+
+function runInContext(context) {
+  vm.runInContext(uploaderSource, context);
+  vm.runInContext(source, context);
+  return context;
+}
 
 function uploadHarness({ tileKind, name = 'same-name.png' }) {
   const mediaId = '22222222-2222-4222-8222-222222222222';
@@ -26,7 +33,7 @@ function uploadHarness({ tileKind, name = 'same-name.png' }) {
     scrollContainer: () => null,
     flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
   });
-  vm.runInContext(source, context);
+  runInContext(context);
   return { components: context.FlowComponents, mediaId };
 }
 
@@ -75,7 +82,7 @@ test('a missing uploaded tile returns bounded scan evidence and an unknown outco
     emitFlowProgress: () => {},
     flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
   });
-  vm.runInContext(source, context);
+  runInContext(context);
 
   let caught;
   try {
@@ -125,7 +132,7 @@ test('video upload confirmation reports and clicks a recognized control', async 
     FlowUiDeadline: { boundedWait: async () => {} },
     flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
   });
-  vm.runInContext(source, context);
+  runInContext(context);
   const result = await context.confirmFlowVideoUploadIfPrompted(Date.now() + 5000);
   assert.deepEqual(JSON.parse(JSON.stringify(result)), {
     confirmationDialogSeen: true,
@@ -152,7 +159,7 @@ test('video upload confirmation waits briefly for a dialog that mounts after fil
     wait: async ms => { ticks += ms; },
     flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
   });
-  vm.runInContext(source, context);
+  runInContext(context);
   const result = await context.confirmFlowVideoUploadIfPrompted(Date.now() + 5000);
   assert.equal(result.confirmationButtonClicked, true);
   assert.equal(result.confirmationDialogUnrecognized, false);
@@ -173,7 +180,7 @@ test('video upload confirmation fails safely on an unrecognized dialog and redac
     FlowUiDeadline: { boundedWait: async () => {} },
     flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
   });
-  vm.runInContext(source, context);
+  runInContext(context);
   await assert.rejects(
     context.confirmFlowVideoUploadIfPrompted(Date.now() + 10_000, undefined, {
       filePickerSelectionConfirmed: true,
@@ -213,7 +220,7 @@ test('video upload confirmation rejects multiple independent dialogs without cli
     FlowUiDeadline: { boundedWait: async () => {} },
     flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
   });
-  vm.runInContext(source, context);
+  runInContext(context);
   await assert.rejects(context.confirmFlowVideoUploadIfPrompted(Date.now() + 5000), error => {
     assert.equal(error.code, 'FLOW_UPLOAD_CONFIRMATION_AMBIGUOUS');
     assert.equal(error.outcome_unknown, true);
@@ -246,7 +253,7 @@ test('video upload confirmation rejects duplicate enabled controls without click
     FlowUiDeadline: { boundedWait: async () => {} },
     flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
   });
-  vm.runInContext(source, context);
+  runInContext(context);
   await assert.rejects(context.confirmFlowVideoUploadIfPrompted(Date.now() + 5000), error => {
     assert.equal(error.code, 'FLOW_UPLOAD_CONFIRMATION_AMBIGUOUS');
     assert.equal(error.outcome_unknown, true);
@@ -266,7 +273,7 @@ test('matchesFlowTile correctly resolves Vietnamese and English prefixed/suffixe
     visible: () => true,
     normalizeFlowUiText: s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim(),
   });
-  vm.runInContext(source, context);
+  runInContext(context);
 
   const makeTile = ariaLabel => ({
     getAttribute: attr => attr === 'aria-label' ? ariaLabel : null,
@@ -297,7 +304,7 @@ test('flowUploadNameMatches matches bilingual asset names', () => {
   const context = vm.createContext({
     normalizeFlowUiText: s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim(),
   });
-  vm.runInContext(source, context);
+  runInContext(context);
 
   const file = 'ref-portrait-555.png';
   assert.equal(context.flowUploadNameMatches('Hình ảnh ref-portrait-555.png', file), true);
@@ -323,7 +330,7 @@ test('video upload confirmation recognizes Vietnamese buttons like "Đồng ý v
     FlowUiDeadline: { boundedWait: async () => {} },
     flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
   });
-  vm.runInContext(source, context);
+  runInContext(context);
   const result = await context.confirmFlowVideoUploadIfPrompted(Date.now() + 5000);
   assert.equal(result.confirmationButtonClicked, true);
   assert.equal(clicks, 1);
@@ -360,7 +367,7 @@ test('findAddMediaButton finds Vietnamese composer add button', () => {
     document: { querySelector: () => editor },
     normalizeFlowUiText: s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim(),
   });
-  vm.runInContext(source, context);
+  runInContext(context);
 
   const found = context.findAddMediaButton();
   assert.equal(found, addBtn);

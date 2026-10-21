@@ -6,7 +6,7 @@ import { auditLatestJob, auditRequestDiagnostics } from './audit-native-report.m
 import { assertVerifiedQuoteWithinCap, parseAuditOptions } from './audit-native-options.mjs';
 import { buildCharacterSnapshot, runCharacterCreateAudit } from './audit-native-character.mjs';
 
-const configuredBase = process.env.FLOW_LOCAL_API_BASE || 'http://127.0.0.1:18897';
+const configuredBase = process.env.FLOW_LOCAL_API_BASE || 'http://127.0.0.1:18899';
 const baseUrl = new URL(configuredBase);
 const loopbackHosts = new Set(['127.0.0.1', 'localhost', '[::1]']);
 if (baseUrl.protocol !== 'http:' || !loopbackHosts.has(baseUrl.hostname) || baseUrl.username || baseUrl.password ||

@@ -1,6 +1,6 @@
 import { copyFileSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
-import type { FrameAssetInput, Job } from "./queue.js";
+import type { FrameAssetInput, Job } from "./job-types.js";
 import { executeFlowDom, extensionSupportsCapability } from "./extension.js";
 import { nativeDownloadIds, waitForNativeDownload, downloadNativeResults, extensionOf, materializeNativeDownload, unpackTakes } from "./native-downloads.js";
 import { uploadFlowMediaToProject, getCachedProjectMedia, cacheProjectMedia } from "./flow-transfer.js";

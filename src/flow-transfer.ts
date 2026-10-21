@@ -2,7 +2,7 @@ import { copyFileSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:
 import { createHash, randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { extname, join } from "node:path";
-import type { Job } from "./queue.js";
+import type { Job } from "./job-types.js";
 import { streamFileChunks, type FileChunk } from "./native-file-transfer.js";
 import { nativeOperation, requireCapabilities } from "./flow.js";
 

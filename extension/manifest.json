@@ -12,6 +12,7 @@
   },
   "permissions": [
     "storage",
+    "unlimitedStorage",
     "tabs",
     "alarms",
     "downloads",
@@ -35,12 +36,12 @@
     "https://storage.googleapis.com/*",
     "https://*.usercontent.goog/*",
     "https://mcp.shopcongngheso5.io.vn/*",
-    "http://127.0.0.1:18897/*",
-    "http://localhost:18897/*",
+    "http://127.0.0.1:18899/*",
+    "http://localhost:18899/*",
     "http://127.0.0.1:18898/*"
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' http://127.0.0.1:18898 http://127.0.0.1:18897 http://localhost:18897 https://flow.google.com https://*.googleusercontent.com https://*.googleapis.com https://storage.googleapis.com https://*.usercontent.goog https://mcp.shopcongngheso5.io.vn wss://mcp.shopcongngheso5.io.vn"
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' http://127.0.0.1:18898 http://127.0.0.1:18899 http://localhost:18899 https://flow.google.com https://*.googleusercontent.com https://*.googleapis.com https://storage.googleapis.com https://*.usercontent.goog https://mcp.shopcongngheso5.io.vn"
   },
   "background": {
     "service_worker": "background/service-worker.js",
@@ -75,6 +76,7 @@
         "content/providers/flow/FlowNavigation.js",
         "content/providers/flow/FlowEditor.js",
         "content/providers/flow/FlowSettings.js",
+        "content/providers/flow/FlowUploader.js",
         "content/providers/flow/FlowComponents.js",
         "content/providers/flow/FlowCharacters.js",
         "content/providers/flow/FlowTiles.js",

@@ -1,41 +1,11 @@
-#!/usr/bin/env node
-// HTTP-only entry point for a VPS/container. Unlike index.ts, this does not attach an MCP stdio transport.
-import { LocalCore } from "./core.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import type { IncomingMessage, ServerResponse } from "node:http";
-import { createFlowMcpServer } from "./mcp-tools.js";
-import { HOST, PORT, PUBLIC_URL, startServer } from "./server.js";
+// Deprecated compatibility entry point. VPS serving is auth-only; the local MCP
+// stdio entry remains `src/index.ts` and is intentionally separate.
+import { AUTH_HOST, AUTH_PORT, AUTH_PUBLIC_URL, startAuthServer } from "./auth-server.js";
 
-const deviceCores = new Map<string, LocalCore>();
-const local = new LocalCore();
-const getDeviceCore = (deviceId: string): LocalCore => {
-  let deviceCore = deviceCores.get(deviceId);
-  if (!deviceCore) deviceCores.set(deviceId, (deviceCore = new LocalCore(deviceId)));
-  return deviceCore;
-};
-const suspendDeviceCore = (deviceId: string) => deviceCores.get(deviceId)?.suspendDevice();
-type RemoteMcpRuntime = { server: ReturnType<typeof createFlowMcpServer>; transport: StreamableHTTPServerTransport };
-const remoteMcpRuntimes = new Map<string, RemoteMcpRuntime>();
-const handleRemoteMcp = async (
-  device: { user_id: string; device_id: string; label: string },
-  req: IncomingMessage,
-  res: ServerResponse,
-  body: unknown,
-) => {
-  let runtime = remoteMcpRuntimes.get(device.device_id);
-  if (!runtime) {
-    const server = createFlowMcpServer(getDeviceCore(device.device_id), PUBLIC_URL);
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-    await server.connect(transport);
-    runtime = { server, transport };
-    remoteMcpRuntimes.set(device.device_id, runtime);
-  }
-  await runtime.transport.handleRequest(req, res, body);
-};
-const role = await startServer(local, getDeviceCore, suspendDeviceCore, undefined, handleRemoteMcp);
-if (role !== "owner") {
-  console.error(`Could not own Flow MCP server at ${HOST}:${PORT} (role: ${role}).`);
-  process.exit(1);
-}
+console.warn("`dist/serve.js` is deprecated; use `npm run serve` for the auth-only service.");
+const server = await startAuthServer();
+console.log(`Flow Auth listening at http://${AUTH_HOST}:${AUTH_PORT}${AUTH_PUBLIC_URL ? ` (${AUTH_PUBLIC_URL})` : ""}`);
 
-console.log(`Flow MCP server listening on ${HOST}:${PORT}${PUBLIC_URL ? ` (${PUBLIC_URL})` : ""}`);
+const stop = () => server.close(() => process.exit(0));
+process.once("SIGINT", stop);
+process.once("SIGTERM", stop);

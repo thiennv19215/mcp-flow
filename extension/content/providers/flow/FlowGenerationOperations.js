@@ -34,7 +34,8 @@
       return null;
     }
     selectFrameAsset(components, value, slot, options) {
-      return components.chooseNativePickerAsset(value.assetName, slot, {
+      const assetName = String(value.assetName || value || "").replace(/^asset:/i, "").trim();
+      return components.chooseNativePickerAsset(assetName, slot, {
         ...options,
         ...(value.expectedId ? { expectedId: value.expectedId } : {}),
       });
@@ -599,6 +600,11 @@
 
             if (correlationEntry && !correlationEntry.requestSeen && Date.now() - correlationEntry.armedAt >= 30000) {
               correlationEntry.useTilesFallback = true;
+            }
+            if (correlationEntry && Date.now() - observeStartedAt >= 15000 && !correlationEntry.useTilesFallback) {
+              const candidateReceipt = tiles.nativeFlowCorrelationReceipt(correlationAttemptId);
+              const capturedCount = (candidateReceipt?.mediaIds || []).length + (candidateReceipt?.children || []).length;
+              if (capturedCount === 0) correlationEntry.useTilesFallback = true;
             }
             const strictCorrelation = correlationEntry && !correlationEntry.useTilesFallback;
             const receipt = correlationEntry ? tiles.nativeFlowCorrelationReceipt(correlationAttemptId) : null;

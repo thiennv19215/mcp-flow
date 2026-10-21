@@ -127,7 +127,7 @@ initLocale.then(() => {
     wsConnected: false,
     flowTabs: 0,
     selectedTabId: null,
-    bridge: "https://mcp.shopcongngheso5.io.vn",
+    bridge: "http://127.0.0.1:18899",
     error: err.message
   });
 });

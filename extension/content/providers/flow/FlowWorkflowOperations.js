@@ -10,6 +10,7 @@
         "flow.edit.run",
         "flow.agent.batch",
         "flow.continue.run",
+        "flow.frame.extract_last",
       ].includes(operation);
     }
     error(...args) {
@@ -62,6 +63,111 @@
         throw this.error("FLOW_SUBMIT_DISABLED", "Flow's Agent submit button was not enabled after the prompt was entered; nothing was submitted.", false, false);
       }
       return { agent_mode: true, prompt_characters: actualPrompt.length, submit_enabled: true };
+    }
+    agentSceneMatches(scenes, prompts) {
+      const stopWords = new Set("the and with from into over under that this then than are was for her his its their onto next near across wide shot close scene image".split(" "));
+      const words = text => new Set(String(text || "").toLowerCase().match(/[a-z0-9']{3,}/g)?.filter(word => !stopWords.has(word)) || []);
+      const sceneWords = scenes.map(words);
+      const pairs = [];
+      prompts.forEach((prompt, tile) => {
+        const have = words(prompt);
+        sceneWords.forEach((want, scene) => {
+          const hit = [...want].filter(word => have.has(word)).length;
+          pairs.push({ scene, tile, score: want.size ? hit / want.size : 0 });
+        });
+      });
+      pairs.sort((a, b) => b.score - a.score);
+      const result = scenes.map(() => []);
+      const usedTiles = new Set();
+      for (const firstPass of [true, false]) for (const { scene, tile, score } of pairs) {
+        if (score < 0.5 || usedTiles.has(tile) || (firstPass && result[scene].length)) continue;
+        result[scene].push(tile);
+        usedTiles.add(tile);
+      }
+      return result;
+    }
+    async runAgentBatchPass(params, command, deadline, before) {
+      const nav = root.FlowNavigation, editor = root.FlowEditor, tiles = root.FlowTiles, agent = root.FlowAgent;
+      let submitted = false, outcomeUnknown = false, submitOnlyDispatched = false;
+      try {
+        await agent.closeNativeAgentSession();
+        const activeAgent = root.flowButton?.("Agent");
+        if (activeAgent?.getAttribute("aria-pressed") === "true") await agent.setNativeAgentMode(false);
+        await nav.ensureFlowLibrarySection("All media", { deadline });
+        await agent.setNativeAgentMode(true);
+        const agentSettingsEvidence = await agent.setNativeAgentSettings("Always", params.aspect_ratio || "16:9");
+        await root.FlowSettings?.chooseNativeModel?.("Nano Banana", "image", { deadline });
+        const box = document.querySelector(".ProseMirror");
+        if (!box) throw this.error("FLOW_AGENT_COMPOSER_MISSING", "Flow's Agent composer is not visible.", true);
+        const scenes = params.agent_scenes || [];
+        const sceneText = scenes.map((scene, index) => `Scene ${index + 1}: ${String(scene).replace(/\s+/g, " ").trim()}`).join("\n");
+        const script = `Generate exactly ${scenes.length} separate images: one image for each scene below, in the listed scene order. Do not combine scenes into a collage or a single image. Images only, never video. ${params.aspect_ratio || "16:9"} aspect ratio. Do not ask questions; generate them now.\n${sceneText}`;
+        root.setEditable?.(box, script);
+        await this.waitWorkflow(deadline, 300, "entering the Flow Agent batch prompt");
+        const preflight = { ...this.verifyAgentBatchPreflight({ editor, box, prompt: script }), agent_settings: agentSettingsEvidence };
+        const evidence = await this.submitAndConfirmDispatch({
+          editor, tiles, command, prompt: script, mediaType: "image", expectedQuantity: scenes.length, deadline,
+          checkConfirmation: () => agent.inspectAgentRunConfirmation(),
+        });
+        submitted = true;
+        if (params.submit_only === true) {
+          submitOnlyDispatched = true;
+          return { ...evidence, preflight, submitted: true, before, type: "image", expectedCount: scenes.length, media: [], prompts: [], trustedGesture: false };
+        }
+        let media, partialFailure = false, failedMedia = [];
+        try {
+          const remaining = Math.max(1, Math.min(Number(params.timeout_ms || 1800000), deadline - Date.now()));
+          media = await tiles.waitForProgressResult(command, before, scenes.length, "image", remaining, "flow-grid-tile-container", true);
+        } catch (error) {
+          if (error?.code !== "FLOW_GENERATION_FAILED" || error?.outcome_unknown !== false
+            || !Array.isArray(error.partialMedia) || !Array.isArray(error.failedMedia)) throw error;
+          media = error.partialMedia;
+          failedMedia = error.failedMedia;
+          partialFailure = true;
+        }
+        const prompts = [];
+        for (const item of media) {
+          const scroller = root.scrollContainer?.();
+          if (scroller) scroller.scrollTop = 0;
+          await root.wait?.(250);
+          let targetTile;
+          for (let step = 0; step < 160 && !targetTile; step++) {
+            targetTile = [...document.querySelectorAll("flow-grid-tile-container")].find(c =>
+              item.id && !item.id.startsWith("title:") ? root.mediaId?.(c) === item.id : c.getAttribute("aria-label") === item.title);
+            if (!targetTile && scroller) {
+              const top = scroller.scrollTop, max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+              if (top >= max - 2) break;
+              scroller.scrollTop = Math.min(max, top + Math.max(200, scroller.clientHeight * 0.78));
+              await root.wait?.(250);
+            }
+          }
+          if (!targetTile) { prompts.push(""); continue; }
+          targetTile.scrollIntoView({ block: "center" });
+          targetTile.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+          await root.wait?.(250);
+          const reuse = root.flowButton?.("Reuse prompt", targetTile);
+          if (!reuse) { prompts.push(""); continue; }
+          reuse.click();
+          await root.wait?.(550);
+          prompts.push(document.querySelector(".ProseMirror")?.innerText || "");
+          const close = root.flowButton?.("Close");
+          if (close && root.flowButton?.("Start new session")) { close.click(); await root.wait?.(350); }
+        }
+        const clear = root.flowButton?.("Clear prompt");
+        if (clear) clear.click();
+        return { ...evidence, preflight, before, type: "image", expectedCount: scenes.length, media, prompts, ...(partialFailure ? { partial: true, failedMedia } : {}), trustedGesture: false };
+      } catch (error) {
+        outcomeUnknown = Boolean(error?.outcome_unknown) || submitted;
+        throw error;
+      } finally {
+        if (!outcomeUnknown && !submitOnlyDispatched) {
+          const session = root.flowButton?.("Start new session");
+          if (session) { const close = root.flowButton?.("Close"); if (close) { close.click(); await root.wait?.(500); } }
+          try { await agent.setNativeAgentSettings("Always"); } catch {}
+          await agent.setNativeAgentMode(false).catch(() => {});
+          const clear = root.flowButton?.("Clear prompt"); if (clear) clear.click();
+        }
+      }
     }
     async submitAndConfirmDispatch({ editor, tiles, command, prompt, mediaType = "video", expectedQuantity = 1, expectedReferenceIds = [], expectedMediaReferenceIds = [], expectedCharacterIds = [], deadline, afterClick, checkConfirmation }) {
       this.requireWorkflowTime(deadline, "arming the Flow request observer");
@@ -140,6 +246,44 @@
       const tiles = root.FlowTiles;
       const menu = root.FlowMediaMenu;
       const agent = root.FlowAgent;
+      if (name === "flow.frame.extract_last") {
+        const sourcePrefix = String(payload.assetName || payload.name || "").trim();
+        if (!sourcePrefix) throw this.error("FLOW_INVALID_ARGUMENT", "Video title is required to extract a chain frame.");
+        const deadline = this.workflowDeadline(command, 90_000);
+        await agent.closeNativeAgentSession();
+        const activeAgent = root.flowButton?.("Agent");
+        if (activeAgent?.getAttribute("aria-pressed") === "true") await agent.setNativeAgentMode(false);
+        await nav.ensureFlowLibrarySection("All media", { deadline });
+        const assets = await menu.scanNativeAssets({ deadline });
+        const matches = assets.filter(asset => asset.kind === "video" && asset.name.toLowerCase().startsWith(sourcePrefix.toLowerCase()));
+        if (matches.length > 1) throw this.error("FLOW_AMBIGUOUS_ASSET", `${matches.length} videos begin with "${sourcePrefix}". Use the exact title.`, false, false);
+        const source = matches[0];
+        if (!source) throw this.error("FLOW_VIDEO_NOT_FOUND", `No video beginning "${sourcePrefix}" exists in the project.`, false, false);
+        const tile = await tiles.findFlowTile(source.name);
+        if (!tile || !tile.querySelector("flow-video-tile")) throw this.error("FLOW_VIDEO_NOT_FOUND", `Video "${source.name}" is no longer visible.`, false, false);
+        tile.scrollIntoView({ block: "center" }); tile.click();
+        await nav.waitForFlowRoute(path => /\/edit\//i.test(path), Math.min(30_000, Math.max(1, deadline - Date.now())), "Flow did not open the source video editor.");
+        const seek = await root.waitForEnabledFlowButton?.("Skip to next clip", Math.min(30_000, Math.max(1, deadline - Date.now())));
+        if (!seek) throw this.error("FLOW_TIMELINE_MISSING", "The source video timeline is not ready.", false, false);
+        seek.click();
+        await this.waitWorkflow(deadline, 1800, "seeking to the source clip's final frame");
+        const save = await root.waitForEnabledFlowButton?.("Save frame", Math.min(10_000, Math.max(1, deadline - Date.now())));
+        if (!save) throw this.error("FLOW_SAVE_FRAME_MISSING", "Flow did not show Save frame.", false, false);
+        save.click();
+        await this.waitWorkflow(deadline, 2500, "saving the source clip's final frame");
+        const back = root.flowButton?.("Back button to go to previous page");
+        if (!back) throw this.error("FLOW_EDIT_BACK_MISSING", "Flow saved the frame, but its Back control is unavailable.", false, true);
+        back.click();
+        await nav.waitForFlowRoute(path => !/\/edit(?:\/|$)/i.test(path), Math.min(20_000, Math.max(1, deadline - Date.now())), "Flow did not return to the project after saving the last frame.", { deadline });
+        await nav.ensureFlowLibrarySection("All media", { deadline });
+        const title = `Saved frame from ${source.name}`;
+        const frame = await tiles.findFlowTile(title, 200);
+        if (!frame) throw this.error("FLOW_FRAME_NOT_FOUND", `Flow did not add the saved frame "${title}".`, false, true);
+        const rawId = root.mediaId?.(frame);
+        const id = await root.resolveNativeMediaUuid?.(rawId, "image") || rawId;
+        this.validateContinuationReferenceIds(id);
+        return { title, id, source: source.name, kind: "image" };
+      }
       if (name === "flow.character.create") {
         if (typeof root.FlowCharacterActions?.create !== "function") throw this.error("NATIVE_CAPABILITY_UNSUPPORTED", "Flow character creation actions are not loaded in this tab. Reload the extension and Flow tab, then retry.", true);
         return root.FlowCharacterActions.create(payload, command);
@@ -203,81 +347,158 @@
         const deadline = this.workflowDeadline(command, params.submit_only ? 120_000 : 32 * 60_000);
         const scenes = params.agent_scenes || [];
         if (!scenes.length) throw this.error("FLOW_INVALID_ARGUMENT", "agent_scenes is required.");
-        await agent.closeNativeAgentSession();
-        await nav.ensureFlowLibrarySection("All media", { deadline });
-        const before = tiles.collectNativeMedia().map(item => item.id || `title:${item.title}`);
-        let submitted = false;
-        let outcomeUnknown = false;
-        let submitOnlyDispatched = false;
-        let dispatchEvidence = null;
-        try {
-          await agent.setNativeAgentMode(true);
-          const agentSettingsEvidence = await agent.setNativeAgentSettings("Always", params.aspect_ratio || "16:9");
-          await root.FlowSettings?.chooseNativeModel?.("Nano Banana", "image", { deadline });
-          const box = document.querySelector(".ProseMirror");
-          if (!box) throw this.error("FLOW_AGENT_COMPOSER_MISSING", "Flow's Agent composer is not visible.", true);
-          const sceneText = scenes.map((scene, index) => `Scene ${index + 1}: ${String(scene).replace(/\s+/g, " ").trim()}`).join("\n");
-          const script = `Generate exactly ${scenes.length} separate images: one image for each scene below, in the listed scene order. Do not combine scenes into a collage or a single image. Images only, never video. ${params.aspect_ratio || "16:9"} aspect ratio. Do not ask questions; generate them now.\n${sceneText}`;
-          root.setEditable?.(box, script); await this.waitWorkflow(deadline, 300, "entering the Flow Agent batch prompt");
-          const preflight = { ...this.verifyAgentBatchPreflight({ editor, box, prompt: script }), agent_settings: agentSettingsEvidence };
-          const evidence = await this.submitAndConfirmDispatch({ editor, tiles, command, prompt: script, mediaType: "image", expectedQuantity: scenes.length, deadline,
-            checkConfirmation: () => agent.inspectAgentRunConfirmation() });
-          dispatchEvidence = evidence;
-          submitted = true;
+        const baseScene = Number(String(params.file_stem || "scene-01").match(/\d+/)?.[0] || 1);
+        const sceneNumbers = Array.isArray(params.agent_numbers) && params.agent_numbers.length === scenes.length
+          ? params.agent_numbers.map(Number)
+          : scenes.map((_, index) => baseScene + index);
+        const sceneMedia = new Map();
+        let pending = scenes.map((_, index) => index);
+        let before = tiles.collectNativeMedia().map(item => item.id || `title:${item.title}`);
+        let dispatchEvidence = {};
+        let latestPreflight;
+        let failedMedia = [];
+
+        for (let pass = 0; pass < 3 && pending.length; pass++) {
+          const requested = pending.slice();
+          const passParams = {
+            ...params,
+            agent_scenes: requested.map(index => scenes[index]),
+            agent_numbers: requested.map(index => sceneNumbers[index]),
+          };
+          const result = await this.runAgentBatchPass(passParams, command, deadline, before);
+          dispatchEvidence = result;
+          latestPreflight = result.preflight;
           if (params.submit_only === true) {
-            submitOnlyDispatched = true;
-            return { ...evidence, preflight, submitted: true, before, type: "image", expectedCount: scenes.length, media: [], trustedGesture: false };
+            return {
+              ...result,
+              before,
+              type: "image",
+              expectedCount: scenes.length,
+              media: [], prompts: [],
+              sceneNumbers: [],
+              requestedSceneNumbers: sceneNumbers,
+              failedScenes: [],
+              trustedGesture: false,
+            };
           }
-          let media;
-          let partialFailure = false;
-          let failedMedia = [];
-          try {
-            media = await tiles.waitForProgressResult(command, before, scenes.length, "image", Number(params.timeout_ms || 1800000), "flow-grid-tile-container", true);
-          } catch (error) {
-            if (error?.code !== "FLOW_GENERATION_FAILED" || error?.outcome_unknown !== false
-              || !Array.isArray(error.partialMedia) || !Array.isArray(error.failedMedia)) throw error;
-            media = error.partialMedia;
-            failedMedia = error.failedMedia;
-            partialFailure = true;
+          const media = Array.isArray(result.media) ? result.media : [];
+          const prompts = Array.isArray(result.prompts) ? result.prompts : [];
+          if (media.length > requested.length || media.some(item => item?.kind !== "image")) {
+            throw this.error("FLOW_AGENT_RESULT_INVALID", "Flow Agent returned invalid image results. Check the project before retrying.", false, true);
           }
-          const prompts = [];
-          for (const item of media) {
-            const scroller = root.scrollContainer?.();
-            if (scroller) scroller.scrollTop = 0;
-            await root.wait?.(250);
-            let targetTile;
-            for (let step = 0; step < 160 && !targetTile; step++) {
-              targetTile = [...document.querySelectorAll("flow-grid-tile-container")].find(c =>
-                item.id && !item.id.startsWith("title:") ? root.mediaId?.(c) === item.id : c.getAttribute("aria-label") === item.title);
-              if (!targetTile && scroller) {
-                const top = scroller.scrollTop, max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-                if (top >= max - 2) break;
-                scroller.scrollTop = Math.min(max, top + Math.max(200, scroller.clientHeight * 0.78)); await root.wait?.(250);
-              }
+          if (media.length < requested.length && (result.partial !== true || !Array.isArray(result.failedMedia)
+            || result.failedMedia.length < requested.length - media.length)) {
+            throw this.error("FLOW_AGENT_RESULT_INVALID", "Flow Agent returned an incomplete result without a confirmed failure. Check the project before retrying.", false, true);
+          }
+          failedMedia = result.failedMedia || [];
+
+          const matches = prompts.length === media.length
+            ? this.agentSceneMatches(requested.map(index => scenes[index]), prompts)
+            : requested.map(() => []);
+          const mediaScenes = new Map();
+          const usedScenes = new Set();
+          matches.forEach((mediaIndexes, localSceneIndex) => {
+            const mediaIndex = mediaIndexes.find(index => !mediaScenes.has(index));
+            if (mediaIndex !== undefined) {
+              mediaScenes.set(mediaIndex, localSceneIndex);
+              usedScenes.add(localSceneIndex);
             }
-            if (!targetTile) { prompts.push(""); continue; }
-            targetTile.scrollIntoView({ block: "center" }); targetTile.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })); await root.wait?.(250);
-            const reuse = root.flowButton?.("Reuse prompt", targetTile);
-            if (!reuse) { prompts.push(""); continue; }
-            reuse.click(); await root.wait?.(550);
-            prompts.push(document.querySelector(".ProseMirror")?.innerText || "");
-            const close = root.flowButton?.("Close");
-            if (close && root.flowButton?.("Start new session")) { close.click(); await root.wait?.(350); }
+          });
+          for (let mediaIndex = 0; mediaIndex < media.length; mediaIndex++) {
+            if (mediaScenes.has(mediaIndex)) continue;
+            const localSceneIndex = requested.findIndex((_, index) => !usedScenes.has(index));
+            if (localSceneIndex >= 0) {
+              mediaScenes.set(mediaIndex, localSceneIndex);
+              usedScenes.add(localSceneIndex);
+            }
           }
-          const clear = root.flowButton?.("Clear prompt"); if (clear) clear.click();
-          return { media, prompts, ...(partialFailure ? { partial: true, failedMedia } : {}), trustedGesture: false, ...dispatchEvidence };
-        } catch (error) {
-          outcomeUnknown = Boolean(error?.outcome_unknown) || submitted;
-          throw error;
-        } finally {
-          if (!outcomeUnknown && !submitOnlyDispatched) {
-            const session = root.flowButton?.("Start new session");
-            if (session) { const close = root.flowButton?.("Close"); if (close) { close.click(); await root.wait?.(500); } }
-            try { await agent.setNativeAgentSettings("Always"); } catch {}
-            await agent.setNativeAgentMode(false).catch(() => {});
-            const clear = root.flowButton?.("Clear prompt"); if (clear) clear.click();
+          for (const [mediaIndex, localSceneIndex] of mediaScenes) {
+            const sceneIndex = requested[localSceneIndex];
+            if (sceneIndex !== undefined && !sceneMedia.has(sceneIndex)) sceneMedia.set(sceneIndex, media[mediaIndex]);
+          }
+          pending = scenes.map((_, index) => index).filter(index => !sceneMedia.has(index));
+          if (pending.length && result.partial !== true) {
+            throw this.error("FLOW_AGENT_RESULT_INVALID", "Flow Agent did not confirm that remaining scenes failed safely. Inspect the project before retrying.", false, true);
+          }
+          if (pending.length && pass < 2) {
+            tiles.emitFlowProgress?.(command, `Flow Agent confirmed partial failure; retrying ${pending.length} unmatched scene(s), pass ${pass + 2}/3`);
+            before = tiles.collectNativeMedia().map(item => item.id || `title:${item.title}`);
           }
         }
+
+        // Preserve the legacy per-scene fallback only after Flow Agent has
+        // explicitly confirmed partial failures for all three bounded passes.
+        // The normal submit/observe operations provide a fresh media snapshot
+        // and request-correlation receipt for every fallback image.
+        const confirmedFallbackFailures = [];
+        if (pending.length && params.submit_only !== true) {
+          await agent.closeNativeAgentSession();
+          const activeAgent = root.flowButton?.("Agent");
+          if (activeAgent?.getAttribute("aria-pressed") === "true") await agent.setNativeAgentMode(false);
+
+          for (const sceneIndex of pending) {
+            let generated = false;
+            for (let attempt = 0; attempt < 2; attempt++) {
+              this.requireWorkflowTime(deadline, `generating fallback for scene ${sceneNumbers[sceneIndex]}`);
+              tiles.emitFlowProgress?.(command, `Flow Agent missed scene ${sceneNumbers[sceneIndex]}; using standard image generation (attempt ${attempt + 1}/2)`);
+              try {
+                const submit = await this.driver.executeOperation("flow.generation.submit", {
+                  type: "image",
+                  prompt: scenes[sceneIndex],
+                  model: "Nano Banana",
+                  aspectRatio: params.aspect_ratio || "16:9",
+                  variants: 1,
+                  maxCredits: 0,
+                  submitOnly: false,
+                }, command);
+                if (submit?.requestDispatched !== true || !submit.correlationAttemptId || !Array.isArray(submit.before)) {
+                  throw this.error("FLOW_SUBMIT_UNCONFIRMED", "Flow did not return a correlated dispatch receipt for the fallback image. Inspect Flow before retrying.", false, true);
+                }
+                const observed = await this.driver.executeOperation("flow.generation.observe", {
+                  before: submit.before,
+                  kind: "image",
+                  expectedCount: 1,
+                  correlationAttemptId: submit.correlationAttemptId,
+                  timeoutMs: Math.max(1000, Math.min(Number(params.timeout_ms || 12 * 60_000), deadline - Date.now())),
+                  retries: 0,
+                }, command);
+                const fallbackMedia = Array.isArray(observed?.media) ? observed.media : [];
+                if (fallbackMedia.length !== 1 || fallbackMedia[0]?.kind !== "image") {
+                  throw this.error("FLOW_GENERATION_RESULT_INVALID", "Flow did not return exactly one correlated fallback image. Inspect the project before retrying.", false, true);
+                }
+                sceneMedia.set(sceneIndex, fallbackMedia[0]);
+                generated = true;
+                break;
+              } catch (error) {
+                const confirmedFailure = error?.code === "FLOW_GENERATION_FAILED" && error?.outcome_unknown === false;
+                if (!confirmedFailure) throw error;
+                if (attempt === 1) confirmedFallbackFailures.push(sceneIndex);
+              }
+            }
+            if (generated) {
+              tiles.emitFlowProgress?.(command, `Fallback image completed for scene ${sceneNumbers[sceneIndex]}`);
+            }
+          }
+        }
+
+        const ordered = [...sceneMedia.entries()].sort((a, b) => a[0] - b[0]);
+        const media = ordered.map(([, item]) => item);
+        const mediaSceneNumbers = ordered.map(([sceneIndex]) => sceneNumbers[sceneIndex]);
+        const mediaPrompts = ordered.map(([sceneIndex]) => scenes[sceneIndex]);
+        const remainingFailures = pending.filter(index => confirmedFallbackFailures.includes(index));
+        return {
+          ...dispatchEvidence,
+          preflight: latestPreflight,
+          before,
+          type: "image",
+          expectedCount: scenes.length,
+          media,
+          prompts: mediaPrompts,
+          sceneNumbers: mediaSceneNumbers,
+          requestedSceneNumbers: sceneNumbers,
+          ...(remainingFailures.length ? { partial: true, failedMedia, failedScenes: remainingFailures.map(index => sceneNumbers[index]) } : { failedScenes: [] }),
+          trustedGesture: false,
+        };
       }
 
       if (name === "flow.continue.run") {

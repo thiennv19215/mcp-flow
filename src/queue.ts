@@ -1,3 +1,5 @@
+// Legacy local-MCP queue retained for compatibility with existing persisted jobs and older integrations.
+// LocalCore no longer instantiates it; active Flow jobs are owned by extension/background/flow-job-queue.js.
 import { randomUUID } from "node:crypto";
 import { loadJobs, saveJob } from "./users.js";
 import { classifyFlowFailure, type FlowErrorCategory } from "./flow-error-policy.js";

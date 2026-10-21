@@ -3,10 +3,12 @@ import { ensureCorrelationObserver } from "./flow-observer-health.js";
 import { inspectExtensionBuild } from "./flow-build-info.js";
 import { decideDevExtensionReload } from "./dev-extension-reload.js";
 import { flowDocumentMatchesLocale, flowProjectUrl, forceEnglishFlowUrl } from "./flow-locale.js";
+import { FlowJobQueue } from "./flow-job-queue.js";
+import { planFlowAgentBatch, planFlowBatch, planFlowContinue, planFlowEdit } from "./flow-workflows.js";
 import "../build-revision.js";
 
-const LOCAL_BRIDGE = "http://127.0.0.1:18897";
-const defaults = { bridge: "https://mcp.shopcongngheso5.io.vn" };
+const LOCAL_BRIDGE = "http://127.0.0.1:18899";
+const defaults = { bridge: LOCAL_BRIDGE };
 const flowUrl = url => /^https:\/\/flow\.google\.com\//.test(url || "");
 const nativeFlowOperations = new Set([
   "flow.context", "flow.state", "flow.projects.list", "flow.project.create", "flow.project.open", "flow.assets.list", "flow.characters.list",
@@ -19,6 +21,17 @@ const nativeFlowOperations = new Set([
   "flow.asset.rename", "flow.asset.trash",
   "flow.character.create", "flow.character.edit", "flow.edit.run",
   "flow.continue.run", "flow.agent.batch",
+  "flow.frame.extract_last",
+  "flow.queue.add", "flow.queue.generate", "flow.queue.edit", "flow.queue.continue", "flow.queue.agent",
+  "flow.queue.get", "flow.queue.wait", "flow.queue.cancel", "flow.queue.retry", "flow.queue.metadata",
+]);
+const extensionQueueOperations = new Set([
+  "flow.queue.add", "flow.queue.generate", "flow.queue.edit", "flow.queue.continue", "flow.queue.agent",
+  "flow.queue.get", "flow.queue.wait", "flow.queue.cancel", "flow.queue.retry", "flow.queue.metadata",
+]);
+const extensionQueueJobOperations = new Set([
+  "flow.generation.submit", "flow.edit.run", "flow.continue.run", "flow.agent.batch",
+  "flow.character.create", "flow.character.edit",
 ]);
 let socket = null;
 let httpSession = null;
@@ -139,7 +152,7 @@ async function clearStaleFlowSubmitBridge(tabId) {
 async function ensureFlowUploadBridge(tabId) {
   if (tabOperationActive(tabId)) return;
   let injectionError = "";
-  await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["content/bridge/flow-upload-main.js"] })
+  await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["content/bridge/flow-upload-main.js", "content/bridge/slate-bridge.js"] })
     .catch(error => { injectionError = [injectionError, String(error?.message || error)].filter(Boolean).join("; "); });
   const readBridge = () => chrome.scripting.executeScript({
     target: { tabId },
@@ -196,8 +209,10 @@ async function sendFlowCommand(tabId, message) {
     await chrome.scripting.executeScript({
       target: { tabId },
       files: [
+        "build-revision.js",
         "content/shared/I18n.js",
         "content/shared/dom-utils.js",
+        "content/providers/flow/FlowSelectors.js",
         "content/shared/activity-overlay.js",
         "content/shared/native-file-transfer.js",
         "content/providers/BaseProviderDriver.js",
@@ -205,6 +220,7 @@ async function sendFlowCommand(tabId, message) {
         "content/providers/flow/FlowNavigation.js",
         "content/providers/flow/FlowEditor.js",
         "content/providers/flow/FlowSettings.js",
+        "content/providers/flow/FlowUploader.js",
         "content/providers/flow/FlowComponents.js",
         "content/providers/flow/FlowCharacters.js",
         "content/providers/flow/FlowTiles.js",
@@ -215,6 +231,7 @@ async function sendFlowCommand(tabId, message) {
         "content/providers/flow/FlowWorkflowOperations.js",
         "content/providers/flow/FlowDriver.js",
         "content/dom-actions.js",
+        "content/floating-tracker-flow.js",
       ],
     }).catch(() => {});
     await chrome.scripting.executeScript({
@@ -395,32 +412,22 @@ function endInteractiveRequest(key, tabId) {
 }
 const config = async () => {
   const stored = await chrome.storage.local.get(null);
-  // Existing profiles without a mode switch to this repository's local MCP.
-  // Signing in from options.js explicitly selects the VPS again.
-  const backendMode = stored.backendMode === "vps" ? "vps" : "local";
-  const desiredBridge = backendMode === "local" ? LOCAL_BRIDGE : defaults.bridge;
-  if (stored.backendMode !== backendMode || stored.bridge !== desiredBridge) {
-    stored.backendMode = backendMode;
+  // Flow operations and MCP use the local connector only. VPS credentials are
+  // retained for account verification, never used to relay Flow work.
+  const desiredBridge = LOCAL_BRIDGE;
+  if (stored.backendMode !== "local" || stored.bridge !== desiredBridge) {
+    stored.backendMode = "local";
     stored.bridge = desiredBridge;
-    await chrome.storage.local.set({ backendMode, bridge: desiredBridge });
+    await chrome.storage.local.set({ backendMode: "local", bridge: desiredBridge });
   }
-  let bridgeUrl;
-  try { bridgeUrl = new URL(desiredBridge); } catch { throw new Error("Bridge URL is invalid"); }
-  if (backendMode === "vps" && stored.deviceToken && stored.tokenBridgeOrigin !== bridgeUrl.origin) {
-    await chrome.storage.local.remove(["deviceToken", "deviceId", "tokenBridgeOrigin"]);
-    delete stored.deviceToken;
-    delete stored.deviceId;
-    delete stored.tokenBridgeOrigin;
-  }
-  return { ...defaults, ...stored, backendMode, bridge: desiredBridge };
+  return { ...defaults, ...stored, backendMode: "local", bridge: desiredBridge };
 };
 
 function bridgeUrl(value) {
   const url = new URL(value);
-  const configuredVps = url.hostname === "mcp.shopcongngheso5.io.vn";
-  const local = ["127.0.0.1", "localhost"].includes(url.hostname) && url.port === "18897" && url.protocol === "http:";
-  if (url.username || url.password || url.search || url.hash || !(local || (configuredVps && url.protocol === "https:"))) {
-    throw new Error("Use the local MCP at http://127.0.0.1:18897 or the configured HTTPS VPS backend.");
+  const local = ["127.0.0.1", "localhost"].includes(url.hostname) && url.port === "18899" && url.protocol === "http:";
+  if (url.username || url.password || url.search || url.hash || !local) {
+    throw new Error("Use the local MCP at http://127.0.0.1:18899.");
   }
   return url;
 }
@@ -476,7 +483,7 @@ async function adoptFlowTab(tab, prepare = false) {
   if (!bridgeConnected() && socket?.readyState !== WebSocket.CONNECTING) void connect();
   return true;
 }
-async function execute(_ws, method, args = []) {
+async function execute(_ws, method, args = [], { queueOwner = false, connectorOwner = false } = {}) {
   if (method === "flow.dom.execute") {
     const [command] = args;
     if (!command || typeof command !== "object" || typeof command.op !== "string") throw new Error("Invalid Flow DOM command");
@@ -485,6 +492,98 @@ async function execute(_ws, method, args = []) {
       error.code = "NATIVE_CAPABILITY_UNSUPPORTED";
       error.retryable = true;
       throw error;
+    }
+    if (extensionQueueOperations.has(command.name)) {
+      if (!connectorOwner) throw Object.assign(new Error("Queue bridge operations are available only through the local MCP connector."), {
+        code: "FLOW_QUEUE_BRIDGE_FORBIDDEN", retryable: false, outcome_unknown: false,
+      });
+      const payload = command.payload && typeof command.payload === "object" ? command.payload : {};
+      const id = String(payload.id ?? payload.job_id ?? "");
+      if (["flow.queue.add", "flow.queue.generate", "flow.queue.edit", "flow.queue.continue", "flow.queue.agent"].includes(command.name)) {
+        let plannedJobs;
+        if (command.name === "flow.queue.generate") {
+          plannedJobs = planFlowBatch(payload, {
+            queue: await flowJobQueue.snapshot(), knownAssets: payload.knownAssets,
+            outputAssets: payload.outputAssets,
+            characterLooks: payload.characterLooks, techniques: payload.techniques,
+            capabilityRegistry: payload.capabilityRegistry,
+          }).jobs;
+        } else if (command.name === "flow.queue.edit") {
+          plannedJobs = [planFlowEdit(payload, { queue: await flowJobQueue.snapshot(), knownAssets: payload.knownAssets, outputAssets: payload.outputAssets }).job];
+        } else if (command.name === "flow.queue.continue") {
+          plannedJobs = [planFlowContinue(payload, { queue: await flowJobQueue.snapshot(), knownAssets: payload.knownAssets, outputAssets: payload.outputAssets }).job];
+        } else if (command.name === "flow.queue.agent") {
+          plannedJobs = [planFlowAgentBatch(payload, { queue: await flowJobQueue.snapshot(), knownAssets: payload.knownAssets, outputAssets: payload.outputAssets }).job];
+        } else {
+          const source = payload.job && typeof payload.job === "object" ? payload.job : payload;
+          plannedJobs = [source];
+        }
+        const batchId = crypto.randomUUID();
+        const added = [];
+        for (const [index, source] of plannedJobs.entries()) {
+          const operation = String(source.operation || source.data?.operation || "flow.generation.submit");
+          if (!extensionQueueJobOperations.has(operation)) throw Object.assign(new Error(`Unsupported queued Flow operation: ${operation}`), {
+            code: "FLOW_QUEUE_OPERATION_UNSUPPORTED", retryable: false, outcome_unknown: false,
+          });
+          const jobPayload = source.payload ?? source.data?.payload;
+          const workflow = jobPayload?.workflow || jobPayload?.params?.workflow || source.workflow || {};
+          const previous = added[index - 1];
+          const metadata = {
+            source: 'mcp',
+            ...(source.metadata ?? source.data?.metadata ?? {}),
+            batchId,
+            ...(workflow && Object.keys(workflow).length ? { workflow } : {}),
+            ...(previous && workflow.dependency ? { dependsOnId: previous.id, dependencyType: workflow.dependency.type } : {}),
+            ...(typeof jobPayload?.output_dir === "string" ? { output_dir: jobPayload.output_dir } : {}),
+            ...(typeof jobPayload?.file_stem === "string" ? { file_stem: jobPayload.file_stem } : {}),
+            ...(typeof jobPayload?.params?.output_dir === "string" ? { output_dir: jobPayload.params.output_dir } : {}),
+            ...(typeof jobPayload?.params?.file_stem === "string" ? { file_stem: jobPayload.params.file_stem } : {}),
+          };
+          added.push(await flowJobQueue.add({
+            id: source.id, operation, payload: jobPayload,
+            label: source.label || source.name, metadata,
+          }));
+        }
+        const snapshot = payload.autoStart === false ? await flowJobQueue.snapshot() : await flowJobQueue.resume();
+        const plannedOutputDir = plannedJobs[0]?.payload?.output_dir ?? plannedJobs[0]?.payload?.params?.output_dir ?? payload.output_dir;
+        return { jobs: added, job: added.length === 1 ? added[0] : undefined, output_dir: plannedOutputDir, batchId, snapshot: flowQueueSnapshot(snapshot) };
+      }
+      if (command.name === "flow.queue.get") {
+        if (!id) return flowQueueSnapshot(await flowJobQueue.snapshot());
+        const result = await flowJobQueue.snapshotById(id);
+        return { ...result, queue: flowQueueSnapshot(result.queue) };
+      }
+      if (command.name === "flow.queue.metadata") {
+        if (!id) throw Object.assign(new Error("flow.queue.metadata requires an id."), { code: "FLOW_QUEUE_ID_REQUIRED", outcome_unknown: false });
+        const job = await flowJobQueue.updateMetadata(id, payload.patch);
+        if (!job) throw Object.assign(new Error(`No Flow queue job with id ${id}.`), { code: "FLOW_QUEUE_JOB_NOT_FOUND", outcome_unknown: false });
+        return { job };
+      }
+      if (!id) throw Object.assign(new Error(`${command.name} requires an id.`), { code: "FLOW_QUEUE_ID_REQUIRED", outcome_unknown: false });
+      if (command.name === "flow.queue.wait") {
+        const timeoutMs = Number(payload.timeoutMs ?? payload.timeout_ms ?? 30_000);
+        const result = await flowJobQueue.wait(id, timeoutMs);
+        return { ...result, snapshot: flowQueueSnapshot(result.snapshot) };
+      }
+      if (command.name === "flow.queue.cancel") {
+        const result = await flowJobQueue.cancel(id);
+        if (!result) throw Object.assign(new Error(`No Flow queue job with id ${id}.`), { code: "FLOW_QUEUE_JOB_NOT_FOUND", outcome_unknown: false });
+        return result;
+      }
+      if (command.name === "flow.queue.retry") {
+        return retryExtensionFlowJob(id);
+      }
+    }
+    const queueSafeReads = new Set([
+      "flow.context", "flow.state", "flow.projects.list", "flow.assets.list", "flow.characters.list",
+      "flow.voices.options", "flow.generation.observe",
+    ]);
+    if (flowJobQueue?.running && !queueOwner && !queueSafeReads.has(command.name)) {
+      throw Object.assign(new Error("The extension queue is using the Flow tab. Retry this operation after the active queue item finishes."), {
+        code: "FLOW_TAB_BUSY",
+        retryable: true,
+        outcome_unknown: false,
+      });
     }
     const flowTarget = command._flowTarget;
     const hasFlowTargetTab = flowTarget && Object.prototype.hasOwnProperty.call(flowTarget, "tabId");
@@ -601,6 +700,297 @@ async function execute(_ws, method, args = []) {
   }
   throw new Error(`Unsupported connector method: ${method}`);
 }
+function flowQueueSnapshot(snapshot) {
+  return { ...snapshot, items: snapshot.jobs, queue: snapshot.jobs };
+}
+async function retryExtensionFlowJob(id) {
+  const previous = await flowJobQueue.get(id);
+  const previousResult = previous?.result?.result || previous?.result || {};
+  if (previousResult.downloadError || previous?.metadata?.downloadError) {
+    throw Object.assign(new Error("This job generated media but its download failed. Download the existing Flow result; do not retry generation."), {
+      code: "FLOW_QUEUE_DOWNLOAD_NOT_RETRYABLE", outcome_unknown: false,
+    });
+  }
+  const failedScenes = Array.isArray(previousResult.failedScenes) ? previousResult.failedScenes.filter(Number.isSafeInteger) : [];
+  if (previous?.operation === "flow.agent.batch" && previous.status === "completed" && failedScenes.length) {
+    const originalParams = previous.payload?.params || {};
+    const requestedNumbers = Array.isArray(previousResult.requestedSceneNumbers)
+      ? previousResult.requestedSceneNumbers.map(Number)
+      : (originalParams.agent_scenes || []).map((_, index) => Number(String(originalParams.file_stem || "scene-01").match(/\d+/)?.[0] || 1) + index);
+    const requestedScenes = Array.isArray(originalParams.agent_scenes) ? originalParams.agent_scenes : [];
+    const retryIndexes = failedScenes.map(number => requestedNumbers.indexOf(number)).filter(index => index >= 0 && index < requestedScenes.length);
+    if (retryIndexes.length) {
+      const payload = {
+        ...previous.payload,
+        params: {
+          ...originalParams,
+          agent_scenes: retryIndexes.map(index => requestedScenes[index]),
+          agent_numbers: retryIndexes.map(index => requestedNumbers[index]),
+        },
+      };
+      const job = await flowJobQueue.add({
+        operation: "flow.agent.batch", payload,
+        label: `Retry ${retryIndexes.length} failed Agent scene(s)`,
+        metadata: { ...previous.metadata, retryOf: previous.id, retriedScenes: retryIndexes.map(index => requestedNumbers[index]) },
+      });
+      const snapshot = await flowJobQueue.resume();
+      return { job, snapshot: flowQueueSnapshot(snapshot), retriedScenes: retryIndexes.map(index => requestedNumbers[index]) };
+    }
+  }
+  const job = await flowJobQueue.retry(id);
+  if (!job) throw Object.assign(new Error(`Flow queue job ${id} is not failed and cannot be retried.`), { code: "FLOW_QUEUE_NOT_RETRYABLE", outcome_unknown: false });
+  const snapshot = await flowJobQueue.resume();
+  return { job, snapshot: flowQueueSnapshot(snapshot) };
+}
+function broadcastFlowQueue(snapshot, reason) {
+  chrome.runtime.sendMessage({ type: "flow-queue:changed", snapshot: flowQueueSnapshot(snapshot), reason }).catch(() => {});
+}
+function flowResultMedia(value) {
+  if (!value || typeof value !== "object") return [];
+  if (Array.isArray(value.media)) return value.media;
+  if (value.portraitMedia && typeof value.portraitMedia === "object") return [value.portraitMedia];
+  if (value.result && typeof value.result === "object") return flowResultMedia(value.result);
+  return [];
+}
+const flowDownloadTitleKey = value => String(value || "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+async function waitForQueueFlowDownload(beforeIds, title, timeoutMs = 12 * 60_000) {
+  if (!chrome.downloads?.search) throw Object.assign(new Error("Chrome download tracking is unavailable; the generated media remains in Flow."), {
+    code: "FLOW_DOWNLOAD_TRACKING_UNAVAILABLE", outcomeUnknown: false, outcome_unknown: false,
+  });
+  const deadline = Date.now() + timeoutMs;
+  const titleKey = flowDownloadTitleKey(title);
+  let lastNew = [];
+  while (Date.now() < deadline) {
+    const items = await chrome.downloads.search({ orderBy: ["-startTime"], limit: 100 });
+    const newItems = items.filter(item => !beforeIds.has(item.id) && (flowUrl(item.referrer) || flowUrl(item.url) || flowUrl(item.finalUrl)));
+    lastNew = newItems;
+    const matching = titleKey
+      ? newItems.filter(item => flowDownloadTitleKey(item.filename?.split(/[\\/]/).pop()).includes(titleKey))
+      : [];
+    if (matching.length > 1 || (!matching.length && newItems.length > 1)) {
+      throw Object.assign(new Error(`Chrome reported multiple possible Flow downloads for "${title}"; refusing to attach an ambiguous file to this queue job. The media remains in Flow.`), {
+        code: "FLOW_DOWNLOAD_AMBIGUOUS", outcomeUnknown: false, outcome_unknown: false,
+      });
+    }
+    const candidates = matching.length === 1 ? matching : newItems.length === 1 ? newItems : [];
+    const interrupted = candidates.find(item => item.state === "interrupted");
+    if (interrupted) throw Object.assign(new Error(`Chrome download failed for "${title}": ${interrupted.error || "unknown error"}. The media remains in Flow.`), {
+      code: "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
+    });
+    const complete = candidates.find(item => item.state === "complete" && item.filename);
+    if (complete) return { id: complete.id, filename: complete.filename };
+    await new Promise(resolve => setTimeout(resolve, 750));
+  }
+  const active = lastNew.find(item => item.state === "in_progress");
+  const detail = active ? `Chrome download ${active.bytesReceived || 0}/${active.totalBytes || "?"} bytes` : "Chrome did not report a new Flow download";
+  throw Object.assign(new Error(`Flow media "${title}" was generated, but its browser download did not complete before the timeout (${detail}). The media remains in Flow.`), {
+    code: "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
+  });
+}
+async function downloadQueueMedia(media, outputDir, fileStem, quality, invoke, hooks, sceneNumbers = []) {
+  if (!chrome.downloads?.search) throw Object.assign(new Error("Chrome download tracking is unavailable; the generated media remains in Flow."), {
+    code: "FLOW_DOWNLOAD_TRACKING_UNAVAILABLE", outcomeUnknown: false, outcome_unknown: false,
+  });
+  const browserDownloads = [];
+  try {
+    for (const [index, item] of media.entries()) {
+      const title = String(item?.title || item?.name || "").trim();
+      if (!title) throw Object.assign(new Error("Flow generated media without a title, so its download could not be matched safely. The media remains in Flow."), {
+        code: "FLOW_DOWNLOAD_ASSET_TITLE_MISSING", outcomeUnknown: false, outcome_unknown: false,
+      });
+      const before = await chrome.downloads.search({ orderBy: ["-startTime"], limit: 100 });
+      const beforeIds = new Set(before.map(download => download.id));
+      await hooks.progress({ phase: "download", message: `Downloading ${title} from Flow…`, percent: 90 + Math.floor(index * 9 / Math.max(1, media.length)) });
+      let triggered;
+      try {
+        triggered = await invoke("flow.asset.download", { id: item.id, name: title, quality });
+      } catch (cause) {
+        throw Object.assign(new Error(`Flow generated "${title}", but did not start its download: ${String(cause?.message || cause)}. The media remains in Flow.`), {
+          code: cause?.code || "FLOW_DOWNLOAD_TRIGGER_FAILED", outcomeUnknown: false, outcome_unknown: false,
+        });
+      }
+      if (!triggered?.downloadTriggered) throw Object.assign(new Error(`Flow generated "${title}", but did not confirm that its download started. The media remains in Flow.`), {
+        code: "FLOW_DOWNLOAD_TRIGGER_FAILED", outcomeUnknown: false, outcome_unknown: false,
+      });
+      let download;
+      try {
+        download = await waitForQueueFlowDownload(beforeIds, title, quality === "upscaled" ? 12 * 60_000 : 3 * 60_000);
+      } catch (cause) {
+        throw Object.assign(new Error(String(cause?.message || cause)), {
+          code: cause?.code || "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
+        });
+      }
+      const sceneNumber = Number(sceneNumbers[index]);
+      const outputStem = Number.isSafeInteger(sceneNumber) && sceneNumber > 0
+        ? `scene-${String(sceneNumber).padStart(2, "0")}`
+        : media.length > 1 ? `${fileStem}-v${index + 1}` : fileStem;
+      browserDownloads.push({
+        ...download,
+        title,
+        fileStem: outputStem,
+      });
+    }
+  } catch (error) {
+    error.browserDownloads = browserDownloads;
+    throw error;
+  }
+  return browserDownloads;
+}
+async function withQueueDownloads(job, payload, operationResult, invoke, hooks) {
+  const params = payload?.params && typeof payload.params === "object" ? payload.params : {};
+  const outputDir = job.metadata?.output_dir || payload.output_dir || params.output_dir;
+  const fileStem = job.metadata?.file_stem || payload.file_stem || params.file_stem;
+  const submitOnly = payload.submitOnly === true || payload.submit_only === true || params.submit_only === true;
+  if (submitOnly || typeof outputDir !== "string" || !outputDir || typeof fileStem !== "string" || !fileStem) return operationResult;
+  const media = flowResultMedia(operationResult);
+  if (!media.length) return operationResult;
+  try {
+    const sceneNumbers = Array.isArray(operationResult?.sceneNumbers) && operationResult.sceneNumbers.length === media.length
+      ? operationResult.sceneNumbers
+      : [];
+    const browserDownloads = await downloadQueueMedia(media, outputDir, fileStem, params.download_quality || payload.download_quality || "original", invoke, hooks, sceneNumbers);
+    return { ...operationResult, browserDownloads };
+  } catch (error) {
+    return {
+      ...operationResult,
+      ...(Array.isArray(error?.browserDownloads) && error.browserDownloads.length ? { browserDownloads: error.browserDownloads } : {}),
+      downloadError: String(error?.message || error),
+      downloadErrorCode: String(error?.code || "FLOW_DOWNLOAD_FAILED"),
+    };
+  }
+}
+async function runExtensionFlowJob(job, hooks) {
+  const operation = job.operation || job.data?.operation;
+  const payload = structuredClone(job.payload || job.data?.payload || {});
+  const queuedOperations = new Set([
+    ...extensionQueueJobOperations,
+  ]);
+  if (!queuedOperations.has(operation)) {
+    throw Object.assign(new Error(`Unsupported extension queue operation: ${String(operation || "(missing)")}`), {
+      code: "FLOW_QUEUE_OPERATION_UNSUPPORTED",
+      outcome_unknown: false,
+    });
+  }
+  const invoke = (name, body) => execute(null, "flow.dom.execute", [{
+    op: "flowOperation",
+    name,
+    payload: body,
+    id: `queue-${job.id}-${crypto.randomUUID()}`,
+  }], { queueOwner: true });
+  while (selectedTabId !== undefined && tabOperationActive(selectedTabId)) {
+    if (hooks.signal.aborted) throw Object.assign(new Error("Queue stopped before Flow accepted this task."), { outcomeUnknown: false });
+    await hooks.progress({ phase: "waiting", message: "Waiting for the active Flow operation to finish…" });
+    await new Promise(resolve => setTimeout(resolve, 1_000));
+  }
+  if (hooks.signal.aborted) throw Object.assign(new Error("Queue stopped before Flow accepted this task."), { outcomeUnknown: false });
+  if (job.metadata?.dependsOnId) {
+    const previous = await flowJobQueue.get(job.metadata.dependsOnId);
+    if (!previous || previous.status !== "completed") {
+      throw Object.assign(new Error(`This scene depends on previous queue job ${job.metadata.dependsOnId}, which did not complete.`), {
+        code: "FLOW_SCENE_DEPENDENCY_FAILED", outcome_unknown: false,
+      });
+    }
+    const result = previous.result?.result || previous.result || {};
+    const media = result.media || result.result?.media || [];
+    const dependency = job.metadata.dependencyType;
+    if (!Array.isArray(media) || !media.length || !media[0]?.title) {
+      throw Object.assign(new Error("The previous scene completed without a resolvable Flow media asset; dependent work was not submitted."), {
+        code: "FLOW_SCENE_DEPENDENCY_ASSET_MISSING", outcome_unknown: false,
+      });
+    }
+    if (dependency === "reference_previous") {
+      if (media[0].kind !== "image") throw Object.assign(new Error("reference_previous requires the previous scene to produce an image."), {
+        code: "FLOW_SCENE_DEPENDENCY_KIND_MISMATCH", outcome_unknown: false,
+      });
+      const reference = { assetName: media[0].title, ...(media[0].id ? { expectedId: media[0].id } : {}) };
+      payload.attachments = [reference, ...(Array.isArray(payload.attachments) ? payload.attachments : [])].slice(0, 3);
+    } else if (dependency === "chain_previous") {
+      if (media[0].kind !== "video") throw Object.assign(new Error("chain_previous requires the previous scene to produce a video."), {
+        code: "FLOW_SCENE_DEPENDENCY_KIND_MISMATCH", outcome_unknown: false,
+      });
+      const frame = await invoke("flow.frame.extract_last", { assetName: media[0].title });
+      payload.firstFrame = { assetName: frame.title, expectedId: frame.id };
+      // Flow Frames mode cannot be combined with ingredient references. Match the old MCP behavior, which skipped them.
+      delete payload.attachments;
+    }
+  }
+  await hooks.progress({ phase: "submit", message: "Submitting to Google Flow…", percent: 5 });
+  if (operation !== "flow.generation.submit") {
+    try {
+      const rawResult = await invoke(operation, payload);
+      const result = await withQueueDownloads(job, payload, rawResult, invoke, hooks);
+      await hooks.progress({ phase: "complete", message: "Flow operation completed.", percent: 100 });
+      return { completed: true, operation, requestDispatched: Boolean(result?.requestDispatched), result };
+    } catch (error) {
+      throw Object.assign(error, {
+        outcomeUnknown: Boolean(error?.outcomeUnknown || error?.outcome_unknown),
+        requestDispatched: Boolean(error?.requestDispatched),
+      });
+    }
+  }
+  let submitted;
+  try {
+    submitted = await invoke(operation, payload);
+  } catch (error) {
+    throw Object.assign(error, {
+      outcomeUnknown: Boolean(error?.outcomeUnknown || error?.outcome_unknown),
+      requestDispatched: Boolean(error?.requestDispatched),
+    });
+  }
+  if (submitted?.submitted === false) {
+    throw Object.assign(new Error("Flow did not confirm the generation request; the task can be retried safely."), {
+      code: "FLOW_SUBMIT_NOT_CONFIRMED",
+      outcomeUnknown: false,
+    });
+  }
+  const params = payload.params && typeof payload.params === "object" ? payload.params : {};
+  const isVideo = payload.type === "video" || params.type === "video";
+  let quoteFields = {};
+  if (isVideo) {
+    const rawCredits = submitted?.credits;
+    if (typeof rawCredits !== "number" || !Number.isFinite(rawCredits)) {
+      throw Object.assign(new Error("Flow accepted the video request, but did not return a verifiable credit quote. Inspect Flow before retrying."), {
+        code: "FLOW_SUBMIT_RECEIPT_INCOMPLETE", outcomeUnknown: true, outcome_unknown: true, requestDispatched: true, creditQuoteVerified: false,
+      });
+    }
+    const maxCredits = payload.maxCredits ?? params.max_credits;
+    if (Number.isFinite(Number(maxCredits)) && rawCredits > Number(maxCredits)) {
+      throw Object.assign(new Error(`Flow dispatched a request quoted at ${rawCredits} credits, above max_credits=${maxCredits}; inspect Flow before retrying.`), {
+        code: "FLOW_MAX_CREDITS_EXCEEDED", outcomeUnknown: true, outcome_unknown: true, requestDispatched: true, credits: rawCredits, creditQuoteVerified: true,
+      });
+    }
+    quoteFields = { credits: rawCredits, creditQuoteVerified: true };
+  }
+  if (payload.submitOnly === true || payload.submit_only === true || params.submit_only === true) {
+    await hooks.progress({ phase: "submitted", message: "Flow accepted the request; rendering was not awaited.", percent: 100 });
+    return { completed: true, requestDispatched: true, ...quoteFields, result: { ...submitted, ...quoteFields } };
+  }
+  const count = Math.max(1, Number(payload.variants ?? payload.count ?? submitted?.expectedCount ?? 1));
+  await hooks.progress({ phase: "render", message: "Submitted; waiting for Flow to finish rendering…", percent: 10 });
+  let observed;
+  try {
+    observed = await invoke("flow.generation.observe", {
+      before: submitted?.before || [],
+      expectedCount: count,
+      variants: count,
+      correlationAttemptId: submitted?.correlationAttemptId,
+      kind: payload.type || "image",
+      retries: payload.retries,
+      timeoutMs: payload.type === "video" ? 600_000 : 300_000,
+    });
+  } catch (error) {
+    throw Object.assign(error, {
+      outcomeUnknown: true,
+      requestDispatched: true,
+      code: error?.code || "FLOW_RENDER_OUTCOME_UNKNOWN",
+    });
+  }
+  const operationResult = await withQueueDownloads(job, payload, { ...observed, ...quoteFields }, invoke, hooks);
+  await hooks.progress({ phase: "complete", message: "Flow generation completed.", percent: 100 });
+  return { completed: true, requestDispatched: true, ...quoteFields, result: operationResult };
+}
+const flowJobQueue = new FlowJobQueue(runExtensionFlowJob);
+flowJobQueue.subscribe((snapshot, reason) => broadcastFlowQueue(snapshot, reason));
 async function fetchBackend(url, token, body, timeoutMs = 15_000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -619,7 +1009,7 @@ async function postHttpMessage(session, path, body, options = {}) {
       const response = await fetchBackend(`${session.bridge}${path}`, session.token, body, timeoutMs);
       if (!response.ok) {
         const detail = await response.json().catch(() => ({}));
-        const error = new Error(detail.error || `Backend returned HTTP ${response.status}.`);
+        const error = new Error(detail.error || `Local MCP returned HTTP ${response.status}.`);
         error.status = response.status;
         if (response.status < 500 || attempt === 2) throw error;
         lastFailure = error;
@@ -630,13 +1020,13 @@ async function postHttpMessage(session, path, body, options = {}) {
       if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
     }
   }
-  throw lastFailure || new Error("Could not send a message to the backend.");
+  throw lastFailure || new Error("Could not send a message to the local MCP host.");
 }
 function applyBackendEvent(message) {
   if (message?.type === "event" && message.method === "flow.selectors.sync") {
     const payload = message.params?.[0];
     if (payload && typeof payload === "object") {
-      console.log("[Flow MCP] Dynamic selectors sync received from backend");
+      console.log("[Flow MCP] Dynamic selectors sync received from the local MCP host");
       chrome.storage.local.set({ flow_remote_selectors: payload });
     }
   }
@@ -645,7 +1035,7 @@ function dispatchCommand(command, sendResult) {
   const commandId = command.id ?? command.request_id ?? command.requestId;
   if (commandId === undefined || commandId === null) throw new Error("Command is missing request id");
   // Keep the receive loop responsive while a page operation waits.
-  void execute(null, command.method, command.args).then(
+  void execute(null, command.method, command.args, { connectorOwner: true }).then(
     value => sendResult({ type: "result", id: commandId, result: { ok: true, value } }),
     error => sendResult({ type: "result", id: commandId, result: { ok: false, error: { code: error?.code || "EXTENSION_COMMAND_FAILED", message: String(error?.message || error), retryable: Boolean(error?.retryable), outcome_unknown: Boolean(error?.outcome_unknown), ...(error?.diagnostics ? { diagnostics: error.diagnostics } : {}) } } }),
   );
@@ -670,7 +1060,7 @@ async function pollHttp(session) {
       if (message?.type === "event") applyBackendEvent(message);
       else if (message?.type === "command") dispatchCommand(message, result => {
         void postHttpMessage(session, "/api/extension/result", { id: String(result.id), result: result.result, session_id: session.sessionId }).catch(error => {
-          if (httpSession === session) lastError = `Command result could not reach backend: ${String(error?.message || error)}`;
+          if (httpSession === session) lastError = `Command result could not reach the local MCP host: ${String(error?.message || error)}`;
         });
       });
     } finally {
@@ -695,13 +1085,12 @@ async function connectHttp(settings, token) {
   if (response.status === 404 || response.status === 405) return false;
   if (!response.ok) {
     const detail = await response.json().catch(() => ({}));
-    // The previous backend routes unknown bearer-authenticated paths through
-    // its Studio-token guard and answers with this legacy 401 body.
+    // Older local MCP builds may route unknown paths through their Studio token guard.
     if (response.status === 401 && detail.error === "Missing or wrong token.") return false;
     throw new Error(detail.error || `Backend connection failed (HTTP ${response.status}).`);
   }
   const connection = await response.json().catch(() => ({}));
-  if (typeof connection.session_id !== "string" || !connection.session_id) throw new Error("Backend did not return a connector session. Update the backend and try again.");
+  if (typeof connection.session_id !== "string" || !connection.session_id) throw new Error("Local MCP did not return a connector session. Update the local MCP and try again.");
   const session = { bridge, token, sessionId: connection.session_id, stopped: false, pollAbort: null };
   httpSession = session;
   bridgeTransport = "http-poll";
@@ -735,9 +1124,7 @@ async function connect() {
   try {
     const settings = await config();
     backendOrigin = new URL(settings.bridge).origin;
-    const token = settings.backendMode === "vps" && settings.tokenBridgeOrigin === backendOrigin
-      ? settings.deviceToken
-      : "";
+    const token = "";
     stopHttpSession();
     const httpConnected = await connectHttp(settings, token);
     if (httpConnected) return;
@@ -785,17 +1172,17 @@ async function connect() {
       clearInterval(heartbeat);
       const intentionalClose = ["User reconnect", "Bridge URL changed"].includes(close.reason);
       lastError = intentionalClose ? "" : close.reason || lastError || "Backend disconnected";
-      // Retry slowly when another connector temporarily owns the backend socket.
+      // Retry slowly when another connector temporarily owns the local MCP socket.
       scheduleReconnect(close.code === 1008 ? 10_000 : undefined);
     };
     ws.onerror = () => {
       bridgeTransport = "disconnected";
-      lastError = `Cannot connect to backend at ${new URL(settings.bridge).origin}. Sign in to the account, then check the VPS HTTPS/WSS connection.`;
+      lastError = `Cannot connect to the local MCP at ${new URL(settings.bridge).origin}. Start it if you need AI access.`;
       ws.close();
     };
   } catch (error) {
     bridgeTransport = "disconnected";
-    lastError = `Cannot connect to backend${backendOrigin ? ` at ${backendOrigin}` : ""}: ${String(error?.message || error)}`;
+    lastError = `Cannot connect to the local MCP${backendOrigin ? ` at ${backendOrigin}` : ""}: ${String(error?.message || error)}`;
     scheduleReconnect();
   }
   finally { opening = false; }
@@ -850,6 +1237,65 @@ chrome.storage.onChanged.addListener((changes, area) => {
   void connect();
 });
 chrome.runtime.onMessage.addListener((message, _sender, respond) => {
+  if (typeof message?.type === "string" && message.type.startsWith("flow-queue:")) {
+    if (_sender?.id !== chrome.runtime.id || _sender?.tab) {
+      respond({ ok: false, error: { code: "FLOW_QUEUE_FORBIDDEN", message: "Flow queue controls are available only from the extension UI." } });
+      return;
+    }
+    void (async () => {
+      await flowJobQueue.ready;
+      let snapshot;
+      switch (message.type) {
+        case "flow-queue:get":
+          snapshot = await flowJobQueue.snapshot();
+          break;
+        case "flow-queue:add": {
+          const source = message.job || {};
+          await flowJobQueue.add({
+            operation: source.operation,
+            payload: source.payload,
+            label: source.label || source.name,
+          });
+          snapshot = await flowJobQueue.snapshot();
+          break;
+        }
+        case "flow-queue:pause":
+          await flowJobQueue.pause();
+          snapshot = await flowJobQueue.snapshot();
+          break;
+        case "flow-queue:resume":
+          snapshot = await flowJobQueue.resume();
+          break;
+        case "flow-queue:stop":
+          snapshot = await flowJobQueue.stop();
+          break;
+        case "flow-queue:clear":
+          snapshot = await flowJobQueue.clear();
+          break;
+        case "flow-queue:remove":
+          await flowJobQueue.remove(String(message.id || message.taskId || ""));
+          snapshot = await flowJobQueue.snapshot();
+          break;
+        case "flow-queue:retry":
+          snapshot = (await retryExtensionFlowJob(String(message.id || message.taskId || ""))).snapshot;
+          break;
+        case "flow-queue:reorder": {
+          const jobs = await flowJobQueue.list();
+          const id = String(message.id || message.taskId || jobs[Number(message.fromIndex)]?.id || "");
+          await flowJobQueue.reorder(id, Number(message.toIndex));
+          snapshot = await flowJobQueue.snapshot();
+          break;
+        }
+        default:
+          throw Object.assign(new Error(`Unsupported Flow queue action: ${message.type}`), { code: "FLOW_QUEUE_ACTION_UNSUPPORTED" });
+      }
+      return { ok: true, ...flowQueueSnapshot(snapshot) };
+    })().then(respond).catch(error => respond({
+      ok: false,
+      error: { code: error?.code || "FLOW_QUEUE_FAILED", message: String(error?.message || error) },
+    }));
+    return true;
+  }
   if (message?.type === "flow-mcp:ensure-active-tab") {
     void (async () => {
       const tabId = _sender.tab?.id;
@@ -874,6 +1320,11 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
       jobId: message.jobId ?? message.job_id,
       progress: message.progress,
     }).catch(() => {});
+
+    if (String(requestId || "").startsWith("queue-") && flowUrl(_sender.tab?.url) && _sender.tab?.id === selectedTabId) {
+      respond({ ok: true, local: true });
+      return;
+    }
 
     const isInteractive = activeInteractiveRequests.get(String(requestId)) === tabId;
     const isSelectedFlowTab = tabId !== undefined && tabId === selectedTabId;

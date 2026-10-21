@@ -26,6 +26,7 @@ type CapabilityRegistry = {
 
 const registryPath = fileURLToPath(new URL("../flow-model-capabilities.json", import.meta.url));
 const registry = JSON.parse(readFileSync(registryPath, "utf8")) as CapabilityRegistry;
+export const flowCapabilityRegistry = registry;
 
 function normalize(value: unknown): string {
   return String(value ?? "").normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}.]+/gu, " ").trim();
