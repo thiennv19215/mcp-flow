@@ -14,6 +14,9 @@
       });
 
       this.operationGroups = [
+        new root.FlowPromptOperations(this),
+        new root.FlowReferenceOperations(this),
+        new root.FlowUploadOperations(this),
         new root.FlowGenerationOperations(this),
         new root.FlowLibraryOperations(this),
         new root.FlowWorkflowOperations(this),

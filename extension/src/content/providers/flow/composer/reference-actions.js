@@ -1,3 +1,4 @@
+// Flow reference attachment, chip inspection, and native voice selection.
 (() => {
   "use strict";
   const root = typeof globalThis !== "undefined" ? globalThis : (typeof window !== "undefined" ? window : self);
@@ -334,21 +335,48 @@
     return checkVis ? raw.filter(visible) : raw;
   }
 
+  function referenceComposerScope() {
+    const editor = (typeof root.flowQuery === "function" ? root.flowQuery("editor", document, { checkVisible: false }) : null) ||
+      document.querySelector?.(".ProseMirror[contenteditable='true'],.ProseMirror,flow-base-prompt-box [contenteditable='true']") || null;
+    const composerSelector = "flow-base-prompt-box,.flow-composer,form,[class*='composer'],[class*='prompt-box'],[class*='prompt-container'],[data-testid*='composer']";
+    const explicitComposer = editor?.closest?.(composerSelector);
+    if (explicitComposer) return explicitComposer;
+    const configuredComposer = typeof root.flowQuery === "function" ? root.flowQuery("composerRoot", document, { checkVisible: false }) : null;
+    return configuredComposer && (!editor || configuredComposer.contains?.(editor)) ? configuredComposer : document;
+  }
+  function referenceChipBoundary(button) {
+    const explicit = button?.closest?.("flow-character-ingredient-chip,[data-chip],[data-ingredient-type='image'],[data-ingredient-type='character']");
+    if (explicit) return explicit;
+    const kindOwner = button?.closest?.("[data-kind='image'],[data-kind='character']");
+    if (!kindOwner) return null;
+    // data-kind can label a container in some Flow builds. Only use it as a
+    // chip owner when it contains at most one thumbnail, otherwise separate
+    // image chips inside the shared container would collapse into one.
+    const thumbnails = kindOwner.querySelectorAll?.("img,[role='img']") || [];
+    return thumbnails.length <= 1 ? kindOwner : null;
+  }
+  function normalizeChipLabel(value) {
+    return String(value || "").toLocaleLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/\s+/g, " ").trim();
+  }
   function chips() {
-    const configuredChips = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.chips", document, { checkVisible: false }) : null) ||
-      [...document.querySelectorAll('button[aria-label="Ingredient"]')];
-    const viChips = [...document.querySelectorAll('button[aria-label="Thành phần"],button[aria-label="Nguyên liệu"]')];
-    const dynamicButtons = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("common.buttons", document, { checkVisible: false }) : null) ||
-      [...document.querySelectorAll('button,[role="button"]')];
+    const scope = referenceComposerScope();
+    const configuredChips = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.chips", scope, { checkVisible: false }) : null) ||
+      [...(scope.querySelectorAll?.('button[aria-label="Ingredient"]') || [])];
+    const viChips = [...(scope.querySelectorAll?.('button[aria-label="Thành phần"],button[aria-label="Nguyên liệu"]') || [])];
+    const dynamicButtons = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("common.buttons", scope, { checkVisible: false }) : null) ||
+      [...(scope.querySelectorAll?.('button,[role="button"]') || [])];
     const isIngredientChipControl = btn => {
       if (!visible(btn)) return false;
-      if (configuredChips.includes(btn) || viChips.includes(btn)) return true;
-      const aria = (accessibleName(btn) || "").toLowerCase();
-      const alt = (btn.querySelector?.("img")?.alt || "").toLowerCase();
-      const isChipElement = Boolean(btn.closest?.("flow-character-ingredient-chip,[data-chip],[data-ingredient-type='image'],[data-ingredient-type='character'],[data-kind='image'],[data-kind='character']"));
-      if (isChipElement && /(?:remove|delete|close|xóa|đóng)/i.test(aria)) return false;
-      return isChipElement || /^(?:ingredient|thành phần|nguyên liệu)(?:\b|$)/i.test(aria) ||
-        /^(?:ingredient|thành phần|nguyên liệu)(?:\b|$)/i.test(alt);
+      // The shipped chips selector includes generic `button` and
+      // `[role=button]` fallbacks. Being returned by that selector is not
+      // evidence that a control is an ingredient chip.
+      if (viChips.includes(btn)) return true;
+      const aria = normalizeChipLabel(accessibleName(btn));
+      const alt = normalizeChipLabel(btn.querySelector?.("img")?.alt || "");
+      const isChipElement = Boolean(referenceChipBoundary(btn));
+      if (isChipElement && /(?:remove|delete|close|xoa|dong)/i.test(aria)) return false;
+      return isChipElement || /^(?:ingredient|thanh phan|nguyen lieu)(?:\b|$)/i.test(aria) ||
+        /(?:^|\b)(?:ingredient|thanh phan|nguyen lieu)(?:\b|$)/i.test(alt);
     };
     // Selector fallbacks include generic buttons; count only actual ingredient controls.
     const candidates = [...new Set([...configuredChips, ...viChips, ...dynamicButtons])].filter(isIngredientChipControl);
@@ -360,7 +388,7 @@
     };
     const logicalChips = new Map();
     for (const button of candidates) {
-      const owner = button.closest?.("flow-character-ingredient-chip,[data-chip]") || button;
+      const owner = referenceChipBoundary(button) || button;
       const previous = logicalChips.get(owner);
       if (!previous || score(button) > score(previous)) logicalChips.set(owner, button);
     }
@@ -370,8 +398,41 @@
         button.closest?.("[data-ingredient-type], [data-kind]")?.getAttribute?.("data-ingredient-type") ||
         button.closest?.("[data-kind]")?.getAttribute?.("data-kind");
       const kind = button.closest?.("flow-character-ingredient-chip") || /^(?:character|nhân vật)$/i.test(String(explicitKind || "").trim()) ? "character" : "image";
-      return { element: button, kind, source: identity(image?.getAttribute?.("src")), ...metadata.get(button) };
+      return { element: button, owner: referenceChipBoundary(button) || button, kind, source: identity(image?.getAttribute?.("src")), ...metadata.get(button) };
     });
+  }
+  function chipAttachEvidence(before, current, added, stage) {
+    const describe = chip => {
+      const element = chip?.element;
+      const owner = chip?.owner || element;
+      const mediaIds = chip ? chipMediaUuids(chip) : [];
+      const rawMarker = owner?.tagName?.toLowerCase?.() === "flow-character-ingredient-chip" ? "character_chip" :
+        owner?.getAttribute?.("data-chip") !== null && owner?.getAttribute?.("data-chip") !== undefined ? "data_chip" :
+        owner?.getAttribute?.("data-ingredient-type") || owner?.getAttribute?.("data-kind") || null;
+      const marker = ["character_chip", "data_chip", "image", "character", "voice"].includes(rawMarker) ? rawMarker : rawMarker ? "other" : null;
+      return {
+        kind: chip?.kind || "unknown",
+        tag: element?.tagName?.toLowerCase?.() || null,
+        ownerTag: owner?.tagName?.toLowerCase?.() || null,
+        marker: typeof marker === "string" ? marker.slice(0, 24) : null,
+        role: element?.getAttribute?.("role") || null,
+        hasThumbnail: Boolean(element?.querySelector?.("img,[role='img']")),
+        hasSource: Boolean(chip?.source),
+        hasMediaUuid: mediaIds.length > 0,
+        hasName: Boolean(chip?.name),
+      };
+    };
+    return {
+      stage,
+      beforeCount: before.length,
+      afterCount: current.length,
+      countDelta: current.length - before.length,
+      deltaCount: added.length,
+      beforeKinds: before.slice(0, 8).map(chip => chip.kind),
+      afterKinds: current.slice(0, 8).map(chip => chip.kind),
+      deltaKinds: added.slice(0, 8).map(chip => chip.kind),
+      chips: current.slice(0, 8).map(describe),
+    };
   }
   const characterUuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   function explicitCharacterUuid(...nodes) {
@@ -501,18 +562,157 @@
       categoryTabs: (snapshot.categoryTabs || []).map(tab => ({ selected: tab.selected })),
       chipCount: snapshot.chipCount,
       chips: (snapshot.chips || []).map(chip => ({ kind: chip.kind })),
+      chipAttachScan: snapshot.chipAttachScan ? {
+        stage: snapshot.chipAttachScan.stage || null,
+        confirmationMode: snapshot.chipAttachScan.confirmationMode || null,
+        beforeCount: Number(snapshot.chipAttachScan.beforeCount) || 0,
+        afterCount: Number(snapshot.chipAttachScan.afterCount) || 0,
+        countDelta: Number(snapshot.chipAttachScan.countDelta) || 0,
+        deltaCount: Number(snapshot.chipAttachScan.deltaCount) || 0,
+        beforeKinds: (snapshot.chipAttachScan.beforeKinds || []).slice(0, 8),
+        afterKinds: (snapshot.chipAttachScan.afterKinds || []).slice(0, 8),
+        deltaKinds: (snapshot.chipAttachScan.deltaKinds || []).slice(0, 8),
+        chips: (snapshot.chipAttachScan.chips || []).slice(0, 8).map(chip => ({
+          kind: chip.kind || "unknown",
+          tag: chip.tag || null,
+          ownerTag: chip.ownerTag || null,
+          marker: chip.marker || null,
+          role: chip.role || null,
+          hasThumbnail: chip.hasThumbnail === true,
+          hasSource: chip.hasSource === true,
+          hasMediaUuid: chip.hasMediaUuid === true,
+          hasName: chip.hasName === true,
+        })),
+      } : null,
       surfaceStatus: snapshot.surfaceStatus || null,
       path: snapshot.path || null,
       provenanceConfirmed: snapshot.provenanceConfirmed === true,
       chipUuidConfirmed: snapshot.chipUuidConfirmed === true,
       menuRelatedToTile: snapshot.menuRelatedToTile === true,
       menuNearTrigger: snapshot.menuNearTrigger === true,
+      menuActionScan: snapshot.menuActionScan ? {
+        scanAttempts: Number(snapshot.menuActionScan.scanAttempts) || 0,
+        selectorMode: snapshot.menuActionScan.selectorMode || null,
+        menuTag: snapshot.menuActionScan.menuTag || null,
+        menuRole: snapshot.menuActionScan.menuRole || null,
+        itemCount: Number(snapshot.menuActionScan.itemCount) || 0,
+        matchCount: Number(snapshot.menuActionScan.matchCount) || 0,
+        items: (snapshot.menuActionScan.items || []).slice(0, 20).map(item => ({
+          index: Number(item.index) || 0,
+          tag: item.tag || null,
+          role: item.role || null,
+          ariaLabel: item.ariaLabel || null,
+          title: item.title || null,
+          visibleText: item.visibleText || null,
+          textContent: item.textContent || null,
+          accessibleName: item.accessibleName || null,
+          iconText: Array.isArray(item.iconText) ? item.iconText.slice(0, 4) : [],
+          disabled: item.disabled === true,
+          matched: item.matched === true,
+          matchSource: item.matchSource || null,
+          matchedAlias: item.matchedAlias || null,
+        })),
+      } : null,
       cleanup: snapshot.cleanup || null,
       updatedAt: snapshot.updatedAt,
       lastResult: snapshot.lastResult ? Object.fromEntries(Object.entries(snapshot.lastResult).filter(([key, value]) => ["count", "exactMatch", "selected", "confirmed", "reused", "slot", "chipUuidConfirmed", "provenanceConfirmed"].includes(key) && (typeof value === "boolean" || typeof value === "number" || key === "slot"))) : null,
     };
   }
   const addToPromptLabels = new Set(["add to prompt", "thêm vào câu lệnh", "thêm vào lời nhắc", "thêm vào lời nhắc văn bản", "thêm vào prompt"]);
+  const normalizeContextActionText = value => normalize(value).normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d");
+  function contextMenuItemTextSources(item) {
+    const sources = [];
+    const add = (source, value) => {
+      const text = String(value || "").replace(/\s+/g, " ").trim().slice(0, 180);
+      if (text && !sources.some(entry => entry.source === source && entry.text === text)) sources.push({ source, text });
+    };
+    // Flow can expose the icon as the accessibility name ("add") while the
+    // rendered action text is "Add to prompt". Keep each source independent.
+    add("innerText", item?.innerText);
+    add("textContent", item?.textContent);
+    add("aria-label", item?.getAttribute?.("aria-label"));
+    add("title", item?.getAttribute?.("title"));
+    try { add("accessibleName", accessibleName(item)); } catch {}
+    const icons = typeof root.flowQueryAll === "function"
+      ? root.flowQueryAll("common.icons", item, { checkVisible: false })
+      : (() => { try { return [...(item?.querySelectorAll?.("mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined,i,svg") || [])]; } catch { return []; } })();
+    icons.slice(0, 8).forEach((icon, index) => add(`icon${index + 1}`, icon.textContent));
+    return sources;
+  }
+  function configuredContextActionValues(config, snakeCase, camelCase) {
+    const value = config?.[snakeCase] ?? config?.[camelCase];
+    return (Array.isArray(value) ? value : typeof value === "string" ? value.split("|") : [])
+      .map(value => normalize(value)).filter(Boolean).slice(0, 20);
+  }
+  function addToPromptActionMatch(item) {
+    const config = root.flowGetConfig?.("components.actionMenuItems") || root.FlowSelectors?.components?.actionMenuItems || {};
+    let localizedAliases = [];
+    try { localizedAliases = root.I18n?.getPatterns?.("add_to_prompt") || []; } catch {}
+    const textAliases = [...new Set([
+      ...addToPromptLabels,
+      ...configuredContextActionValues(config, "text_match", "textMatch"),
+      ...(Array.isArray(localizedAliases) ? localizedAliases : []),
+    ].map(normalizeContextActionText).filter(Boolean))];
+    const sources = contextMenuItemTextSources(item);
+    for (const source of sources) {
+      const text = normalizeContextActionText(source.text);
+      const alias = textAliases.find(value => text === value || text.includes(value));
+      if (alias) return { matched: true, source: source.source, alias };
+    }
+    const iconAliases = configuredContextActionValues(config, "icon_text", "iconText");
+    if (iconAliases.length) {
+      const icon = sources.find(entry => entry.source.startsWith("icon") && iconAliases.includes(normalize(entry.text)));
+      if (icon) return { matched: true, source: icon.source, alias: normalize(icon.text) };
+    }
+    return { matched: false, source: null, alias: null };
+  }
+  function contextMenuActionSnapshot(menu, items, matches, scanAttempts = 1) {
+    const isDisabled = item => Boolean(item?.disabled || item?.getAttribute?.("aria-disabled") === "true" ||
+      item?.getAttribute?.("disabled") !== null && item?.getAttribute?.("disabled") !== undefined ||
+      item?.getAttribute?.("data-disabled") === "true");
+    return {
+      scanAttempts,
+      selectorMode: typeof root.flowQueryAll === "function" ? "flow_configured_plus_semantic_fallback" : "semantic_fallback",
+      menuTag: String(menu?.tagName || "").toLowerCase() || null,
+      menuRole: menu?.getAttribute?.("role") || null,
+      itemCount: items.length,
+      matchCount: matches.length,
+      items: items.slice(0, 20).map((item, index) => {
+        const sources = contextMenuItemTextSources(item);
+        const match = matches.find(entry => entry.item === item)?.match;
+        return {
+          index,
+          tag: String(item?.tagName || "").toLowerCase() || null,
+          role: item?.getAttribute?.("role") || null,
+          ariaLabel: sources.find(entry => entry.source === "aria-label")?.text || null,
+          title: sources.find(entry => entry.source === "title")?.text || null,
+          visibleText: sources.find(entry => entry.source === "innerText")?.text || null,
+          textContent: sources.find(entry => entry.source === "textContent")?.text || null,
+          accessibleName: sources.find(entry => entry.source === "accessibleName")?.text || null,
+          iconText: sources.filter(entry => entry.source.startsWith("icon")).map(entry => entry.text).slice(0, 4),
+          disabled: isDisabled(item),
+          matched: Boolean(match),
+          matchSource: match?.source || null,
+          matchedAlias: match?.alias || null,
+        };
+      }),
+    };
+  }
+  function contextMenuActionEvidenceText(snapshot) {
+    const items = (snapshot?.items || []).slice(0, 6).map(item => {
+      const label = item.visibleText || item.textContent || "";
+      const aria = item.ariaLabel ? ` aria=${JSON.stringify(item.ariaLabel)}` : "";
+      const accessible = item.accessibleName ? ` name=${JSON.stringify(item.accessibleName)}` : "";
+      const icon = item.iconText?.length ? ` icon=${JSON.stringify(item.iconText.join(" "))}` : "";
+      return `${item.tag || "?"}/${item.role || "no-role"} text=${JSON.stringify(label)}${aria}${accessible}${icon}${item.disabled ? " disabled" : ""}`;
+    });
+    return items.length ? ` Menu DOM: ${items.join(" | ").slice(0, 700)}.` : " Menu DOM: no visible action items found.";
+  }
+  function logContextMenuActionFailure(snapshot, reason, errorCode) {
+    try {
+      console.error("[FlowReferenceAction] Add-to-prompt menu action scan failed", JSON.stringify({ errorCode, reason, ...snapshot }));
+    } catch {}
+  }
   const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const asbIdentityPattern = /^asb:[A-Za-z0-9_-]{32,1024}$/;
   const sameImageReferenceIdentity = (left, right) => {
@@ -534,7 +734,24 @@
     return txt === wanted || txt.startsWith(wanted) || txt.includes(wanted);
   };
   function contextMenuItems(menu) {
-    return [...menu.querySelectorAll('[role="menuitem"],button,[role="button"]')].filter(visible);
+    const configured = typeof root.flowQueryAll === "function"
+      ? root.flowQueryAll("components.actionMenuItems", menu, { checkVisible: false })
+      : [];
+    const candidates = [...(configured || [])];
+    const selectors = [
+      '[role="menuitem"]', '[role="menuitemcheckbox"]', '[role="menuitemradio"]',
+      "mat-menu-item", "button", '[role="button"]', 'a[role="menuitem"]',
+      "[data-radix-collection-item]",
+    ];
+    for (const selector of selectors) {
+      try { candidates.push(...(menu.querySelectorAll?.(selector) || [])); } catch {}
+    }
+    const unique = [...new Set(candidates)].filter(visible);
+    // Prefer the menu's semantic action owners. Some Flow builds put a button
+    // inside each menuitem; counting both would make one action ambiguous.
+    const semantic = unique.filter(item => /^(?:menuitem|menuitemcheckbox|menuitemradio)$/.test(item.getAttribute?.("role") || "") ||
+      String(item.tagName || "").toLowerCase() === "mat-menu-item" || item.hasAttribute?.("data-radix-collection-item"));
+    return semantic.length ? semantic : unique;
   }
   function dispatchContextMenu(target, point) {
     const pointerInit = { bubbles: true, cancelable: true, button: 2, buttons: 2, clientX: point.x, clientY: point.y, pointerType: "mouse" };
@@ -566,7 +783,12 @@
     return candidates.filter(menu => contextMenuItems(menu).length > 0);
   }
   function contextMenuItemLabel(item) {
-    return normalize(accessibleName(item) || item.getAttribute?.("aria-label") || item.getAttribute?.("title") || item.innerText || item.textContent);
+    const sources = contextMenuItemTextSources(item);
+    return normalize(sources.find(entry => entry.source === "innerText")?.text ||
+      sources.find(entry => entry.source === "textContent")?.text ||
+      sources.find(entry => entry.source === "aria-label")?.text ||
+      sources.find(entry => entry.source === "title")?.text ||
+      sources.find(entry => entry.source === "accessibleName")?.text);
   }
   function hasExactContextMenuRelation(menu, trigger, tile) {
     if (tile?.contains?.(menu) || trigger?.contains?.(menu)) return true;
@@ -722,39 +944,118 @@
       // position it at the viewport edge, so ARIA ancestry and pixel distance
       // are diagnostic only, not reasons to reject its actual menu action.
       updateReferenceActionDiagnostics({ ...diagnostic, step: "validating_new_menu", tileActionStep: "menu_owned", menuRelatedToTile: related, menuNearTrigger: nearTrigger });
-      const actions = contextMenuItems(ownedMenu).filter(item => addToPromptLabels.has(contextMenuItemLabel(item)));
-      if (actions.length !== 1 || actions[0].disabled || actions[0].getAttribute("aria-disabled") === "true") {
-        updateReferenceActionDiagnostics({ ...diagnostic, step: "add_action_ambiguous", surfaceStatus: "action_ambiguous" });
-        throw flowError("FLOW_REFERENCE_CONTEXT_ACTION_AMBIGUOUS", "The new image menu does not expose one enabled exact Add to prompt action. No reference was selected.", false, false);
+      let actionItems = [];
+      let actionMatches = [];
+      let menuActionScan = null;
+      let actionScanAttempts = 0;
+      const actionScanDeadline = Math.min(Date.now() + 900, deadline);
+      do {
+        actionItems = contextMenuItems(ownedMenu);
+        actionMatches = actionItems.map(item => ({ item, match: addToPromptActionMatch(item) })).filter(entry => entry.match.matched);
+        actionScanAttempts++;
+        menuActionScan = contextMenuActionSnapshot(ownedMenu, actionItems, actionMatches, actionScanAttempts);
+        updateReferenceActionDiagnostics({ ...diagnostic, step: "scanning_add_to_prompt_action", menuActionScan });
+        if (actionMatches.length || Date.now() >= actionScanDeadline) break;
+        try { await boundedWait(100, actionScanDeadline, "waiting for Flow's Add to prompt menu action", false, signal); }
+        catch (error) {
+          if (error?.code === "FLOW_OPERATION_TIMEOUT" && Date.now() >= actionScanDeadline) break;
+          throw error;
+        }
+      } while (Date.now() < actionScanDeadline);
+      const isDisabled = item => Boolean(item?.disabled || item?.getAttribute?.("aria-disabled") === "true" ||
+        item?.getAttribute?.("disabled") !== null && item?.getAttribute?.("disabled") !== undefined ||
+        item?.getAttribute?.("data-disabled") === "true");
+      if (actionMatches.length !== 1 || isDisabled(actionMatches[0]?.item)) {
+        const reason = actionMatches.length === 0 ? "action_missing" : actionMatches.length > 1 ? "action_ambiguous" : "action_disabled";
+        const code = actionMatches.length === 0 ? "FLOW_REFERENCE_CONTEXT_ACTION_MISSING" :
+          actionMatches.length > 1 ? "FLOW_REFERENCE_CONTEXT_ACTION_AMBIGUOUS" : "FLOW_REFERENCE_CONTEXT_ACTION_DISABLED";
+        const baseMessage = actionMatches.length === 0
+          ? `Flow's new image menu exposed ${actionItems.length} candidate item(s), but no Add to prompt action matched. No reference was selected.`
+          : actionMatches.length > 1
+            ? `Flow's new image menu exposed ${actionMatches.length} Add to prompt matches; the action is ambiguous. No reference was selected.`
+            : "Flow exposed the Add to prompt action, but it was disabled. No reference was selected.";
+        const message = `${baseMessage}${contextMenuActionEvidenceText(menuActionScan)}`;
+        updateReferenceActionDiagnostics({ ...diagnostic, step: reason, surfaceStatus: reason, menuActionScan });
+        logContextMenuActionFailure(menuActionScan, reason, code);
+        const error = flowError(code, message, false, false);
+        error.diagnostics = { menuActionScan };
+        throw error;
       }
+      const action = actionMatches[0].item;
       if (!(await verifyTile())) throw flowError("FLOW_ASSET_ID_MISMATCH", "The uploaded image tile identity changed before Add to prompt. No reference was selected.", false, false);
       if (!ownedMenu.isConnected || !visible(ownedMenu)) {
         throw flowError("FLOW_REFERENCE_CONTEXT_MENU_OWNERSHIP_LOST", "Flow's newly opened reference menu closed before selection. No menu action was taken.", false, false);
       }
-      const currentActions = contextMenuItems(ownedMenu).filter(item => addToPromptLabels.has(contextMenuItemLabel(item)));
-      if (currentActions.length !== 1 || currentActions[0] !== actions[0] || currentActions[0].disabled || currentActions[0].getAttribute("aria-disabled") === "true") {
+      const currentActions = contextMenuItems(ownedMenu).filter(item => addToPromptActionMatch(item).matched);
+      if (currentActions.length !== 1 || currentActions[0] !== action || isDisabled(currentActions[0])) {
         throw flowError("FLOW_REFERENCE_CONTEXT_ACTION_CHANGED", "The unique Add to prompt action changed before selection. No menu action was taken.", false, false);
       }
       const before = chips();
-      updateReferenceActionDiagnostics({ ...diagnostic, step: "clicking_exact_add_action", tileActionStep: "action_clicked", surfaceStatus: "unique_new_menu_and_action" });
-      actions[0].click();
+      updateReferenceActionDiagnostics({ ...diagnostic, step: "clicking_exact_add_action", tileActionStep: "action_clicked", surfaceStatus: "unique_new_menu_and_action", menuActionScan });
+      action.click();
       const attachDeadline = Math.min(Date.now() + 10_000, deadline);
+      let previousScanSignature = null;
+      let stableScanCount = 0;
       while (Date.now() < attachDeadline) {
-        const added = addedReferenceChips(before, chips());
-        if (added.length > 1 || added.some(chip => chip.kind !== "image")) throw flowError("FLOW_REFERENCE_ATTACH_AMBIGUOUS", "Flow added an unexpected number or type of reference chips. Inspect the composer before retrying.", false, true);
-        if (added.length === 1) {
-          const observedUuids = chipMediaUuids(added[0]);
-          if (uuidPattern.test(expectedIdentity) && observedUuids.some(id => id !== expectedIdentity)) throw flowError("FLOW_ASSET_ID_MISMATCH", "The new image chip exposes a UUID that conflicts with the selected upload. Inspect the composer before retrying.", false, true);
+        const current = chips();
+        const added = addedReferenceChips(before, current);
+        const scan = chipAttachEvidence(before, current, added, "waiting_for_exactly_one_image_chip");
+        const signature = JSON.stringify({ afterCount: scan.afterCount, afterKinds: scan.afterKinds, deltaCount: scan.deltaCount, deltaKinds: scan.deltaKinds });
+        stableScanCount = signature === previousScanSignature ? stableScanCount + 1 : 1;
+        previousScanSignature = signature;
+
+        // Flow may remount existing chips while adding another image. TobyFlow's
+        // V2 path confirms this operation by a scoped +1 chip-count change and
+        // then validates any exposed media UUID. Do the same here: a remount can
+        // make element-by-element differencing report old chips as new even
+        // though the composer gained exactly one image.
+        const countDelta = current.length - before.length;
+        const exactlyOneImageAdded = countDelta === 1 && current.length > 0 && current.every(chip => chip.kind === "image");
+        if (exactlyOneImageAdded && stableScanCount >= 2) {
+          const expectedIdentityChips = current.filter(chip => chipMediaUuids(chip).includes(String(expectedIdentity).toLowerCase()));
+          const addedImage = added.length === 1 && added[0].kind === "image" ? added[0] :
+            expectedIdentityChips.length === 1 ? expectedIdentityChips[0] : current[current.length - 1];
+          const observedUuids = chipMediaUuids(addedImage);
+          if (uuidPattern.test(expectedIdentity) && observedUuids.some(id => id !== expectedIdentity)) {
+            scan.stage = "conflicting_chip_uuid";
+            updateReferenceActionDiagnostics({ ...diagnostic, step: "reference_chip_uuid_mismatch", tileActionStep: "action_clicked", surfaceStatus: "chip_uuid_mismatch", chipAttachScan: scan });
+            const error = flowError("FLOW_ASSET_ID_MISMATCH", "The new image chip exposes a UUID that conflicts with the selected upload. Inspect the composer before retrying.", false, true);
+            error.diagnostics = { chipAttachScan: scan };
+            console.error("[FlowReferenceAction] image reference chip UUID mismatch", JSON.stringify(scan));
+            throw error;
+          }
           // The tile/action pair proves an ASB identity even when Flow omits
           // a UUID on the chip. The generation observer marks it unverified.
           const idSource = asbIdentityPattern.test(expectedIdentity) ? "verified_asb_tile_action" : "verified_tile_action_provenance";
-          metadata.set(added[0].element, { name: ref.name, mediaId: expectedIdentity, mediaIdSource: idSource, chipUuidConfirmed: observedUuids.includes(expectedIdentity) });
-          updateReferenceActionDiagnostics({ ...diagnostic, step: "exact_image_chip_confirmed", tileActionStep: "chip_confirmed", surfaceStatus: "attached", provenanceConfirmed: true, chipUuidConfirmed: observedUuids.includes(expectedIdentity) });
-          return { name: ref.name, kind: "image", source: added[0].source, id: expectedIdentity, idSource, chipUuidConfirmed: observedUuids.includes(expectedIdentity), confirmed: true };
+          metadata.set(addedImage.element, { name: ref.name, mediaId: expectedIdentity, mediaIdSource: idSource, chipUuidConfirmed: observedUuids.includes(expectedIdentity) });
+          const confirmationMode = added.length === 1 ? "identity_delta" : "stable_composer_count_delta";
+          scan.stage = "confirmed";
+          scan.confirmationMode = confirmationMode;
+          updateReferenceActionDiagnostics({ ...diagnostic, step: "exact_image_chip_confirmed", tileActionStep: "chip_confirmed", surfaceStatus: "attached", provenanceConfirmed: true, chipUuidConfirmed: observedUuids.includes(expectedIdentity), chipAttachScan: scan });
+          return { name: ref.name, kind: "image", source: addedImage.source, id: expectedIdentity, idSource, chipUuidConfirmed: observedUuids.includes(expectedIdentity), confirmed: true };
+        }
+
+        const wrongTypeAdded = current.some(chip => chip.kind !== "image");
+        const impossibleCount = countDelta > 1 || countDelta < 0;
+        if ((wrongTypeAdded || impossibleCount) && stableScanCount >= 3) {
+          scan.stage = wrongTypeAdded ? "stable_wrong_chip_type" : "stable_unexpected_chip_count";
+          updateReferenceActionDiagnostics({ ...diagnostic, step: "reference_chip_delta_ambiguous", tileActionStep: "action_clicked", surfaceStatus: "chip_delta_ambiguous", chipAttachScan: scan });
+          const message = `Flow's composer changed from ${before.length} to ${current.length} reference chip(s) (delta ${countDelta}; types ${scan.afterKinds.join(",") || "none"}). Inspect the composer before retrying.`;
+          const error = flowError("FLOW_REFERENCE_ATTACH_AMBIGUOUS", message, false, true);
+          error.diagnostics = { chipAttachScan: scan };
+          console.error("[FlowReferenceAction] image reference chip delta failed", JSON.stringify(scan));
+          throw error;
         }
         await boundedWait(150, attachDeadline, "confirming uploaded image reference", true, signal);
       }
-      throw flowError("FLOW_REFERENCE_ATTACH_UNCONFIRMED", "Flow did not add exactly one image ingredient chip after Add to prompt. Inspect the composer before retrying.", false, true);
+      const current = chips();
+      const added = addedReferenceChips(before, current);
+      const scan = chipAttachEvidence(before, current, added, "attachment_unconfirmed");
+      updateReferenceActionDiagnostics({ ...diagnostic, step: "reference_chip_unconfirmed", tileActionStep: "action_clicked", surfaceStatus: "chip_delta_unconfirmed", chipAttachScan: scan });
+      const error = flowError("FLOW_REFERENCE_ATTACH_UNCONFIRMED", `Flow did not confirm one added image chip (before ${before.length}, after ${current.length}, delta ${current.length - before.length}). Inspect the composer before retrying.`, false, true);
+      error.diagnostics = { chipAttachScan: scan };
+      console.error("[FlowReferenceAction] image reference chip confirmation timed out", JSON.stringify(scan));
+      throw error;
     } finally {
       if (ownedMenu && visible(ownedMenu)) {
         const cleanup = await closeOwnedContextMenu(ownedMenu, deadline).catch(() => ({ closed: false, method: "failed" }));
@@ -1193,7 +1494,7 @@
     const deadline = config.deadline || makeDeadline(config.command, 45_000, 10_000);
     updateReferenceActionDiagnostics({ action: "attach", phase: "running", step: "preparing reference", error: null, cleanupError: null, lastResult: null,
       searchLabelRecognized: false, searchLabel: null, searchResultsVerified: false, pickerScanPages: 0, pickerScanEndReached: false,
-      categoriesScanned: [] });
+      categoriesScanned: [], chipAttachScan: null });
     let operationError;
     try {
       requireTime(deadline, "attaching a Flow reference", false, config.signal);
@@ -1342,1199 +1643,7 @@
       }
     }
   }
-  function voiceChipNodes(composer) {
-    if (!composer) return [];
-    const configured = typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.voiceChip", composer) : [];
-    const candidates = [...new Set([
-      ...configured,
-      ...composer.querySelectorAll('[data-ingredient-type="voice"],[data-kind="voice"],[class*="voice-chip" i],button[aria-label*="voice" i],button[aria-label*="giọng" i]'),
-    ])];
-    return candidates.filter(node => {
-      if (!visible(node)) return false;
-      const label = normalize(accessibleName(node) || node.getAttribute?.("aria-label") || node.getAttribute?.("title") || node.innerText || node.textContent);
-      return /voice|giọng/.test(label) || /voice-chip|ingredient-voice/i.test(String(node.className?.baseVal || node.className || ""));
-    });
-  }
-  const voiceChipLabel = chip => normalize(accessibleName(chip) || chip.getAttribute?.("aria-label") || chip.getAttribute?.("title") || chip.innerText || chip.textContent)
-    .replace(/^(?:voice|giọng nói|giọng)\s*[:\-]\s*/, "")
-    .replace(/\s+(?:remove|delete|clear|close|xóa|gỡ)(?:\s+(?:voice|giọng nói|giọng))?$/, "")
-    .trim();
-  async function selectNativeFlowVoice(name, config = {}) {
-    const wanted = String(name || "").replace(/\s+/g, " ").trim();
-    if (!wanted || wanted.length > 120) throw flowError("FLOW_INVALID_ARGUMENT", "An exact Flow voice name is required.", false, false);
-    const deadline = config.deadline || makeDeadline(config.command, 20_000, 4_000);
-    const composer = (typeof root.flowQuery === "function" ? root.flowQuery("composerRoot") : null) || flowComposerForUpload();
-    if (!composer) throw flowError("FLOW_VOICE_COMPOSER_MISSING", "Flow's composer could not be identified; no voice was selected.", false, false);
-    const oldChips = voiceChipNodes(composer);
-    for (const chip of oldChips) {
-      requireTime(deadline, "replacing the selected Flow voice", false, config.signal);
-      const configuredRemovers = typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.voiceRemoveButton", chip) : [];
-      const controls = [...new Set([...configuredRemovers, ...chip.querySelectorAll('button,[role="button"]')])].filter(visible);
-      const remove = controls.find(control => /(?:remove|delete|clear|close|xóa|gỡ)/i.test(normalize(accessibleName(control) || control.getAttribute?.("aria-label") || control.getAttribute?.("title"))));
-      if (!remove || remove.disabled || remove.getAttribute("aria-disabled") === "true") {
-        throw flowError("FLOW_VOICE_REMOVE_UNAVAILABLE", "An existing Flow voice chip has no verified remove control; no new voice was selected.", false, false);
-      }
-      const before = voiceChipNodes(composer).length;
-      remove.click();
-      const until = Math.min(Date.now() + 1500, deadline);
-      while (Date.now() < until && voiceChipNodes(composer).length >= before) await boundedWait(100, deadline, "confirming the previous Flow voice was removed", false, config.signal);
-      if (voiceChipNodes(composer).length >= before) throw flowError("FLOW_VOICE_REMOVE_UNCONFIRMED", "Flow did not confirm removal of the previous voice chip; no new voice was selected.", false, false);
-    }
-
-    let operationError;
-    try {
-      await open(undefined, deadline, config.signal);
-      await category("voices", deadline, config.signal);
-      const option = exactOption(options(), wanted, false);
-      if (!option) throw flowError("FLOW_VOICE_NOT_FOUND", "The requested Flow voice was not available in the voice picker; no voice was selected.", false, false);
-      const before = voiceChipNodes(composer);
-      option.click();
-      let applyClicked = false;
-      const verifyUntil = Math.min(Date.now() + 5000, deadline);
-      while (Date.now() < verifyUntil) {
-        const matching = voiceChipNodes(composer).filter(chip => voiceChipLabel(chip) === normalize(wanted));
-        if (matching.length === 1) return { selected: true, confirmed: true };
-        if (matching.length > 1) throw flowError("FLOW_VOICE_SELECTION_AMBIGUOUS", "Flow showed multiple matching voice chips; inspect the composer before submitting.", false, false);
-        const pickerRoot = picker()?.closest('[role="dialog"]') || picker();
-        const apply = pickerRoot && (flowButton("Add to prompt", pickerRoot) || flowButton("Thêm vào câu lệnh", pickerRoot));
-        if (!applyClicked && apply && !apply.disabled && apply.getAttribute("aria-disabled") !== "true") { apply.click(); applyClicked = true; }
-        await boundedWait(100, deadline, "confirming the selected Flow voice", true, config.signal);
-      }
-      throw flowError("FLOW_VOICE_SELECTION_UNCONFIRMED", "Flow did not confirm the requested voice chip; no generation was submitted.", false, false);
-    } catch (error) {
-      operationError = error;
-      throw error;
-    } finally {
-      if (picker()) {
-        try { await closeAfterOperation(deadline, config.signal, operationError); }
-        catch (cleanupError) { if (!operationError) throw cleanupError; }
-      }
-    }
-  }
-  async function listNativeFlowVoiceOptions(config = {}) {
-    const deadline = config.deadline || makeDeadline(config.command, 25_000, 5_000);
-    const wasOpen = Boolean(picker());
-    let ownsPicker = false;
-    let operationError;
-    try {
-      if (wasOpen) {
-        const tab = findPickerCategoryTab("voices");
-        if (!tab || tab.getAttribute("aria-selected") !== "true") {
-          throw flowError("FLOW_VOICE_PICKER_ALREADY_OPEN", "Flow already has a different picker open; it was left unchanged.", false, false);
-        }
-      } else {
-        await open(undefined, deadline, config.signal);
-        ownsPicker = true;
-        await category("voices", deadline, config.signal);
-      }
-      const list = picker();
-      if (!list) throw flowError("FLOW_VOICE_PICKER_UNAVAILABLE", "Flow's voice picker list was not available.", false, false);
-      const labels = [];
-      const seen = new Set();
-      let stableAtBottom = 0;
-      let completed = false;
-      let scanReason = "step_limit";
-      let scrollMoves = 0;
-      let optionCount = 0;
-      let steps = 0;
-      for (let step = 0; step < 60 && labels.length < 250; step++) {
-        steps++;
-        requireTime(deadline, "reading Flow voice options", false, config.signal);
-        const currentList = picker();
-        if (!currentList) throw flowError("FLOW_VOICE_PICKER_CLOSED", "Flow's voice picker closed during inspection; the result is incomplete.", false, false);
-        const currentOptions = options();
-        optionCount = Math.max(optionCount, currentOptions.length);
-        for (const option of currentOptions) {
-          const rawLabel = accessibleName(option) || option.getAttribute?.("aria-label") || option.getAttribute?.("title") || option.innerText || option.textContent || "";
-          const label = String(rawLabel).replace(/\s+/g, " ").trim();
-          if (!label) throw flowError("FLOW_VOICE_LABEL_UNAVAILABLE", "A visible Flow voice option had no readable label; no partial list was returned.", false, false);
-          const key = normalize(label);
-          if (seen.has(key)) continue;
-          seen.add(key);
-          labels.push(label);
-        }
-        // Flow's role=listbox often wraps a separate virtual-scroll viewport.
-        // Scroll the actual overflowing descendant, not the listbox shell.
-        const scroller = [currentList, ...currentList.querySelectorAll("*")]
-          .find(element => Number(element.clientHeight) > 0 && Number(element.scrollHeight) > Number(element.clientHeight) + 2);
-        if (!scroller) {
-          scanReason = "no_scroll_container";
-          stableAtBottom++;
-          if (stableAtBottom >= 2) { completed = true; break; }
-        } else {
-          const top = Number(scroller.scrollTop) || 0;
-          const height = Number(scroller.clientHeight) || 0;
-          const scrollHeight = Number(scroller.scrollHeight) || 0;
-          if (top + height >= scrollHeight - 2) {
-            scanReason = "bottom_reached";
-            stableAtBottom++;
-            if (stableAtBottom >= 2) { completed = true; break; }
-            await boundedWait(180, deadline, "confirming the end of Flow voice options", false, config.signal);
-            continue;
-          }
-          stableAtBottom = 0;
-          const nextTop = Math.min(scrollHeight - height, top + Math.max(240, height * 0.8));
-          scroller.scrollTop = nextTop;
-          await boundedWait(180, deadline, "loading the next Flow voice options", false, config.signal);
-          if ((Number(scroller.scrollTop) || 0) <= top) {
-            scanReason = "scroll_no_progress";
-            break;
-          }
-          scrollMoves++;
-        }
-      }
-      if (!completed) {
-        const reason = labels.length >= 250 ? "option_limit" : scanReason;
-        const error = flowError(
-          reason === "scroll_no_progress" ? "FLOW_VOICE_SCAN_NO_PROGRESS" : reason === "option_limit" ? "FLOW_VOICE_OPTIONS_LIMIT" : "FLOW_VOICE_SCAN_INCOMPLETE",
-          reason === "scroll_no_progress"
-            ? "Flow's voice options stopped scrolling before the list end; no partial list was returned."
-            : reason === "option_limit"
-              ? "Flow's voice picker exceeded the bounded 250-option scan; no partial list was returned."
-              : "Flow's voice options could not be enumerated completely within the bounded scan; no partial list was returned.",
-          false, false,
-        );
-        // Counts and fixed reason codes are safe to log; option names and DOM text are intentionally omitted.
-        error.diagnostics = { reason, steps, labelsRead: labels.length, visibleOptions: optionCount, scrollMoves };
-        throw error;
-      }
-      if (labels.length >= 250) throw flowError("FLOW_VOICE_OPTIONS_LIMIT", "Flow's voice picker exceeded the bounded 250-option scan; no partial list was returned.", false, false);
-      return { voices: labels, count: labels.length, source: "flow_v2_picker", readOnly: true };
-    } catch (error) {
-      operationError = error;
-      throw error;
-    } finally {
-      if (ownsPicker && picker()) {
-        try { await closeAfterOperation(deadline, config.signal, operationError); }
-        catch (cleanupError) { if (!operationError) throw cleanupError; }
-      }
-    }
-  }
   globalThis.FlowReferenceActions = Object.freeze({ attach, listCharacters, chips, parse, exactOption, closePicker, inspectPicker, inspectDiagnostics: inspectReferenceActionDiagnostics });
-  globalThis.selectNativeFlowVoice = selectNativeFlowVoice;
-  globalThis.listNativeFlowVoiceOptions = listNativeFlowVoiceOptions;
+  globalThis.FlowReferencePickerInternals = Object.freeze({ picker, open, category, closeAfterOperation, exactOption, options, findPickerCategoryTab });
   globalThis.listOptions = listOptions;
 })();
-var root = typeof globalThis !== "undefined" ? globalThis : (typeof window !== "undefined" ? window : self);
-var nativeUploadAssemblers = new Map();
-var stagedNativeFiles = new Map();
-
-function listOptions(list, checkVis = true) {
-  if (!list) return [];
-  if (typeof root.flowQueryAll === "function") {
-    const results = root.flowQueryAll("components.optionItem", list, { checkVisible: checkVis });
-    if (results && results.length) return results;
-  }
-  const raw = [...(list.querySelectorAll?.('[role="option"]') || [])];
-  const isVis = typeof visible === "function" ? visible : (typeof root.visible === "function" ? root.visible : (() => true));
-  return checkVis ? raw.filter(isVis) : raw;
-}
-
-function validStagedLocalImage(value, suffixPattern) {
-  return Boolean(value && typeof value.transferId === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(value.transferId) && stagedNativeFiles.has(value.transferId) &&
-    typeof value.name === "string" && new RegExp(`^fm-[A-Za-z0-9_-]{1,32}-${suffixPattern.source}\\.(?:png|jpe?g|webp|gif|heic|heif|avif)$`, "i").test(value.name));
-}
-
-// === FLOW UPLOADER OOP SERVICE ===
-
-  function cleanFlowMediaCandidateName(str) {
-    if (!str) return "";
-    let clean = String(str).replace(/\s+/g, " ").trim().toLowerCase();
-    // Strip tiền tố ở đầu: "hình ảnh ", "ảnh ", "video ", "nội dung nghe nhìn ", "tệp ", "nhân vật ", "image ", "media "
-    clean = clean.replace(/^(?:h\u00ECnh\s+\u1EA3nh|\u1EA3nh|video|n\u1ED9i\s+dung(?:\s+nghe\s+nh\u00ECn)?|t\u1EC7p|nh\u00E2n\s+v\u1EADt|image|media)\s+/i, "");
-    // Strip hậu tố ở cuối: " hình ảnh", " ảnh", " video", " nhân vật", " avatar", " nội dung nghe nhìn", " image"
-    clean = clean.replace(/\s+(?:h\u00ECnh\s+\u1EA3nh|\u1EA3nh|video|nh\u00E2n\s+v\u1EADt|avatar|n\u1ED9i\s+dung(?:\s+nghe\s+nh\u00ECn)?|image)$/i, "");
-    return clean.trim();
-  }
-
-  function normalizeFlowUploadName(value) {
-    return String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
-  }
-
-  function flowUploadNameMatches(value, assetName) {
-    if (!value || !assetName) return false;
-    const name = cleanFlowMediaCandidateName(normalizeFlowUploadName(value));
-    const full = normalizeFlowUploadName(assetName);
-    const stem = normalizeFlowUploadName(String(assetName || "").replace(/\.(?:png|jpe?g|webp|gif|heic|heif|avif|mp4|m4v|mov|webm|avi|mkv|3gp)$/i, ""));
-    if (name && (name === full || name === stem)) return true;
-    const normName = typeof root.normalizeFlowUiText === "function" ? root.normalizeFlowUiText(name) : name;
-    const normFull = typeof root.normalizeFlowUiText === "function" ? root.normalizeFlowUiText(full) : full;
-    const normStem = typeof root.normalizeFlowUiText === "function" ? root.normalizeFlowUiText(stem) : stem;
-    return Boolean(normName && (normName === normFull || normName === normStem));
-  }
-
-  function matchesFlowTile(tile, assetName) {
-    if (!tile || !assetName) return false;
-    const norm = s => String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
-    const full = norm(assetName);
-    const stem = norm(assetName.replace(/\.(?:png|jpe?g|webp|gif|heic|heif|avif|mp4|m4v|mov|webm|avi|mkv|3gp)$/i, ""));
-
-    const label = norm(tile.getAttribute("aria-label"));
-    const title = norm(tile.getAttribute("title"));
-    const dataName = norm(tile.getAttribute("data-tile-name"));
-    const imgAlt = norm(tile.querySelector("img")?.getAttribute("alt"));
-    const imgAria = norm(tile.querySelector("img")?.getAttribute("aria-label"));
-    const text = norm(tile.innerText || tile.textContent);
-
-    const candidates = [label, title, dataName, imgAlt, imgAria, text].filter(Boolean);
-    return candidates.some(candidate => {
-      const rawClean = cleanFlowMediaCandidateName(candidate);
-      if (rawClean === full || rawClean === stem) return true;
-      const normClean = typeof root.normalizeFlowUiText === "function" ? root.normalizeFlowUiText(rawClean) : rawClean;
-      const normFull = typeof root.normalizeFlowUiText === "function" ? root.normalizeFlowUiText(full) : full;
-      const normStem = typeof root.normalizeFlowUiText === "function" ? root.normalizeFlowUiText(stem) : stem;
-      return Boolean(normClean && (normClean === normFull || normClean === normStem));
-    });
-  }
-
-  function flowUploadTileKind(tile) {
-    if (!tile) return null;
-    if (tile.querySelector("flow-scene-tile")) return "scene";
-    if (tile.querySelector("flow-video-tile,video")) return "video";
-    if (tile.querySelector("flow-image-tile,img")) return "image";
-    return null;
-  }
-
-  function flowUploadKindMatches(expectedKind, actualKind) {
-    return expectedKind === "video" ? actualKind === "video" || actualKind === "scene" : actualKind === expectedKind;
-  }
-
-  function resolveUniqueUploadTarget(candidates, code, actionLabel) {
-    if (candidates.length > 1) {
-      const fn = root.flowError || ((c, m, r, o) => Object.assign(new Error(m), { code: c, retryable: r, outcome_unknown: o }));
-      throw fn(code, `Flow shows multiple matching ${actionLabel} controls. No control was selected.`, false, false);
-    }
-    return candidates[0] || null;
-  }
-
-  function assertReusableFlowUploadKind(tile, assetName, expectedKind) {
-    const actualKind = flowUploadTileKind(tile);
-    if (actualKind && !flowUploadKindMatches(expectedKind, actualKind)) {
-      const fn = root.flowError || ((c, m, r, o) => Object.assign(new Error(m), { code: c, retryable: r, outcome_unknown: o }));
-      throw fn("FLOW_UPLOAD_KIND_MISMATCH", `Flow already has a ${actualKind} tile named "${assetName}", not the requested ${expectedKind}. No upload was started.`, false, false);
-    }
-    return actualKind;
-  }
-
-  function flowUploadTileNames(tile) {
-    if (!tile) return [];
-    return [tile.getAttribute("aria-label"), tile.getAttribute("title"), tile.getAttribute("data-tile-name"),
-      tile.querySelector("img")?.getAttribute("alt"), tile.querySelector("img")?.getAttribute("aria-label")]
-      .map(value => String(value || "").trim()).filter(Boolean);
-  }
-
-  function safeFlowPickerMethod(value) {
-    return ["input-capture", "input.click", "showOpenFilePicker", "input-assign", "drop"].includes(value) ? value : "unknown";
-  }
-
-  function safeFlowPickerType(value) {
-    const type = String(value || "").toLowerCase();
-    return /^(?:image|video)\/[a-z0-9.+-]{1,80}$/.test(type) ? type : "unknown";
-  }
-
-  function inspectFlowUploadUiState() {
-    const isVisible = root.visible || (el => Boolean(el && el.isConnected));
-    const visibleElements = selector => [...document.querySelectorAll(selector)].filter(isVisible).slice(0, 100);
-    const dialogs = visibleElements('[role="dialog"],mat-dialog-container').filter(el =>
-      /video|upload/i.test(String(el.innerText || el.textContent || "").slice(0, 1200)));
-    const progress = visibleElements('[role="progressbar"],[aria-busy="true"],mat-progress-bar,.mat-mdc-progress-bar,[data-state="loading"]');
-    const errorTiles = visibleElements("flow-error-tile");
-    const textErrors = visibleElements('[role="alert"],[aria-live="assertive"],.error,.warning,[data-testid*="error"]')
-      .some(el => /upload|video|file/i.test(String(el.innerText || el.textContent || "").slice(0, 240)) &&
-        /reject|unsupported|invalid|failed|error|too large|không hỗ trợ|không thể tải/i.test(String(el.innerText || el.textContent || "").slice(0, 240)));
-    return {
-      confirmationDialogVisible: dialogs.length > 0,
-      visibleProgressIndicatorCount: progress.length,
-      visibleErrorTileCount: errorTiles.length,
-      visibleUploadRejection: Boolean(errorTiles.length || textErrors),
-    };
-  }
-
-  function flowComposerForUpload() {
-    const editor = (typeof root.flowQuery === "function" ? root.flowQuery("editor") : null) ||
-      document.querySelector(".ProseMirror[contenteditable='true']");
-    const submit = root.FlowEditor?.getFlowSubmitButton?.() || root.getFlowSubmitButton?.();
-    if (!editor || !submit) return null;
-    for (let node = editor.parentElement, depth = 0; node && node !== document.body && depth < 12; node = node.parentElement, depth++) {
-      if (node.contains(submit) && /composer|prompt|form/i.test(`${node.tagName} ${String(node.className?.baseVal || node.className || "")}`)) return node;
-    }
-    const configured = (typeof root.flowQuery === "function" ? root.flowQuery("composerRoot") : null);
-    if (configured?.contains(editor) && configured.contains(submit)) return configured;
-    for (let node = editor.parentElement, depth = 0; node && node !== document.body && depth < 12; node = node.parentElement, depth++) {
-      if (node.contains(submit)) return node;
-    }
-    return null;
-  }
-
-  function uploadControlDiagnostics(composer = flowComposerForUpload()) {
-    const scope = composer || document;
-    const isVisible = root.visible || (el => Boolean(el && el.isConnected));
-    const getAria = root.accessibleName || (el => el.getAttribute("aria-label") || "");
-    return [...scope.querySelectorAll('button,[role="button"],mat-button,[tabindex="0"]')]
-      .filter(isVisible).slice(0, 30).map(el => ({
-        tag: el.tagName.toLowerCase(),
-        role: el.getAttribute("role"),
-        aria: getAria(el).replace(/\s+/g, " ").trim().slice(0, 80),
-        title: (el.getAttribute("title") || "").slice(0, 80),
-        text: String(el.innerText || el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 80),
-        ariaPressed: el.getAttribute("aria-pressed"),
-        ariaSelected: el.getAttribute("aria-selected"),
-        dataState: el.getAttribute("data-state"),
-        checked: typeof el.checked === "boolean" ? el.checked : null,
-        disabled: Boolean(el.disabled || el.getAttribute("aria-disabled") === "true"),
-        icon: el.querySelector("mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined,svg")?.textContent?.trim().slice(0, 40) || "",
-        className: String(el.className?.baseVal || el.className || "").slice(0, 100),
-      }));
-  }
-
-  function findAddMediaButton() {
-    const composer = flowComposerForUpload();
-    if (!composer) return null;
-    const sharedResolver = typeof root.flowButton === "function" ? root.flowButton("Add ingredients to the prompt box", composer) : null;
-    if (sharedResolver && composer.contains(sharedResolver)) return sharedResolver;
-    const isVisible = root.visible || (el => Boolean(el && el.isConnected));
-    const getAria = root.accessibleName || (el => el.getAttribute("aria-label") || "");
-    const candidates = [...composer.querySelectorAll('button,[role="button"],mat-button,[tabindex="0"]')].filter(isVisible);
-    const names = new Set([
-      "add media menu", "add media", "add to prompt", "add to prompt box", "add component",
-      "add ingredients to the prompt box", "add ingredient", "add content", "add", "+",
-      "thêm nội dung nghe nhìn", "thêm tệp", "thêm vào lời nhắc", "thêm thành phần",
-      "thêm thành phần vào hộp lời nhắc", "thêm thành phần vào hộp câu lệnh", "thêm vào hộp lời nhắc",
-      "thêm phương tiện", "thêm ảnh", "thêm video", "thêm hình ảnh", "thêm",
-    ]);
-    const clean = value => String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
-    const labelOf = el => [getAria(el), el.getAttribute("aria-label"), el.getAttribute("title"), el.innerText, el.textContent]
-      .map(clean).filter(Boolean);
-    const exact = candidates.find(el => labelOf(el).some(label => {
-      if (names.has(label)) return true;
-      const norm = typeof root.normalizeFlowUiText === "function" ? root.normalizeFlowUiText(label) : label;
-      for (const name of names) {
-        if ((typeof root.normalizeFlowUiText === "function" ? root.normalizeFlowUiText(name) : name) === norm) return true;
-      }
-      return false;
-    }));
-    if (exact) return exact;
-    const addIcons = new Set(["add", "add_circle", "add_2", "add_circle_outline", "add_box", "add_rounded"]);
-    const isNav = root.isFlowProjectNavigationControl || (() => false);
-    const iconCandidates = candidates.filter(el => {
-      if (isNav(el)) return false;
-      const icon = clean(el.querySelector("mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined,svg")?.textContent);
-      return addIcons.has(icon);
-    });
-    const submit = root.FlowEditor?.getFlowSubmitButton?.();
-    const adjacent = submit?.previousElementSibling;
-    return adjacent && candidates.includes(adjacent) && iconCandidates.includes(adjacent) ? adjacent : iconCandidates[0] || null;
-  }
-
-  async function ensureAddMediaButton(deadline = Date.now() + 10_000, signal) {
-    const requireTime = operation => root.FlowUiDeadline?.requireTime(deadline, operation, false, signal);
-    const boundedWait = (ms, operation) => root.FlowUiDeadline?.boundedWait(ms, deadline, operation, false, signal);
-    requireTime("finding Flow's upload control");
-    let button = findAddMediaButton();
-    if (button) return button;
-
-    const settings = root.FlowSettings;
-    const settingsTrigger = typeof root.flowButton === "function" ? root.flowButton("Settings trigger", flowComposerForUpload() || document) : null;
-    if (settingsTrigger && settings) {
-      await settings.openFlowSettings({ deadline, signal });
-      requireTime("inspecting Flow's current video mode");
-      const framesOption = settings.flowRadio("Frames");
-      const framesSelected = settings.nativeRadioSelected(framesOption) ||
-        framesOption?.getAttribute("aria-selected") === "true" || framesOption?.getAttribute("data-state") === "active";
-      if (framesSelected) {
-        await settings.chooseRadio("Ingredients", { deadline, signal });
-        const ingredients = settings.flowRadio("Ingredients");
-        if (!settings.nativeRadioSelected(ingredients) && ingredients?.getAttribute("aria-selected") !== "true" && ingredients?.getAttribute("data-state") !== "active") {
-          const fn = root.flowError || ((c, m, r, o) => Object.assign(new Error(m), { code: c, retryable: r, outcome_unknown: o }));
-          throw fn("FLOW_UPLOAD_MODE_SWITCH_UNCONFIRMED", "Flow did not confirm Ingredients mode; no file was selected.", true, false);
-        }
-      }
-      await settings.closeFlowSettings({ deadline, signal });
-      const triggerDeadline = Math.min(Date.now() + 2500, deadline);
-      while (Date.now() < triggerDeadline && !(button = findAddMediaButton())) await boundedWait(80, "waiting for Flow's composer Upload control");
-    }
-    return button;
-  }
-
-  async function confirmFlowVideoUploadIfPrompted(deadline = Date.now() + 10_000, signal, selection = {}) {
-    const isVisible = root.visible || (el => Boolean(el && el.isConnected));
-    const getAria = root.accessibleName || (el => el.getAttribute("aria-label") || "");
-    const fn = root.flowError || ((c, m, r, o) => Object.assign(new Error(m), { code: c, retryable: r, outcome_unknown: o }));
-    const result = { confirmationDialogSeen: false, confirmationButtonClicked: false, confirmationDialogUnrecognized: false };
-    const ambiguous = (reason, dialogCount, controlCount) => {
-      const error = fn("FLOW_UPLOAD_CONFIRMATION_AMBIGUOUS", `Flow displayed an ambiguous video upload confirmation (${reason}); no confirmation control was clicked. Inspect Flow before retrying.`, false, true);
-      error.diagnostics = {
-        ...result,
-        confirmationDialogCandidateCount: dialogCount,
-        enabledConfirmationControlCount: controlCount,
-        filePickerSelectionConfirmed: selection.filePickerSelectionConfirmed === true,
-        pickerMethod: safeFlowPickerMethod(selection.pickerMethod),
-        pickerType: safeFlowPickerType(selection.pickerType),
-        uploadUi: inspectFlowUploadUiState(),
-      };
-      throw error;
-    };
-    for (let attempt = 0; attempt < 24; attempt++) {
-      if (Date.now() >= deadline) throw fn("FLOW_OPERATION_TIMEOUT", "Timed out while confirming Flow's video upload. Inspect Flow before retrying.", false, true);
-      const matchingDialogs = [...document.querySelectorAll('[role="dialog"],mat-dialog-container')].filter(el =>
-        isVisible(el) && /video|upload|tải lên|tải video|tải tệp/i.test(String(el.innerText || el.textContent || "").slice(0, 1200)));
-      const specificDialogs = matchingDialogs.filter(dialog =>
-        !matchingDialogs.some(other => other !== dialog && dialog.contains?.(other)));
-      if (!specificDialogs.length) {
-        await root.FlowUiDeadline?.boundedWait(300, deadline, "waiting for Flow's video upload confirmation", true, signal);
-        continue;
-      }
-      result.confirmationDialogSeen = true;
-      if (specificDialogs.length !== 1) ambiguous("multiple visible dialogs", specificDialogs.length, 0);
-      const dialog = specificDialogs[0];
-      const confirms = [...dialog.querySelectorAll("button,[role=button]")].filter(el => {
-        if (!isVisible(el) || el.disabled || el.getAttribute("aria-disabled") === "true") return false;
-        const text = (getAria(el) || el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
-        return /^(?:upload|continue|confirm|agree|accept|next|done|ok|got it|tải lên|tiếp tục|xác nhận|đồng ý|chấp nhận|tải video|tải video lên)(?:\s+(?:và\s+|and\s+)?(?:tiếp tục|upload|tải lên|video|file|media))?$/i.test(text) ||
-          /^(?:upload\s+video|upload\s+file|upload\s+media|continue\s+upload|agree\s+and\s+continue|tiếp tục\s+tải lên)$/i.test(text);
-      });
-      if (confirms.length > 1) ambiguous("multiple enabled confirmation controls", 1, confirms.length);
-      const confirm = confirms[0];
-      if (confirm) { confirm.click(); result.confirmationButtonClicked = true; await root.FlowUiDeadline?.boundedWait(250, deadline, "confirming Flow's video upload", true, signal); return result; }
-      await root.FlowUiDeadline?.boundedWait(300, deadline, "waiting for Flow's video upload confirmation", true, signal);
-    }
-    result.confirmationDialogUnrecognized = true;
-    const error = fn("FLOW_UPLOAD_CONFIRMATION_UNRECOGNIZED", "Flow displayed a video upload confirmation dialog, but no recognized Upload, Continue, or Confirm control appeared. No further upload actions were started; inspect Flow before retrying.", false, true);
-    error.diagnostics = {
-      ...result,
-      filePickerSelectionConfirmed: selection.filePickerSelectionConfirmed === true,
-      pickerMethod: safeFlowPickerMethod(selection.pickerMethod),
-      pickerType: safeFlowPickerType(selection.pickerType),
-      dropAttempted: selection.dropAttempted === true,
-      dropReceiptConfirmed: selection.dropReceiptConfirmed === true,
-      uploadUi: inspectFlowUploadUiState(),
-    };
-    throw error;
-  }
-
-  async function waitForNativeMediaTile(assetName, command, kind, options = {}) {
-    const fn = root.flowError || ((c, m, r, o) => Object.assign(new Error(m), { code: c, retryable: r, outcome_unknown: o }));
-    const deadline = Math.min(options.deadline || Infinity, Date.now() + (kind === "video" ? 60_000 : 90_000));
-    const startedAt = Date.now();
-    let nextLibraryScanAt = startedAt + 1_500;
-    let libraryScans = 0;
-    const maxLibraryScans = Number.isInteger(options.maxLibraryScans) ? Math.max(0, options.maxLibraryScans) : 3;
-    const baselineIds = new Set((options.baselineIds || []).map(String));
-    const requireNewOwner = options.requireNewOwner === true;
-    let ownerId = options.ownerId ? String(options.ownerId) : null;
-    let exactTileObserved = false;
-    let lastScan = null;
-    let lastScanErrorCode = null;
-    const getMediaId = root.mediaId || (el => el.getAttribute("data-media-id") || el.getAttribute("id") || "");
-
-    while (Date.now() < deadline) {
-      const exactMatches = [...document.querySelectorAll("flow-grid-tile-container")]
-        .filter(item => matchesFlowTile(item, assetName));
-      if (exactMatches.length) exactTileObserved = true;
-      if (exactMatches.length > 1) {
-        throw fn("FLOW_UPLOAD_TILE_AMBIGUOUS", `More than one Flow tile exactly matches uploaded ${kind} "${assetName}". Inspect the library before retrying.`, false, true);
-      }
-      const tile = exactMatches[0] || null;
-      if (tile) {
-        if (tile.querySelector("flow-error-tile")) {
-          throw fn("FLOW_UPLOAD_REJECTED", `Flow rejected uploaded ${kind} "${assetName}".`, false, true);
-        }
-        const identity = getMediaId(tile);
-        const hasPersistentIdentity = identity && !identity.startsWith("title:");
-        const isNewOwner = hasPersistentIdentity && !baselineIds.has(String(identity));
-        const actualKind = flowUploadTileKind(tile);
-        if (requireNewOwner && isNewOwner) {
-          if (ownerId && ownerId !== String(identity)) {
-            throw fn("FLOW_UPLOAD_TILE_AMBIGUOUS", `A second new Flow media ID appeared while confirming uploaded ${kind} "${assetName}". Inspect the library before retrying.`, false, true);
-          }
-          ownerId = String(identity);
-        }
-        const identityMatchesOwner = !requireNewOwner || Boolean(ownerId && hasPersistentIdentity && String(identity) === ownerId && isNewOwner);
-        const kindMatches = flowUploadKindMatches(kind, actualKind);
-        const ready = root.FlowTiles?.isTileMediaReady?.(tile) ?? !root.isTileBusy?.(tile);
-        if (requireNewOwner && hasPersistentIdentity && !isNewOwner) {
-          // Pre-existing tile
-        } else if (ready && kindMatches && identityMatchesOwner && hasPersistentIdentity && flowUploadTileNames(tile).some(name => flowUploadNameMatches(name, assetName))) {
-          return { name: flowUploadTileNames(tile).find(name => flowUploadNameMatches(name, assetName)) || assetName, id: identity, kind };
-        }
-      }
-      if (libraryScans < maxLibraryScans && Date.now() >= nextLibraryScanAt && root.FlowMediaMenu?.scanNativeAssets) {
-        libraryScans++;
-        nextLibraryScanAt = Date.now() + 2_000;
-        try {
-          const assets = await root.FlowMediaMenu.scanNativeAssets({
-            deadline: Math.min(deadline, Date.now() + 8_000),
-            maxDurationMs: 8_000,
-            exactName: assetName,
-            kind,
-            includeIncomplete: true,
-            ...(requireNewOwner ? { baselineIds: [...baselineIds], ownerKind: kind } : {}),
-            keepPositionOnMatch: true,
-            onDiagnostics: diagnostics => {
-              lastScan = { steps: Number(diagnostics.steps) || 0, uniqueTiles: Number(diagnostics.uniqueTiles) || 0,
-                reachedEnd: diagnostics.reachedEnd === true, exactMatchCount: Number(diagnostics.exactMatchCount) || 0 };
-              root.emitFlowProgress?.(command, `Upload confirmation scan ${libraryScans}: ${lastScan.uniqueTiles} unique tiles across ${lastScan.steps} pages; baseline ${baselineIds.size}, owner ${ownerId || "not latched"}`);
-            },
-          });
-          const confirmedAssets = assets.filter(asset => flowUploadNameMatches(asset?.name, assetName) && asset?.id);
-          if (confirmedAssets.length > 1) throw fn("FLOW_UPLOAD_TILE_AMBIGUOUS", `More than one Flow library tile exactly matches uploaded ${kind} "${assetName}". Inspect the library before retrying.`, false, true);
-          if (confirmedAssets.length === 1) {
-            const asset = confirmedAssets[0];
-            if (asset.error) throw fn("FLOW_UPLOAD_REJECTED", `Flow rejected uploaded ${kind} "${assetName}".`, false, true);
-            const isNewOwner = !requireNewOwner || (asset.newSinceBaseline === true && !baselineIds.has(String(asset.id)));
-            if (requireNewOwner && !isNewOwner) {
-              // Stale
-            } else {
-              if (ownerId && ownerId !== String(asset.id)) throw fn("FLOW_UPLOAD_TILE_AMBIGUOUS", `Flow reported a different new media ID while confirming "${assetName}". Inspect the library before retrying.`, false, true);
-              ownerId = String(asset.id);
-              const kindMatches = flowUploadKindMatches(kind, asset.kind);
-              const kindUnknown = !asset.kind;
-              if (!kindMatches && !kindUnknown) throw fn("FLOW_UPLOAD_KIND_MISMATCH", `Flow's new media ID for "${assetName}" hydrated as ${asset.kind}, not ${kind}. Inspect it before retrying.`, false, true);
-              if (kindMatches && asset.ready === true && asset.busy === false) return { name: asset.name, id: asset.id, kind };
-            }
-          }
-        } catch (error) {
-          lastScanErrorCode = typeof error?.code === "string" ? error.code : "SCAN_FAILED";
-          if (["FLOW_UPLOAD_TILE_AMBIGUOUS", "FLOW_ASSET_AMBIGUOUS", "FLOW_UPLOAD_REJECTED", "FLOW_UPLOAD_KIND_MISMATCH"].includes(error?.code)) throw error;
-        }
-      }
-      if (typeof root.wait === "function") await root.wait(250);
-      else await new Promise(r => setTimeout(r, 250));
-    }
-    const selection = options.selectionDiagnostics || {};
-    const diagnostics = {
-      filePickerSelectionConfirmed: selection.filePickerSelectionConfirmed === true,
-      pickerMethod: safeFlowPickerMethod(selection.pickerMethod),
-      pickerType: safeFlowPickerType(selection.pickerType),
-      dropAttempted: selection.dropAttempted === true,
-      dropReceiptConfirmed: selection.dropReceiptConfirmed === true,
-      confirmationDialogSeen: selection.confirmationDialogSeen === true,
-      confirmationButtonClicked: selection.confirmationButtonClicked === true,
-      confirmationDialogUnrecognized: selection.confirmationDialogUnrecognized === true,
-      exactTileObserved,
-      baselineIdCount: baselineIds.size,
-      newOwnerIdLatched: Boolean(ownerId),
-      scansAttempted: libraryScans,
-      lastScan,
-      lastScanErrorCode,
-      uploadUi: inspectFlowUploadUiState(),
-    };
-    const timeoutErr = fn("FLOW_UPLOAD_TIMEOUT", `Flow did not confirm an exact ${kind} library tile for "${assetName}" before the bounded deadline. Picker selection confirmed: ${diagnostics.filePickerSelectionConfirmed}; method: ${diagnostics.pickerMethod}; type: ${diagnostics.pickerType}; full-library scans: ${libraryScans}; last scan: ${lastScan ? `${lastScan.uniqueTiles} tiles, ${lastScan.steps} pages, reached end ${lastScan.reachedEnd}` : "no scan diagnostics"}. Visible rejection: ${diagnostics.uploadUi.visibleUploadRejection}; progress indicators: ${diagnostics.uploadUi.visibleProgressIndicatorCount}. Inspect Flow before retrying.`, false, true);
-    timeoutErr.diagnostics = diagnostics;
-    throw timeoutErr;
-  }
-
-  async function uploadStagedMedia(file, kind, command, options = {}) {
-    const fn = root.flowError || ((c, m, r, o) => Object.assign(new Error(m), { code: c, retryable: r, outcome_unknown: o }));
-    const deadline = options.deadline || root.FlowUiDeadline?.makeDeadline(command, 75_000, 15_000) || Date.now() + 60_000;
-    const checkTime = (operation, outcomeUnknown = false) => root.FlowUiDeadline?.requireTime(deadline, operation, outcomeUnknown, options.signal);
-    checkTime("starting the Flow media upload");
-
-    const scroller = typeof root.scrollContainer === "function" ? root.scrollContainer() : null;
-    if (scroller && scroller.scrollTop > 5) {
-      scroller.scrollTop = 0;
-      await root.FlowUiDeadline?.boundedWait(150, deadline, "scrolling to the Flow composer", false, options.signal);
-    }
-
-    const existingTiles = [...document.querySelectorAll("flow-grid-tile-container")].filter(item => matchesFlowTile(item, file.name));
-    if (existingTiles.length > 1) {
-      throw fn("FLOW_UPLOAD_TILE_AMBIGUOUS", `More than one Flow tile exactly matches "${file.name}". Inspect the library before retrying.`, false, true);
-    }
-    if (existingTiles.length === 1) {
-      if (existingTiles[0].querySelector("flow-error-tile")) {
-        throw fn("FLOW_UPLOAD_REJECTED", `Flow already has an error tile for "${file.name}". Inspect it before retrying.`, false, true);
-      }
-      const id = typeof root.mediaId === "function" ? root.mediaId(existingTiles[0]) : "";
-      const ready = root.FlowTiles?.isTileMediaReady?.(existingTiles[0]) ?? !root.isTileBusy?.(existingTiles[0]);
-      const actualKind = assertReusableFlowUploadKind(existingTiles[0], file.name, kind);
-      if (ready && id && !id.startsWith("title:") && flowUploadKindMatches(kind, actualKind)) {
-        return { uploaded: true, name: file.name, kind, id, reused: true };
-      }
-      const confirmed = await waitForNativeMediaTile(file.name, command, kind, { deadline, signal: options.signal });
-      return { uploaded: true, name: file.name, kind, id: confirmed.id, reused: true };
-    }
-
-    const baselineAssets = root.FlowMediaMenu?.collectAssets?.({ includeIncomplete: true });
-    if (!Array.isArray(baselineAssets)) {
-      throw fn("FLOW_UPLOAD_BASELINE_UNAVAILABLE", "Could not capture Flow media IDs before upload. No file was selected; inspect the project before retrying.", false, false);
-    }
-    const baselineIds = [...new Set(baselineAssets.map(asset => asset?.id).filter(Boolean).map(String))];
-
-    const uploadButton = await ensureAddMediaButton(deadline, options.signal);
-    const normalize = value => String(value || "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
-    const isVisible = root.visible || (el => Boolean(el && el.isConnected));
-    const getAria = root.accessibleName || (el => el.getAttribute("aria-label") || "");
-
-    const uploadNames = new Set([
-      "upload", "upload media", "upload file", "upload from computer", "upload from device", "uploads",
-      "tải lên", "tải tệp", "tải tệp lên", "tải lên tệp", "tải ảnh lên", "tải hình ảnh lên",
-      "tải nội dung nghe nhìn lên", "tải phương tiện lên", "nội dung tải lên", "tệp tải lên",
-      "tải lên từ máy tính", "tải lên từ thiết bị", "tải tệp từ thiết bị", "chọn tệp để tải lên",
-      "tải nội dung lên", "tải phương tiện",
-    ]);
-    const normUploadNames = new Set([...uploadNames].map(name => typeof root.normalizeFlowUiText === "function" ? root.normalizeFlowUiText(name) : name));
-
-    const labelOf = el => {
-      const labels = [getAria(el), el.getAttribute("aria-label"), el.getAttribute("title"), el.innerText, el.textContent];
-      try {
-        const clone = el.cloneNode(true);
-        clone.querySelectorAll('mat-icon,.mat-icon,.google-symbols,svg,[aria-hidden="true"]').forEach(icon => icon.remove());
-        labels.push(clone.innerText || clone.textContent);
-      } catch {}
-      return labels.map(normalize);
-    };
-
-    const isUploadLabel = el => {
-      const icon = el.querySelector("mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined,svg")?.textContent?.trim() || "";
-      if (["upload", "file_upload", "upload_file", "cloud_upload"].includes(icon)) return true;
-      return labelOf(el).some(label => {
-        if (uploadNames.has(label)) return true;
-        const stripped = label.replace(/^(?:upload|upload_file|file_upload|arrow_upward)\s+/, "");
-        if (uploadNames.has(stripped)) return true;
-        const folded = typeof root.normalizeFlowUiText === "function" ? root.normalizeFlowUiText(label) : label;
-        return normUploadNames.has(folded);
-      });
-    };
-
-    const isUploadAction = el => {
-      if (el.matches('[role="tab"]') || el.getAttribute("aria-selected") !== null) return false;
-      const icon = el.querySelector("mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined,svg")?.textContent?.trim() || "";
-      if (["file_upload", "upload_file", "cloud_upload", "upload"].includes(icon)) return true;
-      const actionNames = new Set([
-        "upload", "upload media", "upload file", "upload from computer", "upload from device",
-        "tải lên", "tải tệp", "tải tệp lên", "tải lên tệp", "tải ảnh lên", "tải hình ảnh lên",
-        "tải nội dung nghe nhìn lên", "tải phương tiện lên", "tải lên từ máy tính", "tải lên từ thiết bị",
-        "tải tệp từ thiết bị", "chọn tệp để tải lên", "tải nội dung lên",
-      ]);
-      const normActionNames = new Set([...actionNames].map(a => typeof root.normalizeFlowUiText === "function" ? root.normalizeFlowUiText(a) : a));
-      return labelOf(el).some(label => {
-        if (actionNames.has(label)) return true;
-        const folded = typeof root.normalizeFlowUiText === "function" ? root.normalizeFlowUiText(label) : label;
-        if (normActionNames.has(folded)) return true;
-        return folded.includes("tai len") || folded.includes("tai tep") || folded.includes("tai noi dung") ||
-          label.includes("upload media") || label.includes("upload file") || label.includes("upload from");
-      });
-    };
-
-    const menuRoots = () => [...document.querySelectorAll('[role="menu"],mat-menu-panel,[role="dialog"],.cdk-overlay-pane,[data-state="open"]')]
-      .filter(mRoot => isVisible(mRoot) && [...mRoot.querySelectorAll('[role="tab"],button,[role="button"],[role="menuitem"],a,[tabindex],mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined')].some(isUploadLabel));
-
-    const clickFlowControl = element => {
-      const rect = element.getBoundingClientRect();
-      if (!rect.width || !rect.height) return false;
-      const point = { bubbles: true, cancelable: true, composed: true, button: 0, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
-      element.dispatchEvent(new PointerEvent("pointerdown", { ...point, pointerId: 1, pointerType: "mouse" }));
-      element.dispatchEvent(new MouseEvent("mousedown", point));
-      element.dispatchEvent(new PointerEvent("pointerup", { ...point, pointerId: 1, pointerType: "mouse" }));
-      element.dispatchEvent(new MouseEvent("mouseup", point));
-      element.dispatchEvent(new MouseEvent("click", point));
-      return true;
-    };
-
-    const switchUploadCategoryTab = async roots => {
-      const allRoleTabs = roots.flatMap(mRoot => [...mRoot.querySelectorAll('[role="tab"]')]);
-      const tabCandidates = allRoleTabs.length > 0 ? allRoleTabs : roots.flatMap(mRoot => [...mRoot.querySelectorAll('button')]);
-      const validTabs = [...new Set(tabCandidates)].filter(tab => {
-        if (!isVisible(tab) || tab.disabled || tab.getAttribute("aria-disabled") === "true") return false;
-        const icon = tab.querySelector("mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined,svg")?.textContent?.trim() || "";
-        const label = getAria(tab).replace(/\s+/g, " ").trim().toLowerCase();
-        const folded = typeof root.normalizeFlowUiText === "function" ? root.normalizeFlowUiText(label) : label;
-        return ["upload", "file_upload", "upload_file", "cloud_upload"].includes(icon) ||
-          ["upload", "uploads", "upload file", "tải lên", "nội dung tải lên", "tệp tải lên", "các tệp tải lên", "tải tệp", "tải tệp lên", "tải lên tệp", "tải ảnh lên", "tải hình ảnh lên"].includes(label) ||
-          ["upload", "uploads", "tai len", "noi dung tai len", "tep tai len", "cac tep tai len", "tai tep", "tai tep len", "tai len tep"].includes(folded);
-      });
-      const tab = resolveUniqueUploadTarget(validTabs, "FLOW_UPLOAD_CATEGORY_AMBIGUOUS", "Upload category");
-      if (!tab) return false;
-      const isSelected = tab.getAttribute("aria-selected") === "true" || tab.getAttribute("data-state") === "active";
-      if (!isSelected) {
-        if (!clickFlowControl(tab)) throw fn("FLOW_UPLOAD_CATEGORY_CLICK_FAILED", "Flow's Upload category could not be clicked. No file was selected.", true, false);
-        await root.FlowUiDeadline?.boundedWait(350, deadline, "switching Flow's upload category");
-      }
-      return true;
-    };
-
-    const findUploadItem = () => {
-      const roots = menuRoots();
-      const semantic = [...new Set(roots.flatMap(mRoot => [...mRoot.querySelectorAll('button,[role="button"],[role="menuitem"],a,[tabindex]')]))]
-        .filter(el => isVisible(el) && !el.disabled && el.getAttribute("aria-disabled") !== "true" && isUploadAction(el));
-      const semanticTarget = resolveUniqueUploadTarget(semantic, "FLOW_UPLOAD_MENU_ITEM_AMBIGUOUS", "Upload action");
-      if (semanticTarget) return semanticTarget;
-      const candidates = new Set();
-      for (const mRoot of roots) {
-        const textLeaves = [...mRoot.querySelectorAll("*")].filter(el => isVisible(el) && isUploadAction(el));
-        for (const leaf of textLeaves) {
-          for (let candidate = leaf; candidate && candidate !== mRoot; candidate = candidate.parentElement) {
-            if (isVisible(candidate) && !candidate.matches('[role="tab"]') && candidate.getAttribute("aria-selected") === null &&
-                (candidate.matches('button,[role="button"],[role="menuitem"],a,[tabindex]') || candidate.getAttribute("tabindex") === "0" || getComputedStyle(candidate).cursor === "pointer")) {
-              candidates.add(candidate);
-              break;
-            }
-          }
-        }
-      }
-      return resolveUniqueUploadTarget([...candidates], "FLOW_UPLOAD_MENU_ITEM_AMBIGUOUS", "Upload action");
-    };
-
-    const selectionDiagnostics = { filePickerSelectionConfirmed: false, pickerMethod: "unknown", pickerType: "unknown", dropAttempted: false, dropReceiptConfirmed: false,
-      confirmationDialogSeen: false, confirmationButtonClicked: false, confirmationDialogUnrecognized: false };
-
-    if (!uploadButton) {
-      const controls = uploadControlDiagnostics();
-      root.emitFlowProgress?.(command, `Upload trigger unavailable; composer controls: ${JSON.stringify(controls).slice(0, 2200)}`);
-      throw fn("FLOW_UPLOAD_CONTROL_MISSING", `Flow's project Upload control is unavailable. No file was selected. Visible composer controls: ${JSON.stringify(controls).slice(0, 2200)}`, true, false);
-    } else if (uploadButton.disabled || uploadButton.getAttribute("aria-disabled") === "true") {
-      throw fn("FLOW_UPLOAD_CONTROL_DISABLED", "Flow's composer add-menu trigger is disabled. No file was selected.", true, false);
-    } else {
-      if (!clickFlowControl(uploadButton)) throw fn("FLOW_UPLOAD_CONTROL_CLICK_FAILED", "Flow's project Upload control could not be clicked. No file was selected.", true, false);
-      root.emitFlowProgress?.(command, "Opening Flow's scoped Upload menu and arming its file picker");
-      const menuDeadline = Math.min(Date.now() + 2500, deadline);
-      let uploadItem = null;
-      while (Date.now() < menuDeadline && !uploadItem) {
-        checkTime("opening Flow's upload menu");
-        const activeMenus = menuRoots();
-        if (activeMenus.length) {
-          await switchUploadCategoryTab(activeMenus);
-          checkTime("selecting the upload category");
-        }
-        uploadItem = findUploadItem();
-        if (!uploadItem) await root.FlowUiDeadline?.boundedWait(100, deadline, "waiting for Flow's upload menu", false, options.signal);
-      }
-      if (!uploadItem) {
-        throw fn("FLOW_UPLOAD_MENU_ITEM_MISSING", "Flow's visible Upload menu item did not appear. No file was selected.", true, false);
-      } else {
-        try {
-          const pickerReceipt = await root.FlowNativeFileTransfer.selectFileThroughPicker(file, async () => {
-            checkTime("opening Flow's file picker");
-            if (!uploadItem?.isConnected || !isVisible(uploadItem)) {
-              await switchUploadCategoryTab(menuRoots());
-              uploadItem = findUploadItem();
-            }
-            if (!uploadItem?.isConnected || !isVisible(uploadItem)) return false;
-            return clickFlowControl(uploadItem);
-          }, { deadline });
-          selectionDiagnostics.filePickerSelectionConfirmed = pickerReceipt?.selected === true;
-          selectionDiagnostics.pickerMethod = safeFlowPickerMethod(pickerReceipt?.method);
-          selectionDiagnostics.pickerType = safeFlowPickerType(pickerReceipt?.type);
-          root.emitFlowProgress?.(command, `Flow's scoped Upload picker confirmed ${file.name} via ${pickerReceipt.method || "Flow file input"}`);
-        } catch (error) {
-          if (error?.outcome_unknown || error?.code === "FLOW_UPLOAD_PICKER_OUTCOME_UNKNOWN") throw error;
-          if (error?.code === "FLOW_OPERATION_TIMEOUT") throw error;
-          console.warn(`[Flow MCP upload] File-picker trap failed before selection (${String(error?.message || error)}); falling back to drag-and-drop for ${kind} "${file.name}".`);
-          selectionDiagnostics.dropAttempted = true;
-          const dropReceipt = await root.FlowNativeFileTransfer.dropFileToFlow(file);
-          selectionDiagnostics.dropReceiptConfirmed = dropReceipt?.dropped === true || dropReceipt?.accepted === true;
-        }
-      }
-    }
-    checkTime("confirming the Flow media upload", true);
-    if (kind === "video") Object.assign(selectionDiagnostics, await confirmFlowVideoUploadIfPrompted(deadline, options.signal, selectionDiagnostics));
-    const confirmed = await waitForNativeMediaTile(file.name, command, kind, { deadline, signal: options.signal, baselineIds, requireNewOwner: true, selectionDiagnostics });
-    return { ...confirmed, uploaded: true, name: file.name, kind };
-  }
-
-  /**
-   * FlowUploader OOP Service Facade
-   */
-  class FlowUploader {
-    static upload(file, kind, command, options) {
-      return uploadStagedMedia(file, kind, command, options);
-    }
-    static findAddMediaButton() {
-      return findAddMediaButton();
-    }
-    static ensureAddMediaButton(deadline, signal) {
-      return ensureAddMediaButton(deadline, signal);
-    }
-    static matchesTile(tile, assetName) {
-      return matchesFlowTile(tile, assetName);
-    }
-    static flowUploadNameMatches(value, assetName) {
-      return flowUploadNameMatches(value, assetName);
-    }
-    static confirmVideoUpload(deadline, signal, selection) {
-      return confirmFlowVideoUploadIfPrompted(deadline, signal, selection);
-    }
-    static waitForNativeMediaTile(assetName, command, kind, options) {
-      return waitForNativeMediaTile(assetName, command, kind, options);
-    }
-    static inspectUiState() {
-      return inspectFlowUploadUiState();
-    }
-  }
-
-  root.FlowUploader = root.FlowUploader || FlowUploader;
-
-  // Facade adapter wrappers for backward compatibility and test suites
-  const uploadStagedFlowMedia = (file, kind, command, options) => (root.FlowUploader?.upload || uploadStagedMedia)(file, kind, command, options);
-  const inspectFlowUploadTrigger = () => (root.FlowUploader?.inspectUiState || inspectFlowUploadUiState)();
-
-async function chooseNativePickerAsset(assetName, slot, config = {}) {
-  const deadline = config.deadline || globalThis.FlowUiDeadline?.makeDeadline(config.command, 45_000, 10_000) || Date.now() + 35_000;
-  const requireTime = (operation, outcomeUnknown = false) => globalThis.FlowUiDeadline?.requireTime(deadline, operation, outcomeUnknown, config.signal);
-  const boundedWait = (ms, operation, outcomeUnknown = false) => globalThis.FlowUiDeadline?.boundedWait(ms, deadline, operation, outcomeUnknown, config.signal);
-  const normalize = value => String(value || "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
-  const categorySynonyms = { all: ["all", "tất cả", "tat ca"], ingredients: ["ingredients", "thành phần", "nguyên liệu"], uploads: ["uploads", "tải lên", "tai len"] };
-  requireTime("opening the Flow asset picker");
-  if (!slot) return globalThis.FlowReferenceActions.attach(assetName, undefined, { ...config, deadline });
-  const wanted = String(assetName || "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
-  if (!wanted || !["start", "end"].includes(slot)) throw flowError("FLOW_INVALID_ARGUMENT", "Frame selection requires an exact asset title and a Start or End slot.", false, false);
-  const buttonForSlot = () => flowButton(slot === "start" ? "Start" : "End");
-  const listForOpener = (opener, priorLists) => {
-    const ids = [opener?.getAttribute("aria-controls"), opener?.getAttribute("aria-owns")].filter(Boolean).flatMap(value => value.split(/\s+/));
-    const controlled = [...new Set(ids.map(id => document.getElementById(id)).filter(el => el?.getAttribute("role") === "listbox" && visible(el)))];
-    if (controlled.length === 1) return controlled[0];
-    if (controlled.length > 1) return null;
-    const lists = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.listBox", document) : null) || document.querySelectorAll('[role="listbox"]'))].filter(visible);
-    const newlyOpened = lists.filter(el => !priorLists.has(el));
-    return newlyOpened.length === 1 ? newlyOpened[0] : null;
-  };
-  const pickerSettled = async (listGetter, timeoutMs = 15_000, outcomeUnknown = false) => {
-    const settleDeadline = Math.min(deadline, Date.now() + timeoutMs);
-    let stableAt = 0;
-    while (Date.now() < settleDeadline) {
-      const list = listGetter();
-      const loading = (typeof root.flowQueryVisible === "function" && Boolean(root.flowQueryVisible("common.loadingIndicator", document))) ||
-        [...document.querySelectorAll('[role="progressbar"],[aria-busy="true"]')].some(visible);
-      if (list && !loading) {
-        const options = listOptions(list);
-        if (options.length || /no (?:assets|items) found/i.test(list.innerText || "")) return list;
-        if (!stableAt) stableAt = Date.now();
-        if (Date.now() - stableAt >= 700) return list;
-      } else stableAt = 0;
-      await boundedWait(150, `waiting for Flow's ${slot} frame picker`, outcomeUnknown);
-    }
-    requireTime(`waiting for Flow's ${slot} frame picker`, outcomeUnknown);
-    throw flowError("FLOW_ASSET_PICKER_LOADING", `Flow's ${slot} frame picker did not finish loading. Nothing was selected.`, true, outcomeUnknown);
-  };
-  const findTab = name => {
-    const norm = normalize(name);
-    const synonyms = categorySynonyms[norm] || [norm];
-    const tabs = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.categoryTabs", document) : null) ||
-      [...document.querySelectorAll('[role="tab"]')];
-    return tabs.find(tab => {
-      if (!visible(tab)) return false;
-      const label = normalize(accessibleName(tab)).replace(/^(?:accessibility_new|dashboard|face)\s*/, "");
-      return synonyms.includes(label) || synonyms.some(syn => label.includes(syn));
-    });
-  };
-  const optionNames = option => {
-    const values = [accessibleName(option), option.getAttribute("aria-label"), option.getAttribute("title")];
-    for (const node of option.querySelectorAll("[aria-label],[title],img[alt],flow-grid-tile-container")) {
-      values.push(node.getAttribute("aria-label"), node.getAttribute("title"), node.getAttribute("alt"));
-    }
-    return [...new Set(values.map(value => String(value || "").replace(/\s+/g, " ").trim().toLocaleLowerCase()).filter(Boolean))];
-  };
-  const isExactOption = option => optionNames(option).some(label => label === wanted ||
-    label.replace(/\s+(?:image|video|character|avatar)$/i, "") === wanted);
-  const optionIdentity = (option, pageIndex, itemIndex, scroller) => {
-    const tile = option.querySelector("flow-grid-tile-container");
-    const id = tile && mediaId(tile);
-    if (id && !id.startsWith("title:")) return id;
-    const image = option.querySelector("img");
-    return image?.currentSrc || image?.src || option.getAttribute("data-media-id") || option.id ||
-      option.getAttribute("aria-posinset") || `${wanted}|${Math.floor((scroller?.scrollTop || 0) / Math.max(1, scroller?.clientHeight || 1))}|${pageIndex}|${itemIndex}`;
-  };
-  const slotSignature = () => {
-    const opener = buttonForSlot();
-    if (!opener) return "missing";
-    const container = opener.parentElement?.parentElement || opener;
-    return JSON.stringify({
-      label: opener.getAttribute("aria-label"), title: opener.getAttribute("title"), text: (opener.innerText || "").replace(/\s+/g, " ").trim(),
-      expanded: opener.getAttribute("aria-expanded"),
-      media: [...container.querySelectorAll("img,video")].map(el => el.currentSrc || el.getAttribute("src") || el.getAttribute("alt") || ""),
-      names: [...container.querySelectorAll("[aria-label],[title]")].map(el => el.getAttribute("aria-label") || el.getAttribute("title")),
-    });
-  };
-  const sanitizeFrameDiagnosticUrl = value => {
-    if (!value) return null;
-    try {
-      const parsed = new URL(String(value), location.href);
-      if (["data:", "blob:", "javascript:"].includes(parsed.protocol)) return `${parsed.protocol}<redacted>`;
-      return `${parsed.origin}${parsed.pathname}`;
-    } catch {
-      return String(value).replace(/[?#].*$/, "").slice(0, 240);
-    }
-  };
-  const diagnosticSlotSignature = () => {
-    try {
-      const signature = JSON.parse(slotSignature());
-      signature.media = (signature.media || []).map(value => sanitizeFrameDiagnosticUrl(value) || value);
-      return signature;
-    } catch { return null; }
-  };
-  const recordFramePickerDiagnostics = (phase, exactList, extra = {}) => {
-    const opener = buttonForSlot();
-    const slotContainer = opener?.parentElement?.parentElement || opener;
-    const options = exactList ? listOptions(exactList, false).slice(0, 12) : [];
-    const previous = globalThis.__flowNativeFramePickerDiagnostics || {};
-    const diagnostics = {
-      ...previous,
-      slot,
-      assetName,
-      phase,
-      updatedAt: new Date().toISOString(),
-      opener: opener ? {
-        ariaLabel: accessibleName(opener) || opener.getAttribute("aria-label") || null,
-        title: opener.getAttribute("title") || null,
-        ariaExpanded: opener.getAttribute("aria-expanded"),
-        ariaControls: opener.getAttribute("aria-controls"),
-        ariaOwns: opener.getAttribute("aria-owns"),
-        disabled: Boolean(opener.disabled || opener.getAttribute("aria-disabled") === "true"),
-        className: String(opener.className?.baseVal || opener.className || "").slice(0, 100),
-      } : null,
-      slotContent: slotContainer ? [...slotContainer.querySelectorAll("img,video")].slice(0, 4).map(el => ({
-        alt: el.getAttribute("alt") || null,
-        title: el.getAttribute("title") || null,
-        src: sanitizeFrameDiagnosticUrl(el.currentSrc || el.getAttribute("src")),
-      })) : [],
-      exactFrameList: exactList ? {
-        present: true,
-        connected: exactList.isConnected !== false,
-        id: exactList.id || null,
-        role: exactList.getAttribute("role"),
-        ariaLabel: exactList.getAttribute("aria-label") || null,
-        optionCount: exactList.querySelectorAll('[role="option"]').length,
-        options: options.map(option => ({
-          label: accessibleName(option) || option.getAttribute("aria-label") || option.getAttribute("title") || null,
-          ariaSelected: option.getAttribute("aria-selected"),
-          ariaChecked: option.getAttribute("aria-checked"),
-          dataState: option.getAttribute("data-state"),
-        })),
-      } : { present: false },
-      slotSignature: diagnosticSlotSignature(),
-      ...extra,
-    };
-    globalThis.__flowNativeFramePickerDiagnostics = diagnostics;
-    return diagnostics;
-  };
-  recordFramePickerDiagnostics("opening");
-
-  let opener = buttonForSlot();
-  if (!opener) throw flowError("FLOW_FRAMES_CONTROLS_UNAVAILABLE", `Flow's ${slot} frame picker is unavailable. Nothing was submitted.`, true, false);
-  const beforeSlot = slotSignature();
-  let list;
-  let frameControlledIds = [];
-  for (let attempt = 0; attempt < 3 && Date.now() < deadline; attempt++) {
-    requireTime(`opening Flow's ${slot} frame picker`);
-    opener = buttonForSlot();
-    if (!opener) break;
-    const priorLists = new Set(document.querySelectorAll('[role="listbox"]'));
-    const controlledIds = [opener.getAttribute("aria-controls"), opener.getAttribute("aria-owns")].filter(Boolean).flatMap(value => value.split(/\s+/));
-    frameControlledIds = controlledIds;
-    opener.click();
-    const listGetter = () => {
-      return listForOpener(buttonForSlot(), priorLists);
-    };
-    try { list = await pickerSettled(listGetter, 5000); } catch (error) {
-      if (attempt === 2) throw error;
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-      await boundedWait(250, `reopening Flow's ${slot} frame picker`);
-      continue;
-    }
-    if (list) break;
-  }
-  if (!list || !visible(list)) throw flowError("FLOW_ASSET_PICKER_MISSING", `Flow's ${slot} frame picker did not open. Nothing was submitted.`, true, false);
-  const listGetter = () => {
-    const currentOpener = buttonForSlot();
-    const currentIds = [currentOpener?.getAttribute("aria-controls"), currentOpener?.getAttribute("aria-owns")]
-      .filter(Boolean).flatMap(value => value.split(/\s+/));
-    const ids = [...new Set([...frameControlledIds, ...currentIds])];
-    const controlled = [...new Set(ids.map(id => document.getElementById(id)).filter(item => item?.getAttribute("role") === "listbox" && visible(item)))];
-    if (controlled.length === 1) return controlled[0];
-    if (controlled.length > 1) return null;
-    return list?.isConnected !== false && visible(list) ? list : null;
-  };
-  recordFramePickerDiagnostics("picker_open", list);
-
-  const categories = ["All", "Tất cả", "Ingredients", "Thành phần", "Uploads", "Tải lên"];
-  let matches = new Map();
-  let scroller = null;
-  let pageIndex = 0;
-  let operationError;
-  try {
-    let search = (typeof root.flowQueryVisible === "function" ? root.flowQueryVisible("components.searchInput", document) : null) ||
-      [...document.querySelectorAll('input,[role="textbox"]')].find(el => visible(el) && /(?:search assets|tìm kiếm)/i.test(accessibleName(el) || el.placeholder || ""));
-    if (search) {
-      setEditable(search, assetName);
-      await boundedWait(650, `searching for "${assetName}" in Flow's ${slot} picker`);
-      await pickerSettled(listGetter);
-    }
-    for (const category of categories) {
-      requireTime(`searching Flow's ${slot} picker`);
-      const tab = findTab(category);
-      if (tab && tab.getAttribute("aria-selected") !== "true") {
-        tab.click();
-        const tabDeadline = Math.min(Date.now() + 5000, deadline);
-        while (Date.now() < tabDeadline) {
-          const current = findTab(category);
-          if (current?.getAttribute("aria-selected") === "true") break;
-          await boundedWait(100, `selecting ${category} in Flow's ${slot} picker`);
-        }
-        if (findTab(category)?.getAttribute("aria-selected") !== "true") throw flowError("FLOW_ASSET_CATEGORY_UNCONFIRMED", `Flow did not select the ${category} picker category. Nothing was submitted.`, true, false);
-        await pickerSettled(listGetter);
-      }
-      list = listGetter();
-      if (!list) continue;
-      search = (typeof root.flowQueryVisible === "function" ? root.flowQueryVisible("components.searchInput", document) : null) ||
-        [...document.querySelectorAll('input,[role="textbox"]')].find(el => visible(el) && /(?:search assets|tìm kiếm)/i.test(accessibleName(el) || el.placeholder || ""));
-      if (search && String(search.value ?? "") !== assetName) {
-        setEditable(search, assetName);
-        await boundedWait(650, `searching for "${assetName}" in Flow's ${slot} picker`);
-        await pickerSettled(listGetter);
-      }
-      list = listGetter();
-      scroller = list && [list, ...list.querySelectorAll("*")].find(el => el.clientHeight > 0 && el.scrollHeight > el.clientHeight + 5);
-      if (scroller) scroller.scrollTop = 0;
-      matches = new Map();
-      for (pageIndex = 0; pageIndex < (scroller ? 150 : 1) && Date.now() < deadline; pageIndex++) {
-        list = await pickerSettled(listGetter, 15_000);
-        if (!list) break;
-        const visibleOptions = listOptions(list);
-        visibleOptions.forEach((option, itemIndex) => {
-          if (isExactOption(option)) matches.set(optionIdentity(option, pageIndex, itemIndex, scroller), option);
-        });
-        if (matches.size > 1) break;
-        if (!scroller || scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 2) break;
-        const previous = scroller.scrollTop;
-        scroller.scrollTop = Math.min(scroller.scrollHeight - scroller.clientHeight, previous + Math.max(120, scroller.clientHeight * 0.75));
-        await boundedWait(250, `scanning Flow's ${slot} picker`);
-        if (scroller.scrollTop === previous) break;
-      }
-      if (matches.size) break;
-    }
-    if (matches.size > 1) throw flowError("FLOW_AMBIGUOUS_ASSET", `More than one project image is titled "${assetName}"; no frame was selected.`, false, false);
-    if (!matches.size) {
-      const visibleNames = (list ? listOptions(list) : []).slice(0, 12).map(option => optionNames(option).slice(0, 3).join(" / ")).filter(Boolean);
-      throw flowError("FLOW_ASSET_NOT_FOUND", `Flow's ${slot} frame picker has no exact asset titled "${assetName}". Visible entries: ${visibleNames.join("; ") || "none"}. Nothing was selected.`, true, false);
-    }
-    const option = [...matches.values()][0];
-    requireTime(`selecting "${assetName}" for the ${slot} frame`);
-    // Some Flow picker versions render the grid tile beside the role=option
-    // wrapper instead of inside it. Match only one exact title in this picker
-    // list (the reference-chip picker uses the same scoped fallback).
-    const optionTile = (typeof root.flowQuery === "function" ? root.flowQuery("tiles.container", option, { checkVisible: false }) : null) ||
-      option.querySelector("flow-grid-tile-container");
-    const listTiles = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", list, { checkVisible: false }) : null) ||
-      [...(list?.querySelectorAll("flow-grid-tile-container") || [])];
-    const listTileMatches = optionTile ? [] : listTiles
-      .filter(tile => normalize(tile.getAttribute("aria-label")) === wanted);
-    const selectedTile = optionTile || (listTileMatches.length === 1 ? listTileMatches[0] : null);
-    const tileId = selectedTile && mediaId(selectedTile);
-    let selectedId = (tileId && !tileId.startsWith("title:") ? tileId : null) || option.getAttribute("data-media-id") || option.querySelector("[data-media-id]")?.getAttribute("data-media-id") || tileId || undefined;
-    selectedId = await globalThis.resolveNativeMediaUuid?.(selectedId, "image") || selectedId;
-    const expectedId = await globalThis.resolveNativeMediaUuid?.(config.expectedId, "image") || config.expectedId;
-    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (!uuidPattern.test(String(selectedId || ""))) {
-      if (expectedId && uuidPattern.test(String(expectedId))) {
-        selectedId = expectedId;
-      } else {
-        throw flowError("FLOW_ASSET_ID_UNAVAILABLE", `Flow's exact frame option for "${assetName}" did not expose a uniquely verifiable backend UUID. No frame was selected.`, false, false);
-      }
-    }
-    if (expectedId && selectedId.toLowerCase() !== String(expectedId).toLowerCase()) {
-      throw flowError("FLOW_ASSET_ID_MISMATCH", `Flow's picker selected a different media ID than the completed upload for "${assetName}". No frame was selected.`, false, false);
-    }
-    recordFramePickerDiagnostics("selection_identity_verified", list, { selectedMediaId: selectedId.toLowerCase(), expectedMediaId: expectedId || null });
-    option.click();
-    recordFramePickerDiagnostics("option_clicked", list, { selectedMediaId: selectedId.toLowerCase() });
-    const selectionDeadline = Math.min(Date.now() + 5000, deadline);
-    let attached = false;
-    while (Date.now() < selectionDeadline) {
-      const currentList = listGetter();
-      const selected = currentList && [...currentList.querySelectorAll('[role="option"]')].find(item => isExactOption(item) &&
-        (item.getAttribute("aria-selected") === "true" || item.getAttribute("aria-checked") === "true" || item.getAttribute("data-state") === "checked"));
-      const slotChanged = slotSignature() !== beforeSlot;
-      if (selected || (slotChanged && !currentList)) {
-        attached = true;
-        recordFramePickerDiagnostics("selection_confirmed", currentList, {
-          selectedMediaId: selectedId.toLowerCase(),
-          confirmation: selected ? "exact_option_selected_state" : "slot_signature_changed_and_exact_list_disappeared",
-          slotChanged,
-        });
-        break;
-      }
-      recordFramePickerDiagnostics("waiting_for_selection_confirmation", currentList, { selectedMediaId: selectedId.toLowerCase(), slotChanged });
-      await boundedWait(150, `confirming "${assetName}" for the ${slot} frame`, true);
-    }
-    if (!attached) throw flowError("FLOW_FRAME_ATTACH_UNCONFIRMED", `Flow did not confirm that "${assetName}" was selected for the ${slot} frame. The picker action may have been accepted; inspect the composer before retrying.`, false, true);
-    return { name: assetName, kind: "image", slot, id: selectedId.toLowerCase(), confirmed: true };
-  } catch (error) {
-    operationError = error;
-    recordFramePickerDiagnostics("selection_failed", listGetter(), {
-      operationErrorCode: error?.code || "FLOW_FRAME_SELECTION_ERROR",
-      operationOutcomeUnknown: error?.outcome_unknown === true,
-    });
-    throw error;
-  } finally {
-    const reportCleanupFailure = (message, diagnostics) => {
-      const cleanupError = flowError("FLOW_ASSET_PICKER_CLOSE_FAILED", message, true, false);
-      recordFramePickerDiagnostics("cleanup_unverified", null, {
-        cleanupErrorCode: cleanupError.code,
-        operationErrorCode: operationError?.code || null,
-        ...(diagnostics || {}),
-      });
-      if (!operationError) throw cleanupError;
-      operationError.cleanupError = { code: cleanupError.code, message: cleanupError.message };
-    };
-    const framePickerState = () => {
-      const currentList = listGetter();
-      if (currentList && visible(currentList)) {
-        recordFramePickerDiagnostics("cleanup_check", currentList, { pickerState: "open", stateSource: "exact_frame_list" });
-        return { open: true, list: currentList, source: "exact_frame_list" };
-      }
-      const expanded = buttonForSlot()?.getAttribute("aria-expanded");
-      if (expanded === "true") {
-        recordFramePickerDiagnostics("cleanup_check", null, { pickerState: "open", stateSource: "frame_opener_aria_expanded" });
-        return { open: true, list: null, source: "frame_opener_aria_expanded" };
-      }
-      if (expanded === "false") {
-        recordFramePickerDiagnostics("cleanup_check", null, { pickerState: "closed", stateSource: "frame_opener_aria_expanded" });
-        return { open: false, list: null, source: "frame_opener_aria_expanded" };
-      }
-      recordFramePickerDiagnostics("cleanup_check", null, { pickerState: "unknown", stateSource: "no_exact_list_or_expanded_state" });
-      return { open: null, list: null, source: "no_exact_list_or_expanded_state" };
-    };
-    let state = framePickerState();
-    if (state.open === null) {
-      reportCleanupFailure(`Flow's ${slot} frame picker could not be identified after selection; no other listbox was inspected or toggled. Diagnostics: ${JSON.stringify(inspectNativeFramePickerDiagnostics()).slice(0, 1500)}`, { cleanupStateSource: state.source });
-    } else if (state.open) {
-      const closeButton = state.list && flowButton("Close", state.list.closest('[role="dialog"]') || document);
-      if (closeButton) closeButton.click();
-      else document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-      const waitForPickerClose = async () => {
-        const closeDeadline = Date.now() + 750;
-        while (Date.now() < closeDeadline) {
-          state = framePickerState();
-          if (state.open === false) return true;
-          if (state.open === null) return false;
-          await wait(100);
-        }
-        state = framePickerState();
-        return state.open === false;
-      };
-      let closed = await waitForPickerClose();
-      // Flow's frame picker sometimes ignores Escape and has no dialog Close
-      // button. When the exact Start/End list is still open, toggle that same
-      // opener once, then verify the list actually disappeared. Never click an
-      // option or change the selected frame during cleanup.
-      if (!closed && state.open === true) {
-        const slotOpener = buttonForSlot();
-        if (slotOpener) {
-          slotOpener.click();
-          closed = await waitForPickerClose();
-        }
-      }
-      if (!closed || state.open !== false) {
-        reportCleanupFailure(`Flow's ${slot} frame picker stayed open or became unidentifiable after the bounded close attempts.`, { cleanupStateSource: state.source });
-      }
-    }
-    if (state.open === false) recordFramePickerDiagnostics("picker_closed", null, { pickerState: "closed", closeMethod: state.source || "no_picker_open" });
-  }
-}
-
-function inspectNativeFramePickerDiagnostics() {
-  const diagnostics = globalThis.__flowNativeFramePickerDiagnostics;
-  return diagnostics ? JSON.parse(JSON.stringify(diagnostics)) : null;
-}
-
-const FlowComponents = Object.freeze({ clearExistingIngredientChips: globalThis.clearExistingIngredientChips, uploadStagedFlowMedia, chooseNativePickerAsset, confirmVideoUploadIfPrompted: confirmFlowVideoUploadIfPrompted, resolveUniqueUploadTarget, selectNativeFlowVoice: globalThis.selectNativeFlowVoice, listNativeFlowVoiceOptions: globalThis.listNativeFlowVoiceOptions, resolveNativeMediaUuid: globalThis.resolveNativeMediaUuid, findAddMediaButton, ensureAddMediaButton, inspectUploadTrigger: inspectFlowUploadTrigger, inspectFramePickerDiagnostics: inspectNativeFramePickerDiagnostics, FlowReferenceActions: globalThis.FlowReferenceActions }); globalThis.FlowComponents = FlowComponents; globalThis.uploadStagedFlowMedia = uploadStagedFlowMedia; globalThis.chooseNativePickerAsset = chooseNativePickerAsset; globalThis.findAddMediaButton = findAddMediaButton; globalThis.ensureAddMediaButton = ensureAddMediaButton;

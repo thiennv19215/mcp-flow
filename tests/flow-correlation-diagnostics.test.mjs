@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-const observerSource = readFileSync(new URL('../extension/content/bridge/flow-correlation-observer.js', import.meta.url), 'utf8');
+const observerSource = readFileSync(new URL('../extension/src/content/bridge/flow-correlation-observer.js', import.meta.url), 'utf8');
 const projectId = '00000000-0000-4000-8000-000000000000';
 
 function observerHarness({ priorStore } = {}) {

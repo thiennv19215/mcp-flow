@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-const tilesSource = readFileSync(new URL('../extension/content/providers/flow/FlowTiles.js', import.meta.url), 'utf8');
+const tilesSource = readFileSync(new URL('../extension/src/content/providers/flow/generation/tiles.js', import.meta.url), 'utf8');
 
 test('unknown-submit observer diagnostics serialize with event evidence and omit IDs, prompt, and URL tokens', async () => {
   const listeners = new Map();
@@ -41,7 +41,7 @@ test('unknown-submit observer diagnostics serialize with event evidence and omit
 });
 
 test('the background command result preserves page-side diagnostics for server-side allowlisting', () => {
-  const source = readFileSync(new URL('../extension/background/service-worker.js', import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../extension/src/background/service-worker.js', import.meta.url), 'utf8');
   assert.match(source, /error\?\.diagnostics \? \{ diagnostics: error\.diagnostics \} : \{\}/);
   assert.match(source, /if \(response\?\.error\?\.diagnostics && typeof response\.error\.diagnostics === "object"\)\s*\{\s*error\.diagnostics = response\.error\.diagnostics;\s*\}/);
 });

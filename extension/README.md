@@ -1,54 +1,48 @@
 # Hướng dẫn Kiến trúc & Phát triển Extension (Flow Native Automation)
 
-Tài liệu này hướng dẫn chi tiết về cấu trúc mã nguồn, nhiệm vụ của từng mô-đun và quy trình mở rộng/bảo trì cho Chrome Extension (`extension/`).
+Tài liệu này hướng dẫn cấu trúc mã nguồn extension, nhiệm vụ mô-đun và quy trình phát triển. `extension/` là cây nguồn; gói Chrome đã build nằm tại `dist/extension/`.
 
 ---
 
 ## 1. Sơ đồ Cấu trúc Thư mục
 
-Mã nguồn được phân tách theo mô hình **Modular Provider Pattern**:
+Mã nguồn dùng kiến trúc **Modular Monolith**: một Chrome extension duy nhất khi đóng gói/cài đặt, bên trong chia module theo nghiệp vụ và provider để dễ bảo trì, cập nhật độc lập:
 
 ```text
 extension/
-├── manifest.json                    # Khai báo quyền, DNR rules, content scripts nạp tuần tự
-├── background/
-│   ├── service-worker.js            # Kết nối bridge, quản lý tab, lập kế hoạch workflow và điều phối Flow operations
-│   ├── flow-job-queue.js            # Hàng đợi Flow dùng chung side panel/MCP, lưu bền trong chrome.storage.local
-│   └── flow-workflows.js            # Lập kế hoạch batch scene, prompt, numbering và dependency
-├── rules/
-│   └── flow-media-headers.json      # DeclarativeNetRequest rules gỡ bỏ CORP headers để tải media
-├── ui/
-│   ├── popup.html / popup.js        # Giao diện popup kết nối trạng thái
-│   ├── sidebar.html / sidebar.js    # Giao diện thao tác Flow và hàng đợi
-│   ├── flow-queue-panel.js          # Panel thêm, chạy, tạm dừng và sắp xếp tác vụ
-│   └── options.html / options.js    # Xác thực tài khoản riêng; MCP vẫn chạy cục bộ
-└── content/
-    ├── dom-actions.js               # Entry point router (~40 dòng), ủy quyền cho ProviderRegistry
-    ├── shared/                      # CÁC TIỆN ÍCH DÙNG CHUNG (SHARED UTILS)
-    │   ├── dom-utils.js             # Helper DOM nền tảng (visible, accessibleName, wait, error taxonomy...)
-    │   ├── activity-overlay.js      # Overlay visual lock thông báo khi automation đang chạy
-    │   └── native-file-transfer.js  # UploadAssembler xử lý chunk upload nhị phân từ MCP local
-    ├── bridge/                      # CẦU NỐI MAIN WORLD (TRUY CẬP DOM GỐC CỦA TRANG)
-    │   ├── flow-upload-main.js      # Hook file picker & drag-and-drop trong MAIN world
-    │   ├── flow-correlation-observer.js # Intercept batchexecute RPC trong MAIN world (bắt media ID thời gian thực)
-    │   └── slate-bridge.js          # Synthetic click listeners trong MAIN world để trigger Angular/Slate
-    └── providers/                   # CÁC BỘ ĐIỀU KHIỂN NỀN TẢNG AI (PROVIDER DRIVERS)
-        ├── BaseProviderDriver.js    # Base class & Interface chuẩn cho mọi AI Provider
-        ├── ProviderRegistry.js      # Router URL: nhận diện domain (Flow, Gemini, ChatGPT...) và cấp Driver
-        └── flow/                    # CÁC MÔ-ĐUN NGHIỆP VỤ RIÊNG BIỆT CỦA GOOGLE FLOW
-            ├── FlowDriver.js        # Driver định tuyến operation tới nhóm xử lý
-            ├── FlowGenerationOperations.js # Upload, references, submit & observe generation
-            ├── FlowLibraryOperations.js    # Project state, assets, library & download
-            ├── FlowWorkflowOperations.js   # Character, edit, agent & continue workflows
-            ├── FlowEditor.js        # ProseMirror editor, user text extraction, bảo tồn chip, submit & enter fallback
-            ├── FlowSettings.js      # Bảng Cài đặt: Mode (Image/Video), Model, Ratio, Duration, Resolution, Quantity
-            ├── FlowComponents.js    # Quản lý References, Ingredients, Frames, dọn chip cũ, upload staged media
-            ├── FlowCharacters.js    # Quản lý Tạo & Chỉnh sửa nhân vật (Character Actions)
-            ├── FlowNavigation.js    # Điều hướng, tự phục hồi sub-route (/character, /edit), thoát viewer, đóng overlay
-            ├── FlowTiles.js         # Quét grid media, polling render progress, bắt lỗi (Quota alert, error taxonomy)
-            ├── FlowMediaMenu.js     # Download media gốc/upscaled, đổi tên asset, chuyển vào thùng rác
-            └── FlowAgent.js         # Flow Agent session & workflows
+├── manifest.json                  # Manifest nguồn; đường dẫn khớp gói sau khi build
+├── icons/                         # Icon nguồn
+├── rules/                         # DNR rules
+├── flow-model-capabilities.json   # Cấu hình model được đồng bộ khi build
+└── src/                           # Toàn bộ source extension
+    ├── background/                # Service worker, queue, bridge và workflow planning
+    ├── ui/                        # Popup, side panel, queue và options
+    └── content/
+        ├── dom-actions.js         # Entry point nhận command và gọi ProviderRegistry
+        ├── floating-tracker-flow.js
+        ├── bridge/                # MAIN-world hooks và observers
+        ├── shared/                # DOM helpers, i18n, overlay, binary transfer
+        └── providers/
+            ├── base/              # Driver interface và registry đa provider
+            └── flow/              # Modular monolith, chia theo nghiệp vụ
+                ├── core/          # Driver, selectors, navigation, settings primitives
+                ├── composer/      # Editor, prompt, reference và voice
+                ├── generation/    # Submit/observe, image/video settings, frames, tiles
+                ├── media/         # Upload và thao tác media
+                ├── library/       # Project, asset listing và thao tác thư viện
+                ├── characters/    # Character actions
+                ├── agent/         # Flow Agent
+                ├── workflows/     # Multi-step orchestration
+                └── compatibility/ # Facade giữ API cũ trong thời gian chuyển đổi
+
+dist/extension/                    # Gói cài được; build chép src/* vào package root
 ```
+
+### Cập nhật selector khi Google Flow đổi DOM
+
+Selector mặc định nằm trong `extension/src/content/providers/flow/core/selectors.js`. MCP đọc `flow-selectors.json`; khi file này đổi, backend phát cấu hình mới tới extension, extension lưu vào `chrome.storage.local`, và content script hợp nhất cấu hình mà không cần build lại extension. Có thể cập nhật một phần cây selector theo dot path; regex gửi qua JSON được khôi phục thành `RegExp`. Backend `src/selectors.ts` theo dõi thư mục chứa file để vẫn nhận cập nhật khi editor lưu bằng cách thay file nguyên tử hoặc khi tạo file sau lúc backend đã chạy.
+
+Khi Flow đổi DOM, trước tiên cập nhật `flow-selectors.json` nếu selector key hiện hữu đã biểu đạt được thay đổi. Nếu cần key mới, thêm key mặc định vào `extension/src/content/providers/flow/core/selectors.js` và cấu hình tương ứng trong `flow-selectors.json`. Nếu Flow đổi trình tự thao tác hoặc điều kiện xác minh, sửa module nghiệp vụ tương ứng; không nhét nghiệp vụ vào selector. Sau thay đổi code, tăng `package.json` và `extension/manifest.json` theo quy ước phát hành của repo.
 
 ---
 
@@ -60,7 +54,7 @@ Nếu service worker khởi động lại giữa một tác vụ đang chạy, q
 
 ---
 
-## 3. Chi tiết Nghiệp vụ Từng File trong `extension/content/`
+## 3. Chi tiết Nghiệp vụ Từng File trong `extension/src/content/`
 
 ### A. Tầng Điều hướng & Entry Point
 - **`dom-actions.js`**:
@@ -70,10 +64,10 @@ Nếu service worker khởi động lại giữa một tác vụ đang chạy, q
   - **Không chứa logic DOM phức tạp**, giữ cho entry point luôn gọn gàng và không bao giờ bị lỗi chéo.
 
 ### B. Tầng Nền tảng Đa Nền tảng (`providers/`)
-- **`BaseProviderDriver.js`**:
+- **`extension/src/content/providers/base/base-provider-driver.js`**:
   - Định nghĩa interface chuẩn cho tất cả các Driver (`key`, `origin`, `context`, `operations`, `supports`, `invoke`, `targetMismatch`, `error`).
   - Mọi AI Provider mới (Gemini, ChatGPT) đều kế thừa từ class này.
-- **`ProviderRegistry.js`**:
+- **`extension/src/content/providers/base/provider-registry.js`**:
   - Quản lý danh sách origin của các nhà cung cấp AI:
     - Google Flow: `https://flow.google.com`
     - Google Gemini: `https://gemini.google.com` (sẵn sàng mở rộng)
@@ -84,18 +78,27 @@ Nếu service worker khởi động lại giữa một tác vụ đang chạy, q
 
 | File | Nghiệp vụ chính | Các hàm / tính năng quan trọng |
 | :--- | :--- | :--- |
-| **`FlowDriver.js`** | **Router của Flow** | Kế thừa `BaseProviderDriver`, xác thực project/target rồi chuyển từng operation tới một nhóm nghiệp vụ. Không giữ toàn bộ chuỗi xử lý trong một dispatcher dài. |
-| **`FlowGenerationOperations.js`** | **Tạo media** | Upload staging, gắn references, chuẩn bị settings, submit yêu cầu và theo dõi kết quả render. |
-| **`FlowLibraryOperations.js`** | **Project & thư viện** | Đọc trạng thái, liệt kê project/assets/characters, tải media, đổi tên và chuyển asset vào thùng rác. |
-| **`FlowWorkflowOperations.js`** | **Workflow nhiều bước** | Tạo/sửa character, chỉnh sửa video, Agent batch và tiếp tục video. |
-| **`FlowEditor.js`** | **Soạn thảo & Submit** | • `getEditorUserText()`: Đọc text thuần của prompt, loại trừ 100% các inline chips.<br>• `clearEditorTextPreservingChips()`: Dọn sạch prompt cũ nhưng bảo toàn các chip reference/nhân vật.<br>• `insertNativeFlowPrompt()`: Chèn prompt an toàn và xác minh.<br>• `activateFlowSubmitButton()`: Bấm submit qua Slate bridge.<br>• `pressFlowEditorSubmit()`: Enter fallback khi click không kích hoạt listener.<br>• `waitForGenerationCreditQuote()`: Đọc credit quote trước khi bấm submit. |
-| **`FlowSettings.js`** | **Cài đặt tham số sinh** | • `openFlowSettings()` / `closeFlowSettings()`: Mở/đóng panel cài đặt an toàn (bằng Escape hoặc click composer).<br>• `chooseRadio()`, `chooseAspectRatio()`, `chooseDuration()`, `chooseResolution()`, `chooseNativeVariantCount()`: Chọn chính xác tham số.<br>• `chooseNativeModel()`: Chọn model thông minh qua aliases (Nano Banana, Veo 2, Imagen 3, Quality/Fast).<br>• `FlowImageActions.prepare()` & `FlowVideoActions.prepare()`: Chuẩn bị toàn bộ settings cho ảnh/video. |
-| **`FlowComponents.js`** | **Thành phần đính kèm** | • `clearExistingIngredientChips()`: Dọn sạch các chip đính kèm cũ trước khi gắn chip mới.<br>• `FlowReferenceActions.attach()`: Đính kèm reference (`character:<name>`, `asset:<name>`) kèm xác nhận thẻ chip hiển thị.<br>• `chooseNativePickerAsset()`: Chọn asset/frame từ picker popup.<br>• `uploadStagedFlowMedia()`: Tải file media nhị phân lên Flow. |
-| **`FlowCharacters.js`** | **Nhân vật Flow** | • `FlowCharacterActions.create()`: Tạo nhân vật mới, chọn giọng nói, tỉ lệ, tạo chân dung.<br>• `FlowCharacterActions.edit()`: Chỉnh sửa thông tin nhân vật có sẵn. |
-| **`FlowNavigation.js`** | **Điều hướng & Phục hồi** | • `ensureFlowProjectEditor()`: Tự động phát hiện khi kẹt ở sub-routes (`/character`, `/edit`,...) và kéo người dùng về màn hình project editor gốc hoặc reload URL sạch.<br>• `exitFlowMediaViewer()`: Thoát media viewer 3 tầng (Nút Back -> `history.back()` -> Điều hướng URL gốc).<br>• `dismissBlockingOverlays()`: Đóng tự động các modal, dialog, backdrop che chắn màn hình. |
-| **`FlowTiles.js`** | **Theo dõi Grid & Lỗi** | • `collectNativeMedia()`: Quét toàn bộ tiles media trong grid.<br>• `findFlowTile()`: Tìm tile theo tiêu đề có cuộn ảo (virtualized scroll).<br>• `waitForProgressResult()`: Polling tiến độ render, xử lý retry khi gặp lỗi tạm thời.<br>• `classifyFlowError()`: Phân loại lỗi (`FLOW_QUOTA_EXCEEDED`, `FLOW_UNUSUAL_ACTIVITY`, `FLOW_POLICY_VIOLATION`, `FLOW_RATE_LIMIT`).<br>• `checkFlowCreditLimitAlert()`: Phát hiện ngay lập tức banner hết credit/quota.<br>• `armNativeFlowCorrelation()`: Kích hoạt RPC correlation tracker. |
-| **`FlowMediaMenu.js`** | **Menu thao tác Media** | • `triggerFlowDownload()`: Tải media chất lượng gốc hoặc upscaled.<br>• `scanNativeAssets()`: Quét toàn bộ thư viện assets của dự án.<br>• `scanNativeProjects()`: Quét danh sách dự án ở trang chủ.<br>• `flow.asset.rename`: Đổi tên asset trong menu 3 chấm.<br>• `flow.asset.trash`: Xóa asset vào thùng rác. |
-| **`FlowAgent.js`** | **Agent Workflows** | • Chuyển đổi Agent mode, cấu hình chính sách Agent, trả lời câu hỏi tương tác tự động của Flow Agent (I2V/R2V). |
+| **`extension/src/content/providers/flow/core/flow-driver.js`** | **Router của Flow** | Kế thừa `BaseProviderDriver`, xác thực project/target rồi chuyển từng operation tới một nhóm nghiệp vụ. Không giữ toàn bộ chuỗi xử lý trong một dispatcher dài. |
+| **`extension/src/content/providers/flow/generation/generation-operations.js`** | **Submit & quan sát tạo ảnh/video** | Chuẩn bị reference/prompt/settings, xác minh tín hiệu submit và tương quan request; `flow.generation.observe` theo dõi kết quả. Không sở hữu riêng settings ảnh/video. |
+| **`extension/src/content/providers/flow/composer/prompt-operations.js`** | **Prompt** | Xóa đúng nội dung prompt theo expected text, xác minh project/editor, và đảm bảo chip tham chiếu được giữ nguyên. |
+| **`extension/src/content/providers/flow/composer/reference-operations.js`** | **API nghiệp vụ tham chiếu** | Nhận lệnh attach/clear reference và trả danh sách voice cho client. Attach xử lý từng reference qua `FlowReferenceActions`; xác minh trạng thái/chip/media identity, không coi click là thành công. |
+| **`extension/src/content/providers/flow/media/upload-operations.js`** | **Upload protocol** | Preflight Flow, nhận các chunk ảnh/video, ráp file và chuyển file đã staging cho uploader DOM. |
+| **`extension/src/content/providers/flow/library/library-operations.js`** | **Project & thư viện** | Đọc trạng thái, liệt kê project/assets/characters, tải media, đổi tên và chuyển asset vào thùng rác. |
+| **`extension/src/content/providers/flow/workflows/workflow-operations.js`** | **Workflow nhiều bước** | Tạo/sửa character, chỉnh sửa video, Agent batch và tiếp tục video. |
+| **`extension/src/content/providers/flow/composer/flow-editor.js`** | **Soạn thảo & Submit** | • `getEditorUserText()`: Đọc text thuần của prompt, loại trừ 100% các inline chips.<br>• `clearEditorTextPreservingChips()`: Dọn sạch prompt cũ nhưng bảo toàn các chip reference/nhân vật.<br>• `insertNativeFlowPrompt()`: Chèn prompt an toàn và xác minh.<br>• `activateFlowSubmitButton()`: Bấm submit qua Slate bridge.<br>• `pressFlowEditorSubmit()`: Enter fallback khi click không kích hoạt listener.<br>• `waitForGenerationCreditQuote()`: Đọc credit quote trước khi bấm submit. |
+| **`extension/src/content/providers/flow/core/settings.js`** | **DOM settings dùng chung** | Cung cấp primitive thao tác panel/dropdown/options; không quyết định cấu hình riêng ảnh/video. |
+| **`extension/src/content/providers/flow/generation/image-settings.js`** | **Settings sinh ảnh** | `FlowImageActions.prepare()` cấu hình Image mode, model, ratio và số lượng; `prepareCharacterPortrait()` dùng cho chân dung character. |
+| **`extension/src/content/providers/flow/generation/video-settings.js`** | **Settings sinh video** | `FlowVideoActions.prepare()` cấu hình model video, ratio, duration, resolution, quantity và Ingredients/Frames mode. |
+| **`extension/src/content/providers/flow/compatibility/flow-components.js`** | **Facade tương thích** | Giữ tên API cũ và chuyển tiếp sang uploader, frame picker, voice/reference actions. Quy tắc mới thuộc module nghiệp vụ, không thêm vào facade. |
+| **`extension/src/content/providers/flow/media/uploader.js`** | **Upload ảnh/video qua DOM** | Điều khiển file input/dropzone, xác nhận upload video khi cần, đối chiếu tile và media ID. Byte upload từ MCP được nhận/ráp riêng ở `native-file-transfer.js` và `extension/src/content/providers/flow/media/upload-operations.js`. |
+| **`extension/src/content/providers/flow/composer/reference-actions.js`** | **Reference ảnh/nhân vật** | Quét picker phân trang/virtualized, gắn reference, xác nhận chip và media identity. |
+| **`extension/src/content/providers/flow/composer/voice-actions.js`** | **Voice** | Chọn voice chính xác, thay chip voice hiện tại, và quét đầy đủ danh sách voice trong picker ảo hóa. |
+| **`extension/src/content/providers/flow/generation/native-frame-picker.js`** | **Ảnh frame video** | Chọn đúng asset vào frame Start/End và xác nhận media ID + trạng thái picker sau thao tác. |
+| **`extension/src/content/providers/flow/characters/flow-characters.js`** | **Nhân vật Flow** | • `FlowCharacterActions.create()`: Tạo nhân vật mới, chọn giọng nói, tỉ lệ, tạo chân dung.<br>• `FlowCharacterActions.edit()`: Chỉnh sửa thông tin nhân vật có sẵn. |
+| **`extension/src/content/providers/flow/core/navigation.js`** | **Điều hướng & Phục hồi** | • `ensureFlowProjectEditor()`: Tự động phát hiện khi kẹt ở sub-routes (`/character`, `/edit`,...) và kéo người dùng về màn hình project editor gốc hoặc reload URL sạch.<br>• `exitFlowMediaViewer()`: Thoát media viewer 3 tầng (Nút Back -> `history.back()` -> Điều hướng URL gốc).<br>• `dismissBlockingOverlays()`: Đóng tự động các modal, dialog, backdrop che chắn màn hình. |
+| **`extension/src/content/providers/flow/generation/tiles.js`** | **Theo dõi Grid & Lỗi** | • `collectNativeMedia()`: Quét toàn bộ tiles media trong grid.<br>• `findFlowTile()`: Tìm tile theo tiêu đề có cuộn ảo (virtualized scroll).<br>• `waitForProgressResult()`: Polling tiến độ render, xử lý retry khi gặp lỗi tạm thời.<br>• `classifyFlowError()`: Phân loại lỗi (`FLOW_QUOTA_EXCEEDED`, `FLOW_UNUSUAL_ACTIVITY`, `FLOW_POLICY_VIOLATION`, `FLOW_RATE_LIMIT`).<br>• `checkFlowCreditLimitAlert()`: Phát hiện ngay lập tức banner hết credit/quota.<br>• `armNativeFlowCorrelation()`: Kích hoạt RPC correlation tracker. |
+| **`extension/src/content/providers/flow/media/media-menu.js`** | **Menu thao tác Media** | • `triggerFlowDownload()`: Tải media chất lượng gốc hoặc upscaled.<br>• `scanNativeAssets()`: Quét toàn bộ thư viện assets của dự án.<br>• `scanNativeProjects()`: Quét danh sách dự án ở trang chủ.<br>• `flow.asset.rename`: Đổi tên asset trong menu 3 chấm.<br>• `flow.asset.trash`: Xóa asset vào thùng rác. |
+| **`extension/src/content/providers/flow/agent/flow-agent.js`** | **Agent Workflows** | • Chuyển đổi Agent mode, cấu hình chính sách Agent, trả lời câu hỏi tương tác tự động của Flow Agent (I2V/R2V). |
 
 ---
 
@@ -133,7 +136,7 @@ Nếu service worker khởi động lại giữa một tác vụ đang chạy, q
 
 Để tích hợp thêm nền tảng AI mới mà không ảnh hưởng đến Flow:
 
-1. **Bước 1: Đăng ký Domain trong `ProviderRegistry.js`**:
+1. **Bước 1: Đăng ký Domain trong `extension/src/content/providers/base/provider-registry.js`**:
    ```javascript
    ProviderRegistry.ORIGINS = Object.freeze({
      flow: "https://flow.google.com",
@@ -143,8 +146,8 @@ Nếu service worker khởi động lại giữa một tác vụ đang chạy, q
    ```
 
 2. **Bước 2: Tạo thư mục Provider mới**:
-   - Tạo thư mục: `extension/content/providers/gemini/`
-   - Tạo file: `GeminiDriver.js`, `GeminiEditor.js`,... kế thừa từ `BaseProviderDriver`:
+   - Tạo thư mục: `extension/src/content/providers/gemini/`
+   - Tạo file `driver.js`, `editor.js`... theo tên thường kebab-case; class bên trong có thể giữ PascalCase và kế thừa từ `BaseProviderDriver`:
    ```javascript
    class GeminiDriver extends globalThis.BaseProviderDriver {
      constructor(context = {}) {
@@ -168,29 +171,32 @@ Nếu service worker khởi động lại giữa một tác vụ đang chạy, q
 
 ---
 
-## 6. Hướng dẫn Nạp & Cập nhật Extension trên Google Chrome
+## 6. Build, nạp và cập nhật Extension trên Google Chrome
+
+`extension/` chứa source và manifest nguồn. `npm run build` tạo gói Chrome đã kiểm tra đường dẫn tại `dist/extension/`; hãy dùng thư mục này với **Load unpacked**.
 
 1. Mở trình duyệt Chrome và truy cập: `chrome://extensions/`
 2. Bật công tắc **Developer mode** (Chế độ dành cho nhà phát triển) ở góc trên bên phải.
 3. Nhấp vào nút **Load unpacked** (Tải tiện ích đã giải nén).
-4. Chọn thư mục `extension` trong repository này:
+4. Chọn thư mục `dist/extension` trong repository này:
    ```text
-   c:\Users\nguye\Documents\flow-mcp-extension-native\extension
+   c:\Users\nguye\Documents\flow-mcp-extension-native\dist\extension
    ```
-5. Khi có bất kỳ thay đổi code nào trong thư mục `extension/`:
+5. Khi chỉ build thủ công, chạy `npm run build` trước khi nhấn Reload. Trong lúc phát triển:
    - Chỉ cần nhấn nút **Reload** (biểu tượng mũi tên xoay tròn) của extension trên trang `chrome://extensions/`.
    - Sau đó F5 lại trang Google Flow tab đang mở để nhận mã nguồn mới nhất.
 
-   Để tự reload trong lúc phát triển: load unpacked thư mục `extension/` một lần, rồi chạy `npm run dev:extension` ở thư mục gốc repo và để tiến trình đó chạy. Extension và các tab Flow đang mở sẽ tự reload sau khi có thay đổi (tối đa khoảng 30 giây).
+   Để tự build và reload: load unpacked `dist/extension/` một lần, rồi chạy `npm run dev:extension` ở thư mục gốc repo. Watcher theo dõi toàn bộ `extension/` (source, manifest, icon, rules và capabilities), build lại gói rồi yêu cầu Chrome reload khi an toàn.
 
 ---
 
-## 7. Kiểm thử Đơn vị (Unit Tests)
+## 7. Kiểm thử và build
 
-Mọi thay đổi trong extension đều có thể kiểm thử tự động offline bằng runner Bun / Node VM:
+Repo dùng Node test runner; các lệnh dưới đây chạy test và build đã khai báo trong `package.json`:
 
 ```bash
-bun test tests/native-references.test.mjs
+npm test
+npm run build
 ```
 
-Đảm bảo 18/18 tests luôn pass trước khi commit và push mã nguồn.
+Test DOM/mock kiểm tra logic offline, không thay thế xác minh trực tiếp trên Flow. Khi chỉ cập nhật tài liệu, không cần chạy test hay build.

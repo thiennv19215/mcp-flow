@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-const source = readFileSync(new URL('../extension/content/providers/flow/FlowTiles.js', import.meta.url), 'utf8');
+const source = readFileSync(new URL('../extension/src/content/providers/flow/generation/tiles.js', import.meta.url), 'utf8');
 const projectId = '00000000-0000-4000-8000-000000000000';
 const eventsByTiles = new WeakMap();
 

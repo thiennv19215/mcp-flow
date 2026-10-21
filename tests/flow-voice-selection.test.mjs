@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { sceneSchema } from '../dist/schemas.js';
+import { flowComponentsSource } from './helpers/flow-components-source.mjs';
 
-const source = readFileSync(new URL('../extension/content/providers/flow/FlowComponents.js', import.meta.url), 'utf8');
+const source = flowComponentsSource;
 
 test('Flow voice input is accepted for text video and rejected for image or frame generation', () => {
   assert.equal(sceneSchema.safeParse({ prompt: 'A test', type: 'video', voice: 'Kore' }).success, true);

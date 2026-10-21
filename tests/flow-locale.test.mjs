@@ -7,9 +7,9 @@ import {
   flowProjectUrl,
   forceEnglishFlowUrl,
   normalizeFlowLocale,
-} from '../extension/background/flow-locale.js';
+} from '../extension/src/background/flow-locale.js';
 
-const worker = readFileSync(new URL('../extension/background/service-worker.js', import.meta.url), 'utf8');
+const worker = readFileSync(new URL('../extension/src/background/service-worker.js', import.meta.url), 'utf8');
 const projectId = '01234567-89ab-4cde-8f01-23456789abcd';
 
 test('Flow automation URL policy is English-only and defaults project URLs to English', () => {

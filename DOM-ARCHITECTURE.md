@@ -6,24 +6,26 @@
 
 ## 1. Triết Lý Thiết Kế (Theo Mô Hình TobyFlow)
 
-Trước đây, selectors bị hardcode rải rác trong hàng chục file provider (`FlowComponents.js`, `FlowCharacters.js`, `FlowSettings.js`...). Khi Google Flow đổi một tên class hay thuộc tính `aria-label`, việc bảo trì trở thành một thảm họa vì phải tìm và sửa hàng trăm vị trí.
+Trước đây, selectors bị hardcode rải rác trong hàng chục file provider (`extension/src/content/providers/flow/compatibility/flow-components.js`, `extension/src/content/providers/flow/characters/flow-characters.js`, `extension/src/content/providers/flow/core/settings.js`...). Khi Google Flow đổi một tên class hay thuộc tính `aria-label`, việc bảo trì trở thành một thảm họa vì phải tìm và sửa hàng trăm vị trí.
 
-Hệ thống hiện tại đã được tái cấu trúc thành **3 tầng độc lập**:
+Hệ thống hiện tại tách thành **cấu hình selector, query engine và các module nghiệp vụ**. Các module được chia theo trách nhiệm (prompt, reference, upload, generation, library, workflow); `extension/src/content/providers/flow/compatibility/flow-components.js` chỉ còn là facade tương thích cho API cũ.
 
 ```
 [Tầng 1: Registry Cấu Hình]
          flow-selectors.json (Local config & Hot-reload)
                    ↕ (Sync qua src/selectors.ts & WebSocket / storage)
 [Tầng 2: Query Engine]
-         FlowSelectors.js (Content Script Layer)
+         extension/src/content/providers/flow/core/selectors.js (Content Script Layer)
          ├── flowGetConfig(path)
          ├── flowQuery(path, scope)
          ├── flowQueryAll(path, scope, options)
          ├── flowQueryVisible(path, scope)
          └── flowFindSemantic(path, scope, options)
                    ↓
-[Tầng 3: Page Drivers / Providers]
-         FlowComponents, FlowCharacters, FlowSettings, FlowTiles, FlowMediaMenu, FlowNavigation...
+[Tầng 3: Driver và module nghiệp vụ]
+         FlowDriver → Prompt / Reference / Upload / Generation / Library / Workflow Operations
+         UI primitives: FlowEditor, FlowReferenceActions, FlowUploader,
+         FlowImageSettings, FlowVideoSettings, FlowTiles, FlowMediaMenu...
 ```
 
 ---
@@ -31,13 +33,12 @@ Hệ thống hiện tại đã được tái cấu trúc thành **3 tầng độ
 ## 2. Quy Tắc Vàng (The Golden Rules)
 
 > [!CAUTION]
-> **1. TUYỆT ĐỐI KHÔNG hardcode selector tĩnh mới trực tiếp trong file logic**:
-> Không viết `document.querySelector(".new-google-class")` hoặc `document.querySelectorAll('button[aria-label="New Feature"]')` trong các file provider.
-> Mọi selector mới **phải được khai báo vào `flow-selectors.json` và `FlowSelectors.js` trước**.
+> **1. Ưu tiên selector cấu hình cho điểm nhận diện DOM cần thay đổi theo Flow**:
+> Dùng `flowQuery`/`flowQueryAll` với key trong `flow-selectors.json` cho vùng DOM dùng lại hoặc selector có khả năng đổi theo giao diện. Nếu cần key mới, khai báo giá trị mặc định trong `extension/src/content/providers/flow/core/selectors.js` và cấu hình trong `flow-selectors.json`. Với thao tác đặc thù hoặc semantic matching, module nghiệp vụ có thể dùng selector cục bộ có giải thích và xác minh rõ ràng; không đưa quy trình nghiệp vụ vào file selector.
 
 > [!IMPORTANT]
-> **2. LUÔN viết theo mô hình 2 tầng (Query Engine + Safe Fallback)**:
-> Vì hệ thống test suite (`tests/*.test.mjs`) chạy trên môi trường Node/Bun với DOM giả lập (JSDOM/mock DOM), bạn luôn phải giữ mẫu fallback:
+> **2. Fallback phải an toàn và kiểm chứng được**:
+> Một fallback chỉ dùng khi query engine không sẵn có hoặc key chưa được cấu hình. Sau khi tìm thấy element, vẫn xác minh đúng ngữ cảnh, trạng thái hiển thị và tính duy nhất trước khi click/chọn. Không click tất cả hoặc chọn phần tử đầu tiên khi kết quả mơ hồ.
 > ```javascript
 > // ✅ ĐÚNG CHUẨN:
 > const button = (typeof root.flowQuery === "function" 
@@ -70,7 +71,7 @@ File [`flow-selectors.json`](./flow-selectors.json) được tổ chức thành 
 
 ---
 
-## 4. Hướng Dẫn Sử Dụng Query Engine (`FlowSelectors.js`)
+## 4. Hướng Dẫn Sử Dụng Query Engine (`extension/src/content/providers/flow/core/selectors.js`)
 
 Mọi phương thức của Query Engine đều được đính kèm vào `globalThis` (hoặc `root`):
 
@@ -117,29 +118,32 @@ Khi Google Flow cập nhật UI khiến extension không tìm thấy nút hoặc
 
 1. **Bước 1: Inspect DOM trên trình duyệt**
    - Mở DevTools trên Flow, kiểm tra thẻ DOM mới (class, role, tag, aria-label).
-2. **Bước 2: Cập nhật `flow-selectors.json`**
-   - Mở file [`flow-selectors.json`](./flow-selectors.json).
-   - Thêm selector mới lên **đầu mảng** `selectors` (ưu tiên Tier 1) của key tương ứng. Giữ selector cũ phía sau làm fallback.
+2. **Bước 2: Cập nhật cấu hình hoặc module sở hữu thao tác**
+   - Mở file [`flow-selectors.json`](./flow-selectors.json) và cập nhật selector cho key hiện có nếu cấu hình đủ biểu đạt thay đổi.
+   - Nếu cần key mới, khai báo default trong `extension/src/content/providers/flow/core/selectors.js` rồi thêm cấu hình trong `flow-selectors.json`.
+   - Nếu đổi luồng thao tác, điều kiện an toàn hoặc xác minh kết quả, cập nhật module nghiệp vụ sở hữu hành động (ví dụ `extension/src/content/providers/flow/composer/reference-actions.js` cho picker reference, `extension/src/content/providers/flow/media/uploader.js` cho upload UI, `extension/src/content/providers/flow/composer/prompt-operations.js` cho clear prompt). Selector JSON không thay thế code khi hành vi thay đổi.
    ```json
-   "submitButton": {
-     "selectors": [
-       "button[data-new-action='generate']",  // <-- Thêm mới vào đây
-       "button[type='submit']",
-       "button[data-action='submit']"
-     ]
+   {
+     "submitButton": {
+       "selectors": [
+         "button[data-new-action='generate']",
+         "button[type='submit']",
+         "button[data-action='submit']"
+       ]
+     }
    }
    ```
-3. **Bước 3: Chạy lại Test Suite & Build**
+3. **Bước 3: Kiểm tra thay đổi**
    ```bash
-   bun test
-   bun run build
+   npm test
+   npm run build
    ```
-   > Không cần đụng vào code trong `FlowComponents.js` hay các Provider khác!
+   > Nếu chỉ cập nhật selector đã có key, backend có thể phát cấu hình nóng. Nếu thêm key hoặc đổi code extension, cần build/reload extension và tab Flow để nạp mã mới.
 
 ---
 
 ## 6. Checklist Kiểm Tra Trước Khi Commit Code
-- [ ] Không có `document.querySelector` trần trụi cho các thành phần nghiệp vụ chính.
-- [ ] Toàn bộ selector mới đã có trong `flow-selectors.json`.
-- [ ] Chạy `bun test` đạt 100% (223/223 pass).
-- [ ] Chạy `bun run build` không có lỗi TypeScript hay build script.
+- [ ] Selector có khả năng đổi theo DOM được khai báo trong cấu hình; key mới có default trong `extension/src/content/providers/flow/core/selectors.js`.
+- [ ] Hành vi được đặt ở module nghiệp vụ đúng miền, không nhồi vào `extension/src/content/providers/flow/compatibility/flow-components.js` facade.
+- [ ] Submit, thao tác destructive và chọn reference kiểm tra project, uniqueness và kết quả sau hành động.
+- [ ] Chạy `npm test` và `npm run build` khi có thay đổi code; không tuyên bố live Flow đã xác minh nếu chỉ chạy mock/offline.

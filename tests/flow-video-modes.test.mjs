@@ -8,9 +8,13 @@ import { LocalCore } from '../dist/core.js';
 import { JobQueue } from '../dist/queue.js';
 import { shapes } from '../dist/schemas.js';
 
-const workflowSource = readFileSync(new URL('../extension/content/providers/flow/FlowWorkflowOperations.js', import.meta.url), 'utf8');
-const agentSource = readFileSync(new URL('../extension/content/providers/flow/FlowAgent.js', import.meta.url), 'utf8');
-const settingsSource = readFileSync(new URL('../extension/content/providers/flow/FlowSettings.js', import.meta.url), 'utf8');
+const workflowSource = readFileSync(new URL('../extension/src/content/providers/flow/workflows/workflow-operations.js', import.meta.url), 'utf8');
+const agentSource = readFileSync(new URL('../extension/src/content/providers/flow/agent/flow-agent.js', import.meta.url), 'utf8');
+const settingsSource = [
+  '../extension/src/content/providers/flow/core/settings.js',
+  '../extension/src/content/providers/flow/generation/image-settings.js',
+  '../extension/src/content/providers/flow/generation/video-settings.js',
+].map(file => readFileSync(new URL(file, import.meta.url), 'utf8')).join('\n');
 
 test('video option lookup skips an unrelated earlier overlay and uses the settings panel', async () => {
   const makeOption = (label, selected = false) => ({

@@ -869,195 +869,13 @@
     }
   }
 
-  async function prepareNativeImageSettings(payload, variants, options = {}) {
-    let ownsSettingsSurface = false;
-    options = {
-      ...options,
-      imagePreparation: true,
-      onSettingsOpened: () => { ownsSettingsSurface = true; },
-    };
-    const ensureSettingsSurface = async () => {
-      const wasVisible = flowSettingsPanelVisible();
-      await openFlowSettings(options);
-      if (!wasVisible && flowSettingsPanelVisible()) ownsSettingsSurface = true;
-    };
-    try {
-      emitImagePreparationProgress(options, "validating requested settings");
-      await assertNativeModelCapabilities(payload, "image", false, options);
-      emitImagePreparationProgress(options, "reading composer controls");
-      const aspectRatio = payload?.aspectRatio || payload?.aspect_ratio;
-      const requestedModel = payload?.model || "Nano Banana";
-
-      emitImagePreparationProgress(options, "selecting image mode");
-      await ensureSettingsSurface();
-      await chooseRadio("Image", options);
-      if (aspectRatio) await chooseAspectRatio(aspectRatio, options);
-
-      if (requestedModel) {
-        emitImagePreparationProgress(options, "selecting requested model");
-        await chooseNativeModel(requestedModel, "image", options);
-        await ensureSettingsSurface();
-        await chooseRadio("Image", options);
-        if (aspectRatio) await chooseAspectRatio(aspectRatio, options);
-      }
-
-      emitImagePreparationProgress(options, "selecting output count");
-      await chooseNativeVariantCount(variants, options);
-
-      finishImagePreparationDiagnostics("completed", { result: { model: requestedModel, aspectRatio, variants } });
-      return undefined;
-    } catch (error) {
-      finishImagePreparationDiagnostics("failed", {
-        error: `${error?.code || "FLOW_SETTINGS_ERROR"}: ${error?.message || String(error)}`,
-        quoteDiagnostics: safeCreditQuoteDiagnostics(),
-      });
-      throw error;
-    } finally {
-      await closeOwnedSettingsSurface(ownsSettingsSurface, options);
-    }
-  }
-
-  const MODE_ALIASES = {
-    ingredients: ["ingredients", "thành phần", "nguyên liệu", "ingredient"],
-    frames: ["frames", "khung hình", "khung", "frame"],
-  };
-
-  function exactModeControl(name) {
-    const rawWanted = foldLabel(name);
-    const aliases = (MODE_ALIASES[rawWanted] || [rawWanted]).map(foldLabel);
-    const candidates = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", document, { checkVisible: false }) : null) ||
-      [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')];
-    return candidates
-      .find(element => {
-        if (!root.visible?.(element) || isNavControl(element)) return false;
-        const cName = foldLabel(String(root.accessibleName?.(element) || "").replace(/^(?:accessibility_new|dashboard|face)\s*/i, ""));
-        return aliases.includes(cName) || aliases.some(a => cName.endsWith(` ${a}`));
-      });
-  }
-
-  async function selectAndConfirmMode(name, framesMode, options = {}) {
-    checkPreparation(options, `selecting Flow ${name} mode`);
-    let control = exactModeControl(name);
-    if (!control) {
-      const hasFrameControls = () => Boolean(root.flowButton?.("Start") && root.flowButton?.("End"));
-      if (framesMode && hasFrameControls()) return;
-      const code = framesMode ? "FLOW_FRAMES_MODE_UNAVAILABLE" : "FLOW_VIDEO_MODE_UNAVAILABLE";
-      throw root.flowError(code, `Flow does not offer the exact ${name} mode for the selected model. Nothing was submitted.`, true, false);
-    }
-    if (!nativeRadioSelected(control) && control.getAttribute("aria-selected") !== "true") control.click();
-    const hasFrameControls = () => Boolean(root.flowButton?.("Start") && root.flowButton?.("End"));
-    const deadline = Math.min(Date.now() + 5000, Number.isFinite(options.deadline) ? options.deadline : Infinity);
-    let confirmed = false;
-    while (Date.now() < deadline) {
-      checkPreparation(options, `confirming Flow ${name} mode`);
-      control = exactModeControl(name);
-      if (control && (nativeRadioSelected(control) || control.getAttribute("aria-selected") === "true" || (framesMode && hasFrameControls()))) { confirmed = true; break; }
-      if (!flowSettingsPanelVisible()) await openFlowSettings(options);
-      await waitPreparation(options, 100, `confirming Flow ${name} mode`);
-    }
-    if (!confirmed) {
-      if (framesMode && hasFrameControls()) confirmed = true;
-      else {
-        const code = framesMode ? "FLOW_FRAMES_MODE_UNCONFIRMED" : "FLOW_VIDEO_MODE_UNCONFIRMED";
-        throw root.flowError(code, `Flow did not confirm that ${name} mode is selected. Nothing was submitted.`, true, false);
-      }
-    }
-    if (framesMode) {
-      const controlsDeadline = Math.min(Date.now() + 4000, Number.isFinite(options.deadline) ? options.deadline : Infinity);
-      while (Date.now() < controlsDeadline && !hasFrameControls()) await waitPreparation(options, 100, "waiting for Flow frame controls");
-      if (!hasFrameControls()) {
-        throw root.flowError("FLOW_FRAMES_CONTROLS_UNAVAILABLE", "Flow selected Frames but did not show both Start and End frame controls. Nothing was submitted.", true, false);
-      }
-    }
-  }
-
-  async function prepareNativeVideoSettings(payload, variants, framesMode, options = {}) {
-    let ownsSettingsSurface = false;
-    options = { ...options, videoPreparation: true, onSettingsOpened: () => { ownsSettingsSurface = true; } };
-    emitImagePreparationProgress(options, "validating requested settings");
-    const ensureSettingsSurface = async () => {
-      const wasVisible = flowSettingsPanelVisible();
-      await openFlowSettings(options);
-      if (!wasVisible && flowSettingsPanelVisible()) ownsSettingsSurface = true;
-    };
-    try {
-    const type = payload.type || "video";
-    const requestedModel = payload.model || payload.video_settings?.model;
-    const modeName = framesMode ? "Frames" : "Ingredients";
-    const aspectRatio = payload.aspectRatio ?? payload.aspect_ratio ?? payload.video_settings?.aspectRatio ?? payload.video_settings?.aspect_ratio;
-    const duration = payload.duration ?? payload.video_settings?.duration;
-    const resolution = payload.resolution ?? payload.video_settings?.resolution;
-    const modelCapabilities = await assertNativeModelCapabilities({
-      ...payload,
-      ...(requestedModel ? { model: requestedModel } : {}),
-      ...(aspectRatio ? { aspectRatio } : {}),
-      ...(duration != null ? { duration } : {}),
-      ...(resolution != null ? { resolution } : {}),
-    }, "video", framesMode, options);
-
-    emitImagePreparationProgress(options, "selecting Video mode");
-    await ensureSettingsSurface();
-    await chooseRadio("Video", options);
-    if (aspectRatio) await chooseVideoOption("ratio", aspectRatio, options);
-
-    if (requestedModel) {
-      emitImagePreparationProgress(options, "selecting requested model");
-      await chooseNativeModel(requestedModel, type, options);
-      const selectedModel = findModelPickerButton();
-      const selectedModelName = normalizeModelLabel(selectedModel?.innerText || selectedModel?.textContent || root.accessibleName?.(selectedModel) || "");
-      const requestedModelMatched = getModelAliases(requestedModel).some(alias => {
-        const normalizedAlias = normalizeModelLabel(alias);
-        return selectedModelName === normalizedAlias || (normalizedAlias.length >= 3 && selectedModelName.includes(normalizedAlias));
-      });
-      if (!requestedModelMatched) {
-        throw root.flowError("FLOW_VIDEO_MODEL_UNCONFIRMED", `Flow did not confirm requested video model "${requestedModel}" (current: ${selectedModelName || "unknown"}). Nothing was submitted.`, true, false);
-      }
-      await ensureSettingsSurface();
-      await chooseRadio("Video", options);
-      if (aspectRatio) await chooseVideoOption("ratio", aspectRatio, options);
-    }
-
-    if (duration != null) {
-      emitImagePreparationProgress(options, "selecting video duration");
-      const modelFixedDuration = Number.isFinite(Number(modelCapabilities?.fixedDuration)) && Number(duration) === Number(modelCapabilities.fixedDuration);
-      await chooseVideoOption("duration", duration, { ...options, allowAbsent: modelFixedDuration });
-    }
-    if (resolution != null) {
-      emitImagePreparationProgress(options, "selecting video resolution");
-      await chooseVideoOption("resolution", resolution, options);
-    }
-    emitImagePreparationProgress(options, "selecting output count");
-    await chooseNativeVariantCount(variants, options);
-
-    emitImagePreparationProgress(options, `selecting ${modeName} input mode`);
-    await ensureSettingsSurface();
-    await selectAndConfirmMode(modeName, Boolean(framesMode), options);
-    emitImagePreparationProgress(options, "reading generation credit quote");
-    const settingsCredits = await (root.FlowEditor?.waitForGenerationCreditQuote?.(Math.min(2000, Number.isFinite(options.deadline) ? Math.max(1, options.deadline - Date.now()) : 2000), options) || root.waitForGenerationCreditQuote?.(2000));
-    finishVideoPreparationDiagnostics("completed", { result: { creditQuote: Number.isFinite(settingsCredits) ? settingsCredits : "unknown", framesMode, model: requestedModel || null, aspectRatio: aspectRatio || null, duration: duration ?? null, resolution: resolution || null, variants } });
-    return settingsCredits;
-    } catch (error) {
-      finishVideoPreparationDiagnostics("failed", {
-        error: `${error?.code || "FLOW_VIDEO_SETTINGS_ERROR"}: ${error?.message || String(error)}`,
-        quoteDiagnostics: safeCreditQuoteDiagnostics(),
-      });
-      throw error;
-    } finally {
-      await closeOwnedSettingsSurface(ownsSettingsSurface, options);
-    }
-  }
-
-  const FlowImageActions = Object.freeze({
-    prepare: async (payload, variants, options) => prepareNativeImageSettings(payload, variants, options),
-    prepareCharacterPortrait: async (character, variants, options) =>
-      prepareNativeImageSettings({ aspectRatio: character.aspect_ratio || "3:4", model: character.model || "Nano Banana" }, variants, options),
-  });
-
-  const FlowVideoActions = Object.freeze({
-    prepare: async (payload, variants, framesMode, options) => prepareNativeVideoSettings(payload, variants, framesMode, options),
-  });
-
   const FlowSettings = Object.freeze({
+    checkPreparation,
+    emitImagePreparationProgress,
+    waitPreparation,
+    finishImagePreparationDiagnostics,
+    finishVideoPreparationDiagnostics,
+    assertNativeModelCapabilities,
     openFlowSettings,
     closeFlowSettings,
     inspectImagePreparationDiagnostics,
@@ -1068,6 +886,8 @@
     flowRadio,
     flowOption,
     nativeRadioSelected,
+    isNavControl,
+    foldLabel,
     chooseRadio,
     chooseAspectRatio,
     chooseDuration,
@@ -1079,14 +899,9 @@
     getModelAliases,
     normalizeModelLabel,
     restoreNativeFramesMode,
-    prepareNativeImageSettings,
-    prepareNativeVideoSettings,
-    selectAndConfirmMode,
   });
 
   root.FlowSettings = FlowSettings;
-  root.FlowImageActions = FlowImageActions;
-  root.FlowVideoActions = FlowVideoActions;
   root.openFlowSettings = openFlowSettings;
   root.closeFlowSettings = closeFlowSettings;
   root.flowSettingsPanelVisible = flowSettingsPanelVisible;

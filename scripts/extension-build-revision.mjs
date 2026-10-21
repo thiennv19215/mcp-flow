@@ -41,6 +41,6 @@ export async function writeExtensionBuildRevision(extensionDir) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  const extensionDir = resolve(fileURLToPath(new URL('../extension/', import.meta.url)));
+  const extensionDir = resolve(fileURLToPath(new URL('../dist/extension/', import.meta.url)));
   console.log(await writeExtensionBuildRevision(extensionDir));
 }

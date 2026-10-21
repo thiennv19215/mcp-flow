@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { shapes } from '../dist/schemas.js';
 
-const source = readFileSync(new URL('../extension/content/providers/flow/FlowGenerationOperations.js', import.meta.url), 'utf8');
+const source = readFileSync(new URL('../extension/src/content/providers/flow/composer/reference-operations.js', import.meta.url), 'utf8');
 
 function harness(clearResult, { pickerOpen = false, promptBefore = '', promptValues = null, closeError = null, referenceChipCounts = [0, 0] } = {}) {
   const calls = [];
@@ -35,7 +35,7 @@ function harness(clearResult, { pickerOpen = false, promptBefore = '', promptVal
   });
   vm.runInContext(source, context);
   const driver = { error: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }) };
-  return { ops: new context.FlowGenerationOperations(driver), calls, closeCalls };
+  return { ops: new context.FlowReferenceOperations(driver), calls, closeCalls };
 }
 
 test('clear references exposes an empty API schema', () => {

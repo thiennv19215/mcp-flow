@@ -44,10 +44,10 @@ test('RemoteCore calls the local voice_options API endpoint', async t => {
 });
 
 test('voice options operation is registered as a Flow-native read-only capability', () => {
-  const generation = readFileSync(new URL('../extension/content/providers/flow/FlowGenerationOperations.js', import.meta.url), 'utf8');
-  const baseDriver = readFileSync(new URL('../extension/content/providers/BaseProviderDriver.js', import.meta.url), 'utf8');
-  const worker = readFileSync(new URL('../extension/background/service-worker.js', import.meta.url), 'utf8');
-  assert.match(generation, /"flow\.voices\.options"/);
+  const references = readFileSync(new URL('../extension/src/content/providers/flow/composer/reference-operations.js', import.meta.url), 'utf8');
+  const baseDriver = readFileSync(new URL('../extension/src/content/providers/base/base-provider-driver.js', import.meta.url), 'utf8');
+  const worker = readFileSync(new URL('../extension/src/background/service-worker.js', import.meta.url), 'utf8');
+  assert.match(references, /"flow\.voices\.options"/);
   assert.match(baseDriver, /"flow\.voices\.options"/);
   assert.match(worker, /"flow\.voices\.options"/);
   assert.match(worker, /flow\.voices\.options.*?includes\(operation\)/s);

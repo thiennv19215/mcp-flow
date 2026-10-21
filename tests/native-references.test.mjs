@@ -10,14 +10,15 @@ import { extensionSetWebSocket } from '../dist/extension.js';
 import { runGeneration, normalizeFlowCharacters } from '../dist/flow.js';
 import { getCachedProjectMedia, cacheProjectMedia } from '../dist/flow-transfer.js';
 import { materializeNativeDownload } from '../dist/native-downloads.js';
-import { readFlowDownloadChunk } from '../extension/background/flow-download-relay.js';
+import { readFlowDownloadChunk } from '../extension/src/background/flow-download-relay.js';
+import { flowComponentsSource } from './helpers/flow-components-source.mjs';
+const source = flowComponentsSource;
 
-const source = readFileSync(new URL('../extension/content/providers/flow/FlowComponents.js', import.meta.url), 'utf8');
-const charactersSource = readFileSync(new URL('../extension/content/providers/flow/FlowCharacters.js', import.meta.url), 'utf8');
-const mediaMenuSource = readFileSync(new URL('../extension/content/providers/flow/FlowMediaMenu.js', import.meta.url), 'utf8');
-const libraryOperationsSource = readFileSync(new URL('../extension/content/providers/flow/FlowLibraryOperations.js', import.meta.url), 'utf8');
-const generationOperationsSource = readFileSync(new URL('../extension/content/providers/flow/FlowGenerationOperations.js', import.meta.url), 'utf8');
-const nativeFileTransferSource = readFileSync(new URL('../extension/content/shared/native-file-transfer.js', import.meta.url), 'utf8');
+const charactersSource = readFileSync(new URL('../extension/src/content/providers/flow/characters/flow-characters.js', import.meta.url), 'utf8');
+const mediaMenuSource = readFileSync(new URL('../extension/src/content/providers/flow/media/media-menu.js', import.meta.url), 'utf8');
+const libraryOperationsSource = readFileSync(new URL('../extension/src/content/providers/flow/library/library-operations.js', import.meta.url), 'utf8');
+const generationOperationsSource = readFileSync(new URL('../extension/src/content/providers/flow/generation/generation-operations.js', import.meta.url), 'utf8');
+const nativeFileTransferSource = readFileSync(new URL('../extension/src/content/shared/native-file-transfer.js', import.meta.url), 'utf8');
 
 test('generation frame routing passes its explicit UUID through to the picker', async () => {
   const context = vm.createContext({ Object, String, RegExp });
@@ -363,11 +364,18 @@ test('reference scanner ignores a global-only scroll decoy and fails closed with
   assert.equal(fixture.clicks(), 0);
 });
 
-function uploadedTileMenuHarness({ preexistingMenu = false, multipleNewMenus = false, noNewMenu = false, chipIdentity = 'matching', leaveOwnedMenuOpen = false, openUnrelatedAfterAction = false, relation = true, farMenu = false, farMenuClose = false } = {}) {
+function uploadedTileMenuHarness({ preexistingMenu = false, multipleNewMenus = false, noNewMenu = false, chipIdentity = 'matching', leaveOwnedMenuOpen = false, openUnrelatedAfterAction = false, relation = true, farMenu = false, farMenuClose = false, actionText = 'Add to prompt', accessibleActionLabel = null, nestedChipControls = false, broadConfiguredButtons = false, addChipCount = 1 } = {}) {
   const mediaUuid = '22222222-2222-4222-8222-222222222222';
   const chips = [];
+  let activeMediaUuid = mediaUuid;
+  let activeTileName = 'Uploaded exact.png';
   const menuStates = [];
+  const logs = [];
   let contextEvents = 0, actionClicks = 0, closeClicks = 0, unrelatedKeyEvents = 0;
+  const controlsForChip = chip => chip.controls || [chip];
+  const allChipControls = () => chips.flatMap(controlsForChip);
+  const unrelatedControl = { tagName: 'BUTTON', innerText: 'Settings', textContent: 'Settings', getAttribute: key => key === 'aria-label' ? 'Open settings' : null, querySelector: () => null, closest: () => null };
+  const unrelatedAfterClick = { tagName: 'BUTTON', innerText: 'Favorite', textContent: 'Favorite', getAttribute: key => key === 'aria-label' ? 'Favorite' : null, querySelector: () => null, closest: () => null };
   const target = { id: 'media-trigger', getBoundingClientRect: () => ({ left: 100, top: 100, width: 20, height: 20 }), dispatchEvent(event) {
     if (event.type !== 'contextmenu') return;
     contextEvents++;
@@ -376,26 +384,36 @@ function uploadedTileMenuHarness({ preexistingMenu = false, multipleNewMenus = f
     for (let index = 0; index < count; index++) menuStates.push({ open: true, owned: true });
   } };
   const makeMenu = state => {
-    const action = { disabled: false, innerText: 'Add to prompt', getAttribute: () => null, click() {
+    const action = { tagName: 'BUTTON', disabled: false, innerText: actionText, textContent: actionText, getAttribute: key => key === 'role' ? 'menuitem' : key === 'aria-label' ? accessibleActionLabel : null, click() {
       actionClicks++;
-      const id = chipIdentity === 'mismatched' ? '33333333-3333-4333-8333-333333333333' : chipIdentity === 'matching' ? mediaUuid : null;
-      const image = { alt: 'Image ingredient image', getAttribute: key => key === 'data-media-id' ? id : null };
-      chips.push({ innerText: 'Ingredient', querySelector: () => image, closest: () => null });
+      const id = chipIdentity === 'mismatched' ? '33333333-3333-4333-8333-333333333333' : chipIdentity === 'matching' ? activeMediaUuid : null;
+      for (let index = 0; index < addChipCount; index++) {
+        const image = { alt: 'Image ingredient image', getAttribute: key => key === 'data-media-id' ? id : key === 'src' ? `https://flow-content.google/image/${id || index}` : null };
+        const owner = { tagName: 'DIV', getAttribute: key => key === 'data-kind' ? 'image' : null,
+          querySelectorAll: selector => /img|role='img'/.test(selector) ? [image] : [] };
+        const makeControl = withImage => ({ tagName: 'BUTTON', innerText: 'Ingredient', textContent: 'Ingredient',
+          getAttribute: key => key === 'aria-label' ? 'Ingredient' : key === 'role' ? 'button' : null,
+          querySelector: selector => withImage && /img/.test(selector) ? image : null,
+          closest: selector => selector.includes("[data-kind='image']") ? owner : null });
+        const mainControl = makeControl(true);
+        if (nestedChipControls) mainControl.controls = [mainControl, makeControl(false)];
+        chips.push(mainControl);
+      }
       if (!leaveOwnedMenuOpen) state.open = false;
       if (openUnrelatedAfterAction) unrelatedState.open = true;
     } };
-    const closeAction = { disabled: false, innerText: 'Close', getAttribute: () => null, click() { closeClicks++; state.open = false; } };
+    const closeAction = { tagName: 'BUTTON', disabled: false, innerText: 'Close', textContent: 'Close', getAttribute: key => key === 'role' ? 'menuitem' : null, click() { closeClicks++; state.open = false; } };
     return { tagName: 'DIV', id: `owned-menu-${menuStates.indexOf(state)}`, isConnected: true,
       getAttribute: key => key === 'role' ? 'menu' : key === 'aria-labelledby' && relation ? target.id : null,
       getBoundingClientRect: () => farMenu ? { left: 400, top: 110, width: 120, height: 80, right: 520, bottom: 190 } : { left: 110, top: 110, width: 120, height: 80, right: 230, bottom: 190 },
-      querySelectorAll: selector => selector === '[role="menuitem"],button,[role="button"]' ? (farMenuClose ? [action, closeAction] : [action]) : [],
+      querySelectorAll: selector => /menuitem|button|radix-collection/.test(selector) ? (farMenuClose ? [action, closeAction] : [action]) : [],
       dispatchEvent(event) { if (state.owned && event.key === 'Escape') state.open = false; else unrelatedKeyEvents++; } };
   };
   const unrelatedState = { open: preexistingMenu, owned: false };
   const unrelatedMenu = makeMenu(unrelatedState);
   const menuObjects = new WeakMap();
   const menuFor = state => { if (!menuObjects.has(state)) menuObjects.set(state, makeMenu(state)); return menuObjects.get(state); };
-  const tile = { isConnected: true, getAttribute: key => key === 'aria-label' ? 'Uploaded exact.png' : null,
+  const tile = { isConnected: true, getAttribute: key => key === 'aria-label' ? activeTileName : null,
     querySelector: selector => selector === 'flow-video-tile,flow-scene-tile' ? null : selector === 'img,[role=\'img\']' ? target : null,
     scrollIntoView() {} };
   const document = { body: { innerText: '' }, querySelectorAll(selector) {
@@ -403,20 +421,30 @@ function uploadedTileMenuHarness({ preexistingMenu = false, multipleNewMenus = f
     if (selector === '[role="menu"],mat-menu-panel') return [...(unrelatedState.open ? [unrelatedMenu] : []), ...menuStates.filter(state => state.open).map(menuFor)];
     if (selector === '[role="dialog"],[role="menu"],[role="listbox"],mat-menu,mat-select-panel') return this.querySelectorAll('[role="menu"],mat-menu-panel');
     if (selector === '[role="listbox"]' || selector === '[role="progressbar"]' || selector === '[role="tab"]') return [];
-    if (selector === 'button[aria-label="Ingredient"]') return chips;
+    if (selector === 'button[aria-label="Ingredient"]') return allChipControls();
+    if (selector === 'button,[role="button"]') return allChipControls();
     return [];
   }, querySelector() { return null; }, activeElement: null, dispatchEvent(event) { if (event.key === 'Escape') unrelatedKeyEvents++; } };
   const context = vm.createContext({ document, location: { pathname: '/project/test' }, Date,
     MouseEvent: class { constructor(type, options) { this.type = type; Object.assign(this, options); } },
     KeyboardEvent: class { constructor(type, options) { this.type = type; Object.assign(this, options); } },
     window: { innerWidth: 1280, innerHeight: 800 },
-    visible: el => ['Add to prompt', 'Ingredient'].includes(el?.innerText) || (el === unrelatedMenu ? unrelatedState.open : menuStates.some(state => state.open && menuFor(state) === el)),
-    mediaId: () => mediaUuid, findFlowTile: async title => title === 'Uploaded exact.png' ? tile : null,
-    accessibleName: el => el.innerText || '', wait: async () => {}, flowButton: () => null,
+    console: { error: (...args) => logs.push(args), warn() {}, info() {}, log() {}, debug() {} },
+    visible: el => [actionText, 'Add to prompt', 'Ingredient'].includes(el?.innerText) || (broadConfiguredButtons && [unrelatedControl, unrelatedAfterClick].includes(el)) || (el === unrelatedMenu ? unrelatedState.open : menuStates.some(state => state.open && menuFor(state) === el)),
+    ...(broadConfiguredButtons ? { flowQueryAll: (path, scope) => {
+      if (['components.chips', 'common.buttons'].includes(path) && scope === document) return [...allChipControls(), unrelatedControl, ...(actionClicks ? [unrelatedAfterClick] : [])];
+      if (path === 'components.actionMenus' && scope === document) return [...(unrelatedState.open ? [unrelatedMenu] : []), ...menuStates.filter(state => state.open).map(menuFor)];
+      if (path === 'tiles.container' && scope === document) return [tile];
+      if (path === 'tiles.image' && scope === tile) return [target];
+      return [];
+    } } : {}),
+    mediaId: () => activeMediaUuid, findFlowTile: async title => title === activeTileName ? tile : null,
+    accessibleName: el => el.getAttribute?.('aria-label') || el.innerText || '', wait: async () => {}, flowButton: () => null,
     flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }) });
   vm.runInContext(source, context);
   return { api: context.FlowReferenceActions, mediaUuid, contextEvents: () => contextEvents, actionClicks: () => actionClicks,
-    closeClicks: () => closeClicks, chipCount: () => chips.length, unrelatedOpen: () => unrelatedState.open, ownedOpen: () => menuStates.some(state => state.open), unrelatedKeyEvents: () => unrelatedKeyEvents };
+    closeClicks: () => closeClicks, chipCount: () => chips.length, setUploadTarget: (name, id) => { activeTileName = name; activeMediaUuid = id; },
+    unrelatedOpen: () => unrelatedState.open, ownedOpen: () => menuStates.some(state => state.open), unrelatedKeyEvents: () => unrelatedKeyEvents, logs: () => logs };
 }
 
 test('character is confirmed by a new typed chip even when thumbnail and chip CDN URLs differ', async () => {
@@ -526,6 +554,81 @@ test('uploaded image attachment uses the unique newly visible Add to prompt menu
   assert.equal(fixture.actionClicks(), 1);
   assert.equal(fixture.chipCount(), 1);
   assert.equal(fixture.ownedOpen(), false);
+});
+
+test('generic configured buttons and controls appearing beside a reference are not counted as chips', async () => {
+  const fixture = uploadedTileMenuHarness({ broadConfiguredButtons: true });
+  const result = await fixture.api.attach('Uploaded exact.png', undefined, { expectedId: fixture.mediaUuid, deadline: Date.now() + 1500 });
+  assert.equal(result.confirmed, true);
+  assert.equal(fixture.actionClicks(), 1);
+  assert.equal(fixture.api.inspectDiagnostics().chipCount, 1);
+});
+
+test('multiple DOM controls inside one explicitly marked image chip count as one reference', async () => {
+  const fixture = uploadedTileMenuHarness({ nestedChipControls: true });
+  const result = await fixture.api.attach('Uploaded exact.png', undefined, { expectedId: fixture.mediaUuid, deadline: Date.now() + 1500 });
+  assert.equal(result.confirmed, true);
+  assert.equal(fixture.api.inspectDiagnostics().chipCount, 1);
+  assert.equal(fixture.api.inspectDiagnostics().chipAttachScan.confirmationMode, 'identity_delta');
+});
+
+test('two uploaded image references are attached and confirmed sequentially', async () => {
+  const fixture = uploadedTileMenuHarness();
+  const first = await fixture.api.attach('Uploaded exact.png', undefined, { expectedId: fixture.mediaUuid, deadline: Date.now() + 1500 });
+  fixture.setUploadTarget('Uploaded second.png', '33333333-3333-4333-8333-333333333333');
+  const second = await fixture.api.attach('Uploaded second.png', undefined, { expectedId: '33333333-3333-4333-8333-333333333333', deadline: Date.now() + 1500 });
+  assert.equal(first.confirmed, true);
+  assert.equal(second.confirmed, true);
+  assert.equal(fixture.actionClicks(), 2);
+  assert.equal(fixture.chipCount(), 2);
+  assert.equal(fixture.api.inspectDiagnostics().chipCount, 2);
+});
+
+test('unexpected multiple reference chips leave bounded before/after diagnostics for agent triage', async () => {
+  const fixture = uploadedTileMenuHarness({ addChipCount: 2 });
+  await assert.rejects(fixture.api.attach('Uploaded exact.png', undefined, { expectedId: fixture.mediaUuid, deadline: Date.now() + 1500 }), error =>
+    error.code === 'FLOW_REFERENCE_ATTACH_AMBIGUOUS' && error.diagnostics?.chipAttachScan?.beforeCount === 0 &&
+      error.diagnostics.chipAttachScan.afterCount === 2 && /changed from 0 to 2 reference chip\(s\).*delta 2/.test(error.message));
+  const diagnostics = fixture.api.inspectDiagnostics().chipAttachScan;
+  assert.equal(diagnostics.stage, 'stable_unexpected_chip_count');
+  assert.equal(diagnostics.deltaKinds.length, 2);
+  assert.equal(fixture.logs().length, 1);
+  assert.match(fixture.logs()[0][0], /image reference chip delta failed/);
+});
+
+test('uploaded image action detection uses rendered menu text when the accessible name is only the add icon', async () => {
+  const fixture = uploadedTileMenuHarness({ accessibleActionLabel: 'add' });
+  const result = await fixture.api.attach('Uploaded exact.png', undefined, { expectedId: fixture.mediaUuid, deadline: Date.now() + 1500 });
+  assert.equal(result.confirmed, true);
+  assert.equal(fixture.actionClicks(), 1);
+  const scan = fixture.api.inspectDiagnostics().menuActionScan;
+  assert.equal(scan.matchCount, 1);
+  assert.equal(scan.items[0].visibleText, 'Add to prompt');
+  assert.equal(scan.items[0].accessibleName, 'add');
+  assert.equal(scan.items[0].matchSource, 'innerText');
+});
+
+test('uploaded image action detection accepts Vietnamese and unaccented Vietnamese menu labels', async () => {
+  for (const actionText of ['Thêm vào lời nhắc', 'Them vao loi nhac']) {
+    const fixture = uploadedTileMenuHarness({ actionText, accessibleActionLabel: 'add' });
+    const result = await fixture.api.attach('Uploaded exact.png', undefined, { expectedId: fixture.mediaUuid, deadline: Date.now() + 1500 });
+    assert.equal(result.confirmed, true, `${actionText} should be recognized as Add to prompt`);
+    assert.equal(fixture.actionClicks(), 1);
+    assert.equal(fixture.api.inspectDiagnostics().menuActionScan.items[0].matchSource, 'innerText');
+  }
+});
+
+test('uploaded image action failure includes menu item evidence in diagnostics and console log', async () => {
+  const fixture = uploadedTileMenuHarness({ actionText: 'Save image', accessibleActionLabel: 'add' });
+  await assert.rejects(fixture.api.attach('Uploaded exact.png', undefined, { expectedId: fixture.mediaUuid, deadline: Date.now() + 1500 }), error =>
+    error.code === 'FLOW_REFERENCE_CONTEXT_ACTION_MISSING' && error.diagnostics?.menuActionScan?.itemCount === 1 &&
+      error.diagnostics.menuActionScan.items[0].visibleText === 'Save image' && error.message.includes('text="Save image"'));
+  const scan = fixture.api.inspectDiagnostics().menuActionScan;
+  assert.equal(scan.matchCount, 0);
+  assert.equal(scan.items[0].accessibleName, 'add');
+  assert.equal(fixture.logs().length, 1);
+  assert.match(fixture.logs()[0][0], /Add-to-prompt menu action scan failed/);
+  assert.match(fixture.logs()[0][1], /Save image/);
 });
 
 test('uploaded image attachment uses the unique newly visible Add to prompt menu at the viewport edge', async () => {
@@ -1029,7 +1132,7 @@ test('file picker reports success only after the bridge confirms the selected fi
 });
 
 test('dynamic selector sync keeps regex-valued extension selectors executable', () => {
-  const selectorsSource = readFileSync(new URL('../extension/content/providers/flow/FlowSelectors.js', import.meta.url), 'utf8');
+  const selectorsSource = readFileSync(new URL('../extension/src/content/providers/flow/core/selectors.js', import.meta.url), 'utf8');
   const remoteSelectors = JSON.parse(readFileSync(new URL('../flow-selectors.json', import.meta.url), 'utf8'));
   const context = vm.createContext({ chrome: { storage: {
     local: { get: (_key, callback) => callback({ flow_remote_selectors: remoteSelectors }) },
@@ -1138,7 +1241,7 @@ test('extension download relay accepts only completed Flow downloads and validat
 });
 
 test('classifyFlowError identifies quota, unusual activity, policy, and rate limits correctly', () => {
-  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/src/content/shared/dom-utils.js', import.meta.url), 'utf8');
   const context = vm.createContext({ window: {}, document: {}, location: { href: 'https://flow.google.com' } });
   vm.runInContext(domUtilsSource, context);
   const classify = context.classifyFlowError;
@@ -1180,7 +1283,7 @@ test('getCachedProjectMedia reuses previously uploaded asset by sha256', () => {
 });
 
 test('getEditorUserText extracts plain prompt text while completely excluding inline chips', () => {
-  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/src/content/shared/dom-utils.js', import.meta.url), 'utf8');
   const context = vm.createContext({ window: {}, document: {}, location: { href: 'https://flow.google.com' } });
   vm.runInContext(domUtilsSource, context);
   const getEditorUserText = context.getEditorUserText;
@@ -1212,7 +1315,7 @@ test('getEditorUserText extracts plain prompt text while completely excluding in
 });
 
 test('clearEditorTextPreservingChips wipes user text without removing reference chips', async () => {
-  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/src/content/shared/dom-utils.js', import.meta.url), 'utf8');
   const dispatchedEvents = [];
   const context = vm.createContext({
     window: { getSelection: () => null },
@@ -1266,7 +1369,7 @@ test('clearEditorTextPreservingChips wipes user text without removing reference 
 });
 
 test('dismissBlockingOverlays clicks close buttons or dispatches Escape for open dialogs', async () => {
-  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/src/content/shared/dom-utils.js', import.meta.url), 'utf8');
   let closeClicked = false;
   let escapeCount = 0;
 
@@ -1314,7 +1417,7 @@ test('dismissBlockingOverlays clicks close buttons or dispatches Escape for open
 });
 
 test('FlowDriverRegistry correctly flags sub-routes like /character as not project editor', () => {
-  const registrySource = readFileSync(new URL('../extension/content/providers/ProviderRegistry.js', import.meta.url), 'utf8');
+  const registrySource = readFileSync(new URL('../extension/src/content/providers/base/provider-registry.js', import.meta.url), 'utf8');
   const rootObj = {};
   const context = vm.createContext({ globalThis: rootObj, URL });
   vm.runInContext(registrySource, context);
@@ -1337,8 +1440,8 @@ test('FlowDriverRegistry correctly flags sub-routes like /character as not proje
 });
 
 test('ensureFlowProjectEditor navigates to project root when stuck on sub-routes', async () => {
-  const registrySource = readFileSync(new URL('../extension/content/providers/ProviderRegistry.js', import.meta.url), 'utf8');
-  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const registrySource = readFileSync(new URL('../extension/src/content/providers/base/provider-registry.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/src/content/shared/dom-utils.js', import.meta.url), 'utf8');
 
   let assignedUrl = null;
   const mockLocation = {
@@ -1380,7 +1483,7 @@ test('ensureFlowProjectEditor navigates to project root when stuck on sub-routes
 });
 
 test('checkFlowCreditLimitAlert detects quota exhaustion banners immediately', () => {
-  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/src/content/shared/dom-utils.js', import.meta.url), 'utf8');
   const alertEl = {
     nodeType: 1,
     innerText: "You've run out of credits. Upgrade your account or wait for reset.",
@@ -1422,7 +1525,7 @@ test('checkFlowCreditLimitAlert detects quota exhaustion banners immediately', (
 });
 
 test('clearExistingIngredientChips removes stale reference chips before attaching new ones', async () => {
-  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/src/content/shared/dom-utils.js', import.meta.url), 'utf8');
   let removedCount = 0;
   let chips;
   const removeButton = {
@@ -1472,7 +1575,7 @@ test('clearExistingIngredientChips removes stale reference chips before attachin
 });
 
 test('clearExistingIngredientChips removes the exact button[aria-label="Ingredient"] chip used by attach diagnostics', async () => {
-  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/src/content/shared/dom-utils.js', import.meta.url), 'utf8');
   let chips;
   const ingredientChip = {
     nodeType: 1,
@@ -1510,7 +1613,7 @@ test('clearExistingIngredientChips removes the exact button[aria-label="Ingredie
 });
 
 test('Vietnamese localization: readGenerationCreditQuote accurately parses Vietnamese credit text', () => {
-  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/src/content/shared/dom-utils.js', import.meta.url), 'utf8');
   const makeContext = text => {
     const ctx = vm.createContext({
       globalThis: {},
@@ -1534,7 +1637,7 @@ test('Vietnamese localization: readGenerationCreditQuote accurately parses Vietn
 });
 
 test('Vietnamese localization: flowButton recognizes Vietnamese button synonyms and icons', () => {
-  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/src/content/shared/dom-utils.js', import.meta.url), 'utf8');
   const buttons = [
     { innerText: 'Cài đặt', querySelector: () => null, getAttribute: () => null, disabled: false, getBoundingClientRect: () => ({ width: 100, height: 30 }) },
     { innerText: 'Bắt đầu tạo', querySelector: () => null, getAttribute: () => null, disabled: false, getBoundingClientRect: () => ({ width: 100, height: 30 }) },
@@ -1563,7 +1666,7 @@ test('Vietnamese localization: flowButton recognizes Vietnamese button synonyms 
 });
 
 test('Vietnamese upload, confirmation, and character save labels resolve as exact aliases', () => {
-  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/src/content/shared/dom-utils.js', import.meta.url), 'utf8');
   const buttons = ['Tải lên tệp', 'Xác nhận', 'Hoàn tất'].map(name => ({ name, innerText: name, querySelector: () => null,
     getAttribute: () => null, disabled: false, getBoundingClientRect: () => ({ width: 100, height: 30 }) }));
   const context = vm.createContext({ globalThis: {}, window: {},
@@ -1622,7 +1725,7 @@ test('duplicate Vietnamese upload category and action targets fail closed', () =
 });
 
 test('All media navigation refuses duplicate exact Vietnamese targets', () => {
-  const navigationSource = readFileSync(new URL('../extension/content/providers/flow/FlowNavigation.js', import.meta.url), 'utf8');
+  const navigationSource = readFileSync(new URL('../extension/src/content/providers/flow/core/navigation.js', import.meta.url), 'utf8');
   const items = ['Tất cả nội dung nghe nhìn', 'Tất cả nội dung nghe nhìn'].map(text => ({ innerText: text, textContent: text,
     disabled: false, getAttribute: () => null, querySelectorAll: () => [], closest: () => ({}) }));
   const navigation = { getAttribute: () => 'Điều hướng dự án', querySelector: () => null,
@@ -1680,7 +1783,7 @@ test('asset rename and trash actions match exact Vietnamese menu labels', async 
 });
 
 test('Vietnamese localization: flowRadio and flowNavigationItem resolve Vietnamese labels', () => {
-  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/src/content/shared/dom-utils.js', import.meta.url), 'utf8');
   const radios = [
     { innerText: 'Hình ảnh', name: 'Hình ảnh', getAttribute: () => null, querySelectorAll: () => [], getBoundingClientRect: () => ({ width: 100, height: 30 }) },
     { innerText: 'Thành phần', name: 'Thành phần', getAttribute: () => null, querySelectorAll: () => [], getBoundingClientRect: () => ({ width: 100, height: 30 }) },
@@ -1714,7 +1817,7 @@ test('Vietnamese localization: flowRadio and flowNavigationItem resolve Vietname
 });
 
 test('Vietnamese localization: ensureFlowLibrarySection("All media") succeeds safely when already at project root editor', async () => {
-  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/src/content/shared/dom-utils.js', import.meta.url), 'utf8');
   const ctx = vm.createContext({
     globalThis: {},
     window: {},
@@ -1740,8 +1843,8 @@ test('Vietnamese localization: ensureFlowLibrarySection("All media") succeeds sa
 });
 
 test('Characters navigation waits for project sidebar controls to mount', async () => {
-  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
-  const navigationSource = readFileSync(new URL('../extension/content/providers/flow/FlowNavigation.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/src/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const navigationSource = readFileSync(new URL('../extension/src/content/providers/flow/core/navigation.js', import.meta.url), 'utf8');
   let ticks = 0;
   let clicked = false;
   const navButton = { innerText: 'Characters', disabled: false, getAttribute: () => null, querySelectorAll: () => [], getBoundingClientRect: () => ({ width: 100, height: 30 }), click: () => { clicked = true; } };
@@ -1777,7 +1880,7 @@ test('Characters navigation waits for project sidebar controls to mount', async 
 });
 
 test('flow.characters.list uses the bounded library scanner instead of the composer add-menu picker', async () => {
-  const source = readFileSync(new URL('../extension/content/providers/flow/FlowLibraryOperations.js', import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../extension/src/content/providers/flow/library/library-operations.js', import.meta.url), 'utf8');
   let receivedDeadline;
   let libraryScanCalled = false;
   const context = vm.createContext({
@@ -1796,8 +1899,8 @@ test('flow.characters.list uses the bounded library scanner instead of the compo
 });
 
 test('Flow Characters navigation recognizes its face icon', () => {
-  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
-  const navigationSource = readFileSync(new URL('../extension/content/providers/flow/FlowNavigation.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/src/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const navigationSource = readFileSync(new URL('../extension/src/content/providers/flow/core/navigation.js', import.meta.url), 'utf8');
   const icon = { innerText: 'face', textContent: 'face' };
   const button = { innerText: '', disabled: false, getAttribute: () => null, querySelectorAll: () => [icon], getBoundingClientRect: () => ({ width: 40, height: 40 }) };
   const navigation = { querySelector: () => ({}), querySelectorAll: selector => selector.startsWith('a,button,') ? [button] : [] };
@@ -1813,7 +1916,7 @@ test('Flow Characters navigation recognizes its face icon', () => {
 });
 
 test('character picker list fails rather than returning partial names when its scroller stalls', async () => {
-  const source = readFileSync(new URL('../extension/content/providers/flow/FlowComponents.js', import.meta.url), 'utf8');
+  const source = flowComponentsSource;
   let ticks = 0;
   let pickerOpen = false;
   const opener = { getAttribute: () => pickerOpen ? 'true' : 'false', click: () => { pickerOpen = !pickerOpen; }, querySelector: () => null, closest: () => null };
@@ -1857,7 +1960,7 @@ test('character picker list fails rather than returning partial names when its s
 });
 
 test('I18n core: translations, plurals, string interpolation and UI pattern lookup work seamlessly', async () => {
-  const i18nSource = readFileSync(new URL('../extension/content/shared/I18n.js', import.meta.url), 'utf8');
+  const i18nSource = readFileSync(new URL('../extension/src/content/shared/i18n.js', import.meta.url), 'utf8');
   const ctx = vm.createContext({
     globalThis: {},
     self: {},
@@ -1895,7 +1998,7 @@ test('I18n core: translations, plurals, string interpolation and UI pattern look
 });
 
 test('Vietnamese localization anti-misclick: flowButton("More options") never matches "Thêm thành phần" or "Thêm"', () => {
-  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/src/content/shared/dom-utils.js', import.meta.url), 'utf8');
   const buttons = [
     { innerText: 'Thêm thành phần', name: 'Thêm thành phần', querySelector: () => null, getAttribute: () => null, disabled: false, getBoundingClientRect: () => ({ width: 100, height: 30 }) },
     { innerText: 'Thêm vào dự án', name: 'Thêm vào dự án', querySelector: () => null, getAttribute: () => null, disabled: false, getBoundingClientRect: () => ({ width: 100, height: 30 }) },
@@ -1922,8 +2025,8 @@ test('Vietnamese localization anti-misclick: flowButton("More options") never ma
 });
 
 test('Vietnamese localization anti-misclick: getFlowSubmitButton prioritizes composer submit button over header "+ Tạo" or "Tạo dự án"', () => {
-  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
-  const editorSource = readFileSync(new URL('../extension/content/providers/flow/FlowEditor.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/src/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const editorSource = readFileSync(new URL('../extension/src/content/providers/flow/composer/flow-editor.js', import.meta.url), 'utf8');
 
   const headerCreateBtn = {
     innerText: 'Tạo dự án',
@@ -1989,7 +2092,7 @@ test('Vietnamese localization anti-misclick: getFlowSubmitButton prioritizes com
 });
 
 test('Vietnamese localization anti-misclick: flowNavigationItem never misclicks "Nội dung tải lên" or "Tất cả dự án" as All media', () => {
-  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/src/content/shared/dom-utils.js', import.meta.url), 'utf8');
   const navItems = [
     { innerText: 'Nội dung tải lên', name: 'Nội dung tải lên', getAttribute: () => null, querySelectorAll: () => [], getBoundingClientRect: () => ({ width: 150, height: 30 }) },
     { innerText: 'Tất cả dự án', name: 'Tất cả dự án', getAttribute: () => null, querySelectorAll: () => [], getBoundingClientRect: () => ({ width: 150, height: 30 }) },
@@ -2016,8 +2119,8 @@ test('Vietnamese localization anti-misclick: flowNavigationItem never misclicks 
 });
 
 test('FlowTiles: isTileBusy and isTileMediaReady correctly distinguish rendering vs finished tiles', () => {
-  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
-  const tilesSource = readFileSync(new URL('../extension/content/providers/flow/FlowTiles.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/src/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const tilesSource = readFileSync(new URL('../extension/src/content/providers/flow/generation/tiles.js', import.meta.url), 'utf8');
 
   const ctx = vm.createContext({
     globalThis: {},
@@ -2111,8 +2214,8 @@ test('FlowTiles: isTileBusy and isTileMediaReady correctly distinguish rendering
 });
 
 test('FlowTiles: Error tile with retry button or Vietnamese failure text is immediately marked failed and not busy', () => {
-  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
-  const tilesSource = readFileSync(new URL('../extension/content/providers/flow/FlowTiles.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/src/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const tilesSource = readFileSync(new URL('../extension/src/content/providers/flow/generation/tiles.js', import.meta.url), 'utf8');
 
   const ctx = vm.createContext({
     globalThis: {},
@@ -2149,8 +2252,8 @@ test('FlowTiles: Error tile with retry button or Vietnamese failure text is imme
 });
 
 test('FlowEditor: currentFlowSubmitErrors detects Angular MDC snackbars and Vietnamese failure toasts', () => {
-  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
-  const editorSource = readFileSync(new URL('../extension/content/providers/flow/FlowEditor.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/src/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const editorSource = readFileSync(new URL('../extension/src/content/providers/flow/composer/flow-editor.js', import.meta.url), 'utf8');
 
   const snackbarEl = {
     innerText: 'Đã xảy ra lỗi. Vui lòng thử lại sau',
@@ -2181,9 +2284,9 @@ test('FlowEditor: currentFlowSubmitErrors detects Angular MDC snackbars and Viet
 });
 
 test('getFlowSubmitButton ignores aspect ratio chip and clear button in ProseMirror parent, choosing Vietnamese submit button with credits', () => {
-  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
-  const selectorsSource = readFileSync(new URL('../extension/content/providers/flow/FlowSelectors.js', import.meta.url), 'utf8');
-  const editorSource = readFileSync(new URL('../extension/content/providers/flow/FlowEditor.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/src/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const selectorsSource = readFileSync(new URL('../extension/src/content/providers/flow/core/selectors.js', import.meta.url), 'utf8');
+  const editorSource = readFileSync(new URL('../extension/src/content/providers/flow/composer/flow-editor.js', import.meta.url), 'utf8');
 
   // Aspect ratio chip inside immediate parent
   const aspectRatioBtn = {
@@ -2280,9 +2383,9 @@ test('getFlowSubmitButton ignores aspect ratio chip and clear button in ProseMir
 });
 
 test('getFlowSubmitButton detects submit button via fonticon with empty textContent', () => {
-  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
-  const selectorsSource = readFileSync(new URL('../extension/content/providers/flow/FlowSelectors.js', import.meta.url), 'utf8');
-  const editorSource = readFileSync(new URL('../extension/content/providers/flow/FlowEditor.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/src/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const selectorsSource = readFileSync(new URL('../extension/src/content/providers/flow/core/selectors.js', import.meta.url), 'utf8');
+  const editorSource = readFileSync(new URL('../extension/src/content/providers/flow/composer/flow-editor.js', import.meta.url), 'utf8');
 
   const matIconBtn = {
     innerText: '',

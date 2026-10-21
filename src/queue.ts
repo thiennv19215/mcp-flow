@@ -1,5 +1,5 @@
 // Legacy local-MCP queue retained for compatibility with existing persisted jobs and older integrations.
-// LocalCore no longer instantiates it; active Flow jobs are owned by extension/background/flow-job-queue.js.
+// LocalCore no longer instantiates it; active Flow jobs are owned by extension/src/background/flow-job-queue.js.
 import { randomUUID } from "node:crypto";
 const memJobs = new Map<string, Job[]>();
 const loadJobs = (scope = "default"): Job[] => memJobs.get(scope) || [];

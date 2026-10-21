@@ -1,1 +1,0 @@
-globalThis.__flowMcpExtensionBuildRevision = "e14fbbf195a3392a4e7b27e30642812bcd22babb8c260480a85010cf63385af1";

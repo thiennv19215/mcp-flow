@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-const source = readFileSync(new URL('../extension/content/providers/flow/FlowCharacters.js', import.meta.url), 'utf8');
+const source = readFileSync(new URL('../extension/src/content/providers/flow/characters/flow-characters.js', import.meta.url), 'utf8');
 
 function harness({ accepts = true } = {}) {
   const events = [];

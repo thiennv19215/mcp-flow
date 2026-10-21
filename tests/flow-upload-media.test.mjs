@@ -1,14 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-const uploaderSource = readFileSync(new URL('../extension/content/providers/flow/FlowUploader.js', import.meta.url), 'utf8');
-const source = readFileSync(new URL('../extension/content/providers/flow/FlowComponents.js', import.meta.url), 'utf8');
+import { flowComponentsSource } from './helpers/flow-components-source.mjs';
 
 function runInContext(context) {
-  vm.runInContext(uploaderSource, context);
-  vm.runInContext(source, context);
+  vm.runInContext(flowComponentsSource, context);
   return context;
 }
 

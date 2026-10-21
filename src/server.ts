@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { basename, extname, join, resolve, sep } from "node:path";
@@ -23,11 +23,7 @@ export const TOKEN_FILE = join(HOME_DIR, "token");
 const isExtensionOrigin = (origin: string | undefined): origin is string => /^chrome-extension:\/\/[a-p]{32}$/.test(origin ?? "");
 const UPLOAD_DIR = join(HOME_DIR, "uploads");
 const STUDIO_HTML = fileURLToPath(new URL("../studio/index.html", import.meta.url));
-const LOGIN_HTML = fileURLToPath(new URL("../studio/login.html", import.meta.url));
-const ADMIN_HTML = fileURLToPath(new URL("../studio/admin.html", import.meta.url));
 const MAX_UPLOAD = 200 * 1024 * 1024;
-const ADMIN_SESSION_COOKIE = "__Host-flow_admin_session";
-const ADMIN_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 
 const MIME: Record<string, string> = {
   ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime", ".gif": "image/gif",
@@ -92,88 +88,16 @@ export async function startServer(
     (process.env.FLOW_MCP_ALLOWED_HOSTS ?? `127.0.0.1:${PORT},localhost:${PORT}`)
       .split(",").map((host) => host.trim().toLowerCase()).filter(Boolean),
   );
-  const adminUser = process.env.FLOW_MCP_ADMIN_USER ?? "";
-  const adminPassword = process.env.FLOW_MCP_ADMIN_PASSWORD ?? "";
   const wsToken = process.env.FLOW_MCP_WS_TOKEN ?? "";
-  const pairAttempts = new Map<string, { count: number; resetsAt: number }>();
-  const deviceLoginAttempts = new Map<string, { count: number; resetsAt: number }>();
-  const loginAttempts = new Map<string, { count: number; resetsAt: number }>();
-  const adminSessions = new Map<string, { username: string; expiresAt: number }>();
 
   // Public deployments must explicitly configure the host allowlist and credentials.
   if (!localOnly) {
     if (!process.env.FLOW_MCP_ALLOWED_HOSTS) throw new Error("Set FLOW_MCP_ALLOWED_HOSTS before binding Flow MCP to a non-local address.");
     if ((process.env.FLOW_MCP_TOKEN?.trim().length ?? 0) < 32) throw new Error("Set FLOW_MCP_TOKEN to a random secret of at least 32 characters for a non-local deployment.");
-    if (!adminUser || adminPassword.length < 16) throw new Error("Set FLOW_MCP_ADMIN_USER and a FLOW_MCP_ADMIN_PASSWORD of at least 16 characters for a non-local deployment.");
     if (wsToken.length < 32) throw new Error("Set FLOW_MCP_WS_TOKEN to a random secret of at least 32 characters for a non-local deployment.");
     if (!PUBLIC_URL?.startsWith("https://")) throw new Error("Set FLOW_MCP_PUBLIC_URL to the HTTPS URL used by the reverse proxy.");
   }
 
-  const basicCredentialsMatch = (authorization: string | undefined): boolean => {
-    const encoded = authorization?.match(/^Basic\s+(.+)$/i)?.[1];
-    if (!encoded) return false;
-    const value = Buffer.from(encoded, "base64").toString("utf8");
-    const separator = value.indexOf(":");
-    if (separator < 0) return false;
-    const providedUser = Buffer.from(value.slice(0, separator));
-    const providedPassword = Buffer.from(value.slice(separator + 1));
-    const expectedUser = Buffer.from(adminUser);
-    const expectedPassword = Buffer.from(adminPassword);
-    return providedUser.length === expectedUser.length && providedPassword.length === expectedPassword.length &&
-      timingSafeEqual(providedUser, expectedUser) && timingSafeEqual(providedPassword, expectedPassword);
-  };
-  const trustedClientIp = (req: IncomingMessage): string => {
-    const proxyIp = req.headers["cf-connecting-ip"] ?? req.headers["x-forwarded-for"]?.toString().split(",")[0].trim();
-    return process.env.FLOW_MCP_TRUST_PROXY === "true" && proxyIp ? proxyIp.toString() : req.socket.remoteAddress ?? "unknown";
-  };
-  const sessionIdFromRequest = (req: IncomingMessage): string | undefined => {
-    const cookieHeader = req.headers.cookie;
-    if (!cookieHeader) return;
-    for (const part of cookieHeader.split(";")) {
-      const [name, ...value] = part.trim().split("=");
-      if (name === ADMIN_SESSION_COOKIE) return value.join("=");
-    }
-  };
-  const sessionFromRequest = (req: IncomingMessage): { username: string } | undefined => {
-    const sessionId = sessionIdFromRequest(req);
-    if (!sessionId) return;
-    const session = adminSessions.get(sessionId);
-    if (!session) return;
-    if (session.expiresAt <= Date.now()) {
-      adminSessions.delete(sessionId);
-      return;
-    }
-    return { username: session.username };
-  };
-  const sessionAuthAllowed = (req: IncomingMessage): boolean => Boolean(sessionFromRequest(req));
-  const adminAuthAllowed = (req: IncomingMessage): boolean => localOnly || sessionAuthAllowed(req) ||
-    (Boolean(adminUser && adminPassword) && basicCredentialsMatch(req.headers.authorization));
-  const requireAdmin = (req: IncomingMessage, res: ServerResponse): boolean => {
-    if (adminAuthAllowed(req)) return true;
-    json(res, 401, { error: "Admin authentication required." });
-    return false;
-  };
-  const credentialsMatch = (username: string, password: string): boolean => {
-    const providedUser = Buffer.from(username);
-    const providedPassword = Buffer.from(password);
-    const expectedUser = Buffer.from(adminUser);
-    const expectedPassword = Buffer.from(adminPassword);
-    return providedUser.length === expectedUser.length && providedPassword.length === expectedPassword.length &&
-      timingSafeEqual(providedUser, expectedUser) && timingSafeEqual(providedPassword, expectedPassword);
-  };
-  const originAllowed = (req: IncomingMessage): boolean => {
-    const origin = req.headers.origin;
-    if (!origin) return true;
-    try {
-      const expected = PUBLIC_URL ? new URL(PUBLIC_URL).origin : `http://${req.headers.host}`;
-      return new URL(origin).origin === expected;
-    } catch { return false; }
-  };
-  const cleanExpiredSessions = (now: number): void => {
-    if (adminSessions.size > 1000) {
-      for (const [id, session] of adminSessions) if (session.expiresAt <= now) adminSessions.delete(id);
-    }
-  };
   const deviceFromRequest = (req: IncomingMessage) => {
     const bearer = req.headers.authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
     return bearer ? authenticateDevice(bearer) : undefined;
@@ -301,59 +225,13 @@ export async function startServer(
         }
       }
       if (url.pathname === "/api/auth/session" && req.method === "GET") {
-        const session = sessionFromRequest(req);
-        return localOnly || session
-          ? json(res, 200, { authenticated: true, username: session?.username ?? adminUser, local: localOnly })
-          : json(res, 401, { authenticated: false });
-      }
-      if (url.pathname === "/api/auth/login" && req.method === "POST") {
-        if (localOnly) return json(res, 200, { ok: true });
-        if (!originAllowed(req)) return json(res, 403, { error: "Request origin is not allowed." });
-        const now = Date.now();
-        if (loginAttempts.size > 1000) {
-          for (const [ip, attempt] of loginAttempts) if (attempt.resetsAt <= now) loginAttempts.delete(ip);
-        }
-        const ip = trustedClientIp(req);
-        const attempt = loginAttempts.get(ip);
-        if (attempt && attempt.resetsAt > now && attempt.count >= 10) {
-          res.setHeader("retry-after", String(Math.max(1, Math.ceil((attempt.resetsAt - now) / 1000))));
-          return json(res, 429, { error: "Bạn đã thử đăng nhập quá nhiều lần. Hãy thử lại sau một phút." });
-        }
-        if (!attempt || attempt.resetsAt <= now) loginAttempts.set(ip, { count: 1, resetsAt: now + 60_000 });
-        else attempt.count += 1;
-        const body = JSON.parse((await readBody(req, 8192)).toString() || "{}");
-        if (typeof body.username !== "string" || typeof body.password !== "string" || body.username.length > 256 || body.password.length > 1024) {
-          return json(res, 400, { error: "Vui lòng nhập tên đăng nhập và mật khẩu." });
-        }
-        if (!credentialsMatch(body.username, body.password)) return json(res, 401, { error: "Tên đăng nhập hoặc mật khẩu chưa đúng." });
-        loginAttempts.delete(ip);
-        cleanExpiredSessions(now);
-        const sessionId = randomBytes(32).toString("base64url");
-        adminSessions.set(sessionId, { username: adminUser, expiresAt: now + ADMIN_SESSION_TTL_MS });
-        res.setHeader("set-cookie", `${ADMIN_SESSION_COOKIE}=${sessionId}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${ADMIN_SESSION_TTL_MS / 1000}`);
-        return json(res, 200, { ok: true });
+        return json(res, 200, { authenticated: true, username: "local", local: true });
       }
       if (url.pathname === "/api/auth/logout" && req.method === "POST") {
-        if (!originAllowed(req)) return json(res, 403, { error: "Request origin is not allowed." });
-        const sessionId = sessionIdFromRequest(req);
-        if (sessionId) adminSessions.delete(sessionId);
-        res.setHeader("set-cookie", `${ADMIN_SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`);
         return json(res, 200, { ok: true });
       }
       if (url.pathname === "/favicon.ico") return void res.writeHead(204).end();
-      if (req.method === "GET" && url.pathname === "/admin") {
-        if (!localOnly && !sessionAuthAllowed(req)) {
-          res.writeHead(302, { location: "/", "cache-control": "no-store" });
-          return res.end();
-        }
-        res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" });
-        return res.end(readFileSync(ADMIN_HTML, "utf8"));
-      }
       if (req.method === "GET" && url.pathname === "/") {
-        if (!localOnly && !sessionAuthAllowed(req)) {
-          res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" });
-          return res.end(readFileSync(LOGIN_HTML, "utf8"));
-        }
         res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
         return res.end(readFileSync(STUDIO_HTML, "utf8").replace("__FLOW_TOKEN__", token));
       }

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { inspectExtensionBuild } from '../extension/background/flow-build-info.js';
+import { inspectExtensionBuild } from '../extension/src/background/flow-build-info.js';
 
 const current = 'a'.repeat(64);
 const previous = 'b'.repeat(64);
@@ -69,7 +69,7 @@ test('runtime build diagnostic fails closed when watcher or content revision is 
 });
 
 test('observer health wires the build probe and manifest loads its marker before Flow content', () => {
-  const worker = readFileSync(new URL('../extension/background/service-worker.js', import.meta.url), 'utf8');
+  const worker = readFileSync(new URL('../extension/src/background/service-worker.js', import.meta.url), 'utf8');
   const manifest = JSON.parse(readFileSync(new URL('../extension/manifest.json', import.meta.url), 'utf8'));
   const contentScripts = manifest.content_scripts.find(entry => entry.world !== 'MAIN');
   assert.match(worker, /const extensionBuild = await inspectExtensionBuild\(tabId\)/);

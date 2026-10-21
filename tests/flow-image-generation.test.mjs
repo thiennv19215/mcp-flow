@@ -2,8 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import { flowComponentsSource } from './helpers/flow-components-source.mjs';
 
-const settingsSource = readFileSync(new URL('../extension/content/providers/flow/FlowSettings.js', import.meta.url), 'utf8');
+const settingsSource = [
+  '../extension/src/content/providers/flow/core/settings.js',
+  '../extension/src/content/providers/flow/generation/image-settings.js',
+  '../extension/src/content/providers/flow/generation/video-settings.js',
+].map(file => readFileSync(new URL(file, import.meta.url), 'utf8')).join('\n');
 
 function makeSettingsHarness() {
   const optionsSelected = new Map();
@@ -161,7 +166,7 @@ test('FlowUploadClient returns both name and id while coercing to string cleanly
 });
 
 test('FlowComponents category("All") does not throw when picker has no explicit All tab', async () => {
-  const componentsSource = readFileSync(new URL('../extension/content/providers/flow/FlowComponents.js', import.meta.url), 'utf8');
+  const componentsSource = flowComponentsSource;
 
   let settledCalled = false;
   const mockList = {
@@ -200,7 +205,7 @@ test('FlowComponents category("All") does not throw when picker has no explicit 
 });
 
 test('FlowComponents attachUploadedImageFromTile handles ASB id without requiring pre-known UUID', async () => {
-  const componentsSource = readFileSync(new URL('../extension/content/providers/flow/FlowComponents.js', import.meta.url), 'utf8');
+  const componentsSource = flowComponentsSource;
 
   const target = {
     id: 'media-trigger',
@@ -230,12 +235,9 @@ test('FlowComponents attachUploadedImageFromTile handles ASB id without requirin
     getAttribute: () => null,
     disabled: false,
     click: () => {
-      chipsList.push({
-        element: { getAttribute: () => null },
-        name: 'My Upload.png',
-        kind: 'image',
-        source: 'flow_tile',
-      });
+      const image = { alt: 'Image ingredient image', getAttribute: () => null };
+      chipsList.push({ tagName: 'BUTTON', innerText: 'Ingredient', getAttribute: key => key === 'aria-label' ? 'Ingredient' : null,
+        querySelector: selector => /img/.test(selector) ? image : null, closest: () => null });
     },
   };
 

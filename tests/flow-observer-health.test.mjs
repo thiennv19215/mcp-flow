@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { ensureCorrelationObserver } from '../extension/background/flow-observer-health.js';
+import { ensureCorrelationObserver } from '../extension/src/background/flow-observer-health.js';
 
 const healthy = (overrides = {}) => ({
   ready: true,
@@ -53,7 +53,7 @@ test('failed observer repair rejects as a definite pre-send failure', async () =
 });
 
 test('generation dispatch awaits observer repair before sending the content command', () => {
-  const source = readFileSync(new URL('../extension/background/service-worker.js', import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../extension/src/background/service-worker.js', import.meta.url), 'utf8');
   const ensureIndex = source.indexOf('if (correlationRequiredOperations.has(operation)) await ensureCorrelationObserver(tabId);');
   const sendIndex = source.indexOf('response = await sendFlowCommand(tabId, {', ensureIndex);
   assert.ok(ensureIndex >= 0 && sendIndex > ensureIndex, 'observer health must be verified before the content command can submit');

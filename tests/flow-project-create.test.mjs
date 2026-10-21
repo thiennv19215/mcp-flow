@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-const source = readFileSync(new URL('../extension/content/providers/flow/FlowLibraryOperations.js', import.meta.url), 'utf8');
+const source = readFileSync(new URL('../extension/src/content/providers/flow/library/library-operations.js', import.meta.url), 'utf8');
 const projectId = '01234567-89ab-4cde-8f01-23456789abcd';
 
 function harness({ controls = ['New project'], createRoute = true } = {}) {

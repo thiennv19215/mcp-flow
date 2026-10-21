@@ -1,5 +1,5 @@
 import { readFileSync, existsSync, watch } from "node:fs";
-import { join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { HOME_DIR } from "./paths.js";
 import { extensionBroadcastEvent, extensionSendEvent, onExtensionInitialized, type Connection } from "./extension.js";
 
@@ -48,22 +48,27 @@ export function initSelectorsWatcher(): void {
   if (watcherInitialized) return;
   watcherInitialized = true;
   const filePath = getSelectorsFilePath();
-  if (existsSync(filePath)) {
-    try {
-      watch(filePath, (eventType) => {
-        if (eventType === "change" || eventType === "rename") {
+  const fileName = basename(filePath).toLowerCase();
+  let reloadTimer: NodeJS.Timeout | undefined;
+  try {
+    // Watch the parent directory so atomic editor saves (temp file + rename)
+    // and creating the selector file after startup are both picked up.
+    watch(dirname(filePath), (_eventType, changedName) => {
+      if (changedName && String(changedName).toLowerCase() !== fileName) return;
+      clearTimeout(reloadTimer);
+      reloadTimer = setTimeout(() => {
+        try {
+          const updated = loadFlowSelectors();
+          if (!Object.keys(updated).length) return;
           console.log(`[FlowSelectors] Selectors file updated on disk (${filePath}), broadcasting to extension...`);
-          try {
-            const updated = loadFlowSelectors();
-            extensionBroadcastEvent("flow.selectors.sync", [updated]);
-          } catch (e) {
-            console.warn("[FlowSelectors] Error reloading selectors:", e);
-          }
+          extensionBroadcastEvent("flow.selectors.sync", [updated]);
+        } catch (e) {
+          console.warn("[FlowSelectors] Error reloading selectors:", e);
         }
-      });
-    } catch (err) {
-      console.warn(`[FlowSelectors] Could not watch ${filePath}:`, err);
-    }
+      }, 100);
+    });
+  } catch (err) {
+    console.warn(`[FlowSelectors] Could not watch ${filePath}:`, err);
   }
 }
 

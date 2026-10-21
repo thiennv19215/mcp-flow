@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { decideDevExtensionReload } from '../extension/background/dev-extension-reload.js';
+import { decideDevExtensionReload } from '../extension/src/background/dev-extension-reload.js';
 
 const oldRevision = 'a'.repeat(64);
 const newRevision = 'b'.repeat(64);

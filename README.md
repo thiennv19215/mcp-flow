@@ -59,7 +59,7 @@ Then sign in, once:
 npm run login
 ```
 
-That opens Flow in your regular browser. Load this repository's extension folder in Chrome (Developer mode → Load unpacked). For an existing installation, click Reload and confirm version 0.2.24. The extension connects automatically to the active Flow tab and follows when you switch to another Flow tab. The popup's reconnect button is only a recovery fallback. No token entry is required.
+That opens Flow in your regular browser. Build the project, then load `dist/extension/` in Chrome (Developer mode → Load unpacked). For an existing installation, click Reload and confirm the version shown in `extension/manifest.json`. The extension connects automatically to the active Flow tab and follows when you switch to another Flow tab. The popup's reconnect button is only a recovery fallback. No token entry is required.
 You sign in yourself; the program never handles your Google password.
 
 The extension handles Flow operations and its queue locally in the browser. The VPS is used only to verify the extension account and issue a revocable device token. MCP remains available as a separate local stdio process for AI clients; it uses the local extension connector and does not send Flow jobs through the account backend.

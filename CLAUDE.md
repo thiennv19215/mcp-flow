@@ -4,7 +4,7 @@ This project exposes Google Flow workflows through MCP and a local Studio panel.
 
 ## Runtime path
 
-`src/server.ts` hosts the local API and extension WebSocket. `extension/background/service-worker.js` selects a Flow tab, reconnects to the backend, and routes capability-gated commands. `extension/content/` contains the Flow page driver and operation handlers. Local uploads move to the page in bounded chunks; Chrome downloads are collected by the backend.
+`src/server.ts` hosts the local API and extension WebSocket. `extension/src/background/service-worker.js` selects a Flow tab, reconnects to the backend, and routes capability-gated commands. `extension/src/content/` contains the Flow page driver and operation handlers. `npm run build` emits the installable extension to `dist/extension/`. Local uploads move to the page in bounded chunks; Chrome downloads are collected by the backend.
 
 ## Safety and workflow behavior
 

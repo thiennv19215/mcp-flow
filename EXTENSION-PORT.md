@@ -5,13 +5,13 @@ The Chrome extension is the only Flow browser driver. It connects to the backend
 ## Install or update
 
 1. Build and start the backend or Studio at `http://127.0.0.1:18899`.
-2. Load this repository's `extension/` directory as an unpacked extension, or reload it at `chrome://extensions`.
+2. Load this repository's `dist/extension/` directory as an unpacked extension, or reload it at `chrome://extensions`.
 3. Open the existing signed-in Flow project tab. In the connector popup, click **Connect active Flow tab**.
 4. Confirm the popup shows a backend connection and selected tab. `/api/health` reports the connector transport, protocol, and extension version on local deployments.
 
 ## Local extension development
 
-For automatic reload while editing, load the repository's `extension/` folder once as an unpacked extension, then run `npm run dev:extension` from the repository root and leave it running. The watcher detects changes under `extension/`; Chrome reloads the extension and refreshes open Flow tabs automatically (the check runs on the extension's existing 30-second alarm). Stop it with Ctrl+C. This development helper uses `http://127.0.0.1:18898` on loopback.
+For automatic reload while editing, build once or start `npm run dev:extension`, load the generated `dist/extension/` folder as an unpacked extension, then leave the watcher running. It watches all of `extension/` (source, manifest, icons, rules, and capabilities), rebuilds `dist/extension/`, and asks Chrome to reload the extension and refresh Flow tabs when safe (the extension checks on its existing 30-second alarm). Stop it with Ctrl+C. This development helper uses `http://127.0.0.1:18898` on loopback.
 
 To request that same idle-only reload without changing a source file, send `POST http://127.0.0.1:18898/reload` with `X-Flow-MCP-Reload: 1` (for example, `curl.exe -X POST -H "X-Flow-MCP-Reload: 1" http://127.0.0.1:18898/reload`). The watcher increments a persisted reload epoch; `/status.revision` changes with that epoch so older service workers detect it, while `/status.buildRevision` retains the exact extension-file fingerprint used by build diagnostics. New service workers adopt `/status.reloadKey` (equal to `revision`) before reloading, avoiding repeated reloads; the tab operation guard remains in force. The extension must already be loaded unpacked from this repository and the updated watcher must be running. A `202` means the epoch was recorded, not that Chrome has completed reloading; confirm the loaded background and Flow content revisions through the existing build diagnostic. Browser-origin requests are restricted to the extension origin and require the custom header; command-line clients can omit `Origin`.
 

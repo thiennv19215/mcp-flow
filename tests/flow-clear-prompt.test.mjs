@@ -11,7 +11,7 @@ import { LocalCore } from '../dist/core.js';
 import { RemoteCore } from '../dist/remote.js';
 import { createFlowMcpServer } from '../dist/mcp-tools.js';
 
-const source = readFileSync(new URL('../extension/content/providers/flow/FlowGenerationOperations.js', import.meta.url), 'utf8');
+const source = readFileSync(new URL('../extension/src/content/providers/flow/composer/prompt-operations.js', import.meta.url), 'utf8');
 const projectId = '00000000-0000-4000-8000-000000000000';
 
 function harness({ prompt = 'known test prompt', controls = [{}], projectMatches = true, referenceStates = null, chipStates = null } = {}) {
@@ -42,7 +42,7 @@ function harness({ prompt = 'known test prompt', controls = [{}], projectMatches
   });
   vm.runInContext(source, context);
   const driver = { error: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }) };
-  return { ops: new context.FlowGenerationOperations(driver), getPrompt: () => currentPrompt, clearCalls: () => clearCalls };
+  return { ops: new context.FlowPromptOperations(driver), getPrompt: () => currentPrompt, clearCalls: () => clearCalls };
 }
 
 test('flow_clear_prompt requires nonempty exact expected text', () => {
