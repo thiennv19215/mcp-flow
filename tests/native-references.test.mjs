@@ -35,6 +35,111 @@ test('generation frame routing passes its explicit UUID through to the picker', 
   assert.equal(selected.options.expectedId, uuid);
   assert.equal(operations.frameValue({ assetName: 'still.png', expectedId: 'bad-id' }), null);
 });
+
+function localUploadGenerationHarness({ failPopupCleanup = false } = {}) {
+  const events = [];
+  const mediaId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const attemptId = 'attempt-1';
+  const transferId = 'transfer-1';
+  const correlation = new Map();
+  let uploadPopupOpen = false;
+  const context = vm.createContext({
+    Date, Promise, Map, Set, Object, String, Number, Boolean, Array, Math, RegExp, Error, AbortController,
+    setTimeout, clearTimeout,
+    FlowUiDeadline: {
+      makeDeadline: () => Date.now() + 60_000,
+      requireTime: () => {},
+    },
+    stagedNativeFiles: new Map([[transferId, { name: 'local-ref.png', size: 20, type: 'image/png' }]]),
+    validStagedLocalImage: () => true,
+    FlowNavigation: {
+      ensureFlowProjectEditor: async () => ({ isProjectEditor: true }),
+      dismissBlockingOverlays: async () => false,
+      ensureFlowLibrarySection: async () => true,
+      prepareFlowOperation: async () => {
+        events.push('popup-cleanup');
+        if (failPopupCleanup) throw Object.assign(new Error('popup remains open'), { code: 'FLOW_BLOCKING_OVERLAY_UNRESOLVED' });
+        uploadPopupOpen = false;
+        return { ready: true, popupDismissed: true };
+      },
+    },
+    FlowMediaMenu: { nativeRead: () => ({ signedIn: true, inProject: true }) },
+    FlowAgent: { closeNativeAgentSession: async () => true },
+    FlowComponents: {
+      clearExistingIngredientChips: async () => ({ remaining: 0 }),
+      uploadStagedFlowMedia: async () => {
+        events.push('upload-complete');
+        uploadPopupOpen = true;
+        return { id: mediaId, uploaded: true };
+      },
+      chooseNativePickerAsset: async (_name, _slot, options) => {
+        events.push('attach-reference');
+        assert.equal(uploadPopupOpen, false, 'reference selection waits until the upload popup is closed');
+        assert.equal(options.expectedId, mediaId);
+        return { name: 'local-ref.png', kind: 'image', id: mediaId, confirmed: true };
+      },
+    },
+    FlowImageActions: { prepare: async () => { events.push('prepare-image'); } },
+    FlowEditor: {
+      preflightGenerationPrompt: async () => { events.push('prompt-editor-ready'); return {}; },
+      insertNativeFlowPrompt: async () => { events.push('prompt-entered'); return true; },
+      waitForGenerationSubmitButton: async () => ({ disabled: false, getAttribute: () => null }),
+      currentFlowSubmitErrors: () => [],
+      activateFlowSubmitButton: async () => { events.push('submit'); return { clickDelivered: true, strategy: 'test' }; },
+    },
+    FlowTiles: {
+      collectNativeMedia: () => [],
+      emitFlowProgress: () => {},
+      armNativeFlowCorrelation: async () => {
+        correlation.set(attemptId, { requestSeen: true, armedAt: Date.now(), interfered: false });
+        return attemptId;
+      },
+      nativeFlowCorrelationMap: () => correlation,
+    },
+    ProviderRegistry: { describeUrl: () => ({ projectId: 'project-1' }) },
+    FlowSettings: {},
+    flowButton: () => null,
+    scrollContainer: () => ({ scrollTop: 0 }),
+    clearExistingIngredientChips: async () => ({ remaining: 0 }),
+    checkFlowCreditLimitAlert: () => null,
+    flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
+    location: { href: 'https://flow.google.com/project/project-1' },
+  });
+  vm.runInContext(generationOperationsSource, context);
+  const driver = { error: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }) };
+  const operations = new context.FlowGenerationOperations(driver);
+  return {
+    events,
+    submit: () => operations.execute('flow.generation.submit', {
+      type: 'image',
+      prompt: 'A studio portrait',
+      attachments: [{ transferId, name: 'local-ref.png', type: 'image/png', size: 20 }],
+      model: 'Nano Banana',
+      aspectRatio: '1:1',
+      variants: 1,
+    }),
+  };
+}
+
+test('local-reference generation closes the upload popup before attaching the reference and submitting', async () => {
+  const fixture = localUploadGenerationHarness();
+  const result = await fixture.submit();
+  assert.equal(result.submitted, true);
+  assert.ok(fixture.events.indexOf('upload-complete') < fixture.events.indexOf('popup-cleanup'));
+  assert.ok(fixture.events.indexOf('popup-cleanup') < fixture.events.indexOf('attach-reference'));
+  assert.ok(fixture.events.indexOf('attach-reference') < fixture.events.indexOf('prompt-entered'));
+  assert.ok(fixture.events.indexOf('prompt-entered') < fixture.events.indexOf('submit'));
+});
+
+test('local-reference generation stops before attaching or submitting if the upload popup cannot close', async () => {
+  const fixture = localUploadGenerationHarness({ failPopupCleanup: true });
+  await assert.rejects(fixture.submit(), error => error.code === 'FLOW_BLOCKING_OVERLAY_UNRESOLVED');
+  assert.ok(fixture.events.includes('upload-complete'));
+  assert.ok(fixture.events.includes('popup-cleanup'));
+  assert.equal(fixture.events.includes('attach-reference'), false);
+  assert.equal(fixture.events.includes('prompt-entered'), false);
+  assert.equal(fixture.events.includes('submit'), false);
+});
 function harness({ names = ['MCP Test Mug'], addedKind = 'character', hideAttached = false, openInitially = true, afterOpenSurface = 'listbox', ambiguousSurface = false, menuTransitionMs = 0, closeDelayMs = 0, characterUuid = '22222222-2222-4222-8222-222222222222' } = {}) {
   let open = openInitially, ticks = 0;
   let pendingCloseAt = null;

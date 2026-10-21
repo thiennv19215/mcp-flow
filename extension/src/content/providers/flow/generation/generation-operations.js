@@ -137,13 +137,46 @@
           const file = root.stagedNativeFiles.get(attachment.transferId);
           if (!file) throw this.error("FLOW_TRANSFER_UNKNOWN", "The staged image is no longer available.", true);
           let uploadReceipt;
+          let uploadError;
           try {
             uploadReceipt = await runFlowStage(`uploading ${attachment.name}`, ({ signal }) => components.uploadStagedFlowMedia(file, "image", command, { deadline: flowDeadline, signal }), true);
-          } finally {
-            if (!flowAbort.signal.aborted && framesMode && (slot === "start" || slot === "end")) {
+          } catch (error) {
+            uploadError = error;
+          }
+
+          if (!flowAbort.signal.aborted && framesMode && (slot === "start" || slot === "end")) {
+            try {
               await runFlowStage("restoring Frames mode after upload", ({ deadline, signal }) => settings.restoreNativeFramesMode({ deadline, signal }));
+            } catch (restoreError) {
+              if (!uploadError) uploadError = restoreError;
+              else uploadError.diagnostics = { ...(uploadError.diagnostics || {}), framesRestoreErrorCode: restoreError?.code || "FLOW_FRAMES_RESTORE_FAILED" };
             }
           }
+
+          // Local references upload inside this generation operation instead
+          // of going through flow.media.upload. Close and verify the upload UI
+          // here too, before opening the reference picker or inserting prompt
+          // text. Give cleanup its own short window so an aborted upload stage
+          // cannot leave Flow's popup blocking the next attempt.
+          let popupCleanupError;
+          try {
+            tiles.emitFlowProgress(command, "Flow upload: closing and verifying the upload popup");
+            if (typeof nav.prepareFlowOperation !== "function") {
+              throw this.error("FLOW_OPERATION_PREFLIGHT_UNAVAILABLE", "Flow popup cleanup is unavailable after upload; no reference or prompt changes were made.", true, false);
+            }
+            await nav.prepareFlowOperation({ deadline: Date.now() + 4_000 });
+          } catch (error) {
+            popupCleanupError = error;
+          }
+
+          if (uploadError) {
+            if (popupCleanupError) uploadError.diagnostics = {
+              ...(uploadError.diagnostics || {}),
+              uploadPopupCleanupErrorCode: popupCleanupError?.code || "FLOW_UPLOAD_POPUP_CLEANUP_FAILED",
+            };
+            throw uploadError;
+          }
+          if (popupCleanupError) throw popupCleanupError;
           return await runFlowStage(`selecting uploaded image ${attachment.name}`, ({ signal }) => components.chooseNativePickerAsset(attachment.name, slot, { deadline: flowDeadline, signal, command, expectedId: uploadReceipt?.id }), true);
         };
 
