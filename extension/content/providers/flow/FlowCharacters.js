@@ -370,14 +370,9 @@
         const before = collectNativeMedia().map(item => item.id || `title:${item.title}`);
         const variants = Math.max(1, Math.min(4, Number(c.variants || 1)));
         const clear = flowButton("Clear prompt"); if (clear) clear.click();
-        const settingsCreditCost = await globalThis.FlowImageActions.prepareCharacterPortrait(c, variants);
+        await globalThis.FlowImageActions.prepareCharacterPortrait(c, variants);
         const box = document.querySelector(".ProseMirror");
         if (!box || !(await insertNativeFlowPrompt(box, String(c.describe)))) throw flowError("FLOW_PROMPT_INPUT_UNCONFIRMED", "Flow's portrait prompt was not accepted. Nothing was submitted.", true);
-        await wait(300);
-        const renderedCreditCost = await waitForGenerationCreditQuote(Number.isFinite(settingsCreditCost) ? 1500 : 8000);
-        const creditCost = Number.isFinite(renderedCreditCost) ? renderedCreditCost : settingsCreditCost;
-        if (!Number.isFinite(creditCost)) throw flowError("FLOW_CREDIT_QUOTE_UNAVAILABLE", "Flow did not show the portrait's credit quote after the prompt was prepared. Nothing was submitted.", true);
-        if (creditCost > 0) throw flowError("NATIVE_CAPABILITY_UNSUPPORTED", `Flow quotes ${creditCost} credits for the portrait; character creation only proceeds when it is free. Nothing was submitted.`, true);
         const start = await waitForGenerationSubmitButton(String(c.describe), 8000);
         if (!start) throw flowError("FLOW_SUBMIT_DISABLED", "Flow's portrait generation button did not become ready within 8 seconds; nothing was submitted.", true);
         await activateFlowSubmitButton(start, String(c.describe));

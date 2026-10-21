@@ -256,7 +256,7 @@
         await runFlowStage("clearing old reference chips", ({ deadline, signal }) => clearReferenceChips({ deadline, signal }));
 
         const settingsCredits = payload.type === "image"
-          ? await runFlowStage("preparing image settings", ({ signal }) => root.FlowImageActions.prepare(payload, variants, { deadline: flowDeadline, signal, command }))
+          ? (await runFlowStage("preparing image settings", ({ signal }) => root.FlowImageActions.prepare(payload, variants, { deadline: flowDeadline, signal, command })), undefined)
           : await runFlowStage("preparing video settings", ({ signal }) => root.FlowVideoActions.prepare(payload, variants, framesMode, { deadline: flowDeadline, signal, command }));
 
         const uploadAndResolve = async (attachment, slot) => {
@@ -356,21 +356,21 @@
         }
         requireFlowTime("preparing the Flow submit request", expectedVideoReferenceIds.length + expectedMediaReferenceIds.length + expectedCharacterIds.length > 0);
 
+        let credits;
+        if (payload.type !== "image") {
           const renderedCredits = await runFlowStage("reading Flow's credit quote", ({ signal }) => editor.waitForGenerationCreditQuote(Number.isFinite(settingsCredits) ? 1500 : 3000, { deadline: flowDeadline, signal }));
-        const credits = Number.isFinite(renderedCredits)
-          ? renderedCredits
-          : Number.isFinite(settingsCredits)
-            ? settingsCredits
-            : undefined;
-        const allowUnknownQuote = payload.allowUnknownQuote === true && payload.submitOnly === true && payload.type === "image" &&
-          expectedMediaReferenceIds.length === 1 && expectedCharacterIds.length === 0 && expectedVideoReferenceIds.length === 0;
-        if (payload.allowUnknownQuote === true && !allowUnknownQuote) {
-          throw this.error("FLOW_UNKNOWN_QUOTE_SCOPE_DENIED", "Unverified quote dispatch is limited to one submit_only image request with one existing project image reference; nothing was submitted.", false, false);
+          credits = Number.isFinite(renderedCredits)
+            ? renderedCredits
+            : Number.isFinite(settingsCredits)
+              ? settingsCredits
+              : undefined;
+          if (!Number.isFinite(credits)) {
+            const error = this.error("FLOW_CREDIT_QUOTE_UNAVAILABLE", "Flow did not show a verifiable credit quote; nothing was submitted.", true, false);
+            error.diagnostics = { quoteDiagnostics: settings?.safeCreditQuoteDiagnostics?.() || null };
+            throw error;
+          }
+          if (payload.maxCredits !== undefined && credits > Number(payload.maxCredits)) throw this.error("FLOW_MAX_CREDITS_EXCEEDED", `Flow quotes ${credits} credits, above max_credits=${payload.maxCredits}. Nothing was submitted.`, false, false);
         }
-        if (!Number.isFinite(credits) && !allowUnknownQuote) {
-          throw this.error("FLOW_CREDIT_QUOTE_UNAVAILABLE", "Flow did not show a verifiable credit quote; nothing was submitted.", true, false);
-        }
-        if (Number.isFinite(credits) && payload.maxCredits !== undefined && credits > Number(payload.maxCredits)) throw this.error("FLOW_MAX_CREDITS_EXCEEDED", `Flow quotes ${credits} credits, above max_credits=${payload.maxCredits}. Nothing was submitted.`, false, false);
 
         const start = await runFlowStage("finding the submit button", () => editor.waitForGenerationSubmitButton(payload.prompt, 15000));
         if (!start) throw this.error("FLOW_SUBMIT_BUTTON_MISSING", "Flow's Start generation button was not found; nothing was submitted.", true);

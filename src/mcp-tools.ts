@@ -137,7 +137,7 @@ server.registerTool(
   {
     title: "Queue Flow generations",
     description:
-      "Queue one clip or image per scene in the open Flow project. Runs one at a time with human-like pauses and spends the user's Google AI credits (approx. per video: Omni 1.1 Flash 7-12, Veo 3.1 Lite 10, Fast 20, Quality 100; images 0). Each scene is checked against max_credits using Flow's own quote before anything is spent. Returns job ids immediately; use flow_wait for results. A scene may set submit_only=true to finish after Flow's correlated request is dispatched, without waiting for render/download; flow_wait reports status=\"submitted\" and request_dispatched=true. Dispatch does not prove server acceptance or a finished result; server_acceptance_observed is reported separately.",
+      "Queue one clip or image per scene in the open Flow project. Runs one at a time with human-like pauses and spends the user's Google AI credits (approx. per video: Omni 1.1 Flash 7-12, Veo 3.1 Lite 10, Fast 20, Quality 100; images usually 0). Video scenes are checked against max_credits using Flow's own quote before anything is spent; image scenes are submitted without a credit quote check. Returns job ids immediately; use flow_wait for results. A scene may set submit_only=true to finish after Flow's correlated request is dispatched, without waiting for render/download; flow_wait reports status=\"submitted\" and request_dispatched=true. Dispatch does not prove server acceptance or a finished result; server_acceptance_observed is reported separately.",
     inputSchema: shapes.generate,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },

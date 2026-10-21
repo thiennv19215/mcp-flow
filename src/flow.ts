@@ -125,13 +125,6 @@ export async function runGeneration(job: Job): Promise<string[]> {
   const activeRefs = framesMode ? [] : refs;
   const isAssetReference = (value: string) => /^asset:/i.test(value);
   const isCharacterReference = (value: string) => /^character:/i.test(value);
-  const allowUnknownQuote = s.allow_unknown_quote === true && s.submit_only === true && s.type === "image" &&
-    activeRefs.length === 1 && isAssetReference(activeRefs[0]) && !framesMode;
-  if (s.allow_unknown_quote === true && !allowUnknownQuote) {
-    throw Object.assign(new Error("allow_unknown_quote is limited to one submit_only image request with exactly one existing asset reference."), {
-      code: "FLOW_UNKNOWN_QUOTE_SCOPE_DENIED", retryable: false, outcome_unknown: false,
-    });
-  }
   const localFileSupported = (file?: string) => {
     if (!file || isAssetReference(file) || isCharacterReference(file)) return true;
     try {
@@ -202,9 +195,9 @@ export async function runGeneration(job: Job): Promise<string[]> {
 
   const submitted = await nativeOperation<{ submitted: boolean; requestDispatched?: boolean; serverAcceptanceObserved?: boolean; before: string[]; type: MediaKind; expectedCount: number; credits?: number | null; correlationAttemptId?: string }>("flow.generation.submit", {
     prompt: s.prompt, type: s.type, model: s.model, aspectRatio: normalizedRatio, duration: s.duration,
-    resolution: s.resolution, variants: s.variants, maxCredits: s.max_credits,
+    resolution: s.resolution, variants: s.variants, ...(s.type === "video" ? { maxCredits: s.max_credits } : {}),
     ...(s.voice ? { voice: s.voice } : {}),
-    submitOnly: s.submit_only === true, allowUnknownQuote,
+    submitOnly: s.submit_only === true,
     firstFrame: frame(s.first_frame, "start"), lastFrame: frame(s.last_frame, "end"), attachments,
   }, "flow.native.generation.submit", job, 120_000);
 
@@ -229,23 +222,24 @@ export async function runGeneration(job: Job): Promise<string[]> {
     });
     throw error;
   }
-  const quoteVerified = typeof submitted.credits === "number";
-  job.creditQuoteVerified = quoteVerified;
-  if (!quoteVerified && !allowUnknownQuote) {
-    throw Object.assign(new Error("Flow dispatched the request but did not return its verified credit quote; inspect Flow before retrying."), {
-      code: "FLOW_SUBMIT_RECEIPT_INCOMPLETE",
-      retryable: false,
-      outcome_unknown: true,
-    });
-  }
-  if (quoteVerified) job.credits = submitted.credits!;
-  else job.note = [job.note, "Flow request was dispatched, but no verifiable credit quote was shown; the max_credits cap could not be checked."].filter(Boolean).join(" · ");
-  if (quoteVerified && job.credits! > s.max_credits) {
-    throw Object.assign(new Error(`Flow dispatched a request quoted at ${job.credits} credits, above max_credits=${s.max_credits}; inspect Flow before retrying.`), {
-      code: "FLOW_MAX_CREDITS_EXCEEDED",
-      retryable: false,
-      outcome_unknown: true,
-    });
+  if (s.type === "video") {
+    const quoteVerified = typeof submitted.credits === "number";
+    job.creditQuoteVerified = quoteVerified;
+    if (!quoteVerified) {
+      throw Object.assign(new Error("Flow dispatched the request but did not return its verified credit quote; inspect Flow before retrying."), {
+        code: "FLOW_SUBMIT_RECEIPT_INCOMPLETE",
+        retryable: false,
+        outcome_unknown: true,
+      });
+    }
+    job.credits = submitted.credits!;
+    if (job.credits > s.max_credits) {
+      throw Object.assign(new Error(`Flow dispatched a request quoted at ${job.credits} credits, above max_credits=${s.max_credits}; inspect Flow before retrying.`), {
+        code: "FLOW_MAX_CREDITS_EXCEEDED",
+        retryable: false,
+        outcome_unknown: true,
+      });
+    }
   }
   if (s.submit_only) {
     job.progress = undefined;

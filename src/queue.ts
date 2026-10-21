@@ -10,7 +10,6 @@ export interface SceneParams {
   type: "video" | "image";
   max_credits: number;
   submit_only?: boolean;
-  allow_unknown_quote?: boolean;
   duration?: 4 | 6 | 8 | 10;
   resolution?: "360p" | "720p";
   model?: string;

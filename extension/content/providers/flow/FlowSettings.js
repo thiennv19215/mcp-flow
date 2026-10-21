@@ -881,15 +881,12 @@
     }
     emitImagePreparationProgress(options, "selecting output count");
     await chooseNativeVariantCount(variants, { ...options, composerOnly: modernComposer });
-    emitImagePreparationProgress(options, "reading generation credit quote");
-    const settingsCredits = await (root.FlowEditor?.waitForGenerationCreditQuote?.(Math.min(2000, Number.isFinite(options.deadline) ? Math.max(1, options.deadline - Date.now()) : 2000), options) || root.waitForGenerationCreditQuote?.(2000));
-    emitImagePreparationProgress(options, "generation credit quote read");
     if (!modernComposer) {
       emitImagePreparationProgress(options, "closing legacy settings");
       await closeFlowSettings(options);
     }
-    finishImagePreparationDiagnostics("completed", { result: { creditQuote: Number.isFinite(settingsCredits) ? settingsCredits : "unknown", modernComposer } });
-    return settingsCredits;
+    finishImagePreparationDiagnostics("completed", { result: { modernComposer } });
+    return undefined;
     } catch (error) {
       finishImagePreparationDiagnostics("failed", { error: `${error?.code || "FLOW_SETTINGS_ERROR"}: ${error?.message || String(error)}` });
       throw error;

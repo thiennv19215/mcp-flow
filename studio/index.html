@@ -1035,7 +1035,7 @@ $("#roll").onclick = async () => {
     reference_images: sc.refs.length ? sc.refs.map(ref) : undefined,
     ...(video
       ? { model: cfg.model, max_credits: cfg.max, download_quality: cfg.quality, ...(cfg.model.startsWith("Omni") ? { duration: cfg.duration, resolution: cfg.resolution } : {}), chain_previous: (i > 0 && sc.chain) || undefined, first_frame: sc.chain ? undefined : ref(sc.first), last_frame: ref(sc.last) }
-      : { max_credits: 0, reference_previous: (i > 0 && sc.match) || undefined }),
+      : { reference_previous: (i > 0 && sc.match) || undefined }),
   }));
   const cost = video ? list.reduce((n, s) => n + sceneCost(s), 0) : 0;
   if (cost > 0 && !confirm(`Queue ${scenes.length} shot(s) for about ${cost} credits?`)) return;

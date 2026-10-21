@@ -186,7 +186,7 @@ agree on what is running. That API listens on 127.0.0.1 only and needs a per-run
 | Tool | Purpose |
 |---|---|
 | `flow_status` | Session state (signed in, project open, plan, credits left), queue, pacing, prompt playbook |
-| `flow_generate` | Queue scenes: prompt, image or video, model, aspect, duration, resolution, variants, first/last frame, reference images, `max_credits` cap |
+| `flow_generate` | Queue scenes: prompt, image or video, model, aspect, duration, resolution, variants, first/last frame, reference images. Videos use a `max_credits` cap; image generation skips the quote check |
 | `flow_wait` | Wait for jobs, or for the task id of a slow call; returns file paths and results. Answers within about 40 s, so call again until `finished` is true |
 | `flow_cancel` | Cancel a job that has not started |
 | `flow_retry` | Re-queue failed jobs with the same settings and file names (a failed tile is first retried inside Flow with its own free Retry button: `retries`, default 1) |
@@ -215,8 +215,8 @@ Output lands in `~/flow-mcp-out/<project>/scene-NN.ext`.
 - One generation at a time, with a random 5–10 second pause between jobs. Set
   `FLOW_MCP_PAUSE_MIN_S` and `FLOW_MCP_PAUSE_MAX_S` to adjust the pause. The page carries an
   invisible reCAPTCHA; this drives the real interface at human pace and does nothing to evade it.
-- Before each generation the server reads Flow's own credit quote and skips the scene if it exceeds
-  `max_credits` (default 25).
+- Before each video generation the server reads Flow's own credit quote and skips the scene if it exceeds
+  `max_credits` (default 25). Image generation skips this quote check.
 - Any Google account language works. The server finds Flow's buttons by their English names, so its
   Chrome window always shows Flow in English (it adds `?hl=en` to the address). Your account's own
   language setting is never changed, and prompts can be written in any language.
