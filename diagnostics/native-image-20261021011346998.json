@@ -1,0 +1,42 @@
+{
+  "started": "2026-10-21T01:13:46.998Z",
+  "mode": "image",
+  "api": "http://127.0.0.1:18897",
+  "probes": [
+    {
+      "name": "image.submit_only",
+      "status": "queued",
+      "job_id": "a4e7c939"
+    },
+    {
+      "name": "image.submit_only",
+      "status": "submitted",
+      "evidence": {
+        "job_id": "a4e7c939",
+        "status": "submitted",
+        "request_dispatched": true,
+        "server_acceptance_observed": false,
+        "credits": 0,
+        "credit_quote_verified": true,
+        "note": "Flow submit request was dispatched; rendering and downloads were not awaited."
+      }
+    }
+  ],
+  "job_id": "a4e7c939",
+  "latest_job": {
+    "id": "a4e7c939",
+    "status": "submitted",
+    "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-image-20261021011346998",
+    "scene": "scene-01",
+    "prompt": "A single red ceramic mug on a plain white background, studio product photo, no text.",
+    "attempts": 1,
+    "credits": 0,
+    "credit_quote_verified": true,
+    "files": [],
+    "note": "Flow submit request was dispatched; rendering and downloads were not awaited.",
+    "outcome_unknown": false,
+    "request_dispatched": true,
+    "server_acceptance_observed": false
+  },
+  "finished": "2026-10-21T01:14:32.370Z"
+}

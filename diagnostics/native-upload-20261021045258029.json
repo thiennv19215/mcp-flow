@@ -1,0 +1,15 @@
+{
+  "started": "2026-10-21T04:52:58.029Z",
+  "mode": "upload",
+  "api": "http://127.0.0.1:18897",
+  "probes": [
+    {
+      "name": "upload_media",
+      "status": "failed",
+      "seconds": 68.219,
+      "error": "Timed out while waiting for uploaded video \"fm-726fc18e2eff-upload.mp4\"; no further Flow actions were started."
+    }
+  ],
+  "finished": "2026-10-21T04:54:06.249Z",
+  "fatal_error": "Timed out while waiting for uploaded video \"fm-726fc18e2eff-upload.mp4\"; no further Flow actions were started."
+}

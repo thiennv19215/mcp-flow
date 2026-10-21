@@ -1,0 +1,79 @@
+{
+  "started": "2026-10-21T02:50:21.439Z",
+  "api": "http://127.0.0.1:18897",
+  "liveGenerationCalls": 0,
+  "steps": [
+    {
+      "name": "preflight",
+      "http": 200,
+      "result": {
+        "httpProjectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+        "observer": {
+          "ready": true,
+          "xhrHookActive": true,
+          "fetchHookActive": true,
+          "activeAttempts": 0
+        },
+        "composer": "settings_2",
+        "promptCharacters": 0,
+        "genericChipCount": 0,
+        "canonicalChipCount": 0,
+        "referenceChipCount": 0,
+        "chips": [],
+        "pickerOpen": false,
+        "activeJobs": []
+      }
+    },
+    {
+      "name": "observer_health_once",
+      "http": 200,
+      "result": {
+        "activeAttempts": 0,
+        "fetchHookActive": true,
+        "observerRevision": 23,
+        "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+        "ready": true,
+        "retiredCount": 2,
+        "retiredSaturated": false,
+        "structuredPromptVersion": 2,
+        "version": 1,
+        "xhrHookActive": true
+      }
+    },
+    {
+      "name": "post_health_verify",
+      "statusHttp": 200,
+      "status": {
+        "httpProjectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+        "observer": {
+          "ready": true,
+          "xhrHookActive": true,
+          "fetchHookActive": true,
+          "activeAttempts": 0
+        },
+        "composer": "settings_2",
+        "promptCharacters": 0,
+        "genericChipCount": 0,
+        "canonicalChipCount": 0,
+        "referenceChipCount": 0,
+        "chips": [],
+        "pickerOpen": false,
+        "activeJobs": []
+      },
+      "charactersHttp": 200,
+      "characters": [
+        "Untitled character"
+      ]
+    },
+    {
+      "name": "attach_character_once",
+      "http": 400,
+      "result": {
+        "error": "Timed out while waiting for the reference picker; no further Flow actions were started."
+      }
+    }
+  ],
+  "targetCharacter": "Untitled character",
+  "result": "STOP_ATTACH_NOT_EXACTLY_CONFIRMED",
+  "finished": "2026-10-21T02:50:40.622Z"
+}

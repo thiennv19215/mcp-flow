@@ -1,0 +1,32 @@
+{
+  "started": "2026-10-21T05:10:03.715Z",
+  "mode": "video-reference",
+  "api": "http://127.0.0.1:18897",
+  "probes": [
+    {
+      "name": "video.image_references.submit_only",
+      "status": "queued",
+      "job_id": "5d9b9c10"
+    },
+    {
+      "name": "video.image_references.submit_only",
+      "status": "failed_before_dispatch",
+      "error": "Job 5d9b9c10 ended as failed before confirmed dispatch (outcome_unknown=false): Flow opened a menu before the reference listbox, but this surface has no source-verified transition; nothing was selected.. Do not replay this job.",
+      "request_diagnostics": null
+    }
+  ],
+  "job_id": "5d9b9c10",
+  "latest_job": {
+    "status": "failed",
+    "attempts": 1,
+    "credits": null,
+    "credit_quote_verified": false,
+    "error_category": "unsupported",
+    "outcome_unknown": false,
+    "request_dispatched": false,
+    "server_acceptance_observed": false,
+    "request_diagnostics": null
+  },
+  "finished": "2026-10-21T05:10:07.838Z",
+  "fatal_error": "Job 5d9b9c10 ended as failed before confirmed dispatch (outcome_unknown=false): Flow opened a menu before the reference listbox, but this surface has no source-verified transition; nothing was selected.. Do not replay this job."
+}

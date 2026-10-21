@@ -6,12 +6,30 @@ export interface FlowState {
   credits_remaining?: number;
   composer?: string;
   hint?: string;
+  characterListDiagnostics?: CharacterListDiagnostics | null;
+}
+
+export interface CharacterListDiagnostics {
+  result: "complete" | "confirmed_empty" | "incomplete" | "scanning";
+  scanComplete?: boolean;
+  nameCount?: number;
+  stableUuidCount?: number;
+  projectId?: string | null;
+  checkedAt?: string;
+  errorCode?: string;
 }
 
 export interface FlowAsset {
   name: string;
   kind: "image" | "video" | "scene";
   id?: string;
+}
+
+export interface FlowCharacter {
+  name: string;
+  /** Stable Flow character UUID when the library tile exposes one. */
+  uuid?: string;
+  use_as?: string;
 }
 
 export interface FlowProject {

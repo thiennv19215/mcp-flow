@@ -3,13 +3,118 @@
 
   const isNavControl = el => {
     if (!el || typeof el.closest !== "function") return false;
+    // Flow hosts the project editor and settings overlays inside this Material
+    // content wrapper. It is not itself a navigation drawer.
+    if (el.closest("mat-sidenav-content, mat-drawer-content, .mat-sidenav-content, .mat-drawer-content, main, [role='main']")) return false;
     if (root.isFlowProjectNavigationControl?.(el)) return true;
-    if (el.closest('nav, [role="navigation"], header, [role="banner"], mat-toolbar, aside, mat-sidenav, flow-navigation, [class*="sidebar"], [class*="drawer"], flow-library, [class*="media-gallery"], [class*="media-list"]')) return true;
+    if (el.closest('nav, [role="navigation"], header, [role="banner"], mat-toolbar, aside, mat-sidenav, mat-drawer, .mat-sidenav, .mat-drawer, flow-navigation, [class*="sidebar"], flow-library, [class*="media-gallery"], [class*="media-list"]')) return true;
     return false;
   };
   const foldLabel = value => root.normalizeFlowUiText?.(value) || String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+  function checkPreparation(options = {}, operation = "preparing Flow settings") {
+    root.FlowUiDeadline?.requireTime(Number.isFinite(options.deadline) ? options.deadline : Infinity, operation, false, options.signal);
+  }
+  let imagePreparationDiagnostics = { phase: "idle", step: "idle", startedAt: null, updatedAt: null, lastResult: null, error: null };
+  let videoPreparationDiagnostics = { phase: "idle", step: "idle", startedAt: null, updatedAt: null, lastResult: null, error: null };
+  function emitImagePreparationProgress(options = {}, step) {
+    const isVideo = options.videoPreparation === true;
+    const diagnostics = isVideo ? videoPreparationDiagnostics : imagePreparationDiagnostics;
+    if (options.imagePreparation === true) {
+      const now = new Date().toISOString();
+      imagePreparationDiagnostics = {
+        ...imagePreparationDiagnostics,
+        phase: "running",
+        step,
+        startedAt: imagePreparationDiagnostics.phase === "running" ? imagePreparationDiagnostics.startedAt : now,
+        updatedAt: now,
+        lastResult: null,
+        error: null,
+      };
+    }
+    if (isVideo) {
+      const now = new Date().toISOString();
+      videoPreparationDiagnostics = {
+        ...diagnostics,
+        phase: "running",
+        step,
+        startedAt: diagnostics.phase === "running" ? diagnostics.startedAt : now,
+        updatedAt: now,
+        lastResult: null,
+        error: null,
+      };
+    }
+    try { root.FlowTiles?.emitFlowProgress?.(options.command, `Flow ${isVideo ? "video" : "image"} settings: ${step}`); } catch {}
+  }
+  function finishImagePreparationDiagnostics(phase, details = {}) {
+    const now = new Date().toISOString();
+    imagePreparationDiagnostics = {
+      ...imagePreparationDiagnostics,
+      phase,
+      updatedAt: now,
+      ...(phase === "completed" ? { lastResult: details.result ?? null, error: null } : {}),
+      ...(phase === "failed" ? { lastResult: null, error: details.error ?? "Unknown settings error" } : {}),
+    };
+  }
+  function inspectImagePreparationDiagnostics() {
+    return { ...imagePreparationDiagnostics };
+  }
+  function finishVideoPreparationDiagnostics(phase, details = {}) {
+    const now = new Date().toISOString();
+    videoPreparationDiagnostics = {
+      ...videoPreparationDiagnostics,
+      phase,
+      updatedAt: now,
+      ...(phase === "completed" ? { lastResult: details.result ?? null, error: null } : {}),
+      ...(phase === "failed" ? { lastResult: null, error: details.error ?? "Unknown video settings error", quoteDiagnostics: details.quoteDiagnostics ?? null } : {}),
+    };
+  }
+  function inspectVideoPreparationDiagnostics() {
+    return { ...videoPreparationDiagnostics };
+  }
+  async function closeOwnedSettingsSurface(owned, options = {}) {
+    if (!owned || !flowSettingsPanelVisible()) return;
+    try { await closeFlowSettings(options); } catch { /* Preserve the primary preparation result. */ }
+  }
+  function safeCreditQuoteDiagnostics() {
+    const inspection = root.FlowEditor?.inspectGenerationCreditQuote?.();
+    if (!inspection) return null;
+    const candidates = Array.isArray(inspection.candidates) ? inspection.candidates : [];
+    const reasonCodes = new Set();
+    for (const candidate of candidates) {
+      const text = String(candidate || "");
+      if (/(?:will\s+use|uses?)\s+\d[\d,.]*\s+credits?/i.test(text)) reasonCodes.add("english_will_use");
+      else if (/(?:sẽ\s+(?:dùng|sử\s+dụng)|tiêu\s+tốn)\s*\d[\d,.]*\s*tín\s*dụng/i.test(text)) reasonCodes.add("vietnamese_use");
+      else reasonCodes.add("unrecognized_credit_text");
+    }
+    if (!candidates.length) reasonCodes.add("no_candidate");
+    return {
+      quote: Number.isFinite(inspection.quote) ? inspection.quote : null,
+      candidateCount: candidates.length,
+      reasonCodes: [...reasonCodes],
+    };
+  }
+  async function waitPreparation(options = {}, ms, operation = "preparing Flow settings") {
+    if (root.FlowUiDeadline?.boundedWait && Number.isFinite(options.deadline)) {
+      await root.FlowUiDeadline.boundedWait(ms, options.deadline, operation, false, options.signal);
+      return;
+    }
+    checkPreparation(options, operation);
+    await root.wait?.(ms);
+    checkPreparation(options, operation);
+  }
 
   function flowSettingsTrigger() {
+    const composer = flowComposerRoot();
+    const submit = composer && root.FlowEditor?.getFlowSubmitButton?.();
+    const adjacent = submit?.previousElementSibling;
+    if (adjacent && composer.contains(adjacent) && /^(?:button|mat-button|div)$/i.test(adjacent.tagName) && root.visible?.(adjacent)) {
+      const label = (root.accessibleName?.(adjacent) || adjacent.innerText || adjacent.textContent || "").replace(/\s+/g, " ").trim();
+      const icon = (root.flowFindIcon ? root.flowFindIcon(adjacent) : adjacent.querySelector?.("mat-icon,.mat-icon,.google-symbols"))?.textContent?.trim()?.toLowerCase();
+      if (/(?:settings?|cài đặt|aspect ratio|tỷ lệ)/i.test(label) || ["tune", "settings", "settings_2", "crop_square", "crop_16_9"].includes(icon)) return adjacent;
+    }
+    const composerTrigger = composer && root.flowButton?.("Settings trigger", composer);
+    if (composerTrigger) return composerTrigger;
+
     const tune = [...document.querySelectorAll('button,[role="button"]')].find(el => {
       if (!root.visible?.(el) || isNavControl(el)) return false;
       const icon = (root.flowFindIcon ? root.flowFindIcon(el) : el.querySelector?.("mat-icon,.mat-icon,.google-symbols"))?.textContent?.trim()?.toLowerCase();
@@ -142,7 +247,7 @@
     ) || Boolean(stateControl.querySelector('input[type="radio"]:checked,input[type="checkbox"]:checked,[aria-checked="true"],[aria-pressed="true"],[aria-selected="true"],[data-state="checked"]'));
   }
 
-  function flowSettingsPanelVisible() {
+  function getVisibleFlowSettingsPanel() {
     // A Flow project-navigation overlay can also contain “Image” and “Video”.
     // Inspect each overlay and require settings-specific controls before treating it as open.
     const openPanels = [...document.querySelectorAll('[role="dialog"], [role="menu"], mat-dialog-container, flow-dialog, .cdk-overlay-pane')]
@@ -170,35 +275,49 @@
         names.some(name => /^(?:upload|uploads|tep tai len|tai len)$/.test(name));
       const hasSettingsContent = !looksLikeProjectNavigation &&
         ((hasOption("image") && hasOption("video")) || hasVariants || hasAspectRatio);
-      if (hasSettingsContent) return true;
+      if (hasSettingsContent) return openPanel;
     }
 
     const hasTypeOption = Boolean(flowRadio("Image") || flowOption("Image")) && Boolean(flowRadio("Video") || flowOption("Video"));
     const hasVariantOption = [1, 2, 3, 4].some(count => flowRadio(`x${count}`) || flowOption(`x${count}`));
-    return hasTypeOption && hasVariantOption;
+    return hasTypeOption && hasVariantOption ? document : null;
   }
 
-  async function openFlowSettings() {
+  function flowSettingsPanelVisible() {
+    return Boolean(getVisibleFlowSettingsPanel());
+  }
+
+  async function openFlowSettings(options = {}) {
+    checkPreparation(options, "opening Flow settings");
     if (flowSettingsPanelVisible()) return true;
     const trigger = flowSettingsTrigger();
     if (!trigger) throw root.flowError("FLOW_SETTINGS_UNAVAILABLE", "Flow's settings panel cannot be opened; no generation was submitted.", true);
     trigger.click();
-    await root.wait?.(400);
-    const deadline = Date.now() + 4000;
+    await waitPreparation(options, 400, "opening Flow settings");
+    if (flowSettingsPanelVisible()) {
+      try { options.onSettingsOpened?.(); } catch {}
+      return true;
+    }
+    const deadline = Math.min(Date.now() + 4000, Number.isFinite(options.deadline) ? options.deadline : Infinity);
     while (Date.now() < deadline) {
-      if (flowSettingsPanelVisible()) return true;
-      await root.wait?.(100);
+      checkPreparation(options, "opening Flow settings");
+      if (flowSettingsPanelVisible()) {
+        try { options.onSettingsOpened?.(); } catch {}
+        return true;
+      }
+      await waitPreparation(options, 100, "opening Flow settings");
     }
     throw root.flowError("FLOW_SETTINGS_OPEN_FAILED", "Flow's settings panel did not open; no generation was submitted.", true);
   }
 
-  async function closeFlowSettings() {
+  async function closeFlowSettings(options = {}) {
+    checkPreparation(options, "closing Flow settings");
     const isOpen = () => flowSettingsPanelVisible();
     if (!isOpen()) return;
 
     for (let attempt = 0; attempt < 2 && isOpen(); attempt++) {
       root.dispatchEscapeKey?.();
-      await root.wait?.(150);
+      await waitPreparation(options, 150, "closing Flow settings");
     }
     if (!isOpen()) return;
 
@@ -206,24 +325,24 @@
     if (trigger) {
       trigger.click();
       const closeDeadline = Date.now() + 2000;
-      while (Date.now() < closeDeadline && isOpen()) await root.wait?.(100);
+      while (Date.now() < Math.min(closeDeadline, Number.isFinite(options.deadline) ? options.deadline : Infinity) && isOpen()) await waitPreparation(options, 100, "closing Flow settings");
     }
     if (!isOpen()) return;
 
     if (isOpen()) {
       ((typeof root.flowQuery === "function" ? root.flowQuery("editor") : null) || document.querySelector(".ProseMirror"))?.click();
       const closeDeadline = Date.now() + 1500;
-      while (Date.now() < closeDeadline && isOpen()) await root.wait?.(100);
+      while (Date.now() < Math.min(closeDeadline, Number.isFinite(options.deadline) ? options.deadline : Infinity) && isOpen()) await waitPreparation(options, 100, "closing Flow settings");
     }
   }
 
-  async function chooseDuration(duration) {
+  async function chooseDuration(duration, options = {}) {
     if (!duration) return;
     const num = parseInt(String(duration), 10);
     if (isNaN(num)) return;
     const str = `${num}s`;
 
-    await openFlowSettings();
+    await openFlowSettings(options);
     const panel = flowSettingsPanelVisible() ? (document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane') || document) : document;
 
     const tryClickDuration = () => {
@@ -255,16 +374,16 @@
 
     let durationClicked = false;
     for (let attempt = 0; attempt < 3 && !durationClicked; attempt++) {
-      if (attempt > 0) await root.wait?.(300);
+      if (attempt > 0) await waitPreparation(options, 300, "selecting Flow video duration");
       durationClicked = tryClickDuration();
     }
-    if (durationClicked) await root.wait?.(300);
+    if (durationClicked) await waitPreparation(options, 300, "confirming Flow video duration");
   }
 
-  async function chooseAspectRatio(aspectRatio) {
+  async function chooseAspectRatio(aspectRatio, options = {}) {
     if (!aspectRatio) return;
     const normalized = root.normalizeAspectRatio?.(aspectRatio) || String(aspectRatio).trim();
-    await openFlowSettings();
+    await openFlowSettings(options);
     const panel = flowSettingsPanelVisible() ? (document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane') || document) : document;
 
     const candidates = [...panel.querySelectorAll('[role="radio"], mat-radio-button, [role="tab"], [role="option"], button, [role="button"]')].filter(el => root.visible?.(el) && !isNavControl(el));
@@ -286,15 +405,15 @@
     if (match) {
       if (!nativeRadioSelected(match) && match.getAttribute("aria-selected") !== "true" && match.getAttribute("data-state") !== "active") {
         match.click();
-        await root.wait?.(300);
+        await waitPreparation(options, 300, "selecting Flow aspect ratio");
       }
     }
   }
 
-  async function chooseResolution(resolution) {
+  async function chooseResolution(resolution, options = {}) {
     if (!resolution) return;
     const wanted = String(resolution).trim().toLowerCase().replace(/\s+/g, "");
-    await openFlowSettings();
+    await openFlowSettings(options);
     const panel = flowSettingsPanelVisible() ? (document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog') || document) : document;
 
     const candidates = [...panel.querySelectorAll('button[role="tab"], [role="radio"], mat-radio-button, button')].filter(el => root.visible?.(el) && !isNavControl(el));
@@ -306,21 +425,80 @@
     if (match) {
       if (!nativeRadioSelected(match) && match.getAttribute("aria-selected") !== "true" && match.getAttribute("data-state") !== "active") {
         match.click();
-        await root.wait?.(300);
+        await waitPreparation(options, 300, "selecting Flow resolution");
       }
     }
   }
 
-  async function chooseRadio(name) {
+  async function chooseVideoOption(kind, requested, options = {}) {
+    if (requested == null || requested === "") return;
+    const wanted = String(requested).trim();
+    const normalizeCompact = value => foldLabel(value).replace(/\s+/g, "");
+    const number = Number.parseInt(wanted, 10);
+    const matches = element => {
+      const label = root.accessibleName?.(element) || "";
+      const text = element.innerText || element.textContent || "";
+      const candidates = [label, text].map(foldLabel).filter(Boolean);
+      if (kind === "duration") {
+        return Number.isFinite(number) && candidates.some(value => {
+          const match = value.match(/(?:^|\s)(\d{1,2})\s*(?:s|sec(?:ond)?s?|giay)?(?:$|\s)/i) || value.match(/^(\d{1,2})$/);
+          return Boolean(match && Number(match[1]) === number);
+        });
+      }
+      if (kind === "ratio") {
+        const ratio = root.normalizeAspectRatio?.(wanted) || wanted;
+        return candidates.some(value => value === foldLabel(ratio) || value.includes(foldLabel(ratio)));
+      }
+      return candidates.some(value => normalizeCompact(value) === normalizeCompact(wanted) ||
+        (kind === "resolution" && normalizeCompact(value) === `${normalizeCompact(wanted)}p`));
+    };
+    const find = () => {
+      // Multiple overlays may be open (for example, an unrelated Add menu and
+      // the settings panel). Only search the panel whose controls prove that it
+      // is Flow's settings panel; never let an earlier global overlay mask it.
+      const panel = getVisibleFlowSettingsPanel() || document;
+      return [...panel.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')]
+        .find(element => root.visible?.(element) && !isNavControl(element) && matches(element)) || null;
+    };
+    const codePrefix = kind === "duration" ? "DURATION" : kind === "resolution" ? "RESOLUTION" : "ASPECT_RATIO";
+    await openFlowSettings(options);
+    let target = find();
+    if (!target && options.allowAbsent === true) return { selected: false, modelFixed: true };
+    if (!target) {
+      const deadline = Math.min(Date.now() + 2000, Number.isFinite(options.deadline) ? options.deadline : Infinity);
+      while (Date.now() < deadline && !target) {
+        await waitPreparation(options, 100, `finding requested video ${kind}`);
+        target = find();
+      }
+    }
+    if (!target) {
+      throw root.flowError(`FLOW_VIDEO_${codePrefix}_UNAVAILABLE`, `Flow does not expose the requested video ${kind} (${wanted}). Nothing was submitted.`, true, false);
+    }
+    if (!nativeRadioSelected(target)) target.click();
+    const verifyDeadline = Math.min(Date.now() + 2500, Number.isFinite(options.deadline) ? options.deadline : Infinity);
+    let selected = false;
+    while (Date.now() < verifyDeadline) {
+      checkPreparation(options, `confirming requested video ${kind}`);
+      const current = find();
+      if (current && nativeRadioSelected(current)) { selected = true; break; }
+      await waitPreparation(options, 100, `confirming requested video ${kind}`);
+    }
+    if (!selected) {
+      throw root.flowError(`FLOW_VIDEO_${codePrefix}_UNCONFIRMED`, `Flow did not confirm the requested video ${kind} (${wanted}). Nothing was submitted.`, true, false);
+    }
+  }
+
+  async function chooseRadio(name, options = {}) {
+    checkPreparation(options, `selecting Flow ${name} mode`);
     if (!flowSettingsPanelVisible()) {
-      await openFlowSettings();
+      await openFlowSettings(options);
     }
     let radio = flowRadio(name);
     if (!radio) {
-      await openFlowSettings();
+      await openFlowSettings(options);
       const findOption = () => flowRadio(name) || flowOption(name);
       const openedBy = Date.now() + 2500;
-      while (Date.now() < openedBy && !radio) { await root.wait?.(100); radio = findOption(); }
+      while (Date.now() < Math.min(openedBy, Number.isFinite(options.deadline) ? options.deadline : Infinity) && !radio) { await waitPreparation(options, 100, `finding Flow ${name} mode`); radio = findOption(); }
     }
     if (!radio) {
       const options = [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')]
@@ -328,28 +506,31 @@
       throw root.flowError("FLOW_OPTION_NOT_FOUND", `Flow has no visible "${name}" option for the current settings. Visible options: ${[...new Set(options)].slice(0, 30).join(", ") || "none"}.`);
     }
     if (!nativeRadioSelected(radio)) radio.click();
-    await root.wait?.(400);
-    const deadline = Date.now() + 3000;
+    await waitPreparation(options, 400, `selecting Flow ${name} mode`);
+    const deadline = Math.min(Date.now() + 3000, Number.isFinite(options.deadline) ? options.deadline : Infinity);
     while (Date.now() < deadline) {
+      checkPreparation(options, `confirming Flow ${name} mode`);
       const current = flowRadio(name) || (flowSettingsPanelVisible() && flowOption(name));
       if (nativeRadioSelected(current)) return;
       if (!current && (!radio.isConnected || !root.visible?.(radio))) return;
-      await root.wait?.(100);
+      await waitPreparation(options, 100, `confirming Flow ${name} mode`);
     }
     radio = flowRadio(name) || (flowSettingsPanelVisible() && flowOption(name));
     if (radio && !nativeRadioSelected(radio)) {
       radio.click();
-      const retryDeadline = Date.now() + 2500;
+      const retryDeadline = Math.min(Date.now() + 2500, Number.isFinite(options.deadline) ? options.deadline : Infinity);
       while (Date.now() < retryDeadline) {
+        checkPreparation(options, `confirming Flow ${name} mode`);
         const current = flowRadio(name) || (flowSettingsPanelVisible() && flowOption(name));
         if (nativeRadioSelected(current) || (!current && (!radio.isConnected || !root.visible?.(radio)))) return;
-        await root.wait?.(100);
+        await waitPreparation(options, 100, `confirming Flow ${name} mode`);
       }
     }
     throw root.flowError("FLOW_OPTION_SELECTION_FAILED", `Flow did not confirm that "${name}" was selected. Nothing was submitted.", true`);
   }
 
   async function chooseNativeVariantCount(count, options = {}) {
+    checkPreparation(options, "selecting Flow output count");
     const variants = Math.max(1, Math.min(4, Number(count) || 1));
     const name = `x${variants}`;
     const composer = options.composerOnly ? flowComposerRoot() : null;
@@ -366,42 +547,43 @@
         throw root.flowError("FLOW_VARIANT_OPTION_MISSING", `Flow's composer does not expose ${name}; no generation was submitted.`, true);
       }
       countControl.click();
-      await root.wait?.(350);
+      await waitPreparation(options, 350, "confirming Flow output count");
       const updatedName = normalizeModelLabel(modelButton?.innerText || modelButton?.textContent || root.accessibleName?.(modelButton) || "");
       if (!new RegExp(`(?:^|\\s)x${variants}(?:\\s|$)`).test(updatedName) && !nativeRadioSelected(countControl)) {
         throw root.flowError("FLOW_VARIANT_SELECTION_UNCONFIRMED", `Flow did not confirm ${name} in its composer. Nothing was submitted.`, true);
       }
       return variants;
     }
-    await openFlowSettings();
+    await openFlowSettings(options);
     let option = flowRadio(name) || flowOption(name);
     if (!option) throw root.flowError("FLOW_VARIANT_OPTION_MISSING", `Flow did not show the ${name} output option. Nothing was submitted.`, true);
     option.click();
-    await root.wait?.(450);
+    await waitPreparation(options, 450, "selecting Flow output count");
 
     const summaryConfirms = () => {
       const trigger = flowSettingsTrigger();
       const summary = (trigger?.innerText || trigger?.textContent || "").replace(/\s+/g, " ").trim();
       return new RegExp(`(?:^|\\s)${name}(?:\\s|$)`, "i").test(summary);
     };
-    const deadline = Date.now() + 5000;
+    const deadline = Math.min(Date.now() + 5000, Number.isFinite(options.deadline) ? options.deadline : Infinity);
     let stableSelectionChecks = 0;
     let stableSummaryChecks = 0;
     while (Date.now() < deadline) {
+      checkPreparation(options, "confirming Flow output count");
       option = flowRadio(name) || flowOption(name);
       if (summaryConfirms()) {
-        if (++stableSummaryChecks >= 2) { await root.wait?.(300); return variants; }
+        if (++stableSummaryChecks >= 2) { await waitPreparation(options, 300, "confirming Flow output count"); return variants; }
       } else stableSummaryChecks = 0;
       if (option && nativeRadioSelected(option)) {
-        if (++stableSelectionChecks >= 2) { await root.wait?.(300); return variants; }
+        if (++stableSelectionChecks >= 2) { await waitPreparation(options, 300, "confirming Flow output count"); return variants; }
       } else {
         stableSelectionChecks = 0;
         if ((!option || !option.isConnected || !root.visible?.(option)) && summaryConfirms()) {
-          await root.wait?.(300);
+          await waitPreparation(options, 300, "confirming Flow output count");
           return variants;
         }
       }
-      await root.wait?.(200);
+      await waitPreparation(options, 200, "confirming Flow output count");
     }
     throw root.flowError("FLOW_VARIANT_SELECTION_UNCONFIRMED", `Flow did not confirm the requested ${name} output count. Nothing was submitted.`, true);
   }
@@ -418,20 +600,44 @@
   }
 
   let capabilityRegistryPromise;
-  async function assertNativeModelCapabilities(payload, type, framesMode = false) {
+  async function assertNativeModelCapabilities(payload, type, framesMode = false, options = {}) {
     if (!capabilityRegistryPromise) {
-      capabilityRegistryPromise = fetch(chrome.runtime.getURL("flow-model-capabilities.json"))
-        .then(response => {
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          return response.json();
-        });
+      emitImagePreparationProgress(options, "reading model capability registry");
+      const deadline = Number.isFinite(options.deadline) ? options.deadline : Date.now() + 5_000;
+      const timeoutMs = Math.min(5_000, deadline - Date.now());
+      if (timeoutMs <= 0) {
+        throw root.flowError("FLOW_OPERATION_TIMEOUT", "Timed out before reading Flow's model capability registry. Nothing was submitted.", false, false);
+      }
+      const controller = new AbortController();
+      const abortCapabilityFetch = () => controller.abort();
+      options.signal?.addEventListener("abort", abortCapabilityFetch, { once: true });
+      let timeout;
+      const timeoutPromise = new Promise((_, reject) => {
+        timeout = setTimeout(() => {
+          controller.abort();
+          reject(root.flowError("FLOW_OPERATION_TIMEOUT", "Timed out while reading Flow's model capability registry. Nothing was submitted.", false, false));
+        }, timeoutMs);
+      });
+      capabilityRegistryPromise = Promise.race([
+        fetch(chrome.runtime.getURL("flow-model-capabilities.json"), { signal: controller.signal })
+          .then(response => {
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return response.json();
+          }),
+        timeoutPromise,
+      ]).finally(() => {
+        clearTimeout(timeout);
+        options.signal?.removeEventListener("abort", abortCapabilityFetch);
+      });
     }
     let registry;
     try { registry = await capabilityRegistryPromise; }
     catch (error) {
       capabilityRegistryPromise = null;
+      if (error?.code === "FLOW_OPERATION_TIMEOUT") throw error;
       throw root.flowError("FLOW_CAPABILITY_REGISTRY_UNAVAILABLE", `Flow model capability registry could not be read: ${error?.message || error}. Nothing was submitted.`, false, false);
     }
+    emitImagePreparationProgress(options, "validating model capabilities");
     const ratios = type === "video" ? registry.defaults.videoAspectRatios : registry.defaults.imageAspectRatios;
     if (payload.aspectRatio && !ratios.includes(payload.aspectRatio)) {
       throw root.flowError("FLOW_MODEL_UNSUPPORTED", `${type} aspect ratio ${payload.aspectRatio} is not supported. Allowed: ${ratios.join(", ")}. Nothing was submitted.`, false, false);
@@ -450,7 +656,7 @@
     if (framesMode && rule && !rule.supportsFrames) {
       throw root.flowError("FLOW_MODEL_UNSUPPORTED", `Model "${selectedModel}" does not support first/last frame inputs. Nothing was submitted.`, false, false);
     }
-    if (!rule) return;
+    if (!rule) return null;
     if (!rule.types.includes(type)) {
       throw root.flowError("FLOW_MODEL_UNSUPPORTED", `Model "${selectedModel}" does not support ${type} generation. Nothing was submitted.`, false, false);
     }
@@ -465,6 +671,7 @@
       const options = rule.resolutions.length ? ` Allowed: ${rule.resolutions.join(", ")}.` : "";
       throw root.flowError("FLOW_MODEL_UNSUPPORTED", `Model "${selectedModel}" does not offer ${payload.resolution} resolution.${options} Nothing was submitted.`, false, false);
     }
+    return rule;
   }
 
   function getModelAliases(model) {
@@ -511,45 +718,50 @@
     return button || null;
   }
 
-  async function chooseNativeModel(model, type) {
+  async function chooseNativeModel(model, type, options = {}) {
+    checkPreparation(options, "selecting the Flow model");
     if (!model) return;
+    emitImagePreparationProgress(options, "locating model selector");
     const legacyImage = type === "image" && /^\s*(nano banana( 2)?|latest)?\s*$/i.test(model);
     const aliases = getModelAliases(model);
 
     let button = findModelPickerButton();
     if (!button) {
-      await openFlowSettings();
+      await openFlowSettings(options);
       button = findModelPickerButton();
     }
     if (!button) {
-      const deadline = Date.now() + 2500;
+      const deadline = Math.min(Date.now() + 2500, Number.isFinite(options.deadline) ? options.deadline : Infinity);
       while (Date.now() < deadline && !button) {
+        checkPreparation(options, "finding the Flow model selector");
         button = findModelPickerButton();
-        if (!button) await root.wait?.(100);
+        if (!button) await waitPreparation(options, 100, "finding the Flow model selector");
       }
     }
 
     if (button) {
       const currentModelText = normalizeModelLabel(button.innerText || button.textContent || root.accessibleName?.(button) || "");
       const alreadyApplied = aliases.some(alias => currentModelText === alias || (alias.length >= 3 && currentModelText.includes(alias)));
-      if (alreadyApplied) return;
+      if (alreadyApplied) { emitImagePreparationProgress(options, "requested model already selected"); return; }
     }
 
     if (!button) return;
 
+    emitImagePreparationProgress(options, "opening model selector");
     button.click();
-    await root.wait?.(450);
+    await waitPreparation(options, 450, "opening the Flow model selector");
 
     let items = [];
-    const menuDeadline = Date.now() + 4000;
+    const menuDeadline = Math.min(Date.now() + 4000, Number.isFinite(options.deadline) ? options.deadline : Infinity);
     while (Date.now() < menuDeadline) {
+      checkPreparation(options, "loading Flow model choices");
       items = [...document.querySelectorAll('[role="menuitem"], [role="menuitemradio"], mat-option, [role="option"]')].filter(el => root.visible?.(el));
       if (!items.length) {
         const activeMenu = document.querySelector('[role="menu"]:last-of-type, [data-radix-popper-content-wrapper]:last-of-type, .cdk-overlay-pane:last-of-type');
         if (activeMenu) items = [...activeMenu.querySelectorAll('button, [role="menuitem"], [role="menuitemradio"]')].filter(el => root.visible?.(el));
       }
       if (items.length) break;
-      await root.wait?.(100);
+      await waitPreparation(options, 100, "loading Flow model choices");
     }
 
     const names = items.map(el => root.accessibleName?.(el)).map(normalizeModelLabel);
@@ -591,21 +803,24 @@
 
     if (index < 0) {
       root.dispatchEscapeKey?.();
+      emitImagePreparationProgress(options, "requested model option unavailable");
       return;
     }
 
     const chosenItem = items[index];
+    emitImagePreparationProgress(options, "selecting requested model");
     chosenItem.click();
-    await root.wait?.(500);
+    await waitPreparation(options, 500, "selecting the Flow model");
 
     if (chosenItem.isConnected && root.visible?.(chosenItem)) {
       root.dispatchEscapeKey?.();
-      await root.wait?.(200);
+      await waitPreparation(options, 200, "closing the Flow model selector");
     }
+    emitImagePreparationProgress(options, "model selection settled");
   }
 
-  async function restoreNativeFramesMode() {
-    await openFlowSettings();
+  async function restoreNativeFramesMode(options = {}) {
+    await openFlowSettings(options);
     const findFrames = () => [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')]
       .find(el => root.visible?.(el) && !isNavControl(el) &&
         /^(?:frames|khung hinh|khung|khung anh)$/.test(foldLabel((root.accessibleName?.(el) || "").replace(/^(?:accessibility_new|dashboard|face)\s*/i, ""))));
@@ -613,25 +828,30 @@
     if (!frames) throw root.flowError("FLOW_FRAMES_MODE_UNAVAILABLE", "Flow does not show a Frames mode control after local frame upload. Nothing was submitted.", true, false);
     if (!nativeRadioSelected(frames) && frames.getAttribute("aria-selected") !== "true") frames.click();
     const hasFrameControls = () => Boolean(root.flowButton?.("Start") && root.flowButton?.("End"));
-    const deadline = Date.now() + 5000;
+    const deadline = Math.min(Date.now() + 5000, Number.isFinite(options.deadline) ? options.deadline : Infinity);
     let confirmed = false;
     while (Date.now() < deadline) {
+      checkPreparation(options, "restoring Flow Frames mode after upload");
       frames = findFrames();
       if (frames && (nativeRadioSelected(frames) || frames.getAttribute("aria-selected") === "true" || hasFrameControls())) { confirmed = true; break; }
-      if (!flowSettingsPanelVisible()) await openFlowSettings();
-      await root.wait?.(100);
+      if (!flowSettingsPanelVisible()) await openFlowSettings(options);
+      await waitPreparation(options, 100, "restoring Flow Frames mode after upload");
     }
     if (!confirmed) throw root.flowError("FLOW_FRAMES_MODE_UNCONFIRMED", "Flow did not confirm Frames mode after local frame upload. Nothing was submitted.", true, false);
-    await closeFlowSettings();
-    const controlsDeadline = Date.now() + 4000;
-    while (Date.now() < controlsDeadline && !hasFrameControls()) await root.wait?.(100);
+    await closeFlowSettings(options);
+    const controlsDeadline = Math.min(Date.now() + 4000, Number.isFinite(options.deadline) ? options.deadline : Infinity);
+    while (Date.now() < controlsDeadline && !hasFrameControls()) await waitPreparation(options, 100, "waiting for Flow frame controls after upload");
     if (!root.flowButton?.("Start") || !root.flowButton?.("End")) {
       throw root.flowError("FLOW_FRAMES_CONTROLS_UNAVAILABLE", "Flow selected Frames but did not restore both Start and End frame controls. Nothing was submitted.", true, false);
     }
   }
 
-  async function prepareNativeImageSettings(payload, variants) {
-    await assertNativeModelCapabilities(payload, "image");
+  async function prepareNativeImageSettings(payload, variants, options = {}) {
+    options = { ...options, imagePreparation: true };
+    try {
+    emitImagePreparationProgress(options, "validating requested settings");
+    await assertNativeModelCapabilities(payload, "image", false, options);
+    emitImagePreparationProgress(options, "reading composer controls");
     const aspectRatio = payload?.aspectRatio || payload?.aspect_ratio;
     const requestedModel = payload?.model || "Nano Banana";
     const composer = flowComposerRoot();
@@ -639,27 +859,41 @@
     const modernComposer = Boolean(composer && composerModel);
 
     if (!modernComposer) {
-      await openFlowSettings();
-      await chooseRadio("Image");
-      if (aspectRatio) await chooseAspectRatio(aspectRatio);
+      emitImagePreparationProgress(options, "opening legacy settings");
+      await openFlowSettings(options);
+      emitImagePreparationProgress(options, "selecting image mode");
+      await chooseRadio("Image", options);
+      if (aspectRatio) await chooseAspectRatio(aspectRatio, options);
     }
 
     if (requestedModel) {
-      await chooseNativeModel(requestedModel, "image");
+      emitImagePreparationProgress(options, "selecting requested model");
+      await chooseNativeModel(requestedModel, "image", options);
       if (!modernComposer) {
-        await openFlowSettings();
-        await chooseRadio("Image");
-        if (aspectRatio) await chooseAspectRatio(aspectRatio);
+        await openFlowSettings(options);
+        await chooseRadio("Image", options);
+        if (aspectRatio) await chooseAspectRatio(aspectRatio, options);
       }
     }
 
     if (modernComposer && aspectRatio && root.normalizeAspectRatio?.(aspectRatio) !== "16:9") {
       throw root.flowError("FLOW_ASPECT_RATIO_UNAVAILABLE", "This Flow composer does not expose aspect-ratio controls yet. Choose 16:9 or use the standard Flow settings page. Nothing was submitted.", true);
     }
-    await chooseNativeVariantCount(variants, { composerOnly: modernComposer });
-    const settingsCredits = await (root.FlowEditor?.waitForGenerationCreditQuote?.(2000) || root.waitForGenerationCreditQuote?.(2000));
-    if (!modernComposer) await closeFlowSettings();
+    emitImagePreparationProgress(options, "selecting output count");
+    await chooseNativeVariantCount(variants, { ...options, composerOnly: modernComposer });
+    emitImagePreparationProgress(options, "reading generation credit quote");
+    const settingsCredits = await (root.FlowEditor?.waitForGenerationCreditQuote?.(Math.min(2000, Number.isFinite(options.deadline) ? Math.max(1, options.deadline - Date.now()) : 2000), options) || root.waitForGenerationCreditQuote?.(2000));
+    emitImagePreparationProgress(options, "generation credit quote read");
+    if (!modernComposer) {
+      emitImagePreparationProgress(options, "closing legacy settings");
+      await closeFlowSettings(options);
+    }
+    finishImagePreparationDiagnostics("completed", { result: { creditQuote: Number.isFinite(settingsCredits) ? settingsCredits : "unknown", modernComposer } });
     return settingsCredits;
+    } catch (error) {
+      finishImagePreparationDiagnostics("failed", { error: `${error?.code || "FLOW_SETTINGS_ERROR"}: ${error?.message || String(error)}` });
+      throw error;
+    }
   }
 
   const MODE_ALIASES = {
@@ -678,7 +912,8 @@
       });
   }
 
-  async function selectAndConfirmMode(name, framesMode) {
+  async function selectAndConfirmMode(name, framesMode, options = {}) {
+    checkPreparation(options, `selecting Flow ${name} mode`);
     let control = exactModeControl(name);
     if (!control) {
       const hasFrameControls = () => Boolean(root.flowButton?.("Start") && root.flowButton?.("End"));
@@ -688,13 +923,14 @@
     }
     if (!nativeRadioSelected(control) && control.getAttribute("aria-selected") !== "true") control.click();
     const hasFrameControls = () => Boolean(root.flowButton?.("Start") && root.flowButton?.("End"));
-    const deadline = Date.now() + 5000;
+    const deadline = Math.min(Date.now() + 5000, Number.isFinite(options.deadline) ? options.deadline : Infinity);
     let confirmed = false;
     while (Date.now() < deadline) {
+      checkPreparation(options, `confirming Flow ${name} mode`);
       control = exactModeControl(name);
       if (control && (nativeRadioSelected(control) || control.getAttribute("aria-selected") === "true" || (framesMode && hasFrameControls()))) { confirmed = true; break; }
-      if (!flowSettingsPanelVisible()) await openFlowSettings();
-      await root.wait?.(100);
+      if (!flowSettingsPanelVisible()) await openFlowSettings(options);
+      await waitPreparation(options, 100, `confirming Flow ${name} mode`);
     }
     if (!confirmed) {
       if (framesMode && hasFrameControls()) confirmed = true;
@@ -704,58 +940,107 @@
       }
     }
     if (framesMode) {
-      const controlsDeadline = Date.now() + 4000;
-      while (Date.now() < controlsDeadline && !hasFrameControls()) await root.wait?.(100);
+      const controlsDeadline = Math.min(Date.now() + 4000, Number.isFinite(options.deadline) ? options.deadline : Infinity);
+      while (Date.now() < controlsDeadline && !hasFrameControls()) await waitPreparation(options, 100, "waiting for Flow frame controls");
       if (!hasFrameControls()) {
         throw root.flowError("FLOW_FRAMES_CONTROLS_UNAVAILABLE", "Flow selected Frames but did not show both Start and End frame controls. Nothing was submitted.", true, false);
       }
     }
   }
 
-  async function prepareNativeVideoSettings(payload, variants, framesMode) {
-    await assertNativeModelCapabilities(payload, "video", framesMode);
+  async function prepareNativeVideoSettings(payload, variants, framesMode, options = {}) {
+    let ownsSettingsSurface = false;
+    options = { ...options, videoPreparation: true, onSettingsOpened: () => { ownsSettingsSurface = true; } };
+    emitImagePreparationProgress(options, "validating requested settings");
+    const ensureSettingsSurface = async () => {
+      const wasVisible = flowSettingsPanelVisible();
+      await openFlowSettings(options);
+      if (!wasVisible && flowSettingsPanelVisible()) ownsSettingsSurface = true;
+    };
+    try {
     const type = payload.type || "video";
     const requestedModel = payload.model || payload.video_settings?.model;
     const modeName = framesMode ? "Frames" : "Ingredients";
-    const aspectRatio = payload.aspectRatio || payload.aspect_ratio;
-    const duration = payload.duration || payload.video_settings?.duration;
-    const resolution = payload.resolution || payload.video_settings?.resolution;
+    const aspectRatio = payload.aspectRatio ?? payload.aspect_ratio ?? payload.video_settings?.aspectRatio ?? payload.video_settings?.aspect_ratio;
+    const duration = payload.duration ?? payload.video_settings?.duration;
+    const resolution = payload.resolution ?? payload.video_settings?.resolution;
+    const modelCapabilities = await assertNativeModelCapabilities({
+      ...payload,
+      ...(requestedModel ? { model: requestedModel } : {}),
+      ...(aspectRatio ? { aspectRatio } : {}),
+      ...(duration != null ? { duration } : {}),
+      ...(resolution != null ? { resolution } : {}),
+    }, "video", framesMode, options);
 
-    await openFlowSettings();
-    await chooseRadio("Video");
-    if (aspectRatio) await chooseAspectRatio(aspectRatio);
+    emitImagePreparationProgress(options, "selecting Video mode");
+    await ensureSettingsSurface();
+    await chooseRadio("Video", options);
+    if (aspectRatio) await chooseVideoOption("ratio", aspectRatio, options);
 
     if (requestedModel) {
-      await chooseNativeModel(requestedModel, type);
-      await openFlowSettings();
-      await chooseRadio("Video");
-      if (aspectRatio) await chooseAspectRatio(aspectRatio);
+      emitImagePreparationProgress(options, "selecting requested model");
+      await chooseNativeModel(requestedModel, type, options);
+      const selectedModel = findModelPickerButton();
+      const selectedModelName = normalizeModelLabel(selectedModel?.innerText || selectedModel?.textContent || root.accessibleName?.(selectedModel) || "");
+      const requestedModelMatched = getModelAliases(requestedModel).some(alias => {
+        const normalizedAlias = normalizeModelLabel(alias);
+        return selectedModelName === normalizedAlias || (normalizedAlias.length >= 3 && selectedModelName.includes(normalizedAlias));
+      });
+      if (!requestedModelMatched) {
+        throw root.flowError("FLOW_VIDEO_MODEL_UNCONFIRMED", `Flow did not confirm requested video model "${requestedModel}" (current: ${selectedModelName || "unknown"}). Nothing was submitted.`, true, false);
+      }
+      await ensureSettingsSurface();
+      await chooseRadio("Video", options);
+      if (aspectRatio) await chooseVideoOption("ratio", aspectRatio, options);
     }
 
-    if (duration) await chooseDuration(duration);
-    if (resolution) await chooseResolution(resolution);
-    await chooseNativeVariantCount(variants);
+    if (duration != null) {
+      emitImagePreparationProgress(options, "selecting video duration");
+      const modelFixedDuration = Number.isFinite(Number(modelCapabilities?.fixedDuration)) && Number(duration) === Number(modelCapabilities.fixedDuration);
+      await chooseVideoOption("duration", duration, { ...options, allowAbsent: modelFixedDuration });
+    }
+    if (resolution != null) {
+      emitImagePreparationProgress(options, "selecting video resolution");
+      await chooseVideoOption("resolution", resolution, options);
+    }
+    emitImagePreparationProgress(options, "selecting output count");
+    await chooseNativeVariantCount(variants, options);
 
-    await openFlowSettings();
-    await selectAndConfirmMode(modeName, Boolean(framesMode));
-    const settingsCredits = await (root.FlowEditor?.waitForGenerationCreditQuote?.(2000) || root.waitForGenerationCreditQuote?.(2000));
-    await closeFlowSettings();
+    emitImagePreparationProgress(options, `selecting ${modeName} input mode`);
+    await ensureSettingsSurface();
+    await selectAndConfirmMode(modeName, Boolean(framesMode), options);
+    emitImagePreparationProgress(options, "reading generation credit quote");
+    const settingsCredits = await (root.FlowEditor?.waitForGenerationCreditQuote?.(Math.min(2000, Number.isFinite(options.deadline) ? Math.max(1, options.deadline - Date.now()) : 2000), options) || root.waitForGenerationCreditQuote?.(2000));
+    finishVideoPreparationDiagnostics("completed", { result: { creditQuote: Number.isFinite(settingsCredits) ? settingsCredits : "unknown", framesMode, model: requestedModel || null, aspectRatio: aspectRatio || null, duration: duration ?? null, resolution: resolution || null, variants } });
     return settingsCredits;
+    } catch (error) {
+      finishVideoPreparationDiagnostics("failed", {
+        error: `${error?.code || "FLOW_VIDEO_SETTINGS_ERROR"}: ${error?.message || String(error)}`,
+        quoteDiagnostics: safeCreditQuoteDiagnostics(),
+      });
+      throw error;
+    } finally {
+      await closeOwnedSettingsSurface(ownsSettingsSurface, options);
+    }
   }
 
   const FlowImageActions = Object.freeze({
-    prepare: async (payload, variants) => prepareNativeImageSettings(payload, variants),
-    prepareCharacterPortrait: async (character, variants) =>
-      prepareNativeImageSettings({ aspectRatio: character.aspect_ratio || "3:4", model: character.model || "Nano Banana" }, variants),
+    prepare: async (payload, variants, options) => prepareNativeImageSettings(payload, variants, options),
+    prepareCharacterPortrait: async (character, variants, options) =>
+      prepareNativeImageSettings({ aspectRatio: character.aspect_ratio || "3:4", model: character.model || "Nano Banana" }, variants, options),
   });
 
   const FlowVideoActions = Object.freeze({
-    prepare: async (payload, variants, framesMode) => prepareNativeVideoSettings(payload, variants, framesMode),
+    prepare: async (payload, variants, framesMode, options) => prepareNativeVideoSettings(payload, variants, framesMode, options),
   });
 
   const FlowSettings = Object.freeze({
     openFlowSettings,
     closeFlowSettings,
+    inspectImagePreparationDiagnostics,
+    inspectVideoPreparationDiagnostics,
+    safeCreditQuoteDiagnostics,
+    closeOwnedSettingsSurface,
     flowSettingsPanelVisible,
     flowRadio,
     flowOption,
@@ -764,6 +1049,7 @@
     chooseAspectRatio,
     chooseDuration,
     chooseResolution,
+    chooseVideoOption,
     chooseNativeVariantCount,
     chooseNativeModel,
     findModelPickerButton,

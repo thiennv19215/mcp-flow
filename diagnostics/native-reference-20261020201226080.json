@@ -1,0 +1,37 @@
+{
+  "started": "2026-10-20T20:12:26.08Z",
+  "mode": "reference",
+  "api": "http://127.0.0.1:18897",
+  "probes": [
+    {
+      "name": "image.reference.submit_only",
+      "status": "queued",
+      "job_id": "30f5c749"
+    }
+  ],
+  "job_id": "30f5c749",
+  "latest_job": {
+    "id": "30f5c749",
+    "status": "running",
+    "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-20261020201226080",
+    "scene": "scene-01",
+    "prompt": "Show the same subject on a plain white background, no text.",
+    "attempts": 1,
+    "credit_quote_verified": null,
+    "progress": "Flow submit: activating the submit button",
+    "files": [],
+    "outcome_unknown": false,
+    "request_dispatched": false,
+    "server_acceptance_observed": false
+  },
+  "finished": "2026-10-20T20:13:37.5929712Z",
+  "fatal_error": "fetch failed",
+  "post_restart_verification": {
+    "checked_at": "2026-10-20T20:13:37.5823086Z",
+    "job_id": "30f5c749",
+    "uploaded_reference": "fm-9aa6f547c686-upload.png",
+    "matching_flow_asset": "Show the same subject on a plain white background, no text.",
+    "result": "Flow library contains an image tile with the exact unique prompt, confirming the request was accepted; render was not awaited.",
+    "caveat": "Local API disconnected during submit and recovered the job as outcome_unknown; do not replay."
+  }
+}

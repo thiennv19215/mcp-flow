@@ -1,0 +1,41 @@
+{
+  "checked_at": "2026-10-21T02:02:27.537Z",
+  "http": 200,
+  "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+  "prompt": {
+    "contentEditable": true,
+    "characterCount": 0,
+    "chipCount": 0
+  },
+  "referenceAction": {
+    "action": "attach",
+    "phase": "failed",
+    "step": "picker closed",
+    "error": "FLOW_OPERATION_TIMEOUT: Timed out while waiting for the reference picker; no further Flow actions were started.",
+    "cleanupError": null,
+    "updatedAt": "2026-10-21T02:02:27.523Z",
+    "pickerOpen": false,
+    "pickerRole": null,
+    "pickerOptionCount": 0,
+    "pickerOptionLabels": [],
+    "searchValue": "",
+    "categoryTabs": [],
+    "chipCount": 0,
+    "chips": [],
+    "lastResult": null
+  },
+  "clear": {
+    "composer": {
+      "tag": "flow-base-prompt-box",
+      "className": "",
+      "connected": true
+    },
+    "clearPromptButton": null,
+    "chipCount": 0,
+    "chips": [],
+    "helper": {
+      "phase": "idle"
+    }
+  },
+  "activeJobs": []
+}

@@ -3,3 +3,4 @@ dist
 .env
 _metadata
 */_metadata
+*.log

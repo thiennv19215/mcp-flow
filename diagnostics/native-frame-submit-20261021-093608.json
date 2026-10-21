@@ -1,0 +1,78 @@
+{
+  "started": "2026-10-21T02:36:08.4683046Z",
+  "mode": "first_frame_video_submit_only",
+  "project_id": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+  "asset": "fm-9aa6f547c686-upload.png",
+  "prompt": "A gentle camera push toward the product from the supplied opening frame, with subtle natural motion and no scene changes. Fresh frame check 20261021-093608.",
+  "request": {
+    "retries": 0,
+    "submit_only": true,
+    "allow_unknown_quote": false,
+    "variants": 1,
+    "max_credits": 15,
+    "type": "video"
+  },
+  "generation_api_calls": 1,
+  "probes": [],
+  "observer_health_repair": {
+    "fetch_hook_active": true,
+    "xhr_hook_active": true,
+    "ready": true,
+    "active_attempts": 0
+  },
+  "queue_response": {
+    "output_dir": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-frame-20261021-093608",
+    "jobs": [
+      {
+        "id": "2891d147",
+        "status": "running",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-frame-20261021-093608",
+        "scene": "scene-01",
+        "prompt": "A gentle camera push toward the product from the supplied opening frame, with subtle natural motion and no scene changes. Fresh frame check 20261021-093608.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "files": [],
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false
+      }
+    ]
+  },
+  "job_id": "2891d147",
+  "latest_job": {
+    "id": "2891d147",
+    "status": "failed",
+    "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-frame-20261021-093608",
+    "scene": "scene-01",
+    "prompt": "A gentle camera push toward the product from the supplied opening frame, with subtle natural motion and no scene changes. Fresh frame check 20261021-093608.",
+    "attempts": 1,
+    "credit_quote_verified": null,
+    "progress": "Flow submit: selecting asset fm-9aa6f547c686-upload.png",
+    "files": [],
+    "error": "Flow's start frame picker stayed open after selection. Inspect the composer before retrying.",
+    "error_category": "unknown",
+    "outcome_unknown": false,
+    "request_dispatched": false,
+    "server_acceptance_observed": false
+  },
+  "result": "failed_before_dispatch_stop_no_retry",
+  "finished": "2026-10-21T02:36:20.6415153Z",
+  "postflight": {
+    "action_chip_count": 0,
+    "active_jobs": [],
+    "warnings": null,
+    "prompt": {
+      "contentEditable": true,
+      "characterCount": 0,
+      "chipCount": 0
+    },
+    "clear_chip_count": 0,
+    "action_chips": [],
+    "observer_ready": true,
+    "picker_open": true,
+    "active_attempts": 0,
+    "xhr_hook_active": true,
+    "composer": "Bắt đầu swap_horiz Kết thúc Bạn muốn tạo những gì? Tác nhân Video · 720p · 10 giây crop_16_9 x1 arro",
+    "fetch_hook_active": true
+  }
+}

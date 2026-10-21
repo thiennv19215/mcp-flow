@@ -1,0 +1,94 @@
+{
+  "started": "2026-10-21T01:58:58.286Z",
+  "api": "http://127.0.0.1:18897",
+  "operation": "inspect-only reference picker; no selection or generation",
+  "reference": "asset:fm-9aa6f547c686-upload.png",
+  "preflight": {
+    "http": 200,
+    "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "activeJobs": [],
+    "prompt": {
+      "contentEditable": true,
+      "characterCount": 0,
+      "chipCount": 0
+    },
+    "reference": {
+      "action": "idle",
+      "phase": "idle",
+      "step": "idle",
+      "error": null,
+      "cleanupError": null,
+      "updatedAt": "2026-10-21T01:58:58.351Z",
+      "pickerOpen": false,
+      "pickerRole": null,
+      "pickerOptionCount": 0,
+      "pickerOptionLabels": [],
+      "searchValue": "",
+      "categoryTabs": [],
+      "chipCount": 0,
+      "chips": []
+    },
+    "clear": {
+      "composer": {
+        "tag": "flow-base-prompt-box",
+        "className": "",
+        "connected": true
+      },
+      "clearPromptButton": null,
+      "chipCount": 0,
+      "chips": [],
+      "helper": {
+        "phase": "idle"
+      }
+    }
+  },
+  "inspect": {
+    "http": 400,
+    "data": {
+      "error": "Timed out while waiting for the reference picker; no further Flow actions were started."
+    }
+  },
+  "postflight": {
+    "http": 200,
+    "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "activeJobs": [],
+    "prompt": {
+      "contentEditable": true,
+      "characterCount": 0,
+      "chipCount": 0
+    },
+    "reference": {
+      "action": "attach",
+      "phase": "failed",
+      "step": "picker closed",
+      "error": "FLOW_OPERATION_TIMEOUT: Timed out while waiting for the reference picker; no further Flow actions were started.",
+      "cleanupError": null,
+      "updatedAt": "2026-10-21T01:59:13.479Z",
+      "pickerOpen": false,
+      "pickerRole": null,
+      "pickerOptionCount": 0,
+      "pickerOptionLabels": [],
+      "searchValue": "",
+      "categoryTabs": [],
+      "chipCount": 0,
+      "chips": [],
+      "lastResult": null
+    },
+    "clear": {
+      "composer": {
+        "tag": "flow-base-prompt-box",
+        "className": "",
+        "connected": true
+      },
+      "clearPromptButton": null,
+      "chipCount": 0,
+      "chips": [],
+      "helper": {
+        "phase": "idle"
+      }
+    }
+  },
+  "promptAndChipsUnchanged": true,
+  "pickerClosed": true,
+  "finished": "2026-10-21T01:59:13.498Z"
+}

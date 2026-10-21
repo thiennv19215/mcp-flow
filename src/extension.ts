@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { currentDeviceContext } from "./request-context.js";
 
-type ExtensionError = { code?: string; message?: string; retryable?: boolean; outcome_unknown?: boolean };
+type ExtensionError = { code?: string; message?: string; retryable?: boolean; outcome_unknown?: boolean; diagnostics?: unknown };
 type ExtensionResult = { ok: boolean; value?: unknown; error?: string | ExtensionError };
 type OutboundMessage =
   | { type: "command"; id: string; method: string; args: unknown[]; timeout_ms: number }
@@ -229,13 +229,16 @@ function acceptResult(connection: Connection, id: string, result: ExtensionResul
       code: detail.code || "EXTENSION_COMMAND_FAILED",
       retryable: Boolean(detail.retryable),
       outcome_unknown: Boolean(detail.outcome_unknown),
+      diagnostics: detail.diagnostics,
     }));
   }
 }
 
-function acceptProgress(connection: Connection, progress: { requestId?: unknown; tabId?: number; progress?: unknown }): void {
+function acceptProgress(connection: Connection, progress: { requestId?: unknown; tabId?: number; progress?: unknown }): boolean {
   const requestId = String(progress?.requestId ?? "");
-  if (requestId && connection.pending.has(requestId)) events.emit("progress", { ...progress, requestId, deviceId: connection.deviceId });
+  if (!requestId || !connection.pending.has(requestId)) return false;
+  events.emit("progress", { ...progress, requestId, deviceId: connection.deviceId });
+  return true;
 }
 
 function acceptInitialized(connection: Connection, info: { protocol?: number; version?: string; capabilities?: unknown }): void {
@@ -307,12 +310,11 @@ export function extensionHttpResult(deviceId: string, sessionId: string, id: str
   return true;
 }
 
-export function extensionHttpProgress(deviceId: string, sessionId: string, progress: { requestId?: unknown; tabId?: number; progress?: unknown }): boolean {
+export function extensionHttpProgress(deviceId: string, sessionId: string, progress: { requestId?: unknown; tabId?: number; progress?: unknown }): { accepted: boolean; matched: boolean } {
   const connection = connections.get(deviceId);
-  if (!isConnected(connection) || connection.transport !== "http-poll" || connection.sessionId !== sessionId) return false;
+  if (!isConnected(connection) || connection.transport !== "http-poll" || connection.sessionId !== sessionId) return { accepted: false, matched: false };
   connection.lastSeen = Date.now();
-  acceptProgress(connection, progress);
-  return true;
+  return { accepted: true, matched: acceptProgress(connection, progress) };
 }
 
 function call(connection: Connection, method: string, args: unknown[] = [], timeoutMs = 5 * 60_000): Promise<any> {

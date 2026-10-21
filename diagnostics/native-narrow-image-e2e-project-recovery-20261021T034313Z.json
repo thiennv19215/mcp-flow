@@ -1,0 +1,42 @@
+{
+  "started": "2026-10-21T03:43:13.2019986Z",
+  "scope": "reuse confirmed image upload, attempt one capped text-to-image submit-only request",
+  "api": "http://127.0.0.1:18897",
+  "upload": {
+    "status": "reused_confirmed_upload",
+    "title": "fm-9aa6f547c686-upload.png",
+    "uuid": "3e54fcea-fc18-4f6e-a904-0e6259fd0347",
+    "evidence": "diagnostics/native-upload-20261020201209389.json",
+    "duplicateUploadMade": false
+  },
+  "initialPreflightReport": "diagnostics/native-narrow-image-e2e-preflight-20261021T034217Z.json",
+  "recovery": {
+    "method": "documented local create_project/open_project APIs",
+    "createdProjectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "listed": true,
+    "opened": true
+  },
+  "finalPreflight": {
+    "statusMethod": "POST /api/status",
+    "detailed": false,
+    "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "observerReady": false,
+    "xhrHookActive": false,
+    "fetchHookActive": false,
+    "activeAttempts": 0,
+    "queuedRunningCount": 0,
+    "promptChars": 0,
+    "chips": 0,
+    "pickerOpen": false,
+    "composer": "settings_2",
+    "agentPressed": null,
+    "visibleQuoteCandidateCount": 0,
+    "extensionVersion": "not exposed by API"
+  },
+  "result": "BLOCKED_BEFORE_GENERATION",
+  "generationApiCalled": false,
+  "requestDispatched": false,
+  "outcomeUnknown": false,
+  "reason": "Fresh-project create/open did not dismiss the Flow settings surface. Composer remained settings_2 and observer hooks were false at the final preflight, so generation was not invoked.",
+  "finished": "2026-10-21T03:43:13.2023905Z"
+}

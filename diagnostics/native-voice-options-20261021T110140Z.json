@@ -1,0 +1,32 @@
+{
+  "timestampUtc": "2026-10-21T11:01:40Z",
+  "operation": "flow_voice_options",
+  "preflight": {
+    "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "promptChars": 0,
+    "promptChips": 0,
+    "referenceChips": 0,
+    "pickerOpen": false,
+    "observerReady": true,
+    "activeAttempts": 0,
+    "queued": [],
+    "running": []
+  },
+  "result": {
+    "error": "Not found.",
+    "labels": [],
+    "inspectionCompleted": false
+  },
+  "note": "Single POST /api/voice_options returned {error: Not found.}; no retry. Source contains voice_options, but the serving local API process does not expose this route. No picker was opened and no voice was selected.",
+  "postflight": {
+    "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "promptChars": 0,
+    "promptChips": 0,
+    "referenceChips": 0,
+    "pickerOpen": false,
+    "observerReady": true,
+    "activeAttempts": 0,
+    "queued": [],
+    "running": []
+  }
+}

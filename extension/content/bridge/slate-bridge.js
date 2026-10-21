@@ -147,11 +147,6 @@
       }
     }
 
-    // Direct click in main world as companion/fallback
-    try {
-      target.click();
-    } catch (_) {}
-
     return {
       success: invoked > 0,
       invoked: invoked,

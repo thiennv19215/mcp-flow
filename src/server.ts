@@ -295,8 +295,9 @@ export async function startServer(
           if (typeof body.session_id !== "string" || body.session_id.length > 100 || (body.requestId !== undefined && typeof body.requestId !== "string" && typeof body.requestId !== "number")) {
             return json(res, 400, { error: "Invalid extension progress." });
           }
-          if (!extensionHttpProgress(deviceId, body.session_id, { requestId: body.requestId, tabId: typeof body.tabId === "number" ? body.tabId : undefined, progress: body.progress })) return json(res, 409, { error: "Connector session was replaced." });
-          return json(res, 200, { ok: true });
+          const receipt = extensionHttpProgress(deviceId, body.session_id, { requestId: body.requestId, tabId: typeof body.tabId === "number" ? body.tabId : undefined, progress: body.progress });
+          if (!receipt.accepted) return json(res, 409, { error: "Connector session was replaced." });
+          return json(res, 200, { ok: true, matched: receipt.matched });
         }
       }
       if (url.pathname === "/api/auth/session" && req.method === "GET") {

@@ -1,0 +1,117 @@
+{
+  "started": "2026-10-21T02:41:29.111Z",
+  "api": "http://127.0.0.1:18897",
+  "mode": "first-frame submit-only",
+  "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+  "asset": "fm-9aa6f547c686-upload.png",
+  "prompt": "A gentle, slow camera push toward the existing product; preserve its shape and composition, with subtle natural motion and no text. First-frame dispatch verification 2026-10-21T02:41:29.111Z.",
+  "request": {
+    "type": "video",
+    "first_frame": "asset:fm-9aa6f547c686-upload.png",
+    "max_credits": 15,
+    "submit_only": true,
+    "retries": 0,
+    "variants": 1
+  },
+  "preflight": {
+    "ready": true,
+    "noQueuedOrRunningJobs": true,
+    "activeAttempts": 0,
+    "cleanComposer": true,
+    "exactAssetCount": 1
+  },
+  "liveGenerationCalls": 1,
+  "polling": [
+    {
+      "at": "2026-10-21T02:41:29.172Z",
+      "http": 400,
+      "status": null,
+      "request_dispatched": null,
+      "outcome_unknown": null,
+      "error": null
+    }
+  ],
+  "submitHttp": 200,
+  "submitResponse": {
+    "output_dir": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-first-frame-20261021024129110",
+    "jobs": [
+      {
+        "id": "ae85c866",
+        "status": "running",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-first-frame-20261021024129110",
+        "scene": "scene-01",
+        "prompt": "A gentle, slow camera push toward the existing product; preserve its shape and composition, with subtle natural motion and no text. First-frame dispatch verification 2026-10-21T02:41:29.111Z.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "files": [],
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false
+      }
+    ]
+  },
+  "jobId": "ae85c866",
+  "result": "FAILED_PRE_DISPATCH",
+  "finished": "2026-10-21T02:41:42.035Z",
+  "postflight": {
+    "http": 200,
+    "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "observer": {
+      "ready": true,
+      "activeAttempts": 0
+    },
+    "promptCharacters": 0,
+    "chipCount": 0,
+    "pickerOpen": false,
+    "composer": "Video · 720p · 10s crop_16_9 x1"
+  },
+  "statusCheck": {
+    "http": 200,
+    "job": {
+      "id": "ae85c866",
+      "status": "failed",
+      "request_dispatched": false,
+      "server_acceptance_observed": false,
+      "outcome_unknown": false,
+      "error": "Flow's start frame picker stayed open or became unidentifiable after the bounded close attempts. Inspect the composer before retrying.",
+      "credit_quote_verified": null,
+      "credits": null
+    },
+    "observer": {
+      "ready": true,
+      "activeAttempts": 0
+    },
+    "activeQueueJobs": [],
+    "promptCharacters": 0,
+    "chipCount": 0,
+    "pickerOpen": false
+  },
+  "evidence": {
+    "jobId": "ae85c866",
+    "status": "failed",
+    "request_dispatched": false,
+    "outcome_unknown": false,
+    "error": "Flow's start frame picker stayed open or became unidentifiable after the bounded close attempts. Inspect the composer before retrying."
+  },
+  "diagnosis": {
+    "conclusion": "The saved evidence cannot determine whether Flow actually left the Start picker open or the exact frame list disappeared while the opener exposed no readable aria-expanded state. The failure message is emitted for either state.open===true or an unidentifiable state; the postflight snapshot was taken after cleanup and reports pickerOpen=false, which does not establish the state at the failure instant.",
+    "failurePhase": "bounded frame-picker cleanup, before quote read or request dispatch",
+    "capturedAtFailure": {
+    "exactFrameListIdentity": null,
+    "frameOpenerAriaExpanded": null,
+    "selectedOptionState": null,
+    "frameSlotMedia": null,
+    "visibleFramePickerOptions": null
+    },
+    "availableEvidence": {
+      "error": "Flow's start frame picker stayed open or became unidentifiable after the bounded close attempts. Inspect the composer before retrying.",
+      "requestDispatched": false,
+      "outcomeUnknown": false,
+      "quoteVerified": null,
+      "postflightPickerOpen": false
+    },
+    "selectorEvidenceInCurrentSource": "The frame action can identify its list only through a unique list opened by that exact click or a listbox named by the Start/End opener aria-controls/aria-owns. Cleanup reads that exact list and the exact opener aria-expanded attribute; it must not use another visible listbox.",
+    "followupInstrumentation": "Current source now records frame opener aria-label/title/aria-expanded/controls/owns/disabled/class, slot media summaries, exact-list identity/options/selected states, selected media UUID, confirmation source, cleanup state source, and close method in flow.state diagnostics and close-failure text.",
+    "liveDisposition": "Keep ae85c866 as a definite pre-dispatch failure. Do not replay."
+  }
+}

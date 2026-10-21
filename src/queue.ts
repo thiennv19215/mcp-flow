@@ -1,13 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { loadJobs, saveJob } from "./users.js";
 import { classifyFlowFailure, type FlowErrorCategory } from "./flow-error-policy.js";
+import { sanitizeUnknownSubmitDiagnostics, type SafeUnknownSubmitDiagnostics } from "./flow-request-diagnostics.js";
 
-export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled";
+export type JobStatus = "queued" | "running" | "submitted" | "done" | "failed" | "cancelled";
 
 export interface SceneParams {
   prompt: string;
   type: "video" | "image";
   max_credits: number;
+  submit_only?: boolean;
+  allow_unknown_quote?: boolean;
   duration?: 4 | 6 | 8 | 10;
   resolution?: "360p" | "720p";
   model?: string;
@@ -15,7 +18,9 @@ export interface SceneParams {
   variants?: number;
   first_frame?: string;
   last_frame?: string;
+  voice?: string;
   reference_images?: string[];
+  video_reference?: { asset: string; start_frame_index: number; end_frame_index: number };
   chain_from?: string;
   reference_from?: string;
   edit_asset?: string;
@@ -47,6 +52,12 @@ export interface Job {
   // True when Flow may have accepted a submit but the backend could not confirm its result.
   // Such a job must not be retried automatically or from the Retry button.
   outcomeUnknown?: boolean;
+  requestDispatched?: boolean;
+  serverAcceptanceObserved?: boolean;
+  creditQuoteVerified?: boolean;
+  requestDiagnostics?: SafeUnknownSubmitDiagnostics;
+  // Queue-owned synchronous durability hook. Functions are omitted by JSON.stringify.
+  persistNow?: () => void;
   // Scene numbers a batch still could not make after all its own retries; flow_retry redoes just these.
   failed_scenes?: number[];
   createdAt: string;
@@ -67,19 +78,36 @@ export class JobQueue {
 
   constructor(private runner: JobRunner, private scopeId = "local") {
     for (const job of loadJobs(scopeId)) {
-      // A restart cannot tell whether Flow accepted a request before the process stopped.
-      // Keep the result visible and block retry rather than risk a second paid generation.
+      job.persistNow = () => this.persist(job);
+      // The SQLite status column predates the `submitted` state. Recover submit-only
+      // receipts from the durable job data, whose dispatched flag is written first.
+      if (job.status === "done" && job.params.submit_only && job.requestDispatched) {
+        job.status = "submitted";
+      }
       if (job.status === "running") {
-        job.status = "failed";
         job.finishedAt = new Date().toISOString();
-        job.outcomeUnknown = true;
-        job.errorCategory = "extension";
-        job.error = "Backend restarted while this job was running. Check the Flow project before retrying; its outcome is unknown.";
-        saveJob(scopeId, job);
+        job.progress = undefined;
+        if (job.params.submit_only && job.requestDispatched === true) {
+          job.status = "submitted";
+          job.outcomeUnknown = false;
+          job.error = undefined;
+          job.errorCategory = undefined;
+          job.note = job.serverAcceptanceObserved
+            ? "Flow accepted the dispatched request; rendering was not awaited."
+            : "Flow request dispatch was confirmed before backend restart; server acceptance is unknown and rendering was not awaited.";
+        } else {
+          // A restart cannot tell whether an interrupted operation reached submit.
+          // Keep it visible and block retry rather than risk a duplicate generation.
+          job.status = "failed";
+          job.outcomeUnknown = true;
+          job.errorCategory = "extension";
+          job.error = "Backend restarted while this job was running. Check the Flow project before retrying; its outcome is unknown.";
+        }
+        this.persist(job);
       }
       if (job.error && !job.errorCategory) {
         job.errorCategory = classifyFlowFailure({ message: job.error, outcome_unknown: job.outcomeUnknown }).category;
-        saveJob(scopeId, job);
+        this.persist(job);
       }
       this.jobs.set(job.id, job);
     }
@@ -96,8 +124,9 @@ export class JobQueue {
       attempts: 0,
       createdAt: new Date().toISOString(),
     };
+    job.persistNow = () => this.persist(job);
     this.jobs.set(job.id, job);
-    saveJob(this.scopeId, job);
+    this.persist(job);
     void this.work();
     return job;
   }
@@ -110,7 +139,13 @@ export class JobQueue {
     return this.jobs.get(id);
   }
 
-  persist(job: Job): void { saveJob(this.scopeId, job); }
+  persist(job: Job): void {
+    // The legacy SQLite status CHECK accepts `done` but not `submitted`. The JSON
+    // payload is authoritative on load; normalize that column value and reconstruct
+    // `submitted` from submit_only + requestDispatched during recovery.
+    const durable = job.status === "submitted" ? { ...job, status: "done" as const } : job;
+    saveJob(this.scopeId, durable);
+  }
 
   list(): Job[] {
     return [...this.jobs.values()];
@@ -125,7 +160,7 @@ export class JobQueue {
       job.errorCategory = undefined;
       job.retryAfterAt = undefined;
       job.finishedAt = undefined;
-      saveJob(this.scopeId, job);
+      this.persist(job);
       void this.work();
     }
     return job;
@@ -136,7 +171,7 @@ export class JobQueue {
     if (job && job.status === "queued") {
       job.status = "cancelled";
       job.finishedAt = new Date().toISOString();
-      saveJob(this.scopeId, job);
+      this.persist(job);
     }
     return job;
   }
@@ -146,7 +181,7 @@ export class JobQueue {
       if (job.status !== "queued") continue;
       job.status = "cancelled";
       job.finishedAt = new Date().toISOString();
-      saveJob(this.scopeId, job);
+      this.persist(job);
     }
   }
 
@@ -173,10 +208,10 @@ export class JobQueue {
         job.retryAfterAt = undefined;
         job.status = "running";
         job.attempts++;
-        saveJob(this.scopeId, job);
+        this.persist(job);
         try {
           job.files = await this.runner(job);
-          job.status = "done";
+          job.status = job.params.submit_only && job.requestDispatched ? "submitted" : "done";
           job.error = undefined;
           job.errorCategory = undefined;
           job.retryAfterAt = undefined;
@@ -184,16 +219,21 @@ export class JobQueue {
         } catch (err) {
           job.error = err instanceof Error ? err.message : String(err);
           const policy = classifyFlowFailure(err);
-          job.outcomeUnknown = policy.outcomeUnknown;
+          // Once the correlated submit receipt says the request was dispatched,
+          // any later failure must remain ineligible for automatic replay.
+          job.outcomeUnknown = policy.outcomeUnknown || job.requestDispatched === true;
+          job.requestDiagnostics = job.outcomeUnknown
+            ? sanitizeUnknownSubmitDiagnostics((err as { diagnostics?: unknown } | null)?.diagnostics)
+            : undefined;
           job.errorCategory = policy.category;
-          const canAutoRetry = policy.autoRetry && policy.retryable && !policy.outcomeUnknown && job.attempts <= (job.params.retries ?? 1);
+          const canAutoRetry = policy.autoRetry && policy.retryable && !job.outcomeUnknown && job.attempts <= (job.params.retries ?? 1);
           if (canAutoRetry && policy.cooldownMs > 0) job.retryAfterAt = new Date(Date.now() + policy.cooldownMs).toISOString();
           job.status = canAutoRetry ? "queued" : "failed";
           if (canAutoRetry) job.finishedAt = undefined;
         }
         if (job.status === "queued") job.finishedAt = undefined;
         else job.finishedAt = new Date().toISOString();
-        saveJob(this.scopeId, job);
+        this.persist(job);
         this.lastFinished = Date.now();
       }
     } finally {

@@ -1,0 +1,110 @@
+{
+  "started": "2026-10-21T01:38:26.178Z",
+  "api": "http://127.0.0.1:18897",
+  "operation": "read-only flow.characters list to invoke source-defined picker close cleanup",
+  "mutation": false,
+  "before": {
+    "picker": {
+      "action": "attach",
+      "phase": "failed",
+      "step": "picker close failed",
+      "error": "FLOW_ASSET_NOT_FOUND: No exact reference named \"fm-9aa6f547c686-upload.png\" in the selected project. Nothing was attached.",
+      "cleanupError": "FLOW_ASSET_PICKER_CLOSE_FAILED: Flow's reference picker stayed open and could not be dismissed.",
+      "updatedAt": "2026-10-21T01:38:26.227Z",
+      "pickerOpen": true,
+      "pickerRole": "listbox",
+      "pickerOptionCount": 12,
+      "chipCount": 0,
+      "chips": [],
+      "lastResult": null
+    },
+    "clear": {
+      "composer": {
+        "tag": "flow-base-prompt-box",
+        "className": "",
+        "connected": true
+      },
+      "clearPromptButton": null,
+      "chipCount": 0,
+      "chips": [],
+      "helper": {
+        "phase": "idle"
+      }
+    },
+    "prompt": {
+      "tag": "div",
+      "aria": "Bạn muốn tạo những gì? close Tác nhân 🍌 Nano Banana 2.1 crop_9_16 x1 arrow_forward",
+      "text": "Bạn muốn tạo những gì? close Tác nhân 🍌 Nano Banana 2.1 crop_9_16 x1 arrow_forward",
+      "icon": "",
+      "className": "base-prompt-box",
+      "disabled": false,
+      "connected": true
+    },
+    "activeJobs": []
+  },
+  "characters": [
+    {
+      "name": "Untitled character",
+      "use_as": "character:Untitled character"
+    }
+  ],
+  "outcome": "characters read completed",
+  "after": {
+    "picker": {
+      "action": "attach",
+      "phase": "failed",
+      "step": "picker close failed",
+      "error": "FLOW_ASSET_NOT_FOUND: No exact reference named \"fm-9aa6f547c686-upload.png\" in the selected project. Nothing was attached.",
+      "cleanupError": "FLOW_ASSET_PICKER_CLOSE_FAILED: Flow's reference picker stayed open and could not be dismissed.",
+      "updatedAt": "2026-10-21T01:38:28.602Z",
+      "pickerOpen": true,
+      "pickerRole": "listbox",
+      "pickerOptionCount": 12,
+      "chipCount": 0,
+      "chips": [],
+      "lastResult": null
+    },
+    "clear": {
+      "composer": {
+        "tag": "flow-base-prompt-box",
+        "className": "",
+        "connected": true
+      },
+      "clearPromptButton": null,
+      "chipCount": 0,
+      "chips": [],
+      "helper": {
+        "phase": "idle"
+      }
+    },
+    "prompt": {
+      "tag": "div",
+      "aria": "Bạn muốn tạo những gì? close Tác nhân 🍌 Nano Banana 2.1 crop_9_16 x1 arrow_forward",
+      "text": "Bạn muốn tạo những gì? close Tác nhân 🍌 Nano Banana 2.1 crop_9_16 x1 arrow_forward",
+      "icon": "",
+      "className": "base-prompt-box",
+      "disabled": false,
+      "connected": true
+    },
+    "activeJobs": []
+  },
+  "assetMapping": {
+    "apiTitles": [
+      {
+        "name": "fm-9aa6f547c686-upload.png",
+        "kind": "image"
+      },
+      {
+        "name": "fm-fff737cedcc9-upload.png",
+        "kind": "image"
+      }
+    ],
+    "resolver": {
+      "input": "asset:<name> strips only asset: prefix; exactOption compares accessible name, aria-label, title to supplied name, with optional Flow suffix removal; it does not strip image extensions"
+    },
+    "picker": {
+      "optionCount": 12,
+      "visibleNamesNotExposedByCurrentDiagnostics": true
+    }
+  }
+}

@@ -34,10 +34,13 @@
     "https://*.googleapis.com/*",
     "https://storage.googleapis.com/*",
     "https://*.usercontent.goog/*",
-    "https://mcp.shopcongngheso5.io.vn/*"
+    "https://mcp.shopcongngheso5.io.vn/*",
+    "http://127.0.0.1:18897/*",
+    "http://localhost:18897/*",
+    "http://127.0.0.1:18898/*"
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://flow.google.com https://*.googleusercontent.com https://*.googleapis.com https://storage.googleapis.com https://*.usercontent.goog https://mcp.shopcongngheso5.io.vn wss://mcp.shopcongngheso5.io.vn"
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' http://127.0.0.1:18898 http://127.0.0.1:18897 http://localhost:18897 https://flow.google.com https://*.googleusercontent.com https://*.googleapis.com https://storage.googleapis.com https://*.usercontent.goog https://mcp.shopcongngheso5.io.vn wss://mcp.shopcongngheso5.io.vn"
   },
   "background": {
     "service_worker": "background/service-worker.js",

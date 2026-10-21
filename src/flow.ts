@@ -4,10 +4,10 @@ import type { Job } from "./queue.js";
 import { executeFlowDom, extensionSupportsCapability } from "./extension.js";
 import { nativeDownloadIds, waitForNativeDownload, downloadNativeResults, extensionOf, materializeNativeDownload, unpackTakes } from "./native-downloads.js";
 import { uploadFlowMediaToProject, getCachedProjectMedia, cacheProjectMedia } from "./flow-transfer.js";
-import type { FlowState, FlowAsset, FlowProject, DownloadQuality, MediaKind, NativeMedia, CharacterParams } from "./types.js";
+import type { FlowState, FlowAsset, FlowProject, FlowCharacter, DownloadQuality, MediaKind, NativeMedia, CharacterParams } from "./types.js";
 import { validateFlowSceneCapabilities } from "./flow-capabilities.js";
 
-export type { FlowState, FlowAsset, FlowProject, DownloadQuality, MediaKind, NativeMedia, CharacterParams };
+export type { FlowState, FlowAsset, FlowProject, FlowCharacter, DownloadQuality, MediaKind, NativeMedia, CharacterParams };
 export { characterLook, rememberCharacter, createCharacter, editCharacter } from "./characters.js";
 export { uploadFlowMediaToProject } from "./flow-transfer.js";
 
@@ -65,8 +65,26 @@ export function requireCapabilities(...capabilities: string[]): void {
 
 export async function getFlowState(detailed = false): Promise<FlowState> {
   return executeFlowDom<FlowState>({
-    op: "flowOperation", name: "flow.state", payload: { detailed }, capability: "flow.native.state", timeoutMs: 8_000,
+    op: "flowOperation", name: "flow.state", payload: { detailed, includeProgressDiagnostics: true, progressDiagnosticsPing: detailed }, capability: "flow.native.state", timeoutMs: 8_000,
   }, { timeoutMs: 8_000 });
+}
+
+export async function getCorrelationObserverHealth(): Promise<{
+  ready: boolean;
+  version?: number;
+  observerRevision?: number;
+  projectId?: string | null;
+  activeAttempts?: number;
+  xhrHookActive?: boolean;
+  fetchHookActive?: boolean;
+}> {
+  return executeFlowDom({
+    op: "flowOperation",
+    name: "flow.generation.observer.health",
+    payload: {},
+    capability: "flow.native.generation.observer.health",
+    timeoutMs: 15_000,
+  }, { timeoutMs: 20_000 });
 }
 
 export async function listFlowProjects(): Promise<FlowProject[]> {
@@ -75,10 +93,26 @@ export async function listFlowProjects(): Promise<FlowProject[]> {
   }, { timeoutMs: 100_000 });
 }
 
+export async function createFlowProject(): Promise<FlowProject> {
+  const result = await executeFlowDom<{ project: FlowProject; created: boolean }>({
+    op: "flowOperation", name: "flow.project.create", payload: {}, capability: "flow.native.project.create", timeoutMs: 35_000,
+  }, { timeoutMs: 40_000 });
+  if (!result?.created || !result.project?.id) {
+    throw Object.assign(new Error("Flow did not confirm the newly created project."), {
+      code: "FLOW_CREATE_PROJECT_RESULT_UNKNOWN", retryable: false, outcome_unknown: true,
+    });
+  }
+  return result.project;
+}
+
 export async function openFlowProject(projectId: string): Promise<{ opened: boolean; id: string; url: string }> {
   return executeFlowDom({
     op: "flowOperation", name: "flow.project.open", payload: { projectId }, capability: "flow.native.project.open", timeoutMs: 60_000,
   }, { timeoutMs: 65_000 });
+}
+
+export async function listFlowVoiceOptions(): Promise<{ voices: string[]; count: number; source: string; readOnly: true }> {
+  return nativeOperation("flow.voices.options", {}, "flow.native.voices.options", undefined, 35_000);
 }
 
 export async function runGeneration(job: Job): Promise<string[]> {
@@ -91,6 +125,13 @@ export async function runGeneration(job: Job): Promise<string[]> {
   const activeRefs = framesMode ? [] : refs;
   const isAssetReference = (value: string) => /^asset:/i.test(value);
   const isCharacterReference = (value: string) => /^character:/i.test(value);
+  const allowUnknownQuote = s.allow_unknown_quote === true && s.submit_only === true && s.type === "image" &&
+    activeRefs.length === 1 && isAssetReference(activeRefs[0]) && !framesMode;
+  if (s.allow_unknown_quote === true && !allowUnknownQuote) {
+    throw Object.assign(new Error("allow_unknown_quote is limited to one submit_only image request with exactly one existing asset reference."), {
+      code: "FLOW_UNKNOWN_QUOTE_SCOPE_DENIED", retryable: false, outcome_unknown: false,
+    });
+  }
   const localFileSupported = (file?: string) => {
     if (!file || isAssetReference(file) || isCharacterReference(file)) return true;
     try {
@@ -159,16 +200,58 @@ export async function runGeneration(job: Job): Promise<string[]> {
   }
   const normalizedRatio = normalizeAspectRatio(s.aspect_ratio);
 
-  const submitted = await nativeOperation<{ submitted: boolean; before: string[]; type: MediaKind; expectedCount: number; credits?: number; correlationAttemptId?: string }>("flow.generation.submit", {
+  const submitted = await nativeOperation<{ submitted: boolean; requestDispatched?: boolean; serverAcceptanceObserved?: boolean; before: string[]; type: MediaKind; expectedCount: number; credits?: number | null; correlationAttemptId?: string }>("flow.generation.submit", {
     prompt: s.prompt, type: s.type, model: s.model, aspectRatio: normalizedRatio, duration: s.duration,
     resolution: s.resolution, variants: s.variants, maxCredits: s.max_credits,
+    ...(s.voice ? { voice: s.voice } : {}),
+    submitOnly: s.submit_only === true, allowUnknownQuote,
     firstFrame: frame(s.first_frame, "start"), lastFrame: frame(s.last_frame, "end"), attachments,
   }, "flow.native.generation.submit", job, 120_000);
 
-  if (typeof submitted.credits !== "number") throw new Error("Native generation did not return its credit quote after submission. The outcome may be unknown; inspect Flow before retrying.");
-  job.credits = submitted.credits;
-  if (job.credits > s.max_credits) throw new Error(`Flow quoted ${job.credits} credits, above max_credits=${s.max_credits}. Nothing should have been generated.`);
-  if (!submitted.submitted) throw new Error("Native Flow submit did not confirm that generation started.");
+  // Persist this receipt before checking quote policy or taking any later path.
+  // A backend restart after this point can report submit_only work as submitted
+  // instead of losing the dispatch evidence with the in-memory Job object.
+  job.requestDispatched = submitted.requestDispatched === true;
+  job.serverAcceptanceObserved = submitted.serverAcceptanceObserved === true;
+  job.persistNow?.();
+  if (!submitted.submitted) {
+    throw Object.assign(new Error("Native Flow submit did not confirm a submitted request; inspect Flow before retrying."), {
+      code: "FLOW_SUBMIT_RECEIPT_INCOMPLETE",
+      retryable: false,
+      outcome_unknown: submitted.requestDispatched === true,
+    });
+  }
+  if (submitted.requestDispatched !== true) {
+    const error = Object.assign(new Error("Flow did not provide correlated evidence that this submit request was dispatched. Inspect Flow before retrying."), {
+      code: "FLOW_SUBMIT_DISPATCH_UNCONFIRMED",
+      retryable: false,
+      outcome_unknown: true,
+    });
+    throw error;
+  }
+  const quoteVerified = typeof submitted.credits === "number";
+  job.creditQuoteVerified = quoteVerified;
+  if (!quoteVerified && !allowUnknownQuote) {
+    throw Object.assign(new Error("Flow dispatched the request but did not return its verified credit quote; inspect Flow before retrying."), {
+      code: "FLOW_SUBMIT_RECEIPT_INCOMPLETE",
+      retryable: false,
+      outcome_unknown: true,
+    });
+  }
+  if (quoteVerified) job.credits = submitted.credits!;
+  else job.note = [job.note, "Flow request was dispatched, but no verifiable credit quote was shown; the max_credits cap could not be checked."].filter(Boolean).join(" · ");
+  if (quoteVerified && job.credits! > s.max_credits) {
+    throw Object.assign(new Error(`Flow dispatched a request quoted at ${job.credits} credits, above max_credits=${s.max_credits}; inspect Flow before retrying.`), {
+      code: "FLOW_MAX_CREDITS_EXCEEDED",
+      retryable: false,
+      outcome_unknown: true,
+    });
+  }
+  if (s.submit_only) {
+    job.progress = undefined;
+    job.note = "Flow submit request was dispatched; rendering and downloads were not awaited.";
+    return [];
+  }
   const observed = await nativeOperation<{ media: NativeMedia[] }>("flow.generation.observe", {
     before: submitted.before, kind: submitted.type, expectedCount: submitted.expectedCount,
     correlationAttemptId: submitted.correlationAttemptId,
@@ -178,15 +261,55 @@ export async function runGeneration(job: Job): Promise<string[]> {
   return downloadNativeResults(observed.media, s.output_dir, s.file_stem, s.download_quality ?? "original", job);
 }
 
-export async function attachReferences(references: string[]): Promise<unknown> {
+export async function attachReferences(references: string[], inspectOnly = false): Promise<unknown> {
   requireCapabilities("flow.native.references.attach");
-  return nativeOperation("flow.references.attach", { references }, "flow.native.references.attach", undefined, 60_000);
+  return nativeOperation("flow.references.attach", { references, ...(inspectOnly ? { inspectOnly: true } : {}) }, "flow.native.references.attach", undefined, 60_000);
 }
 
-export async function listCharacters(): Promise<string[]> {
+export async function clearFlowReferences(): Promise<{ cleared: number; remaining: number }> {
+  requireCapabilities("flow.native.references.clear");
+  return nativeOperation(
+    "flow.references.clear",
+    {},
+    "flow.native.references.clear",
+    undefined,
+    30_000,
+  );
+}
+
+export async function listCharacters(): Promise<FlowCharacter[]> {
   const state = await getFlowState();
   if (!state.signedIn || !state.inProject) throw new Error(state.hint || "Open a signed-in Flow project first.");
-  return nativeOperation("flow.characters.list", {}, "flow.native.characters.list", undefined, 90_000);
+  const result = await nativeOperation<unknown>("flow.characters.list", {}, "flow.native.characters.list", undefined, 90_000);
+  return normalizeFlowCharacters(result);
+}
+
+const flowCharacterUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** Normalize extension results from mixed versions without stringifying wrapped objects or exposing arbitrary IDs. */
+export function normalizeFlowCharacters(value: unknown): FlowCharacter[] {
+  const rows = Array.isArray(value) ? value
+    : value && typeof value === "object" && Array.isArray((value as { characters?: unknown }).characters)
+      ? (value as { characters: unknown[] }).characters : [];
+  const result: FlowCharacter[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    let candidate: unknown = row;
+    for (let depth = 0; depth < 4 && candidate && typeof candidate === "object"; depth++) {
+      const wrapped = candidate as Record<string, unknown>;
+      candidate = typeof wrapped.name === "string" ? wrapped.name
+        : wrapped.name && typeof wrapped.name === "object" ? wrapped.name
+          : typeof wrapped.character === "string" ? wrapped.character
+            : wrapped.character && typeof wrapped.character === "object" ? wrapped.character : undefined;
+    }
+    const name = typeof candidate === "string" ? candidate.replace(/\s+/g, " ").trim() : "";
+    if (!name || seen.has(name.toLocaleLowerCase())) continue;
+    seen.add(name.toLocaleLowerCase());
+    const record = row && typeof row === "object" ? row as Record<string, unknown> : {};
+    const rawId = typeof record.uuid === "string" ? record.uuid : "";
+    result.push({ name, ...(flowCharacterUuid.test(rawId) ? { uuid: rawId.toLowerCase() } : {}) });
+  }
+  return result;
 }
 
 export async function listAssets(): Promise<FlowAsset[]> {
@@ -218,11 +341,36 @@ export async function trashAsset(name: string): Promise<{ trashed: string }> {
 }
 
 const EDIT_TIMEOUT_MS = 10 * 60_000;
+function saveWorkflowDispatchReceipt(
+  job: Job,
+  result: { requestDispatched?: boolean; serverAcceptanceObserved?: boolean },
+): void {
+  if (result.requestDispatched !== true) return;
+  job.requestDispatched = true;
+  job.serverAcceptanceObserved = result.serverAcceptanceObserved === true;
+  job.persistNow?.();
+}
+
 export async function runEdit(job: Job): Promise<string[]> {
   requireCapabilities("flow.native.edit.run", "flow.native.asset.download");
-  const result = await nativeOperation<{ media: NativeMedia[] }>(
-    "flow.edit.run", { job: { id: job.id, params: job.params } }, "flow.native.edit.run", job, EDIT_TIMEOUT_MS + 2 * 60_000,
+  const timeoutMs = job.params.submit_only ? 135_000 : EDIT_TIMEOUT_MS + 2 * 60_000;
+  const result = await nativeOperation<{ media?: NativeMedia[]; requestDispatched?: boolean; serverAcceptanceObserved?: boolean; submitted?: boolean }>(
+    "flow.edit.run", { job: { id: job.id, params: job.params } }, "flow.native.edit.run", job, timeoutMs,
   );
+  saveWorkflowDispatchReceipt(job, result);
+  if (job.params.submit_only === true) {
+    if (result.requestDispatched !== true) throw Object.assign(new Error("Flow did not confirm the correlated edit request dispatch. Inspect the project before retrying."), { code: "FLOW_SUBMIT_UNCONFIRMED", retryable: false, outcome_unknown: true });
+    job.requestDispatched = true;
+    job.serverAcceptanceObserved = result.serverAcceptanceObserved === true;
+    job.outcomeUnknown = false;
+    job.note = job.serverAcceptanceObserved
+      ? "Flow accepted the edit request; rendering and download were not awaited."
+      : "Flow edit request dispatch was confirmed; server acceptance and rendered output were not awaited.";
+    job.persistNow?.();
+    job.progress = undefined;
+    return [];
+  }
+  if (!Array.isArray(result.media)) throw Object.assign(new Error("Flow edit returned no media result."), { code: "FLOW_EDIT_RESULT_INVALID", retryable: false, outcome_unknown: true });
   const files = await downloadNativeResults(result.media, job.params.output_dir, job.params.file_stem, job.params.download_quality ?? "original", job);
   job.progress = undefined;
   return files;
@@ -261,9 +409,24 @@ function step(job: Job, text: string | undefined): void {
 
 export async function runContinue(job: Job): Promise<string[]> {
   requireCapabilities("flow.native.continue.run", "flow.native.asset.download");
-  const result = await nativeOperation<{ media: NativeMedia[] }>(
-    "flow.continue.run", { job: { id: job.id, params: job.params } }, "flow.native.continue.run", job, VIDEO_TIMEOUT_MS + 5 * 60_000,
+  const timeoutMs = job.params.submit_only ? 135_000 : VIDEO_TIMEOUT_MS + 5 * 60_000;
+  const result = await nativeOperation<{ media?: NativeMedia[]; requestDispatched?: boolean; serverAcceptanceObserved?: boolean; submitted?: boolean }>(
+    "flow.continue.run", { job: { id: job.id, params: job.params } }, "flow.native.continue.run", job, timeoutMs,
   );
+  saveWorkflowDispatchReceipt(job, result);
+  if (job.params.submit_only === true) {
+    if (result.requestDispatched !== true) throw Object.assign(new Error("Flow did not confirm the correlated continuation request dispatch. Inspect the project before retrying."), { code: "FLOW_SUBMIT_UNCONFIRMED", retryable: false, outcome_unknown: true });
+    job.requestDispatched = true;
+    job.serverAcceptanceObserved = result.serverAcceptanceObserved === true;
+    job.outcomeUnknown = false;
+    job.note = job.serverAcceptanceObserved
+      ? "Flow accepted the continuation request; rendering and download were not awaited."
+      : "Flow continuation request dispatch was confirmed; server acceptance and rendered output were not awaited.";
+    job.persistNow?.();
+    job.progress = undefined;
+    return [];
+  }
+  if (!Array.isArray(result.media)) throw Object.assign(new Error("Flow continuation returned no media result."), { code: "FLOW_CONTINUE_RESULT_INVALID", retryable: false, outcome_unknown: true });
   job.progress = undefined;
   return downloadNativeResults(result.media, job.params.output_dir, job.params.file_stem, job.params.download_quality ?? "original", job);
 }
@@ -322,10 +485,24 @@ export async function runAgentBatch(job: Job): Promise<string[]> {
       agent_numbers: missing.map(index => sceneNumbers[index]),
     };
     try {
-      const result = await nativeOperation<{ media: NativeMedia[]; prompts?: string[]; partial?: boolean; failedMedia?: unknown[] }>(
-        "flow.agent.batch", { job: { id: job.id, params: passParams } }, "flow.native.agent.batch", job, 30 * 60_000,
+      const timeoutMs = job.params.submit_only ? 135_000 : 30 * 60_000;
+      const result = await nativeOperation<{ media?: NativeMedia[]; prompts?: string[]; partial?: boolean; failedMedia?: unknown[]; requestDispatched?: boolean; serverAcceptanceObserved?: boolean; submitted?: boolean }>(
+        "flow.agent.batch", { job: { id: job.id, params: passParams } }, "flow.native.agent.batch", job, timeoutMs,
       );
-      collectAgentPass(missing, result);
+      saveWorkflowDispatchReceipt(job, result);
+      if (job.params.submit_only === true) {
+        if (result.requestDispatched !== true) throw Object.assign(new Error("Flow did not confirm the correlated Agent request dispatch. Inspect the project before retrying."), { code: "FLOW_SUBMIT_UNCONFIRMED", retryable: false, outcome_unknown: true });
+        job.requestDispatched = true;
+        job.serverAcceptanceObserved = result.serverAcceptanceObserved === true;
+        job.outcomeUnknown = false;
+        job.note = job.serverAcceptanceObserved
+          ? "Flow accepted the Agent batch; rendering and download were not awaited."
+          : "Flow Agent request dispatch was confirmed; server acceptance and rendered output were not awaited.";
+        job.persistNow?.();
+        job.progress = undefined;
+        return [];
+      }
+      collectAgentPass(missing, { ...result, media: Array.isArray(result.media) ? result.media : [] });
     } catch (error) {
       if (error && (error as { outcome_unknown?: unknown }).outcome_unknown === true) throw error;
       if (!confirmedGenerationFailure(error)) throw error;

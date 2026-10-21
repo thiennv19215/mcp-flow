@@ -1,0 +1,59 @@
+{
+  "jobId": "3de91884",
+  "final": {
+    "status": "failed",
+    "requestDispatched": false,
+    "serverAcceptanceObserved": false,
+    "outcomeUnknown": false,
+    "creditQuoteVerified": null,
+    "credits": null,
+    "error": "Flow did not show a verifiable credit quote; nothing was submitted.",
+    "progress": "Flow submit: reading Flow's credit quote"
+  },
+  "polls": [
+    {
+      "accepted": false,
+      "progress": "Flow submit: reading Flow's credit quote",
+      "unknown": false,
+      "quote": null,
+      "status": "running",
+      "dispatched": false,
+      "credits": null,
+      "error": null
+    },
+    {
+      "accepted": false,
+      "progress": "Flow submit: reading Flow's credit quote",
+      "unknown": false,
+      "quote": null,
+      "status": "failed",
+      "dispatched": false,
+      "credits": null,
+      "error": "Flow did not show a verifiable credit quote; nothing was submitted."
+    }
+  ],
+  "postflight": {
+    "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "observerReady": true,
+    "activeAttempts": 0,
+    "activeJobs": [],
+    "promptCharacters": "",
+    "chipCount": 0,
+    "pickerOpen": false,
+    "surfaces": [
+      {
+        "tag": "div",
+        "role": "menu",
+        "labels": [
+          "upload Tải lên",
+          "folder Bộ sưu tập mới",
+          "account_circle Tạo nhân vật",
+          "play_movies Cảnh mới"
+        ],
+        "label": "upload Tải lên folder Bộ sưu tập mới account_circle Tạo nhân vật play_movies Cảnh mới"
+      }
+    ],
+    "quoteCandidates": [],
+    "composer": "settings_2"
+  }
+}

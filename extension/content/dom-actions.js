@@ -41,6 +41,7 @@
               message: String(error?.message || error),
               retryable: Boolean(error?.retryable),
               outcome_unknown: Boolean(error?.outcome_unknown),
+              ...(error?.diagnostics ? { diagnostics: error.diagnostics } : {}),
             },
           });
         }

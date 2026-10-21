@@ -1,0 +1,36 @@
+{
+  "started": "2026-10-21T02:13:17.940Z",
+  "mode": "frame",
+  "api": "http://127.0.0.1:18897",
+  "probes": [
+    {
+      "name": "video.first_frame.submit_only",
+      "status": "queued",
+      "job_id": "f0efa71f"
+    },
+    {
+      "name": "video.first_frame.submit_only",
+      "status": "failed_before_dispatch",
+      "error": "Job f0efa71f ended as failed before confirmed dispatch (outcome_unknown=false): Flow selected the requested references, but their exact backend IDs could not be verified for submit correlation. No generation request was sent; inspect the composer before retrying.. Do not replay this job."
+    }
+  ],
+  "job_id": "f0efa71f",
+  "latest_job": {
+    "id": "f0efa71f",
+    "status": "failed",
+    "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-frame-20261021021317940",
+    "scene": "scene-01",
+    "prompt": "A gentle slow camera push in from the supplied first frame.",
+    "attempts": 1,
+    "credit_quote_verified": null,
+    "progress": "Flow submit: selecting asset fm-9aa6f547c686-upload.png",
+    "files": [],
+    "error": "Flow selected the requested references, but their exact backend IDs could not be verified for submit correlation. No generation request was sent; inspect the composer before retrying.",
+    "error_category": "unknown",
+    "outcome_unknown": false,
+    "request_dispatched": false,
+    "server_acceptance_observed": false
+  },
+  "finished": "2026-10-21T02:13:26.625Z",
+  "fatal_error": "Job f0efa71f ended as failed before confirmed dispatch (outcome_unknown=false): Flow selected the requested references, but their exact backend IDs could not be verified for submit correlation. No generation request was sent; inspect the composer before retrying.. Do not replay this job."
+}

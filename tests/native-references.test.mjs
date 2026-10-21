@@ -7,43 +7,123 @@ import { join } from 'node:path';
 import vm from 'node:vm';
 import { EventEmitter } from 'node:events';
 import { extensionSetWebSocket } from '../dist/extension.js';
-import { runGeneration } from '../dist/flow.js';
+import { runGeneration, normalizeFlowCharacters } from '../dist/flow.js';
 import { getCachedProjectMedia, cacheProjectMedia } from '../dist/flow-transfer.js';
 import { materializeNativeDownload } from '../dist/native-downloads.js';
 import { readFlowDownloadChunk } from '../extension/background/flow-download-relay.js';
 
 const source = readFileSync(new URL('../extension/content/providers/flow/FlowComponents.js', import.meta.url), 'utf8');
-function harness({ names = ['MCP Test Mug'], addedKind = 'character', hideAttached = false } = {}) {
-  let open = true, ticks = 0;
+const mediaMenuSource = readFileSync(new URL('../extension/content/providers/flow/FlowMediaMenu.js', import.meta.url), 'utf8');
+const nativeFileTransferSource = readFileSync(new URL('../extension/content/shared/native-file-transfer.js', import.meta.url), 'utf8');
+function harness({ names = ['MCP Test Mug'], addedKind = 'character', hideAttached = false, openInitially = true, afterOpenSurface = 'listbox', ambiguousSurface = false, menuTransitionMs = 0, characterUuid = '22222222-2222-4222-8222-222222222222' } = {}) {
+  let open = openInitially, ticks = 0;
   const attached = [];
   let clicks = 0;
+  let addToPromptClicks = 0;
   const image = src => ({ alt: addedKind === 'character' ? 'Character ingredient image' : 'Image ingredient image', getAttribute: () => src });
-  const option = name => ({ name, getAttribute: () => null, querySelectorAll: () => [], click() {
-    clicks++; open = false;
-    if (hideAttached) entries.splice(0, entries.length);
-    attached.push({ querySelector: () => image('https://flow.google.com/asb/portrait=s512-rw'), closest: () => addedKind === 'character' ? {} : null });
+  const attachChip = () => attached.push({ querySelector: () => image('https://flow.google.com/asb/portrait=s512-rw'), closest: () => addedKind === 'character' ? {} : null });
+  const option = name => ({ name, getAttribute: key => key === 'data-character-id' ? characterUuid : null, querySelector: selector => selector === '[data-character-id]' && characterUuid ? { getAttribute: () => characterUuid } : null, querySelectorAll: () => [], click() {
+    clicks++;
+    if (addedKind === 'character') {
+      open = false;
+      if (hideAttached) entries.splice(0, entries.length);
+      attachChip();
+    }
   } });
   const entries = names.map(option);
-  const list = { querySelectorAll: selector => selector === '[role="option"]' ? entries : [] };
-  const opener = { getAttribute: () => open ? 'true' : 'false', click: () => { open = !open; } };
+  const list = { getAttribute: name => name === 'role' ? 'listbox' : null, querySelectorAll: selector => selector === '[role="option"]' ? entries : [], closest: () => null };
+  const surfaceState = { value: openInitially ? 'listbox' : 'closed' };
+  const menuItem = { name: 'Characters', getAttribute: key => key === 'role' ? 'menuitem' : null, querySelectorAll: () => [], innerText: 'Characters' };
+  const menu = { tagName: 'DIV', getAttribute: key => key === 'role' ? 'menu' : null, querySelectorAll: selector => selector === 'button,[role="button"],[role="menuitem"],[role="option"],mat-option' ? [menuItem] : [], innerText: 'Characters' };
+  const dialog = { tagName: 'DIV', getAttribute: key => key === 'role' ? 'dialog' : null, querySelectorAll: () => [], innerText: 'Choose a character' };
   const tab = { name: 'Characters', getAttribute: () => 'true' };
-  const tile = { getAttribute: () => 'MCP Test Mug', querySelector: selector => selector === 'flow-character-tile' ? {} : image('https://flow-content.google/image/different-thumbnail') };
+  const tile = { getAttribute: key => key === 'aria-label' ? 'MCP Test Mug' : key === 'data-character-id' ? characterUuid : null, querySelector: selector => selector === 'flow-character-tile' ? (addedKind === 'character' ? {} : null) : image('https://flow-content.google/image/different-thumbnail') };
+  const opener = { getAttribute: () => open ? 'true' : 'false', click: () => { open = !open; surfaceState.value = open ? afterOpenSurface : 'closed'; } };
+  const submit = {};
+  const editor = { isContentEditable: true, parentElement: null };
+  const composer = { tagName: 'DIV', className: 'flow-composer', contains: node => node === editor || node === submit || node === opener,
+    querySelectorAll: selector => selector === 'button,[role="button"],mat-button,[tabindex="0"]' ? [opener] : [] };
+  editor.parentElement = composer;
   const document = { body: { innerText: '' },
-    querySelector(selector) { return this.querySelectorAll(selector)[0] || (selector === '.ProseMirror' ? {} : null); },
+    querySelector(selector) { return this.querySelectorAll(selector)[0] || (selector.includes('.ProseMirror') ? editor : null); },
     querySelectorAll(selector) {
-    if (selector === '[role="listbox"]') return open ? [list] : [];
+    if (selector === '[role="listbox"]') return open && surfaceState.value === 'listbox' ? [list] : [];
+    if (selector === '[role="dialog"],[role="menu"],[role="listbox"],mat-menu,mat-select-panel') {
+      if (!open || surfaceState.value === 'closed') return [];
+      if (surfaceState.value === 'menu') return ambiguousSurface ? [menu, dialog] : [menu];
+      if (surfaceState.value === 'dialog') return [dialog];
+      return [list];
+    }
     if (selector === '[role="progressbar"]') return [];
-    if (selector === '[role="tab"]') return [tab];
+    if (selector === '[role="tab"]') return [{ name: 'All', getAttribute: () => 'true' }, tab];
     if (selector === 'button[aria-label="Ingredient"]') return attached;
     if (selector === 'flow-grid-tile-container') return [tile];
     return [];
   } };
-  const context = vm.createContext({ document, location: { href: 'https://flow.google.com/project/test', pathname: '/project/test' }, Date: { now: () => ticks += 500 }, visible: () => true,
-    accessibleName: el => el.name || '', flowButton: name => name === 'Add ingredients to the prompt box' ? opener : null,
-    wait: async () => {}, flowError: (code, message) => Object.assign(new Error(message), { code }),
+  const context = vm.createContext({ document, location: { href: 'https://flow.google.com/project/test', pathname: '/project/test' }, Date: class MockDate extends Date { static now() { return ticks; } }, visible: () => true,
+    mediaId: () => '33333333-3333-4333-8333-333333333333',
+    FlowEditor: { getFlowSubmitButton: () => submit },
+    accessibleName: el => el.name || '', flowButton: name => name === 'Add ingredients to the prompt box' ? opener : name === 'Add to prompt' && addedKind === 'image' ? { disabled: false, click() { addToPromptClicks++; open = false; attachChip(); } } : null,
+    wait: async ms => { ticks += ms; if (open && surfaceState.value === 'menu' && menuTransitionMs > 0 && ticks >= menuTransitionMs) surfaceState.value = 'listbox'; }, flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
   });
   vm.runInContext(source, context);
-  return { api: context.FlowReferenceActions, clicks: () => clicks };
+  return { api: context.FlowReferenceActions, clicks: () => clicks, addToPromptClicks: () => addToPromptClicks,
+    attachedCount: () => attached.length, pickerOpen: () => open };
+}
+
+function uploadedTileMenuHarness({ preexistingMenu = false, multipleNewMenus = false, chipIdentity = 'matching', leaveOwnedMenuOpen = false, openUnrelatedAfterAction = false, relation = true, farMenu = false, farMenuClose = false } = {}) {
+  const mediaUuid = '22222222-2222-4222-8222-222222222222';
+  const chips = [];
+  const menuStates = [];
+  let contextEvents = 0, actionClicks = 0, closeClicks = 0, unrelatedKeyEvents = 0;
+  const target = { id: 'media-trigger', getBoundingClientRect: () => ({ left: 100, top: 100, width: 20, height: 20 }), dispatchEvent(event) {
+    if (event.type !== 'contextmenu') return;
+    contextEvents++;
+    const count = multipleNewMenus ? 2 : 1;
+    for (let index = 0; index < count; index++) menuStates.push({ open: true, owned: true });
+  } };
+  const makeMenu = state => {
+    const action = { disabled: false, innerText: 'Add to prompt', getAttribute: () => null, click() {
+      actionClicks++;
+      const id = chipIdentity === 'mismatched' ? '33333333-3333-4333-8333-333333333333' : chipIdentity === 'matching' ? mediaUuid : null;
+      const image = { alt: 'Image ingredient image', getAttribute: key => key === 'data-media-id' ? id : null };
+      chips.push({ innerText: 'Ingredient', querySelector: () => image, closest: () => null });
+      if (!leaveOwnedMenuOpen) state.open = false;
+      if (openUnrelatedAfterAction) unrelatedState.open = true;
+    } };
+    const closeAction = { disabled: false, innerText: 'Close', getAttribute: () => null, click() { closeClicks++; state.open = false; } };
+    return { tagName: 'DIV', id: `owned-menu-${menuStates.indexOf(state)}`, isConnected: true,
+      getAttribute: key => key === 'role' ? 'menu' : key === 'aria-labelledby' && relation ? target.id : null,
+      getBoundingClientRect: () => farMenu ? { left: 400, top: 110, width: 120, height: 80, right: 520, bottom: 190 } : { left: 110, top: 110, width: 120, height: 80, right: 230, bottom: 190 },
+      querySelectorAll: selector => selector === '[role="menuitem"],button,[role="button"]' ? (farMenuClose ? [action, closeAction] : [action]) : [],
+      dispatchEvent(event) { if (state.owned && event.key === 'Escape') state.open = false; else unrelatedKeyEvents++; } };
+  };
+  const unrelatedState = { open: preexistingMenu, owned: false };
+  const unrelatedMenu = makeMenu(unrelatedState);
+  const menuObjects = new WeakMap();
+  const menuFor = state => { if (!menuObjects.has(state)) menuObjects.set(state, makeMenu(state)); return menuObjects.get(state); };
+  const tile = { isConnected: true, getAttribute: key => key === 'aria-label' ? 'Uploaded exact.png' : null,
+    querySelector: selector => selector === 'flow-video-tile,flow-scene-tile' ? null : selector === 'img,[role=\'img\']' ? target : null,
+    scrollIntoView() {} };
+  const document = { body: { innerText: '' }, querySelectorAll(selector) {
+    if (selector === 'flow-grid-tile-container') return [tile];
+    if (selector === '[role="menu"],mat-menu-panel') return [...(unrelatedState.open ? [unrelatedMenu] : []), ...menuStates.filter(state => state.open).map(menuFor)];
+    if (selector === '[role="dialog"],[role="menu"],[role="listbox"],mat-menu,mat-select-panel') return this.querySelectorAll('[role="menu"],mat-menu-panel');
+    if (selector === '[role="listbox"]' || selector === '[role="progressbar"]' || selector === '[role="tab"]') return [];
+    if (selector === 'button[aria-label="Ingredient"]') return chips;
+    return [];
+  }, querySelector() { return null; }, activeElement: null, dispatchEvent(event) { if (event.key === 'Escape') unrelatedKeyEvents++; } };
+  const context = vm.createContext({ document, location: { pathname: '/project/test' }, Date,
+    MouseEvent: class { constructor(type, options) { this.type = type; Object.assign(this, options); } },
+    KeyboardEvent: class { constructor(type, options) { this.type = type; Object.assign(this, options); } },
+    window: { innerWidth: 1280, innerHeight: 800 },
+    visible: el => ['Add to prompt', 'Ingredient'].includes(el?.innerText) || (el === unrelatedMenu ? unrelatedState.open : menuStates.some(state => state.open && menuFor(state) === el)),
+    mediaId: () => mediaUuid, findFlowTile: async title => title === 'Uploaded exact.png' ? tile : null,
+    accessibleName: el => el.innerText || '', wait: async () => {}, flowButton: () => null,
+    flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }) });
+  vm.runInContext(source, context);
+  return { api: context.FlowReferenceActions, mediaUuid, contextEvents: () => contextEvents, actionClicks: () => actionClicks,
+    closeClicks: () => closeClicks, chipCount: () => chips.length, unrelatedOpen: () => unrelatedState.open, ownedOpen: () => menuStates.some(state => state.open), unrelatedKeyEvents: () => unrelatedKeyEvents };
 }
 
 test('character is confirmed by a new typed chip even when thumbnail and chip CDN URLs differ', async () => {
@@ -52,7 +132,51 @@ test('character is confirmed by a new typed chip even when thumbnail and chip CD
   assert.equal(result.confirmed, true);
   assert.equal(result.kind, 'character');
   assert.equal(result.name, 'MCP Test Mug');
+  assert.equal(result.id, '22222222-2222-4222-8222-222222222222');
+  assert.notEqual(result.id, '33333333-3333-4333-8333-333333333333');
 });
+
+test('character attach fails closed before clicking when no explicit character UUID is exposed', async () => {
+  const { api, clicks } = harness({ characterUuid: null });
+  await assert.rejects(api.attach('character:MCP Test Mug'), error =>
+    error.code === 'FLOW_CHARACTER_ID_UNAVAILABLE' && error.outcome_unknown === false);
+  assert.equal(clicks(), 0);
+});
+
+test('character list API normalization unwraps nested names and drops unsafe IDs', () => {
+  const normalized = normalizeFlowCharacters([
+    { name: { name: ' Untitled   character ' }, use_as: 'character:[object Object]', uuid: 'not-a-uuid' },
+    { name: 'MCP Test Mug', id: '22222222-2222-4222-8222-222222222222' },
+    { name: 'Ada', uuid: '33333333-3333-4333-8333-333333333333', id: '44444444-4444-4444-8444-444444444444' },
+  ]);
+  assert.deepEqual(normalized, [
+    { name: 'Untitled character' },
+    { name: 'MCP Test Mug' },
+    { name: 'Ada', uuid: '33333333-3333-4333-8333-333333333333' },
+  ]);
+});
+
+test('inspect-only reports an exact match without selecting or attaching and closes its owned picker', async () => {
+  const { api, clicks, addToPromptClicks, attachedCount, pickerOpen } = harness({ addedKind: 'image', openInitially: false });
+  const result = await api.inspectPicker('asset:MCP Test Mug');
+  assert.equal(result.exact_match, true);
+  assert.equal(result.selected, false);
+  assert.equal(clicks(), 0);
+  assert.equal(addToPromptClicks(), 0);
+  assert.equal(attachedCount(), 0);
+  assert.equal(pickerOpen(), false);
+});
+
+test('inspect-only refuses a pre-existing picker and leaves it open without selection', async () => {
+  const { api, clicks, addToPromptClicks, attachedCount, pickerOpen } = harness({ addedKind: 'image', openInitially: true });
+  await assert.rejects(api.inspectPicker('asset:MCP Test Mug'), error =>
+    error.code === 'FLOW_REFERENCE_PICKER_ALREADY_OPEN' && error.outcome_unknown === false && /left it open/.test(error.message));
+  assert.equal(clicks(), 0);
+  assert.equal(addToPromptClicks(), 0);
+  assert.equal(attachedCount(), 0);
+  assert.equal(pickerOpen(), true);
+});
+
 test('a confirmed character is reused without clicking its option a second time', async () => {
   const { api, clicks } = harness({ hideAttached: true });
   await api.attach('character:MCP Test Mug');
@@ -62,7 +186,278 @@ test('a confirmed character is reused without clicking its option a second time'
 });
 test('an ordinary image chip cannot confirm an explicitly requested character', async () => {
   const { api } = harness({ addedKind: 'image' });
-  await assert.rejects(api.attach('character:MCP Test Mug'), error => error.code === 'FLOW_REFERENCE_ATTACH_UNCONFIRMED');
+  await assert.rejects(api.attach('character:MCP Test Mug', undefined, { deadline: Date.now() + 350 }), error =>
+    ['FLOW_REFERENCE_ATTACH_UNCONFIRMED', 'FLOW_OPERATION_TIMEOUT'].includes(error.code) && error.outcome_unknown === true);
+});
+test('an image reference is successful only after Flow adds its ingredient chip', async () => {
+  const { api, clicks, addToPromptClicks } = harness({ addedKind: 'image' });
+  const result = await api.attach('MCP Test Mug');
+  assert.equal(clicks(), 1, 'the exact image option is clicked once');
+  assert.equal(addToPromptClicks(), 1, 'Add to prompt is clicked once');
+  assert.equal(result.confirmed, true);
+  assert.equal(result.kind, 'image');
+});
+
+test('uploaded image attachment leaves an unrelated pre-existing menu untouched', async () => {
+  const fixture = uploadedTileMenuHarness({ preexistingMenu: true });
+  await assert.rejects(fixture.api.attach('Uploaded exact.png', undefined, { expectedId: fixture.mediaUuid, deadline: Date.now() + 1000 }), error => error.code === 'FLOW_REFERENCE_CONTEXT_MENU_BUSY');
+  assert.equal(fixture.contextEvents(), 0);
+  assert.equal(fixture.actionClicks(), 0);
+  assert.equal(fixture.unrelatedOpen(), true);
+  assert.equal(fixture.unrelatedKeyEvents(), 0);
+});
+
+test('uploaded image attachment rejects multiple newly opened menus', async () => {
+  const fixture = uploadedTileMenuHarness({ multipleNewMenus: true });
+  await assert.rejects(fixture.api.attach('Uploaded exact.png', undefined, { expectedId: fixture.mediaUuid, deadline: Date.now() + 1000 }), error => error.code === 'FLOW_REFERENCE_CONTEXT_MENU_AMBIGUOUS');
+  assert.equal(fixture.contextEvents(), 1);
+  assert.equal(fixture.actionClicks(), 0);
+  assert.equal(fixture.chipCount(), 0);
+});
+
+test('uploaded image attachment rejects one unrelated menu that appears during the menu wait', async () => {
+  const fixture = uploadedTileMenuHarness({ relation: false });
+  await assert.rejects(fixture.api.attach('Uploaded exact.png', undefined, { expectedId: fixture.mediaUuid, deadline: Date.now() + 1000 }), error => error.code === 'FLOW_REFERENCE_CONTEXT_MENU_UNOWNED');
+  assert.equal(fixture.contextEvents(), 1);
+  assert.equal(fixture.actionClicks(), 0);
+  assert.equal(fixture.chipCount(), 0);
+  assert.equal(fixture.ownedOpen(), true, 'an unowned menu is left untouched');
+});
+
+test('uploaded image attachment rejects a related menu outside the trigger position bound', async () => {
+  const fixture = uploadedTileMenuHarness({ farMenu: true, farMenuClose: true });
+  await assert.rejects(fixture.api.attach('Uploaded exact.png', undefined, { expectedId: fixture.mediaUuid, deadline: Date.now() + 1000 }), error => error.code === 'FLOW_REFERENCE_CONTEXT_MENU_POSITION_UNVERIFIED');
+  assert.equal(fixture.actionClicks(), 0);
+  assert.equal(fixture.closeClicks(), 0, 'a menu outside the full ownership bound never receives cleanup');
+  assert.equal(fixture.ownedOpen(), true, 'a related menu without verified position is left untouched');
+});
+
+test('uploaded image attachment rejects a conflicting chip UUID and cleans up only its owned menu', async () => {
+  const fixture = uploadedTileMenuHarness({ chipIdentity: 'mismatched', leaveOwnedMenuOpen: true, openUnrelatedAfterAction: true });
+  await assert.rejects(fixture.api.attach('Uploaded exact.png', undefined, { expectedId: fixture.mediaUuid, deadline: Date.now() + 1000 }), error => error.code === 'FLOW_ASSET_ID_MISMATCH' && error.outcome_unknown === true);
+  assert.equal(fixture.actionClicks(), 1);
+  assert.equal(fixture.unrelatedOpen(), true, 'the unrelated menu opened by an independent UI event is not closed');
+  assert.equal(fixture.ownedOpen(), true, 'menu remains open when no exact owned close affordance exists');
+  assert.equal(fixture.unrelatedKeyEvents(), 0);
+  assert.equal(fixture.api.inspectDiagnostics().cleanup, 'cleanup_pending_no_owned_close_affordance');
+});
+
+test('uploaded image attachment records provenance separately when the new chip exposes no UUID', async () => {
+  const fixture = uploadedTileMenuHarness({ chipIdentity: 'missing' });
+  const result = await fixture.api.attach('Uploaded exact.png', undefined, { expectedId: fixture.mediaUuid, deadline: Date.now() + 1000 });
+  assert.equal(result.confirmed, true);
+  assert.equal(result.idSource, 'verified_tile_action_provenance');
+  assert.equal(result.chipUuidConfirmed, false);
+  const diagnostics = fixture.api.inspectDiagnostics();
+  assert.equal(diagnostics.provenanceConfirmed, true);
+  assert.equal(diagnostics.chipUuidConfirmed, false);
+  const serialized = JSON.stringify(diagnostics);
+  assert.doesNotMatch(serialized, /Uploaded exact\.png|22222222-2222-4222-8222-222222222222|searchValue|pickerOptionLabels/);
+});
+
+test('uploaded image context actions serialize concurrent requests and reuse the first confirmed chip', async () => {
+  const fixture = uploadedTileMenuHarness({ chipIdentity: 'missing' });
+  const results = await Promise.all([
+    fixture.api.attach('Uploaded exact.png', undefined, { expectedId: fixture.mediaUuid, deadline: Date.now() + 1500 }),
+    fixture.api.attach('Uploaded exact.png', undefined, { expectedId: fixture.mediaUuid, deadline: Date.now() + 1500 }),
+  ]);
+  assert.equal(fixture.actionClicks(), 1);
+  assert.equal(results.filter(result => result.reused).length, 1);
+});
+
+test('reference picker waits for a bounded menu-to-listbox transition without clicking menu items', async () => {
+  const { api, clicks } = harness({ names: ['MCP Test Mug'], addedKind: 'image', openInitially: false, afterOpenSurface: 'menu', menuTransitionMs: 450 });
+  const result = await api.attach('MCP Test Mug', undefined, { deadline: Date.now() + 5000 });
+  assert.equal(result.confirmed, true);
+  assert.equal(clicks(), 1, 'only the exact asset option is clicked once the listbox appears');
+});
+
+test('a uniquely recognized intermediate menu is bounded and rejected without selecting an item', async () => {
+  const { api, clicks } = harness({ openInitially: false, afterOpenSurface: 'menu' });
+  await assert.rejects(api.attach('character:MCP Test Mug', undefined, { deadline: Date.now() + 1000 }), error =>
+    error.code === 'FLOW_ASSET_PICKER_TRANSITION_UNSUPPORTED' && /no menu item was selected/i.test(error.message) && error.diagnostics?.visibleSurfaces?.length === 1);
+  const diagnostics = api.inspectDiagnostics();
+  assert.equal(clicks(), 0, 'no menu item or asset option is selected');
+  assert.equal(diagnostics.surfaceStatus, 'menu_transition_timeout');
+  assert.deepEqual(JSON.parse(JSON.stringify(diagnostics.visibleSurfaces.map(surface => ({ role: surface.role, labelCount: surface.labelCount })))), [
+    { role: 'menu', labelCount: 1 },
+  ]);
+});
+
+test('ambiguous visible picker surfaces fail closed and preserve bounded surface labels', async () => {
+  const { api, clicks } = harness({ openInitially: false, afterOpenSurface: 'menu', ambiguousSurface: true });
+  await assert.rejects(api.attach('character:MCP Test Mug', undefined, { deadline: Date.now() + 1000 }), error =>
+    error.code === 'FLOW_ASSET_PICKER_SURFACE_AMBIGUOUS');
+  const diagnostics = api.inspectDiagnostics();
+  assert.equal(clicks(), 0, 'ambiguous popup surfaces never reach option selection');
+  assert.equal(diagnostics.surfaceStatus, 'ambiguous');
+  assert.equal(diagnostics.visibleSurfaces.length, 2);
+  assert.deepEqual(Array.from(diagnostics.visibleSurfaces, surface => surface.role), ['menu', 'dialog']);
+});
+
+test('first-frame selection is confirmed by the chosen asset appearing in the Start slot', async () => {
+  let pickerOpen = false;
+  let frameListPresent = true;
+  let omitExpandedState = false;
+  let slotAsset = '';
+  let optionClicks = 0;
+  let openerClicks = 0;
+  let clock = 0;
+  const projectId = '11111111-1111-4111-8111-111111111111';
+  const mediaUuid = '22222222-2222-4222-8222-222222222222';
+  const conflictingMediaUuid = '33333333-3333-4333-8333-333333333333';
+  const asbId = '0123456789abcdefghij0123456789ab';
+  let provideAlias = true;
+  let aliasEntries = [{ asb: asbId, mediaUuid, mediaType: 'image' }];
+  const listeners = new Map();
+  const identityWindow = {
+    addEventListener: (type, listener) => listeners.set(type, listener),
+    removeEventListener: (type, listener) => { if (listeners.get(type) === listener) listeners.delete(type); },
+    dispatchEvent: event => {
+      if (provideAlias && (event.type === 'TOBY_FLOW_MEDIA_IDENTITIES_READ' || event.type === 'TOBY_FLOW_V2_MEDIA_IDENTITIES_READ')) {
+        for (const type of ['TOBY_FLOW_MEDIA_IDENTITIES', 'TOBY_FLOW_V2_MEDIA_IDENTITIES']) listeners.get(type)?.({ detail: {
+          projectId, entries: aliasEntries,
+        } });
+      }
+    },
+  };
+  const opener = {
+    name: 'Start',
+    getAttribute: name => name === 'aria-label' ? 'Start' : name === 'aria-expanded' && !omitExpandedState ? String(pickerOpen) : null,
+    parentElement: { parentElement: { querySelectorAll: selector => selector === 'img,video' && slotAsset ? [{ currentSrc: slotAsset, getAttribute: () => null }] : [] } },
+    click: () => { openerClicks++; pickerOpen = !pickerOpen; },
+  };
+  const selectedTile = { querySelectorAll: () => [], getAttribute: name => name === 'aria-label' ? 'MCP Test Mug' : null };
+  const option = {
+    name: 'MCP Test Mug',
+    getAttribute: name => name === 'aria-selected' && slotAsset ? 'true' : null,
+    querySelectorAll: () => [],
+    querySelector: () => null,
+    click() { optionClicks++; slotAsset = 'https://flow.google.com/asb/asset-123?token=private-test#fragment'; pickerOpen = true; frameListPresent = false; },
+  };
+  const list = { getAttribute: name => name === 'role' ? 'listbox' : null, querySelectorAll: selector => selector === '[role="option"]' ? [option] : selector === 'flow-grid-tile-container' ? [selectedTile] : [], closest: () => null };
+  const unrelatedList = { querySelectorAll: () => [], closest: () => null };
+  const allTab = { name: 'All', getAttribute: name => name === 'aria-selected' ? 'true' : null };
+  const document = {
+    querySelectorAll(selector) {
+      if (selector === '[role="listbox"]') return pickerOpen && frameListPresent ? [unrelatedList, list] : [unrelatedList];
+      if (selector === '[role="progressbar"],[aria-busy="true"]') return [];
+      if (selector === '[role="tab"]') return [allTab];
+      if (selector.startsWith('input')) return [];
+      return [];
+    },
+    getElementById: () => null,
+    dispatchEvent: () => {},
+  };
+  const context = vm.createContext({ document, location: { pathname: `/project/${projectId}` }, Date: class MockDate extends Date { static now() { return clock; } }, setTimeout, clearTimeout, window: identityWindow,
+    CustomEvent: class CustomEvent { constructor(type) { this.type = type; } }, mediaId: value => value === selectedTile ? `asb:${asbId}` : undefined,
+    visible: el => el !== list || (pickerOpen && frameListPresent),
+    accessibleName: el => el.name || '', flowButton: name => name === 'Start' ? opener : null,
+    flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
+    KeyboardEvent: class KeyboardEvent {},
+    wait: async ms => { clock += ms; },
+  });
+  vm.runInContext(source, context);
+  const result = await context.chooseNativePickerAsset('MCP Test Mug', 'start');
+  assert.equal(optionClicks, 1);
+  assert.equal(result.confirmed, true);
+  assert.equal(result.slot, 'start');
+  assert.equal(result.id, mediaUuid, 'the selected thumbnail ASB identity is resolved to its exact Flow UUID');
+  assert.equal(slotAsset, 'https://flow.google.com/asb/asset-123?token=private-test#fragment');
+  assert.equal(pickerOpen, false, 'the frame picker is closed and verified after Flow confirms the selection');
+  assert.equal(openerClicks, 2, 'when Escape is ignored, cleanup toggles the exact Start opener once');
+  assert.deepEqual(context.document.querySelectorAll('[role="listbox"]'), [unrelatedList], 'the unrelated listbox remains visible and untouched');
+  const frameDiagnostics = context.FlowComponents.inspectFramePickerDiagnostics();
+  assert.equal(frameDiagnostics.phase, 'picker_closed');
+  assert.equal(frameDiagnostics.selectedMediaId, mediaUuid);
+  assert.equal(frameDiagnostics.confirmation, 'slot_signature_changed_and_exact_list_disappeared');
+  assert.equal(frameDiagnostics.stateSource, 'frame_opener_aria_expanded');
+  assert.equal(frameDiagnostics.exactFrameList.present, false, 'diagnostics distinguish the vanished exact frame list from the still-visible unrelated listbox');
+  const exportedFrameDiagnostics = JSON.stringify(frameDiagnostics);
+  assert.match(exportedFrameDiagnostics, /https:\/\/flow\.google\.com\/asb\/asset-123/);
+  assert.doesNotMatch(exportedFrameDiagnostics, /private-test|fragment|\?token|#/i, 'frame diagnostics omit URL query strings and fragments');
+  slotAsset = '';
+  frameListPresent = true;
+  await assert.rejects(context.chooseNativePickerAsset('MCP Test Mug', 'start', { expectedId: 'different-upload-id' }), error =>
+    error.code === 'FLOW_ASSET_ID_MISMATCH' && error.outcome_unknown === false);
+  assert.equal(optionClicks, 1, 'a mismatched expected ID is rejected before clicking the option');
+  provideAlias = false;
+  await assert.rejects(context.chooseNativePickerAsset('MCP Test Mug', 'start'), error =>
+    error.code === 'FLOW_ASSET_ID_UNAVAILABLE' && error.outcome_unknown === false && /No frame was selected/.test(error.message));
+  assert.equal(optionClicks, 1, 'an unresolved ASB alias is rejected before changing the frame slot');
+  provideAlias = true;
+  aliasEntries = [
+    { asb: asbId, mediaUuid, mediaType: 'image' },
+    { asb: asbId, mediaUuid: conflictingMediaUuid, mediaType: 'image' },
+  ];
+  await assert.rejects(context.chooseNativePickerAsset('MCP Test Mug', 'start'), error =>
+    error.code === 'FLOW_ASSET_ID_UNAVAILABLE' && error.outcome_unknown === false);
+  assert.equal(optionClicks, 1, 'conflicting ASB mappings are rejected before changing the frame slot');
+  aliasEntries = [{ asb: asbId, mediaUuid, mediaType: 'image' }];
+  omitExpandedState = true;
+  const clicksBeforeAmbiguousAttempt = openerClicks;
+  await assert.rejects(context.chooseNativePickerAsset('MCP Test Mug', 'start'), error =>
+    error.code === 'FLOW_ASSET_PICKER_CLOSE_FAILED' && error.outcome_unknown === false &&
+      /no_exact_list_or_expanded_state/.test(error.message) && /selectedMediaId/.test(error.message));
+  assert.equal(optionClicks, 2, 'the option was selected once before the picker became unidentifiable');
+  assert.equal(openerClicks - clicksBeforeAmbiguousAttempt, 1, 'ambiguous cleanup does not toggle a control without visible expanded-state evidence');
+  assert.deepEqual(context.document.querySelectorAll('[role="listbox"]'), [unrelatedList], 'ambiguous cleanup never treats the unrelated listbox as the frame picker');
+});
+
+test('an unconfirmed frame choice keeps its primary error when the exact picker state becomes unknown', async () => {
+  let clock = 0;
+  let pickerOpen = false;
+  const uuid = '22222222-2222-4222-8222-222222222222';
+  const option = {
+    getAttribute: name => name === 'aria-label' ? 'MCP Test Mug' : null,
+    querySelectorAll: () => [], querySelector: () => null,
+    click() { pickerOpen = false; },
+  };
+  const tile = { getAttribute: name => name === 'aria-label' ? 'MCP Test Mug' : null, querySelectorAll: () => [] };
+  const list = {
+    isConnected: true,
+    getAttribute: name => name === 'role' ? 'listbox' : null,
+    querySelectorAll: selector => selector === '[role="option"]' ? [option] : selector === 'flow-grid-tile-container' ? [tile] : [],
+  };
+  const opener = {
+    getAttribute: name => name === 'aria-label' ? 'Start' : null,
+    innerText: 'Start',
+    parentElement: { parentElement: { querySelectorAll: () => [] } },
+    click() { pickerOpen = !pickerOpen; },
+  };
+  const allTab = { getAttribute: name => name === 'aria-selected' ? 'true' : null, name: 'All' };
+  const context = vm.createContext({
+    document: {
+      body: {},
+      getElementById: () => null,
+      dispatchEvent() {},
+      querySelectorAll(selector) {
+        if (selector === '[role="listbox"]') return pickerOpen ? [list] : [];
+        if (selector === '[role="progressbar"],[aria-busy="true"]') return [];
+        if (selector === '[role="tab"]') return [allTab];
+        if (selector === 'input,[role="textbox"]') return [];
+        return [];
+      },
+    },
+    location: { href: 'https://flow.google.com/project/test', pathname: '/project/test' },
+    Date: class MockDate extends Date { static now() { return clock; } },
+    setTimeout, clearTimeout, KeyboardEvent: class KeyboardEvent {},
+    CustomEvent: class CustomEvent {},
+    window: { addEventListener() {}, removeEventListener() {}, dispatchEvent() {} },
+    mediaId: value => value === tile ? uuid : undefined,
+    visible: value => value !== list || pickerOpen,
+    accessibleName: value => value === opener ? 'Start' : value === allTab ? 'All' : value.getAttribute?.('aria-label') || '',
+    flowButton: name => name === 'Start' ? opener : null,
+    wait: async ms => { clock += ms; },
+    flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
+  });
+  vm.runInContext(source, context);
+  await assert.rejects(context.chooseNativePickerAsset('MCP Test Mug', 'start', { deadline: 15000 }), error =>
+    error.code === 'FLOW_FRAME_ATTACH_UNCONFIRMED' && error.outcome_unknown === true && error.cleanupError?.code === 'FLOW_ASSET_PICKER_CLOSE_FAILED');
+  const diagnostics = context.FlowComponents.inspectFramePickerDiagnostics();
+  assert.equal(diagnostics.phase, 'cleanup_unverified');
+  assert.equal(diagnostics.operationErrorCode, 'FLOW_FRAME_ATTACH_UNCONFIRMED');
+  assert.equal(diagnostics.cleanupErrorCode, 'FLOW_ASSET_PICKER_CLOSE_FAILED');
 });
 test('exact matching rejects duplicates and does not choose a prefix match', async () => {
   const { api, clicks } = harness({ names: ['MCP Test Mug', 'MCP Test Mug'] });
@@ -78,6 +473,244 @@ test('asset names ending in media decoration are matched without broad substring
   const option = { name: 'Mug Character', getAttribute: () => null, querySelectorAll: () => [] };
   assert.equal(api.exactOption([option], 'Mug'), option);
   assert.equal(api.exactOption([option], 'Mu'), null);
+});
+
+test('character scan fails instead of returning a partial list when scrolling stalls before the bottom', async () => {
+  let ticks = 0;
+  const tile = { innerText: 'First character', textContent: 'First character' };
+  const container = { scrollTop: 0, scrollHeight: 1800, clientHeight: 500 };
+  Object.defineProperty(container, 'scrollTop', {
+    get: () => 0,
+    set: () => {},
+  });
+  let navigationOptions;
+  const context = vm.createContext({
+    document: { querySelectorAll: selector => selector.includes('progressbar') || selector.includes('aria-busy') ? [] : selector === 'flow-character-tile' ? [tile] : selector === 'flow-custom-tile' ? [{ innerText: 'New character', querySelectorAll: () => [{ innerText: 'add' }] }] : [] },
+    location: { href: 'https://flow.google.com/project/test', pathname: '/project/test' },
+    Date: class MockDate extends Date { static now() { return ticks; } },
+    visible: () => true,
+    scrollContainer: () => container,
+    ensureFlowLibrarySection: async (_label, options) => { navigationOptions = options; },
+    flowQueryAll: () => [tile],
+    wait: async ms => { ticks += ms; },
+    clickFlowNavigation: () => false,
+    flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
+  });
+  vm.runInContext(mediaMenuSource, context);
+  await assert.rejects(context.FlowMediaMenu.scanNativeCharacters({ deadline: 20_000 }), error =>
+    error.code === 'FLOW_CHARACTER_SCAN_INCOMPLETE' && /no complete list/.test(error.message));
+  assert.equal(navigationOptions.deadline, 20_000, 'navigation shares the caller deadline');
+});
+
+test('character scanner refuses to report an empty list when the Characters section is not proven active', async () => {
+  let ticks = 0;
+  const context = vm.createContext({
+    document: { querySelectorAll: () => [] },
+    location: { href: 'https://flow.google.com/project/proj_123', pathname: '/project/proj_123' },
+    Date: class MockDate extends Date { static now() { return ticks; } },
+    visible: () => true,
+    scrollContainer: () => null,
+    ensureFlowLibrarySection: async () => {},
+    wait: async ms => { ticks += ms; },
+    flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
+  });
+  vm.runInContext(mediaMenuSource, context);
+
+  await assert.rejects(context.FlowMediaMenu.scanNativeCharacters({ deadline: 5000 }), error => {
+    assert.equal(error.code, 'FLOW_CHARACTER_SCAN_INCOMPLETE');
+    assert.equal(error.outcome_unknown, false);
+    assert.equal(error.diagnostics.currentSection, null);
+    assert.equal(error.diagnostics.visibleTileCount, 0);
+    assert.match(error.message, /no empty or partial list was returned/);
+    return true;
+  });
+});
+
+test('character scanner returns an empty list only after an active empty section stays stable', async () => {
+  let ticks = 0;
+  const createTile = { innerText: 'New character', textContent: 'New character', querySelectorAll: () => [{ innerText: 'add', textContent: 'add' }] };
+  const context = vm.createContext({
+    document: { scrollingElement: { scrollHeight: 500, clientHeight: 500, scrollTop: 0 }, querySelectorAll: selector => selector === 'flow-custom-tile' ? [createTile] : [] },
+    location: { href: 'https://flow.google.com/project/proj_123', pathname: '/project/proj_123' },
+    Date: class MockDate extends Date { static now() { return ticks; } },
+    visible: () => true,
+    scrollContainer: () => null,
+    ensureFlowLibrarySection: async () => {},
+    wait: async ms => { ticks += ms; },
+    clickFlowNavigation: () => false,
+    flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
+  });
+  vm.runInContext(mediaMenuSource, context);
+
+  const result = await context.FlowMediaMenu.scanNativeCharacters({ deadline: 10_000 });
+  assert.deepEqual(Array.from(result), []);
+  const diagnostics = context.FlowMediaMenu.inspectCharacterScanDiagnostics();
+  assert.equal(diagnostics.result, 'confirmed_empty');
+  assert.equal(diagnostics.currentSection, 'Characters');
+  assert.equal(diagnostics.createActionVisible, true);
+  assert.equal(diagnostics.visibleTileCount, 0);
+});
+
+test('character scanner waits for late character tiles instead of returning an early empty list', async () => {
+  let ticks = 0;
+  const tile = { innerText: 'Late character', textContent: 'Late character' };
+  const createTile = { innerText: 'New character', textContent: 'New character', querySelectorAll: () => [{ innerText: 'add', textContent: 'add' }] };
+  const context = vm.createContext({
+    document: { scrollingElement: { scrollHeight: 500, clientHeight: 500, scrollTop: 0 }, querySelectorAll: selector => selector === 'flow-character-tile' ? (ticks >= 1200 ? [tile] : []) : selector === 'flow-custom-tile' ? [createTile] : [] },
+    location: { href: 'https://flow.google.com/project/proj_123', pathname: '/project/proj_123' },
+    Date: class MockDate extends Date { static now() { return ticks; } },
+    visible: () => true,
+    scrollContainer: () => null,
+    flowQueryAll: () => [tile],
+    ensureFlowLibrarySection: async () => {},
+    wait: async ms => { ticks += ms; },
+    clickFlowNavigation: () => false,
+    flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
+  });
+  vm.runInContext(mediaMenuSource, context);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(await context.FlowMediaMenu.scanNativeCharacters({ deadline: 10_000 }))), [{ name: 'Late character' }]);
+  const diagnostics = context.FlowMediaMenu.inspectCharacterScanDiagnostics();
+  assert.equal(diagnostics.result, 'complete');
+  assert.equal(diagnostics.scanComplete, true);
+  assert.equal(diagnostics.visibleTileCount, 1);
+});
+
+test('character scanner exposes only a character-specific stable UUID and records complete scan metadata', async () => {
+  let ticks = 0;
+  const uuid = '22222222-2222-4222-8222-222222222222';
+  const tile = { innerText: 'Ada', textContent: 'Ada', getAttribute: name => name === 'data-character-id' ? uuid : null, querySelector: () => null };
+  const createTile = { innerText: 'New character', textContent: 'New character', querySelectorAll: () => [{ innerText: 'add', textContent: 'add' }] };
+  const context = vm.createContext({
+    document: { scrollingElement: { scrollHeight: 500, clientHeight: 500, scrollTop: 0 }, querySelectorAll: selector => selector === 'flow-character-tile' ? [tile] : selector === 'flow-custom-tile' ? [createTile] : [] },
+    location: { href: 'https://flow.google.com/project/proj_123', pathname: '/project/proj_123' },
+    Date: class MockDate extends Date { static now() { return ticks; } },
+    visible: () => true,
+    scrollContainer: () => null,
+    ensureFlowLibrarySection: async () => {},
+    flowQueryAll: () => [tile],
+    wait: async ms => { ticks += ms; },
+    clickFlowNavigation: () => false,
+    flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
+  });
+  vm.runInContext(mediaMenuSource, context);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(await context.FlowMediaMenu.scanNativeCharacters({ deadline: 10_000 }))), [{ name: 'Ada', uuid }]);
+  const diagnostics = context.FlowMediaMenu.inspectCharacterScanDiagnostics();
+  assert.equal(diagnostics.result, 'complete');
+  assert.equal(diagnostics.scanComplete, true);
+  assert.equal(diagnostics.nameCount, 1);
+  assert.equal(diagnostics.stableUuidCount, 1);
+});
+
+test('character scanner does not promote generic data-id to a character UUID', async () => {
+  let ticks = 0;
+  const portraitId = '22222222-2222-4222-8222-222222222222';
+  const tile = { innerText: 'Ada', textContent: 'Ada', getAttribute: name => name === 'data-id' ? portraitId : null, querySelector: () => null };
+  const createTile = { innerText: 'New character', textContent: 'New character', querySelectorAll: () => [{ innerText: 'add', textContent: 'add' }] };
+  const context = vm.createContext({
+    document: { scrollingElement: { scrollHeight: 500, clientHeight: 500, scrollTop: 0 }, querySelectorAll: selector => selector === 'flow-character-tile' ? [tile] : selector === 'flow-custom-tile' ? [createTile] : [] },
+    location: { href: 'https://flow.google.com/project/proj_123', pathname: '/project/proj_123' },
+    Date: class MockDate extends Date { static now() { return ticks; } },
+    visible: () => true, scrollContainer: () => null,
+    ensureFlowLibrarySection: async () => {}, flowQueryAll: () => [tile],
+    wait: async ms => { ticks += ms; }, clickFlowNavigation: () => false,
+    flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
+  });
+  vm.runInContext(mediaMenuSource, context);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(await context.FlowMediaMenu.scanNativeCharacters({ deadline: 10_000 }))), [{ name: 'Ada' }]);
+  const diagnostics = context.FlowMediaMenu.inspectCharacterScanDiagnostics();
+  assert.equal(diagnostics.scanComplete, true);
+  assert.equal(diagnostics.stableUuidCount, 0);
+});
+
+test('character scanner fails incomplete when a visible character tile has no usable name', async () => {
+  let ticks = 0;
+  const tile = { innerText: '', textContent: '', getAttribute: () => null, querySelector: () => null };
+  const createTile = { innerText: 'New character', textContent: 'New character', querySelectorAll: () => [{ innerText: 'add', textContent: 'add' }] };
+  const context = vm.createContext({
+    document: { scrollingElement: { scrollHeight: 500, clientHeight: 500, scrollTop: 0 }, querySelectorAll: selector => selector === 'flow-character-tile' ? [tile] : selector === 'flow-custom-tile' ? [createTile] : [] },
+    location: { href: 'https://flow.google.com/project/proj_123', pathname: '/project/proj_123' },
+    Date: class MockDate extends Date { static now() { return ticks; } },
+    visible: () => true, scrollContainer: () => null,
+    ensureFlowLibrarySection: async () => {}, flowQueryAll: () => [tile],
+    wait: async ms => { ticks += ms; }, clickFlowNavigation: () => false,
+    flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
+  });
+  vm.runInContext(mediaMenuSource, context);
+
+  await assert.rejects(context.FlowMediaMenu.scanNativeCharacters({ deadline: 10_000 }), error => {
+    assert.equal(error.code, 'FLOW_CHARACTER_SCAN_INVALID_RESULT');
+    assert.equal(error.diagnostics.scanComplete, false);
+    return true;
+  });
+});
+
+test('character scanner does not mark a visible but unbounded library as complete', async () => {
+  let ticks = 0;
+  const tile = { innerText: 'Ada', textContent: 'Ada' };
+  const createTile = { innerText: 'New character', textContent: 'New character', querySelectorAll: () => [{ innerText: 'add', textContent: 'add' }] };
+  const context = vm.createContext({
+    document: { querySelectorAll: selector => selector === 'flow-character-tile' ? [tile] : selector === 'flow-custom-tile' ? [createTile] : [] },
+    location: { href: 'https://flow.google.com/project/proj_123', pathname: '/project/proj_123' },
+    Date: class MockDate extends Date { static now() { return ticks; } },
+    visible: () => true,
+    scrollContainer: () => null,
+    ensureFlowLibrarySection: async () => {},
+    flowQueryAll: () => [tile],
+    wait: async ms => { ticks += ms; },
+    clickFlowNavigation: () => false,
+    flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
+  });
+  vm.runInContext(mediaMenuSource, context);
+
+  await assert.rejects(context.FlowMediaMenu.scanNativeCharacters({ deadline: 10_000 }), error => {
+    assert.equal(error.code, 'FLOW_CHARACTER_SCAN_INCOMPLETE');
+    assert.equal(error.diagnostics.scanComplete, false);
+    assert.match(error.message, /no complete list was returned/);
+    return true;
+  });
+});
+
+function nativeFileTransferHarness() {
+  const listeners = new Set();
+  const actions = [];
+  const window = {
+    addEventListener: (_type, listener) => listeners.add(listener),
+    removeEventListener: (_type, listener) => listeners.delete(listener),
+    postMessage(message) {
+      actions.push(message.action);
+      const result = message.action === 'status'
+        ? { success: true, fired: 'input.click', fileName: 'local-reference.png', fileSize: 3, fileType: 'image/png' }
+        : { success: true };
+      for (const listener of [...listeners]) listener({ source: window, data: { source: 'flow-mcp-upload-v8-result', requestId: message.requestId, ...result } });
+    },
+  };
+  const context = vm.createContext({ window, location: { origin: 'https://flow.google.com' }, crypto: webcrypto, Blob, atob, setTimeout, clearTimeout });
+  vm.runInContext(nativeFileTransferSource, context);
+  return { transfer: context.FlowNativeFileTransfer, actions };
+}
+
+test('file picker records the click boundary before a menu callback can throw', async () => {
+  const { transfer, actions } = nativeFileTransferHarness();
+  const file = new Blob(['abc']);
+  Object.defineProperty(file, 'name', { value: 'local-reference.png' });
+  await assert.rejects(transfer.selectFileThroughPicker(file, async () => {
+    throw new Error('Flow menu rerendered after dispatching its click');
+  }), error => error.outcome_unknown === true && error.code === 'FLOW_UPLOAD_PICKER_OUTCOME_UNKNOWN');
+  assert.deepEqual(actions, ['arm', 'cancel']);
+});
+
+test('file picker reports success only after the bridge confirms the selected file', async () => {
+  const { transfer } = nativeFileTransferHarness();
+  const file = new Blob(['abc']);
+  Object.defineProperty(file, 'name', { value: 'local-reference.png' });
+  const result = await transfer.selectFileThroughPicker(file, async () => true);
+  assert.equal(result.selected, true);
+  assert.equal(result.method, 'input.click');
+  assert.equal(result.type, 'image/png');
+  assert.equal(result.trustedGesture, false);
 });
 
 test('dynamic selector sync keeps regex-valued extension selectors executable', () => {
@@ -476,17 +1109,28 @@ test('checkFlowCreditLimitAlert detects quota exhaustion banners immediately', (
 test('clearExistingIngredientChips removes stale reference chips before attaching new ones', async () => {
   const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
   let removedCount = 0;
-  const chips = [
+  let chips;
+  const removeButton = {
+    name: 'Remove ingredient',
+    disabled: false,
+    getAttribute: name => name === 'aria-label' ? 'Remove ingredient' : null,
+    click: () => { chips.shift(); removedCount++; },
+  };
+  chips = [
     {
       nodeType: 1,
+      tagName: 'DIV',
+      matches: selector => selector.includes("[role='listitem']"),
+      hasAttribute: () => false,
       name: 'Ingredient: Old Cat',
       innerText: 'Ingredient: Old Cat',
       getAttribute: () => null,
       getBoundingClientRect: () => ({ width: 100, height: 30 }),
-      querySelectorAll: selector => [],
-      click: () => { chips.shift(); removedCount++; },
+      querySelectorAll: selector => selector.includes('button') ? [removeButton] : [],
     }
   ];
+  const composer = { querySelectorAll: selector => selector.includes('button') || selector.includes('role="button"') || selector.includes('role="listitem"') || selector.includes('mat-chip') || selector.includes('data-chip') ? chips : [] };
+  const editor = { closest: selector => selector.includes('composer') ? composer : null };
 
   const context = vm.createContext({
     globalThis: {},
@@ -496,6 +1140,7 @@ test('clearExistingIngredientChips removes stale reference chips before attachin
     setTimeout: fn => fn(),
     clearTimeout: () => {},
     document: {
+      querySelector: selector => selector.includes('.ProseMirror') ? editor : null,
       querySelectorAll: selector => selector.includes('button') ? chips : [],
     },
     location: { href: 'https://flow.google.com' },
@@ -509,6 +1154,44 @@ test('clearExistingIngredientChips removes stale reference chips before attachin
   await clearExistingIngredientChips();
   assert.equal(removedCount, 1);
   assert.equal(chips.length, 0);
+});
+
+test('clearExistingIngredientChips removes the exact button[aria-label="Ingredient"] chip used by attach diagnostics', async () => {
+  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  let chips;
+  const ingredientChip = {
+    nodeType: 1,
+    tagName: 'BUTTON',
+    name: 'Ingredient',
+    innerText: 'cancel',
+    textContent: 'cancel',
+    disabled: false,
+    isConnected: true,
+    matches: selector => selector.includes('button[aria-label="Ingredient"]'),
+    hasAttribute: () => false,
+    getAttribute: name => name === 'aria-label' ? 'Ingredient' : null,
+    getBoundingClientRect: () => ({ width: 28, height: 28 }),
+    querySelectorAll: () => [],
+    click: () => { chips.shift(); },
+  };
+  chips = [ingredientChip];
+  const composer = { querySelectorAll: selector => selector.includes('button[aria-label="Ingredient"]') ? chips : [] };
+  const editor = { closest: selector => selector.includes('prompt-box') ? composer : null };
+  const context = vm.createContext({
+    globalThis: {}, window: {}, URL,
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+    setTimeout: fn => { fn(); return 0; }, clearTimeout: () => {},
+    document: { querySelector: selector => selector.includes('.ProseMirror') ? editor : null, querySelectorAll: () => [] },
+    location: { href: 'https://flow.google.com' },
+    accessibleName: el => el.getAttribute?.('aria-label') || el.innerText || '',
+    flowButton: () => null,
+  });
+  vm.runInContext(domUtilsSource, context);
+
+  const result = await context.globalThis.clearExistingIngredientChips();
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), { cleared: 1, remaining: 0 });
+  assert.equal(chips.length, 0);
+  assert.equal(context.globalThis.inspectFlowReferenceClearDiagnostics().chipCount, 0);
 });
 
 test('Vietnamese localization: readGenerationCreditQuote accurately parses Vietnamese credit text', () => {
@@ -624,6 +1307,123 @@ test('Vietnamese localization: ensureFlowLibrarySection("All media") succeeds sa
   assert.equal(result, true);
 });
 
+test('Characters navigation waits for project sidebar controls to mount', async () => {
+  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const navigationSource = readFileSync(new URL('../extension/content/providers/flow/FlowNavigation.js', import.meta.url), 'utf8');
+  let ticks = 0;
+  let clicked = false;
+  const navButton = { innerText: 'Characters', disabled: false, getAttribute: () => null, querySelectorAll: () => [], getBoundingClientRect: () => ({ width: 100, height: 30 }), click: () => { clicked = true; } };
+  const createTile = { innerText: 'New character', textContent: 'New character', querySelectorAll: selector => selector === 'mat-icon' ? [{ innerText: 'add', textContent: 'add' }] : [], getBoundingClientRect: () => ({ width: 100, height: 30 }) };
+  const document = {
+    body: {},
+    activeElement: { closest: () => null },
+    querySelector: selector => selector.includes('.ProseMirror') ? {} : null,
+    querySelectorAll: selector => {
+      if (selector === 'nav,[role="navigation"],mat-sidenav') return [];
+      if (selector.startsWith('a,button,')) return ticks >= 300 ? [navButton] : [];
+      if (selector === 'flow-custom-tile') return clicked ? [createTile] : [];
+      if (selector.includes('progressbar') || selector.includes('aria-busy')) return [];
+      return [];
+    },
+  };
+  const context = vm.createContext({
+    window: {}, document,
+    location: { href: 'https://flow.google.com/u/0/project/proj_123', pathname: '/project/proj_123' },
+    Date: class MockDate extends Date { static now() { return ticks; } },
+    visible: () => true,
+    accessibleName: el => el.innerText || '',
+    FlowUiDeadline: { requireTime: () => {}, boundedWait: async ms => { ticks += ms; } },
+    wait: async ms => { ticks += ms; },
+    flowError: (code, message, retryable) => Object.assign(new Error(message), { code, retryable }),
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+  });
+  vm.runInContext(domUtilsSource, context);
+  vm.runInContext(navigationSource, context);
+
+  await context.ensureFlowLibrarySection('Characters');
+  assert.equal(clicked, true, 'the Characters item is clicked after it mounts');
+});
+
+test('flow.characters.list uses the bounded library scanner instead of the composer add-menu picker', async () => {
+  const source = readFileSync(new URL('../extension/content/providers/flow/FlowLibraryOperations.js', import.meta.url), 'utf8');
+  let receivedDeadline;
+  let libraryScanCalled = false;
+  const context = vm.createContext({
+    FlowUiDeadline: { makeDeadline: () => 12_345 },
+    FlowReferenceActions: { listCharacters: async () => { throw new Error('The add-menu picker is not used for library listing.'); } },
+    FlowMediaMenu: { scanNativeCharacters: async options => { libraryScanCalled = true; receivedDeadline = options.deadline; return [{ name: 'MCP character', uuid: '22222222-2222-4222-8222-222222222222' }]; } },
+    Date,
+  });
+  vm.runInContext(source, context);
+  const operations = new context.FlowLibraryOperations({ error: (code, message, retryable) => Object.assign(new Error(message), { code, retryable }) });
+
+  const result = await operations.execute('flow.characters.list', {}, { timeoutMs: 30_000 });
+  assert.deepEqual(result, [{ name: 'MCP character', uuid: '22222222-2222-4222-8222-222222222222' }]);
+  assert.equal(receivedDeadline, 12_345);
+  assert.equal(libraryScanCalled, true, 'listing uses the complete Characters library scan');
+});
+
+test('Flow Characters navigation recognizes its face icon', () => {
+  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const navigationSource = readFileSync(new URL('../extension/content/providers/flow/FlowNavigation.js', import.meta.url), 'utf8');
+  const icon = { innerText: 'face', textContent: 'face' };
+  const button = { innerText: '', disabled: false, getAttribute: () => null, querySelectorAll: () => [icon], getBoundingClientRect: () => ({ width: 40, height: 40 }) };
+  const navigation = { querySelector: () => ({}), querySelectorAll: selector => selector.startsWith('a,button,') ? [button] : [] };
+  const context = vm.createContext({
+    window: {},
+    document: { body: {}, querySelectorAll: selector => selector === 'nav,[role="navigation"],mat-sidenav' ? [navigation] : [], querySelector: () => navigation },
+    location: { href: 'https://flow.google.com/u/0/project/proj_123', pathname: '/project/proj_123' },
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+  });
+  vm.runInContext(domUtilsSource, context);
+  vm.runInContext(navigationSource, context);
+  assert.equal(context.FlowNavigation.flowNavigationItem('Characters'), button);
+});
+
+test('character picker list fails rather than returning partial names when its scroller stalls', async () => {
+  const source = readFileSync(new URL('../extension/content/providers/flow/FlowComponents.js', import.meta.url), 'utf8');
+  let ticks = 0;
+  let pickerOpen = false;
+  const opener = { getAttribute: () => pickerOpen ? 'true' : 'false', click: () => { pickerOpen = !pickerOpen; }, querySelector: () => null, closest: () => null };
+  const submit = {};
+  const editor = { isContentEditable: true, parentElement: null };
+  const composer = { tagName: 'DIV', className: 'flow-composer', contains: node => node === editor || node === submit || node === opener,
+    querySelectorAll: selector => selector === 'button,[role="button"],mat-button,[tabindex="0"]' ? [opener] : [] };
+  editor.parentElement = composer;
+  const option = { innerText: 'Pip', textContent: 'Pip', getAttribute: () => null, querySelectorAll: () => [] };
+  const scroller = { clientHeight: 100, scrollHeight: 1000, get scrollTop() { return 0; }, set scrollTop(_value) {} };
+  const list = { innerText: '', getAttribute: name => name === 'role' ? 'listbox' : null, querySelectorAll: selector => selector === '[role="option"]' ? [option] : selector === '*' ? [scroller] : [] };
+  const tab = { innerText: 'Characters', getAttribute: name => name === 'aria-selected' ? 'true' : null, click: () => {} };
+  const context = vm.createContext({
+    window: {}, location: { href: 'https://flow.google.com/u/0/project/proj_123', pathname: '/project/proj_123' },
+    Date: class MockDate extends Date { static now() { return ticks; } },
+    visible: () => true,
+    accessibleName: el => el.innerText || '',
+    flowButton: name => name === 'Add ingredients to the prompt box' ? opener : null,
+    flowQuery: selector => selector === 'editor' ? editor : selector === 'composerRoot' ? composer : null,
+    FlowEditor: { getFlowSubmitButton: () => submit },
+    flowQueryAll: () => null,
+    wait: async ms => { ticks += ms; },
+    flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
+    document: {
+      activeElement: { dispatchEvent: () => {} }, dispatchEvent: () => {},
+      querySelectorAll: selector => {
+        if (selector === '[role="listbox"]') return pickerOpen ? [list] : [];
+        if (selector === '[role="tab"]') return pickerOpen ? [tab] : [];
+        if (selector === '[role="progressbar"],[aria-busy="true"]') return [];
+        if (selector === 'button[aria-label="Ingredient"]' || selector === 'button[aria-label="Thành phần"],button[aria-label="Nguyên liệu"]') return [];
+        if (selector === 'button,[role="button"]') return [opener];
+        if (selector === '[role="dialog"],main,[role="listbox"]') return pickerOpen ? [list] : [];
+        return [];
+      },
+    },
+  });
+  vm.runInContext(source, context);
+  await assert.rejects(context.FlowReferenceActions.listCharacters(), error =>
+    error.code === 'FLOW_CHARACTER_SCAN_INCOMPLETE' && /no complete list/.test(error.message));
+  assert.equal(pickerOpen, false, 'the picker is closed after the scan fails');
+});
+
 test('I18n core: translations, plurals, string interpolation and UI pattern lookup work seamlessly', async () => {
   const i18nSource = readFileSync(new URL('../extension/content/shared/I18n.js', import.meta.url), 'utf8');
   const ctx = vm.createContext({
@@ -715,6 +1515,7 @@ test('Vietnamese localization anti-misclick: getFlowSubmitButton prioritizes com
 
   const composerContainer = {
     querySelectorAll: (s) => s.includes('button') ? [composerSubmitBtn] : [],
+    contains: element => element === composerSubmitBtn,
   };
 
   const proseMirror = {
@@ -1002,6 +1803,7 @@ test('getFlowSubmitButton ignores aspect ratio chip and clear button in ProseMir
     tagName: 'DIV',
     querySelectorAll: s => s.includes('button') ? [aspectRatioBtn, clearBtn, submitBtn] : [],
     querySelector: s => null,
+    contains: element => element === submitBtn || element === aspectRatioBtn || element === clearBtn,
   };
   innerWrapper.parentElement = composerContainer;
 

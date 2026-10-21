@@ -1,0 +1,29 @@
+{
+  "historical_create_report": "native-character-create-20261021.json",
+  "conclusion": "Historical evidence associates the Untitled character with the same project UUID currently open, not a different project. Current /api/characters returns no characters. This confirms it is absent from the current API list; it does not establish whether Flow deleted it or the scanner omitted it.",
+  "current_api": {
+    "character_count": 0,
+    "url": "https://flow.google.com/project/0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "project_id": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "characters": []
+  },
+  "checked_at": "2026-10-21T02:29:20.9515796Z",
+  "operation": "readonly_current_character_list_comparison",
+  "project_correlation": {
+    "historical_project_id": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "evidence": [
+      "native-character-pre-rename-20261021.json records the same projectId and one Untitled character.",
+      "native-character-rename-20261021.json records the same projectId in observer state and one Untitled character.",
+      "native-character-corrected-rename-20261021.json records its character edit route under /project/0dc56af8-f217-4c0c-91db-8868145f29c0 and postflight still lists Untitled character."
+    ]
+  },
+  "historical_create": {
+    "characters": [
+      {
+        "name": "Untitled character",
+        "use_as": "character:Untitled character"
+      }
+    ],
+    "listed": false
+  }
+}

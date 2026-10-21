@@ -1,0 +1,39 @@
+{
+  "started": "2026-10-21T02:43:00.2927860Z",
+  "mode": "image-reference-submit-only",
+  "project_id": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-20261021T024302397Z",
+  "preflight": {
+    "signedIn": true,
+    "inProject": true,
+    "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "promptChars": 0,
+    "chipCount": 0,
+    "pickerOpen": false,
+    "referenceActionPhase": "idle",
+    "observerReady": true,
+    "activeAttempts": 0,
+    "queuedOrRunning": 0,
+    "assetExactCount": 1,
+    "asset": "fm-9aa6f547c686-upload.png",
+    "submitEnabled": true
+  },
+  "job_id": "0966c6fd",
+  "terminal": {
+    "id": "0966c6fd",
+    "status": "failed",
+    "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-20261021T024302397Z",
+    "scene": "scene-01",
+    "prompt": "Reference submit check 20261021T024302397Z: create one blue ceramic cup on a pale stone plinth, studio still life, soft daylight, no text.",
+    "attempts": 1,
+    "credit_quote_verified": null,
+    "progress": "Waiting for Flow to dispatch the generation request",
+    "files": [],
+    "error": "Flow did not emit a correlated generation request within the submit budget (click delivered: true). The outcome is unknown; inspect Flow before retrying.",
+    "error_category": "unknown",
+    "outcome_unknown": true,
+    "request_dispatched": false,
+    "server_acceptance_observed": false
+  },
+  "finished": "2026-10-21T02:43:41.6278993Z",
+  "outcome": "FAIL: dispatch not confirmed; no retry"
+}

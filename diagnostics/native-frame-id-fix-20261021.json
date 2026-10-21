@@ -1,0 +1,24 @@
+{
+  "checked_at": "2026-10-21T02:16:00Z",
+  "incident_report": "diagnostics/native-frame-20261021021317940.json",
+  "job_id": "f0efa71f",
+  "observed_outcome": {
+    "status": "failed_before_dispatch",
+    "request_dispatched": false,
+    "server_acceptance_observed": false,
+    "outcome_unknown": false,
+    "retries": 0,
+    "error": "Flow selected the requested references, but their exact backend IDs could not be verified for submit correlation. No generation request was sent."
+  },
+  "root_cause": "The frame picker returned the thumbnail identity in the asb:<token> form, while request correlation requires the exact project media UUID. The observer already maintains an ASB-to-UUID map and exposes it through read events, but the content picker did not query that map before returning the selected reference ID.",
+  "fix": {
+    "description": "Resolve selected image ASB identities to a UUID only from the observer's project-scoped media identity map. Require matching project ID, image type, and a valid UUID; keep the existing pre-dispatch fail-closed behavior when no unique mapping exists. Normalize expected upload IDs through the same resolver.",
+    "live_api_calls": 0
+  },
+  "validation": {
+    "build": "passed",
+    "focused_test": "tests/native-references.test.mjs: 40 passed, 0 failed",
+    "diff_check": "passed",
+    "live_verification": "not run; local API server PID 2380 predates current build and live operation was explicitly held"
+  }
+}

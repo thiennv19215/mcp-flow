@@ -1,0 +1,42 @@
+{
+  "operation": "first_frame_submit_only_preflight",
+  "retries": 0,
+  "generation_api_called": false,
+  "reason": "Current Flow status exposes zero credit quote candidates and the composer is in Nano Banana image mode. No mode switch or generation request was made because only a current visible quote is permitted.",
+  "project_id": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+  "result": "blocked_quote_missing",
+  "mode": "frame",
+  "max_credits": 15,
+  "checked_at": "2026-10-21T02:31:20.4613718Z",
+  "variants": 1,
+  "preflight": {
+    "xhr_hook_active": true,
+    "prompt_character_count": 0,
+    "current_credit_quote_candidates": [],
+    "credit_quote_diagnostic": {
+      "receiptId": 1,
+      "receivedAt": "2026-10-21T02:29:54.966Z",
+      "requestId": "20",
+      "tabId": 1784013709,
+      "flowUrl": true,
+      "isInteractive": false,
+      "isSelectedFlowTab": true,
+      "acceptedByWorker": true,
+      "progress": "Flow progress telemetry check",
+      "transport": "http-poll",
+      "backendState": "backend_matched_pending_command",
+      "backendMatchedRequest": true,
+      "httpStatus": 200,
+      "forwardedAt": "2026-10-21T02:29:54.97Z"
+    },
+    "chip_count": 0,
+    "active_jobs": [],
+    "active_attempts": 0,
+    "picker_open": false,
+    "fetch_hook_active": true,
+    "observer_ready": true,
+    "composer": "What do you want to create? add Agent 🍌 Nano Banana 2.1 crop_square x1 arrow_forward"
+  },
+  "requested_asset": "fm-9aa6f547c686-upload.png",
+  "prompt": "A gentle slow camera push in from the supplied first frame. E2E 20261021-0229."
+}

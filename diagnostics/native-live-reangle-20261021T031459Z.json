@@ -1,0 +1,37 @@
+{
+  "started": "2026-10-21T03:14:59.9530345Z",
+  "mode": "reangle",
+  "asset": "fm-9aa6f547c686-upload.png",
+  "preflight": {
+    "chips": 0,
+    "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "queuedRunning": 0,
+    "observerReady": true,
+    "pickerOpen": false,
+    "agentPressed": "false",
+    "activeAttempts": 0,
+    "promptChars": 0
+  },
+  "jobId": "3654a7a6",
+  "outcome": "outcome_unknown",
+  "evidence": {
+    "request_dispatched": false,
+    "status": "failed",
+    "outcome_unknown": true,
+    "credit_quote_verified": null,
+    "jobId": "3654a7a6",
+    "credits": null,
+    "error": "Flow did not emit a correlated generation request within the submit budget (click delivered: true). The outcome is unknown; inspect Flow before retrying.",
+    "error_category": "unknown"
+  },
+  "postflight": {
+    "queuedRunning": [],
+    "chips": 0,
+    "promptChars": 0,
+    "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "observerReady": true,
+    "pickerOpen": false,
+    "activeAttempts": 0
+  },
+  "finished": "2026-10-21T03:15:39.1514951Z"
+}

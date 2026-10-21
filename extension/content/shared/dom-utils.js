@@ -133,7 +133,7 @@ function classifyFlowError(rawText) {
   }
 
   // 2. Unusual Activity / Captcha / Bot Detection
-  if (/(?:PUBLIC_ERROR_UNUSUAL_ACTIVITY|UNUSUAL_ACTIVITY|bot_detected|captcha_failed|unusual activity|extensions that modify the page|suspicious activity)/i.test(text)) {
+  if (/(?:PUBLIC_ERROR_UNUSUAL_ACTIVITY|UNUSUAL_ACTIVITY|bot_detected|captcha_failed|unusual activity|extensions that modify the page|suspicious activity|hoạt động bất thường|tiện ích trình duyệt sửa đổi trang)/i.test(text)) {
     return {
       category: "captcha",
       code: "FLOW_UNUSUAL_ACTIVITY",
@@ -678,7 +678,6 @@ async function insertNativeFlowPrompt(el, value) {
 }
 
 var FLOW_CREDIT_QUOTE_REGEX = /(?:\b(?:generating\s+)?will\s+use\s+([\d,]+(?:\.\d+)?)\s+credits?\b|(?:quá trình tạo\s+)?(?:sẽ\s+dùng|sẽ\s+sử\s+dụng|tiêu\s+tốn)\s+([\d,]+(?:\.\d+)?)\s+(?:tín\s+dụng|điểm\s+tín\s+dụng|credits?))/i;
-var FLOW_CREDIT_BARE_REGEX = /^([\d,]+(?:\.\d+)?)\s+(?:credits?|tín\s+dụng|điểm\s+tín\s+dụng)$/i;
 
 function readGenerationCreditQuote() {
   const pageText = (document.body?.innerText || "").replace(/\s+/g, " ").trim();
@@ -693,11 +692,7 @@ function readGenerationCreditQuote() {
     .filter(item => item.match)
     .sort((a, b) => a.text.length - b.text.length)[0];
   if (usage) return Number((usage.match[1] || usage.match[2]).replace(/,/g, ""));
-  // Retain compatibility with Flow builds that expose only a bare numeric quote.
-  const bare = candidates.map(text => ({ text, match: text.match(FLOW_CREDIT_BARE_REGEX) }))
-    .filter(item => item.match)
-    .sort((a, b) => a.text.length - b.text.length)[0];
-  return bare ? Number(bare.match[1].replace(/,/g, "")) : undefined;
+  return undefined;
 }
 
 async function waitForGenerationCreditQuote(timeoutMs = 8000) {
@@ -742,7 +737,8 @@ function flowNavigationItem(label) {
     if (!visible(el) || el.disabled || el.getAttribute?.("aria-disabled") === "true") return false;
     const text = normalize(el.innerText || el.textContent || accessibleName(el));
     const iconNames = [...(el.querySelectorAll?.("mat-icon") || [])].map(icon => normalize(icon.innerText || icon.textContent));
-    if ((wanted === "characters" || synonyms.includes("nhân vật")) && (iconNames.includes("accessibility_new") || iconNames.includes("person"))) return true;
+    if ((wanted === "characters" || synonyms.includes("nhân vật")) &&
+        iconNames.some(icon => ["accessibility_new", "person", "face"].includes(icon))) return true;
     if ((wanted === "all media" || synonyms.includes("tất cả nội dung nghe nhìn")) && iconNames.some(ic => ALL_MEDIA_ICONS.includes(ic))) return true;
     
     // So khớp an toàn: exact match hoặc prefix/suffix có icon
@@ -818,33 +814,109 @@ async function exitFlowMediaViewer() {
   return !isMediaViewer();
 }
 
-async function clearExistingIngredientChips() {
-  const clear = flowButton("Clear prompt");
-  if (clear) {
-    clear.click();
-    await wait(150);
-  }
+function flowReferenceComposerRoot() {
+  const editor = (typeof flowQuery === "function" ? flowQuery("editor") : null) || document.querySelector(".ProseMirror[contenteditable='true']");
+  if (!editor) return null;
+  const configured = typeof flowQuery === "function" ? flowQuery("composerRoot") : null;
+  if (configured?.contains(editor)) return configured;
+  return editor.closest("flow-base-prompt-box, .base-prompt-box, .flow-composer, [class*='composer'], [class*='prompt-box'], form") || editor.parentElement;
+}
 
+function flowReferenceChipNodes(composer) {
+  if (!composer) return [];
+  const ingredientChipSelector = 'button[aria-label="Ingredient"],button[aria-label="Thành phần"],button[aria-label="Nguyên liệu"]';
   const isRefChip = el => {
     if (!visible(el)) return false;
     const name = (accessibleName(el) || el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
-    return matchesFlowUiRegex(name, /(?:Ingredient|Thành phần)/i) || matchesFlowUiRegex(name, /Xóa thành phần|Remove ingredient/i) || el.hasAttribute?.("data-chip");
+      const ownClass = String(el.className?.baseVal || el.className || "").toLowerCase();
+      const voiceMarker = el.getAttribute?.("data-ingredient-type") === "voice" || el.getAttribute?.("data-kind") === "voice" ||
+        /voice-chip|ingredient-voice/.test(ownClass) ||
+        Boolean(el.querySelector?.('[data-ingredient-type="voice"],[data-kind="voice"],[class*="voice-chip" i],[class*="ingredient-voice" i]')) ||
+        /^(?:voice|giọng nói|giọng)\s*[:\-]/i.test(name);
+      if (voiceMarker) return false;
+    if (el.matches?.(ingredientChipSelector)) return true;
+    if (el.hasAttribute?.("data-chip")) return true;
+    if (el.matches?.("mat-chip,[role='listitem']")) return matchesFlowUiRegex(name, /(?:Ingredient|Thành phần)/i);
+    return /(?:remove|delete|clear|xóa|gỡ).{0,40}(?:ingredient|thành phần)|(?:ingredient|thành phần).{0,40}(?:remove|delete|clear|xóa|gỡ)/i.test(name);
   };
+  return [...composer.querySelectorAll(`${ingredientChipSelector},button,[role="button"],[role="listitem"],mat-chip,[data-chip]`)].filter(isRefChip);
+}
 
-  for (let attempt = 0; attempt < 10; attempt++) {
-    const chips = [...document.querySelectorAll('button,[role="button"],[role="listitem"],mat-chip,[data-chip]')].filter(isRefChip);
-    if (!chips.length) break;
+function inspectFlowReferenceClearDiagnostics() {
+  const composer = flowReferenceComposerRoot();
+  const clear = composer ? flowButton("Clear prompt", composer) : null;
+  const chips = flowReferenceChipNodes(composer);
+  const helper = globalThis.__flowReferenceClearDiagnostics || { phase: "idle" };
+  return {
+    composer: composer ? { tag: composer.tagName?.toLowerCase(), className: String(composer.className?.baseVal || composer.className || "").slice(0, 120), connected: composer.isConnected === true } : null,
+    clearPromptButton: clear ? { aria: (accessibleName(clear) || "").replace(/\s+/g, " ").trim().slice(0, 100), disabled: Boolean(clear.disabled || clear.getAttribute("aria-disabled") === "true"), connected: clear.isConnected === true } : null,
+    chipCount: chips.length,
+    chips: chips.slice(0, 6).map(chip => {
+      const attached = globalThis.FlowReferenceActions?.chips?.().find(item => item.element === chip);
+      return {
+        tag: chip.tagName.toLowerCase(),
+        label: (accessibleName(chip) || chip.innerText || chip.textContent || "").replace(/\s+/g, " ").trim().slice(0, 100),
+        name: attached?.name || null,
+        kind: attached?.kind || null,
+        id: attached?.mediaId || null,
+        connected: chip.isConnected === true,
+      };
+    }),
+    helper: { ...helper },
+  };
+}
 
-    const firstChip = chips[0];
-    const removeBtn = [...firstChip.querySelectorAll('button, [role="button"], mat-icon')].find(btn => {
-      const label = (accessibleName(btn) || btn.innerText || btn.textContent || "").trim().toLowerCase();
-      return /close|clear|remove|xóa|delete/i.test(label);
-    }) || firstChip;
+async function clearExistingIngredientChips(options = {}) {
+  const deadline = Number.isFinite(options.deadline) ? options.deadline : Date.now() + 5_000;
+  const signal = options.signal;
+  const state = globalThis.__flowReferenceClearDiagnostics || (globalThis.__flowReferenceClearDiagnostics = { phase: "idle" });
+  const update = patch => Object.assign(state, patch, { updatedAt: new Date().toISOString() });
+  const requireTime = operation => globalThis.FlowUiDeadline?.requireTime(deadline, operation, false, signal);
+  const boundedWait = (ms, operation) => globalThis.FlowUiDeadline?.boundedWait(ms, deadline, operation, false, signal) || wait(Math.min(ms, Math.max(1, deadline - Date.now())));
+  const composer = flowReferenceComposerRoot();
+  if (!composer) throw flowError("FLOW_REFERENCE_CLEAR_COMPOSER_MISSING", "Could not scope existing reference chips to Flow's composer; nothing was submitted.", false, false);
+  const initial = flowReferenceChipNodes(composer);
+  update({ phase: initial.length ? "clearing" : "no-existing-chips", initialCount: initial.length, removedCount: 0, error: null });
+  if (!initial.length) {
+    update({ phase: "returned", remainingCount: 0 });
+    return { cleared: 0, remaining: 0 };
+  }
 
-    try {
-      removeBtn.click();
-    } catch {}
-    await wait(100);
+  let removedCount = 0;
+  try {
+    // FlowEditor.insertNativeFlowPrompt clears prompt text while preserving
+    // reference chips. Avoid the broad Clear prompt action; it also removes
+    // user prompt text and is not needed for attachment cleanup.
+    for (let attempt = 0; attempt < 6; attempt++) {
+      requireTime("clearing existing Flow reference chips");
+      const chips = flowReferenceChipNodes(composer);
+      if (!chips.length) break;
+      const chip = chips[0];
+      const isFlowIngredientChipButton = chip.matches?.('button[aria-label="Ingredient"],button[aria-label="Thành phần"],button[aria-label="Nguyên liệu"]');
+      const controls = [...(chip.matches?.('button,[role="button"]') ? [chip] : []), ...chip.querySelectorAll('button,[role="button"],mat-icon')];
+      const remove = isFlowIngredientChipButton
+        ? chip
+        : controls.find(control => /(?:close|clear|remove|delete|xóa|gỡ)/i.test(accessibleName(control) || control.innerText || control.textContent || ""));
+      if (!remove || remove.disabled || remove.getAttribute("aria-disabled") === "true") {
+        throw flowError("FLOW_REFERENCE_REMOVE_CONTROL_MISSING", "A Flow reference chip has no enabled remove control; nothing was submitted.", false, false);
+      }
+      const beforeCount = chips.length;
+      update({ phase: "removing-chip", currentLabel: (accessibleName(chip) || chip.innerText || chip.textContent || "").replace(/\s+/g, " ").trim().slice(0, 100), removedCount });
+      remove.click();
+      await boundedWait(120, "waiting for a Flow reference chip to clear");
+      const after = flowReferenceChipNodes(composer);
+      if (after.length >= beforeCount) throw flowError("FLOW_REFERENCE_CLEAR_UNCONFIRMED", "Flow did not remove the existing reference chip; nothing was submitted. Inspect the composer before retrying.", false, false);
+      removedCount += beforeCount - after.length;
+      update({ phase: "chip-removed", removedCount, remainingCount: after.length });
+    }
+    requireTime("confirming existing Flow reference chips are cleared");
+    const remaining = flowReferenceChipNodes(composer).length;
+    if (remaining) throw flowError("FLOW_REFERENCE_CLEAR_UNCONFIRMED", `Flow still shows ${remaining} existing reference chip(s); nothing was submitted.`, false, false);
+    update({ phase: "returned", removedCount, remainingCount: 0 });
+    return { cleared: removedCount, remaining: 0 };
+  } catch (error) {
+    update({ phase: "error", removedCount, error: String(error?.code || error?.message || error).slice(0, 240) });
+    throw error;
   }
 }
 
@@ -1064,6 +1136,7 @@ if (typeof globalThis !== "undefined") {
   globalThis.ensureFlowProjectEditor = ensureFlowProjectEditor;
   globalThis.exitFlowMediaViewer = exitFlowMediaViewer;
   globalThis.clearExistingIngredientChips = clearExistingIngredientChips;
+  globalThis.inspectFlowReferenceClearDiagnostics = inspectFlowReferenceClearDiagnostics;
   globalThis.checkFlowCreditLimitAlert = checkFlowCreditLimitAlert;
   globalThis.readGenerationCreditQuote = readGenerationCreditQuote;
   globalThis.waitForGenerationCreditQuote = waitForGenerationCreditQuote;

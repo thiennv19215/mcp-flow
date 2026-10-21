@@ -1,0 +1,36 @@
+{
+  "started": "2026-10-21T01:45:15.840Z",
+  "mode": "video",
+  "api": "http://127.0.0.1:18897",
+  "probes": [
+    {
+      "name": "video.submit_only",
+      "status": "queued",
+      "job_id": "6a175e38"
+    },
+    {
+      "name": "video.submit_only",
+      "status": "failed_before_dispatch",
+      "error": "Job 6a175e38 ended as failed before confirmed dispatch (outcome_unknown=false): Flow did not show a verifiable credit quote; nothing was submitted.. Do not replay this job."
+    }
+  ],
+  "job_id": "6a175e38",
+  "latest_job": {
+    "id": "6a175e38",
+    "status": "failed",
+    "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-video-20261021014515840",
+    "scene": "scene-01",
+    "prompt": "A red ceramic mug on a wooden table. Slow gentle camera push in, natural daylight. No text.",
+    "attempts": 1,
+    "credit_quote_verified": null,
+    "progress": "Flow submit: reading Flow's credit quote",
+    "files": [],
+    "error": "Flow did not show a verifiable credit quote; nothing was submitted.",
+    "error_category": "quota",
+    "outcome_unknown": false,
+    "request_dispatched": false,
+    "server_acceptance_observed": false
+  },
+  "finished": "2026-10-21T01:45:24.946Z",
+  "fatal_error": "Job 6a175e38 ended as failed before confirmed dispatch (outcome_unknown=false): Flow did not show a verifiable credit quote; nothing was submitted.. Do not replay this job."
+}

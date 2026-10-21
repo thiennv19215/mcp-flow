@@ -140,6 +140,23 @@
           '[role="option"]',
           "mat-option"
         ]
+      },
+      voiceChip: {
+        selectors: [
+          '[data-ingredient-type="voice"]',
+          '[data-kind="voice"]',
+          '[class*="voice-chip" i]',
+          'button[aria-label*="voice" i]',
+          'button[aria-label*="giọng" i]'
+        ]
+      },
+      voiceRemoveButton: {
+        selectors: [
+          'button[aria-label*="remove" i]',
+          'button[aria-label*="delete" i]',
+          'button[aria-label*="xóa" i]',
+          '[role="button"][aria-label*="remove" i]'
+        ]
       }
     },
 

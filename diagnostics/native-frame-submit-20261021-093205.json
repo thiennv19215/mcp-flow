@@ -1,0 +1,71 @@
+{
+  "started": "2026-10-21T02:32:05.9802658Z",
+  "mode": "first_frame_video_submit_only",
+  "project_id": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+  "asset": "fm-9aa6f547c686-upload.png",
+  "prompt": "A gentle camera push toward the product from the supplied opening frame, with subtle natural motion and no scene changes. E2E run 20261021-093205.",
+  "request": {
+    "max_credits": 15,
+    "retries": 0,
+    "variants": 1,
+    "submit_only": true,
+    "allow_unknown_quote": false,
+    "type": "video"
+  },
+  "generation_api_calls": 1,
+  "probes": [],
+  "queue_response": {
+    "output_dir": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-frame-20261021-093205",
+    "jobs": [
+      {
+        "id": "e19adaf3",
+        "status": "running",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-frame-20261021-093205",
+        "scene": "scene-01",
+        "prompt": "A gentle camera push toward the product from the supplied opening frame, with subtle natural motion and no scene changes. E2E run 20261021-093205.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "files": [],
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false
+      }
+    ]
+  },
+  "job_id": "e19adaf3",
+  "latest_job": {
+    "id": "e19adaf3",
+    "status": "failed",
+    "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-frame-20261021-093205",
+    "scene": "scene-01",
+    "prompt": "A gentle camera push toward the product from the supplied opening frame, with subtle natural motion and no scene changes. E2E run 20261021-093205.",
+    "attempts": 1,
+    "credit_quote_verified": null,
+    "progress": "Flow submit: selecting asset fm-9aa6f547c686-upload.png",
+    "files": [],
+    "error": "Flow selected the requested references, but their exact backend IDs could not be verified for submit correlation. No generation request was sent; inspect the composer before retrying.",
+    "error_category": "unknown",
+    "outcome_unknown": false,
+    "request_dispatched": false,
+    "server_acceptance_observed": false
+  },
+  "result": "failed_before_dispatch_stop_no_retry",
+  "finished": "2026-10-21T02:32:12.1916192Z",
+  "postflight": {
+    "observer_ready": true,
+    "warnings": null,
+    "action_chip_count": 0,
+    "active_attempts": 0,
+    "composer": "cancel swap_horiz End close What do you want to create? Agent Video · 720p · 10s crop_16_9 x1 arrow_",
+    "action_chips": [],
+    "fetch_hook_active": true,
+    "prompt": {
+      "contentEditable": true,
+      "characterCount": 0,
+      "chipCount": 0
+    },
+    "xhr_hook_active": true,
+    "active_jobs": [],
+    "picker_open": false
+  }
+}

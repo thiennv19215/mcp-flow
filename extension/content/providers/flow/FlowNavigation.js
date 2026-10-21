@@ -46,7 +46,10 @@
       if (!root.visible?.(el) || el.disabled || el.getAttribute?.("aria-disabled") === "true") return false;
       const text = normalize(el.innerText || el.textContent || root.accessibleName?.(el));
       const iconNames = [...(el.querySelectorAll?.("mat-icon") || [])].map(icon => normalize(icon.innerText || icon.textContent));
-      if ((wanted === "characters" || synonyms.includes("nhân vật")) && (iconNames.includes("accessibility_new") || iconNames.includes("person"))) return true;
+      // Flow's character controls use either a person or face Material icon,
+      // depending on which surface/version is mounted.
+      if ((wanted === "characters" || synonyms.includes("nhân vật")) &&
+          iconNames.some(icon => ["accessibility_new", "person", "face"].includes(icon))) return true;
       if (wanted === "all media" || synonyms.includes("tất cả nội dung nghe nhìn")) {
         if (/(?:^|\s)(?:video|clip|nhân vật|characters|dự án|project|nội dung tải lên|uploads?)(?:$|\s)/i.test(text)) return false;
         if (iconNames.some(ic => ALL_MEDIA_ICONS.includes(ic))) return true;
@@ -68,11 +71,13 @@
     return true;
   }
 
-  async function waitForFlowRoute(predicate, timeoutMs = 20000, message = "Route wait timed out.") {
-    const deadline = Date.now() + timeoutMs;
+  async function waitForFlowRoute(predicate, timeoutMs = 20000, message = "Route wait timed out.", options = {}) {
+    const deadline = Math.min(Date.now() + timeoutMs, Number.isFinite(options.deadline) ? options.deadline : Infinity);
     while (Date.now() < deadline) {
+      root.FlowUiDeadline?.requireTime(deadline, message, false, options.signal);
       if (predicate(location.pathname)) return true;
-      await root.wait?.(100);
+      if (root.FlowUiDeadline?.boundedWait) await root.FlowUiDeadline.boundedWait(100, deadline, message, false, options.signal);
+      else await root.wait?.(100);
     }
     throw (root.flowError ? root.flowError("FLOW_NAVIGATION_TIMEOUT", message, true) : new Error(message));
   }
@@ -125,7 +130,14 @@
     return !isMediaViewer();
   }
 
-  async function dismissBlockingOverlays() {
+  async function dismissBlockingOverlays(options = {}) {
+    const checkTime = label => root.FlowUiDeadline?.requireTime(Number.isFinite(options.deadline) ? options.deadline : Infinity, label, false, options.signal);
+    const pause = async (ms, label) => {
+      if (root.FlowUiDeadline?.boundedWait && Number.isFinite(options.deadline)) return root.FlowUiDeadline.boundedWait(ms, options.deadline, label, false, options.signal);
+      checkTime(label);
+      await root.wait?.(ms);
+      checkTime(label);
+    };
     let dismissedAny = false;
 
     const isSettingsDialog = el => {
@@ -137,6 +149,7 @@
 
     const dialogs = [...document.querySelectorAll('[role="dialog"], mat-dialog-container, flow-dialog, [aria-modal="true"]')].filter(el => root.visible?.(el));
     for (const dialog of dialogs) {
+      checkTime("checking Flow blocking dialogs");
       if (isSettingsDialog(dialog)) continue;
 
       const closeBtn = [...dialog.querySelectorAll('button, [role="button"]')].find(btn => {
@@ -149,11 +162,11 @@
       if (closeBtn) {
         closeBtn.click();
         dismissedAny = true;
-        await root.wait?.(150);
+        await pause(150, "closing a Flow blocking dialog");
       } else {
         root.dispatchEscapeKey?.();
         dismissedAny = true;
-        await root.wait?.(150);
+        await pause(150, "closing a Flow blocking dialog");
       }
     }
 
@@ -164,7 +177,7 @@
       if (!hasOnlySettings) {
         root.dispatchEscapeKey?.();
         dismissedAny = true;
-        await root.wait?.(150);
+        await pause(150, "closing a Flow overlay");
       }
     }
 
@@ -197,9 +210,12 @@
     }
   }
 
-  async function ensureFlowProjectEditor() {
+  async function ensureFlowProjectEditor(options = {}) {
+    const waitOptions = { deadline: options.deadline, signal: options.signal };
+    const checkTime = label => root.FlowUiDeadline?.requireTime(Number.isFinite(options.deadline) ? options.deadline : Infinity, label, false, options.signal);
     const describe = () => (root.ProviderRegistry?.describeUrl?.(location.href) || root.FlowDriverRegistry?.describeUrl?.(location.href) || null);
     let target = describe();
+    checkTime("opening the Flow project editor");
 
     // 1. In project root editor
     if (target?.isProjectEditor) {
@@ -217,14 +233,14 @@
       });
       if (doneOrBack) {
         doneOrBack.click();
-        const leftSubRoute = await waitForFlowRoute(() => describe()?.isProjectEditor === true, 2000, "").catch(() => false);
+        const leftSubRoute = await waitForFlowRoute(() => describe()?.isProjectEditor === true, 2000, "", waitOptions).catch(() => false);
         if (leftSubRoute) return { success: true, isProjectEditor: true, projectId: target.projectId };
       }
 
       const allMedia = flowNavigationItem("All media");
       if (allMedia) {
         allMedia.click();
-        const leftSubRoute = await waitForFlowRoute(() => describe()?.isProjectEditor === true, 2000, "").catch(() => false);
+        const leftSubRoute = await waitForFlowRoute(() => describe()?.isProjectEditor === true, 2000, "", waitOptions).catch(() => false);
         if (leftSubRoute) return { success: true, isProjectEditor: true, projectId: target.projectId };
       }
 
@@ -252,7 +268,7 @@
     if (newProjectBtn) {
       console.log("[FlowNavigation] Clicking New project button...");
       newProjectBtn.click();
-      await waitForFlowRoute(() => describe()?.isProjectEditor === true, 15000, "Flow did not open a new project editor.");
+      await waitForFlowRoute(() => describe()?.isProjectEditor === true, 15000, "Flow did not open a new project editor.", waitOptions);
       target = describe();
       return { success: true, isProjectEditor: true, projectId: target?.projectId || null };
     }
@@ -261,7 +277,7 @@
     if (firstProjectCard && root.visible?.(firstProjectCard)) {
       console.log("[FlowNavigation] Opening first existing project...");
       firstProjectCard.click();
-      await waitForFlowRoute(() => describe()?.isProjectEditor === true, 15000, "Flow did not open existing project editor.");
+      await waitForFlowRoute(() => describe()?.isProjectEditor === true, 15000, "Flow did not open existing project editor.", waitOptions);
       target = describe();
       return { success: true, isProjectEditor: true, projectId: target?.projectId || null };
     }
@@ -274,7 +290,9 @@
     if (focused?.closest?.("mat-sidenav,[role=navigation]")) focused.blur();
   }
 
-  async function ensureFlowLibrarySection(label) {
+  async function ensureFlowLibrarySection(label, options = {}) {
+    const checkTime = () => root.FlowUiDeadline?.requireTime(Number.isFinite(options.deadline) ? options.deadline : Infinity, `opening the Flow ${label} library`, false, options.signal);
+    checkTime();
     await leaveFlowDetailView();
 
     const isAtProjectRoot = () => {
@@ -292,9 +310,20 @@
     }
 
     let target = flowNavigationItem(label);
+    if (!target && label === "Characters") {
+      // The project URL can update before Flow mounts the project sidebar.
+      // Wait briefly for its navigation controls before reporting them missing.
+      const navDeadline = Math.min(Date.now() + 5000, Number.isFinite(options.deadline) ? options.deadline : Infinity);
+      while (!target && Date.now() < navDeadline) {
+        checkTime();
+        if (root.FlowUiDeadline?.boundedWait) await root.FlowUiDeadline.boundedWait(150, navDeadline, "waiting for Flow's Characters navigation control", false, options.signal);
+        else await root.wait?.(150);
+        target = flowNavigationItem(label);
+      }
+    }
     if (!target && label === "All media") {
       // Thử phục hồi về Project Editor nếu bị kẹt ở sub-route
-      await ensureFlowProjectEditor();
+      await ensureFlowProjectEditor(options);
       if (isAtProjectRoot()) return true;
       target = flowNavigationItem(label);
     }
@@ -305,7 +334,7 @@
     }
 
     target.click();
-    const deadline = Date.now() + (label === "Characters" ? 10000 : 5000);
+    const deadline = Math.min(Date.now() + (label === "Characters" ? 10000 : 5000), Number.isFinite(options.deadline) ? options.deadline : Infinity);
     const hasCharacterAction = () => [...document.querySelectorAll("flow-custom-tile")].some(tile => {
       if (!root.visible?.(tile)) return false;
       const addIcon = [...tile.querySelectorAll("mat-icon")].some(icon =>
@@ -319,9 +348,11 @@
       ? hasCharacterAction() || hasEmptyCharacterChooser()
       : isAtProjectRoot() || [...document.querySelectorAll("flow-grid-tile-container")].some(el => root.visible?.(el));
     while (Date.now() < deadline) {
+      checkTime();
       const loading = [...document.querySelectorAll('[role="progressbar"],[aria-busy="true"]')].some(el => root.visible?.(el));
       if (!loading && hasSectionMarker()) break;
-      await root.wait?.(150);
+      if (root.FlowUiDeadline?.boundedWait) await root.FlowUiDeadline.boundedWait(150, deadline, `opening the Flow ${label} library`, false, options.signal);
+      else await root.wait?.(150);
     }
     if (!hasSectionMarker()) {
       if (label === "All media" && isAtProjectRoot()) return true;

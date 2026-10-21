@@ -169,6 +169,8 @@ extension/
    - Chỉ cần nhấn nút **Reload** (biểu tượng mũi tên xoay tròn) của extension trên trang `chrome://extensions/`.
    - Sau đó F5 lại trang Google Flow tab đang mở để nhận mã nguồn mới nhất.
 
+   Để tự reload trong lúc phát triển: load unpacked thư mục `extension/` một lần, rồi chạy `npm run dev:extension` ở thư mục gốc repo và để tiến trình đó chạy. Extension và các tab Flow đang mở sẽ tự reload sau khi có thay đổi (tối đa khoảng 30 giây).
+
 ---
 
 ## 6. Kiểm thử Đơn vị (Unit Tests)

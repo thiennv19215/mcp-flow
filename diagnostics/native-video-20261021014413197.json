@@ -1,0 +1,36 @@
+{
+  "started": "2026-10-21T01:44:13.197Z",
+  "mode": "video",
+  "api": "http://127.0.0.1:18897",
+  "probes": [
+    {
+      "name": "video.submit_only",
+      "status": "queued",
+      "job_id": "d221a462"
+    },
+    {
+      "name": "video.submit_only",
+      "status": "failed_before_dispatch",
+      "error": "Job d221a462 ended as failed before confirmed dispatch (outcome_unknown=false): Flow does not expose the requested video ratio (16:9). Nothing was submitted.. Do not replay this job."
+    }
+  ],
+  "job_id": "d221a462",
+  "latest_job": {
+    "id": "d221a462",
+    "status": "failed",
+    "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-video-20261021014413197",
+    "scene": "scene-01",
+    "prompt": "A red ceramic mug on a wooden table. Slow gentle camera push in, natural daylight. No text.",
+    "attempts": 1,
+    "credit_quote_verified": null,
+    "progress": "Flow video settings: selecting Video mode",
+    "files": [],
+    "error": "Flow does not expose the requested video ratio (16:9). Nothing was submitted.",
+    "error_category": "unknown",
+    "outcome_unknown": false,
+    "request_dispatched": false,
+    "server_acceptance_observed": false
+  },
+  "finished": "2026-10-21T01:44:16.297Z",
+  "fatal_error": "Job d221a462 ended as failed before confirmed dispatch (outcome_unknown=false): Flow does not expose the requested video ratio (16:9). Nothing was submitted.. Do not replay this job."
+}

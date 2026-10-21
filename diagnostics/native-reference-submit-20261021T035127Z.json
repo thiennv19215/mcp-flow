@@ -1,0 +1,195 @@
+{
+  "started": "2026-10-21T03:51:27.3439254Z",
+  "mode": "image_reference_submit_only",
+  "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+  "asset": {
+    "title": "fm-b4ad4a4bd219-upload.png",
+    "listed": true,
+    "uuid": "27dd914f-de46-4dff-b0cd-e0ea3b28acf4",
+    "uploadReport": "diagnostics/native-reference-upload-20261021T034920Z.json"
+  },
+  "referencePreparation": {
+    "pickerClosed": true,
+    "confirmedChipUuid": "27dd914f-de46-4dff-b0cd-e0ea3b28acf4",
+    "inspect_only_requested": true,
+    "anomaly": "inspect_only API call returned attached:true and status showed one exact Ingredient chip",
+    "actualAction": "attach"
+  },
+  "limits": {
+    "retries": 0,
+    "max_credits": 0,
+    "allow_unknown_quote": false,
+    "variants": 1,
+    "submit_only": true
+  },
+  "preflight": {
+    "queuedRunning": 0,
+    "exactAssetChip": 1,
+    "activeAttempts": 0,
+    "fetchHook": true,
+    "xhrHook": true,
+    "pickerOpen": false,
+    "quoteGate": "generation helper verifies in-cap quote before submit",
+    "globalQuoteCandidateCount": 0,
+    "promptChars": 0,
+    "chipCount": 1,
+    "observerReady": true
+  },
+  "jobId": "93819e71",
+  "outcome": "submitted",
+  "evidence": {
+    "server_acceptance_observed": false,
+    "credits": 0,
+    "jobId": "93819e71",
+    "outcome_unknown": false,
+    "note": "Flow submit request was dispatched; rendering and downloads were not awaited.",
+    "request_dispatched": true,
+    "requestDiagnostics": null,
+    "credit_quote_verified": true,
+    "status": "submitted"
+  },
+  "postflight": {
+    "queuedRunning": [],
+    "requestDiagnostics": {
+      "version": 1,
+      "count": 2,
+      "events": [
+        {
+          "observedAt": 1792554363798,
+          "attemptId": "1c5673ac-d2e2-47a8-966b-9de8923fb2d6",
+          "mediaType": "image",
+          "transport": "fetch",
+          "path": "/_/AiSandboxAngularFrontend/data/batchexecute",
+          "rpcId": "ogiZ0b",
+          "payloadVersion": "image_rows_v1",
+          "payloadShape": {
+            "type": "array",
+            "length": 5,
+            "items": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "length": 1,
+                "items": [
+                  "@{type=array; length=14; items=System.Object[]}"
+                ]
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "array",
+                "length": 11,
+                "items": [
+                  "@{type=null}",
+                  "@{type=number}",
+                  "@{type=null}",
+                  "@{type=null}",
+                  "@{type=null}",
+                  "@{type=string; length=36}",
+                  "@{type=null}",
+                  "@{type=null}",
+                  "@{type=null}",
+                  "@{type=null}",
+                  "@{type=array; length=2; items=System.Object[]}"
+                ]
+              },
+              {
+                "type": "array",
+                "length": 1,
+                "items": [
+                  "@{type=string; length=36}"
+                ]
+              }
+            ]
+          },
+          "pathRecognized": true,
+          "payloadMatched": true,
+          "fields": {
+            "shape": true,
+            "prompt": true,
+            "model": null,
+            "quantity": true,
+            "referenceIds": true,
+            "project": true
+          },
+          "reasons": []
+        },
+        {
+          "observedAt": 1792554695282,
+          "attemptId": "43607be5-6fa2-4833-8d06-2672599e6706",
+          "mediaType": "image",
+          "transport": "fetch",
+          "path": "/_/AiSandboxAngularFrontend/data/batchexecute",
+          "rpcId": "ogiZ0b",
+          "payloadVersion": "image_rows_v1",
+          "payloadShape": {
+            "type": "array",
+            "length": 5,
+            "items": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "length": 1,
+                "items": [
+                  "@{type=array; length=14; items=System.Object[]}"
+                ]
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "array",
+                "length": 11,
+                "items": [
+                  "@{type=null}",
+                  "@{type=number}",
+                  "@{type=null}",
+                  "@{type=null}",
+                  "@{type=null}",
+                  "@{type=string; length=36}",
+                  "@{type=null}",
+                  "@{type=null}",
+                  "@{type=null}",
+                  "@{type=null}",
+                  "@{type=array; length=2; items=System.Object[]}"
+                ]
+              },
+              {
+                "type": "array",
+                "length": 1,
+                "items": [
+                  "@{type=string; length=36}"
+                ]
+              }
+            ]
+          },
+          "pathRecognized": true,
+          "payloadMatched": true,
+          "fields": {
+            "shape": true,
+            "prompt": true,
+            "model": null,
+            "quantity": true,
+            "referenceIds": true,
+            "project": true
+          },
+          "reasons": []
+        }
+      ]
+    },
+    "composer": "🍌 Nano Banana 2.1 crop_square x1",
+    "promptChars": 0,
+    "pickerOpen": false,
+    "promptChipCount": 0,
+    "observerReady": true,
+    "referenceChipCount": 0,
+    "activeAttempts": 1,
+    "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa"
+  },
+  "finished": "2026-10-21T03:51:36.5890895Z"
+}

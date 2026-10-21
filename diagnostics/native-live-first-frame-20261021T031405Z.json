@@ -1,0 +1,37 @@
+{
+  "started": "2026-10-21T03:14:05.8547604Z",
+  "mode": "first_frame",
+  "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+  "asset": "fm-9aa6f547c686-upload.png",
+  "preflight": {
+    "observerReady": true,
+    "activeAttempts": 0,
+    "queuedRunning": 0,
+    "promptChars": 0,
+    "chips": 0,
+    "pickerOpen": false,
+    "agentPressed": "false"
+  },
+  "jobId": "ef818f23",
+  "outcome": "failed_before_dispatch",
+  "evidence": {
+    "jobId": "ef818f23",
+    "credit_quote_verified": null,
+    "request_dispatched": false,
+    "error_category": "unknown",
+    "credits": null,
+    "error": "Flow's start frame picker stayed open or became unidentifiable after the bounded close attempts. Diagnostics: {\"slot\":\"start\",\"assetName\":\"fm-9aa6f547c686-upload.png\",\"phase\":\"cleanup_check\",\"updatedAt\":\"2026-10-21T03:14:10.994Z\",\"opener\":{\"ariaLabel\":\"Start\",\"title\":null,\"ariaExpanded\":null,\"ariaControls\":null,\"ariaOwns\":null,\"disabled\":false,\"className\":\"empty-chip\"},\"slotContent\":[],\"exactFrameList\":{\"present\":false},\"slotSignature\":{\"label\":null,\"title\":null,\"text\":\"Start\",\"expanded\":null,\"media\":[],\"names\":[\"Swap first and last frames\"]},\"pickerState\":\"unknown\",\"stateSource\":\"no_exact_list_or_expanded_state\"}",
+    "status": "failed",
+    "outcome_unknown": false
+  },
+  "finished": "2026-10-21T03:14:11.9393627Z",
+  "postflight": {
+    "promptChars": 0,
+    "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "pickerOpen": false,
+    "activeAttempts": 0,
+    "observerReady": true,
+    "chips": 0,
+    "queuedRunning": []
+  }
+}

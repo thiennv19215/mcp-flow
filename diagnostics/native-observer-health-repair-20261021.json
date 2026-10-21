@@ -1,0 +1,31 @@
+{
+  "checked_at": "2026-10-21T02:20:15Z",
+  "api": "http://127.0.0.1:18897",
+  "operation": "one authenticated health-only observer check/repair",
+  "live_generation_calls": 0,
+  "health_http": 200,
+  "health": {
+    "ready": true,
+    "xhrHookActive": true,
+    "fetchHookActive": true,
+    "activeAttempts": 0,
+    "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "observerRevision": 23
+  },
+  "postflight_status_http": 200,
+  "postflight": {
+    "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "composer": "Video · 720p · 10s crop_16_9 x1",
+    "promptCharacterCount": 0,
+    "referenceChipCount": 0,
+    "referencePickerOpen": false,
+    "startFrameEmpty": true,
+    "endFrameEmpty": true,
+    "submitEnabled": false,
+    "quoteCandidates": [],
+    "activeJobs": [],
+    "agentModePressed": false
+  },
+  "state_change": "Only observer instrumentation became ready; no prompt, reference, frame, mode, job, or credit-setting change was observed.",
+  "decision": "Do not submit: quote gate remains unavailable (no candidate quote)."
+}

@@ -10,24 +10,41 @@ import { stageNativeMedia, cleanStagedFiles } from "./flow-transfer.js";
 import { downloadNativeResults, extensionOf, nativeDownloadIds, waitForNativeDownload } from "./native-downloads.js";
 
 const ASSET_PREFIX = "asset:";
+const normalizeCharacterName = (name: string): string => name.replace(/\s+/g, " ").trim().toLowerCase();
 const looksFile = () => {
   const context = currentDeviceContext();
   return context ? join(HOME_DIR, "users", context.userId, context.deviceId, "characters.json") : join(HOME_DIR, "characters.json");
 };
 
 export const loadLooks = (): Record<string, string> => {
-  try { return JSON.parse(readFileSync(looksFile(), "utf8")) as Record<string, string>; } catch { return {}; }
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(looksFile(), "utf8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed)
+      .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+      .map(([name, look]) => [normalizeCharacterName(name), look.trim()])
+      .filter(([name]) => Boolean(name))) as Record<string, string>;
+  } catch { return {}; }
 };
 
-export const characterLook = (name: string): string | undefined => loadLooks()[name.toLowerCase()];
+export const characterLook = (name: string): string | undefined => {
+  const key = normalizeCharacterName(name);
+  return key ? loadLooks()[key] : undefined;
+};
 
 export function rememberCharacter(name: string, look: string): void {
+  const key = normalizeCharacterName(name);
+  if (!key) throw new Error("Character name is required to remember its appearance.");
   const file = looksFile();
   mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, JSON.stringify({ ...loadLooks(), [name.toLowerCase()]: look.trim() }, null, 2));
+  const looks = loadLooks();
+  const description = String(look || "").trim();
+  if (description) looks[key] = description;
+  else delete looks[key];
+  writeFileSync(file, JSON.stringify(looks, null, 2));
 }
 
-export async function createCharacter(c: CharacterParams, job?: Job): Promise<{ name: string; url: string; portrait?: string }> {
+export async function createCharacter(c: CharacterParams, job?: Job): Promise<{ name: string; url: string; portrait?: string; cleanupWarning?: string }> {
   if (!c.image && !c.describe) throw new Error("Pass either an image or a description for the character.");
   const flowContext = job ?? ({} as Job);
   const localImage = Boolean(c.image && !c.image.startsWith(ASSET_PREFIX));
@@ -54,7 +71,7 @@ export async function createCharacter(c: CharacterParams, job?: Job): Promise<{ 
       stagedTransferId = staged.transferId;
       character = { ...c, image: staged } as unknown as CharacterParams;
     }
-    const result = await nativeOperation<{ name: string; url: string; portraitMedia?: NativeMedia }>("flow.character.create", { character }, "flow.native.character.create", flowContext, 10 * 60_000);
+    const result = await nativeOperation<{ name: string; url: string; portraitMedia?: NativeMedia; cleanupWarning?: string }>("flow.character.create", { character }, "flow.native.character.create", flowContext, 10 * 60_000);
     let portrait: string | undefined;
     if (result.portraitMedia) {
       const dir = castDirForContext();
@@ -68,19 +85,19 @@ export async function createCharacter(c: CharacterParams, job?: Job): Promise<{ 
     }
     if (c.describe) rememberCharacter(c.name, c.describe);
     if (job) job.progress = undefined;
-    return { name: result.name, url: result.url, portrait };
+    return { name: result.name, url: result.url, portrait, ...(result.cleanupWarning ? { cleanupWarning: result.cleanupWarning } : {}) };
   } finally {
     if (stagedTransferId) await nativeOperation("flow.file.upload.abort", { transferId: stagedTransferId }, "flow.native.file.upload.abort", flowContext, 10_000).catch(() => {});
     cleanStagedFiles(stagedDirs);
   }
 }
 
-export async function editCharacter(name: string, change?: string, job?: Job): Promise<{ name: string; portrait?: string; note?: string }> {
+export async function editCharacter(name: string, change?: string, job?: Job, rename?: string): Promise<{ name: string; portrait?: string; note?: string; cleanupWarning?: string }> {
   requireCapabilities("flow.native.character.edit");
   const flowContext = job ?? ({} as Job);
   const before = await nativeDownloadIds();
-  const result = await nativeOperation<{ name: string; downloadTriggered?: boolean; note?: string }>(
-    "flow.character.edit", { name, change, timeoutMs: 4 * 60_000 }, "flow.native.character.edit", flowContext, 5 * 60_000,
+  const result = await nativeOperation<{ name: string; downloadTriggered?: boolean; note?: string; cleanupWarning?: string }>(
+    "flow.character.edit", { name, change, rename, timeoutMs: 4 * 60_000 }, "flow.native.character.edit", flowContext, 5 * 60_000,
   );
   let portrait: string | undefined;
   let note = result.note;
@@ -89,12 +106,12 @@ export async function editCharacter(name: string, change?: string, job?: Job): P
       const file = await waitForNativeDownload(before, 90_000, progress => { if (job) job.progress = progress; });
       const dir = castDirForContext();
       mkdirSync(dir, { recursive: true });
-      portrait = join(dir, `${name.replace(/[^\w.-]+/g, "_")}${extensionOf(file.filename)}`);
+      portrait = join(dir, `${(rename || name).replace(/[^\w.-]+/g, "_")}${extensionOf(file.filename)}`);
       copyFileSync(file.filename, portrait);
     } catch (error) {
       note = `${change ? `${name} was changed in Flow, but the new` : "The"} portrait could not be saved (${error instanceof Error ? error.message : String(error)}). Call flow_character_edit with just the name to save it.`;
     }
   }
   if (job) job.progress = undefined;
-  return { name, portrait, note };
+  return { name: rename || name, portrait, note, ...(result.cleanupWarning ? { cleanupWarning: result.cleanupWarning } : {}) };
 }

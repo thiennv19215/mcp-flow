@@ -1,0 +1,49 @@
+{
+  "jobId": "c086ece5",
+  "final": {
+    "status": "failed",
+    "requestDispatched": false,
+    "serverAcceptanceObserved": false,
+    "outcomeUnknown": false,
+    "creditQuoteVerified": null,
+    "credits": null,
+    "error": "Flow opened a menu before the reference listbox, but this surface has no source-verified transition; nothing was selected.",
+    "progress": "Flow submit: selecting asset fm-9aa6f547c686-upload.png"
+  },
+  "polls": [
+    {
+      "accepted": false,
+      "unknown": false,
+      "credits": null,
+      "quote": null,
+      "dispatched": false,
+      "status": "failed",
+      "error": "Flow opened a menu before the reference listbox, but this surface has no source-verified transition; nothing was selected."
+    }
+  ],
+  "postflight": {
+    "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "observerReady": true,
+    "activeAttempts": 0,
+    "activeJobs": [],
+    "promptCharacters": "",
+    "chipCount": 0,
+    "chips": [],
+    "pickerOpen": false,
+    "surfaces": [
+      {
+        "label": "upload Tải lên folder Bộ sưu tập mới account_circle Tạo nhân vật play_movies Cảnh mới",
+        "role": "menu",
+        "tag": "div",
+        "labels": [
+          "upload Tải lên",
+          "folder Bộ sưu tập mới",
+          "account_circle Tạo nhân vật",
+          "play_movies Cảnh mới"
+        ]
+      }
+    ],
+    "creditCandidates": [],
+    "composer": "settings_2"
+  }
+}

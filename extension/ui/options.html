@@ -245,6 +245,14 @@
       transform: translateY(0);
     }
 
+    .btn-local {
+      margin-left: 8px;
+      background: #252a33;
+      color: var(--text-primary);
+      border: 1px solid var(--card-border);
+      box-shadow: none;
+    }
+
     /* Status Toast / Alert */
     .status-msg {
       margin-top: 16px;
@@ -366,6 +374,9 @@
           <polyline points="7 3 7 8 15 8"></polyline>
         </svg>
         <span id="txtBtnSave">Đăng nhập và kết nối</span>
+      </button>
+      <button class="btn-save btn-local" id="useLocal" type="button">
+        <span id="txtUseLocal">Dùng MCP local (127.0.0.1:18897)</span>
       </button>
 
       <div class="status-msg" id="status"></div>

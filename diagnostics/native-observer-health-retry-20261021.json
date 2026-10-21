@@ -1,0 +1,20 @@
+{
+  "checked_at": "2026-10-21T02:01:51.774Z",
+  "endpoint": "http://127.0.0.1:18897/api/observer_health",
+  "operation": "one health-only observer check",
+  "mutation": false,
+  "http": 200,
+  "result": {
+    "activeAttempts": 0,
+    "fetchHookActive": true,
+    "observerRevision": 23,
+    "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "ready": true,
+    "retiredCount": 0,
+    "retiredSaturated": false,
+    "structuredPromptVersion": 2,
+    "version": 1,
+    "xhrHookActive": true
+  },
+  "finished": "2026-10-21T02:01:51.823Z"
+}

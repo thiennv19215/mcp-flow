@@ -4,6 +4,8 @@
   const FLOW_CORRELATION_ARM_EVENT = "TOBY_FLOW_CORRELATION_ARM";
   const FLOW_CORRELATION_DISARM_EVENT = "TOBY_FLOW_CORRELATION_DISARM";
   const FLOW_CORRELATION_RECEIPT_EVENT = "TOBY_FLOW_CORRELATION_RECEIPT";
+  const FLOW_CORRELATION_HEALTH_READ_EVENT = "TOBY_FLOW_CORRELATION_HEALTH_READ";
+  const FLOW_CORRELATION_HEALTH_RESPONSE_EVENT = "TOBY_FLOW_CORRELATION_HEALTH_RESPONSE";
 
   function nativeFlowCorrelationMap() {
     if (!(globalThis.__flowNativeGenerationCorrelations instanceof Map)) {
@@ -22,7 +24,40 @@
     return `id-${(hash >>> 0).toString(16).padStart(8, "0")}`;
   }
 
-  async function armNativeFlowCorrelation({ projectId, mediaType, prompt, expectedQuantity }) {
+  function readMainWorldCorrelationHealth(timeoutMs = 500) {
+    const nonce = crypto.randomUUID();
+    return new Promise(resolve => {
+      let settled = false;
+      let timer;
+      const finish = value => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        window.removeEventListener(FLOW_CORRELATION_HEALTH_RESPONSE_EVENT, onResponse);
+        resolve(value);
+      };
+      const onResponse = event => {
+        const detail = event?.detail;
+        if (!detail || detail.nonce !== nonce) return;
+        const { nonce: _nonce, ...health } = detail;
+        finish(health);
+      };
+      timer = setTimeout(() => finish(null), Math.max(50, timeoutMs));
+      window.addEventListener(FLOW_CORRELATION_HEALTH_RESPONSE_EVENT, onResponse);
+      window.dispatchEvent(new CustomEvent(FLOW_CORRELATION_HEALTH_READ_EVENT, { detail: { nonce } }));
+    });
+  }
+
+  async function armNativeFlowCorrelation({
+    projectId,
+    mediaType,
+    prompt,
+    expectedQuantity,
+    expectedReferenceIds = [],
+    expectedMediaReferenceIds = [],
+    expectedCharacterIds = [],
+    expectedVoiceCount = 0,
+  }) {
     if (!projectId || !["image", "video"].includes(mediaType)) return null;
     const attemptId = crypto.randomUUID();
     const nonce = crypto.randomUUID();
@@ -34,14 +69,18 @@
         if (
           receipt?.schemaVersion !== 1 ||
           receipt?.nonce !== nonce ||
-          receipt?.attemptId !== attemptId ||
-          receipt?.projectId !== projectId ||
-          receipt?.mediaType !== mediaType
+          receipt?.attemptId !== attemptId
         ) return;
         entry.receipts.push(receipt);
         if (receipt.stage === "request_seen") entry.requestSeen = true;
         if (receipt.stage === "armed") {
-          entry.armed = !receipt.reason;
+          // The service worker may have repaired the observer before this
+          // command started, but Flow can replace its global transport hooks
+          // while settings and references are being prepared. The MAIN-world
+          // receipt captures the hook state at the actual arm boundary; do not
+          // deliver the submit click unless both transports are still patched.
+          entry.armed = !receipt.reason && receipt.projectId === projectId && receipt.mediaType === mediaType &&
+            receipt.xhrHookActive === true && receipt.fetchHookActive === true;
           clearTimeout(timer);
           resolve(entry.armed);
         }
@@ -60,15 +99,23 @@
         mediaType,
         expectedQuantity,
         promptFingerprint: flowPromptFingerprint(prompt),
-        expectedReferenceIds: [],
-        expectedMediaReferenceIds: [],
-        expectedCharacterIds: [],
+        expectedReferenceIds,
+        expectedMediaReferenceIds,
+        expectedCharacterIds,
+        expectedVoiceCount: Math.max(0, Math.min(1, Number(expectedVoiceCount) || 0)),
         expectedGlobalCharacter: false,
         strictDispatch: true,
         ttlMs: 15 * 60_000,
       },
     }));
     if (!(await armed)) {
+      root.__flowNativeCorrelationArmDiagnostics = {
+        requestedAt: new Date(entry.armedAt).toISOString(),
+        result: "not_armed",
+        expected: { projectId, mediaType, promptFingerprint: flowPromptFingerprint(prompt) },
+        receipt: entry.receipts.find(receipt => receipt?.stage === "armed") || null,
+        timeoutMs: 500,
+      };
       window.removeEventListener(FLOW_CORRELATION_RECEIPT_EVENT, entry.listener);
       window.removeEventListener("TOBY_FLOW_V2_CORRELATION_RECEIPT", entry.listener);
       window.dispatchEvent(new CustomEvent(FLOW_CORRELATION_DISARM_EVENT, {
@@ -77,7 +124,90 @@
       return null;
     }
     nativeFlowCorrelationMap().set(attemptId, entry);
+    root.__flowNativeCorrelationArmDiagnostics = {
+      requestedAt: new Date(entry.armedAt).toISOString(),
+      result: "armed",
+      expected: { projectId, mediaType, promptFingerprint: flowPromptFingerprint(prompt) },
+      receipt: entry.receipts.find(receipt => receipt?.stage === "armed") || null,
+      timeoutMs: 500,
+    };
     return attemptId;
+  }
+
+  async function inspectNativeFlowCorrelationObserver() {
+    const registry = root.ProviderRegistry || root.FlowDriverRegistry;
+    const described = registry?.describeUrl?.(location.href) || null;
+    const pageProjectId = described?.projectId || null;
+    const observer = await readMainWorldCorrelationHealth();
+    const diagnostics = {
+      pageProjectId,
+      descriptor: described ? {
+        driverKey: described.driverKey || described.key || null,
+        origin: described.origin || null,
+        routePrefix: described.routePrefix || "",
+      } : null,
+      observer,
+      projectMatch: Boolean(pageProjectId && observer?.projectId === pageProjectId),
+      armPreflight: null,
+    };
+    if (!observer) {
+      diagnostics.armPreflight = { result: "skipped", reason: "observer_health_timeout" };
+      return diagnostics;
+    }
+    if (!observer.ready || !diagnostics.projectMatch) {
+      diagnostics.armPreflight = {
+        result: "skipped",
+        reason: !observer.ready ? "observer_not_ready" : "project_id_mismatch",
+      };
+      return diagnostics;
+    }
+    if (Number(observer.activeAttempts) > 0) {
+      diagnostics.armPreflight = { result: "skipped", reason: "observer_has_active_attempts" };
+      return diagnostics;
+    }
+    const probePrompt = `Read-only Flow correlation observer preflight ${crypto.randomUUID()}`;
+    const attemptId = await armNativeFlowCorrelation({
+      projectId: pageProjectId,
+      mediaType: "image",
+      prompt: probePrompt,
+      expectedQuantity: 1,
+      expectedReferenceIds: [],
+      expectedMediaReferenceIds: [],
+      expectedCharacterIds: [],
+    });
+    const armDiagnostics = root.__flowNativeCorrelationArmDiagnostics || null;
+    if (attemptId) disarmNativeFlowCorrelation(attemptId);
+    diagnostics.armPreflight = {
+      result: attemptId ? "armed_and_disarmed" : armDiagnostics?.result || "not_armed",
+      expected: armDiagnostics?.expected || null,
+      receipt: armDiagnostics?.receipt || null,
+      reason: armDiagnostics?.receipt?.reason || null,
+    };
+    return diagnostics;
+  }
+
+  async function readNativeFlowCorrelationHealth() {
+    const health = await readMainWorldCorrelationHealth();
+    if (!health || typeof health !== "object") return null;
+    const events = Array.isArray(health.requestDiagnostics?.events) ? health.requestDiagnostics.events.slice(-32) : [];
+    const safeEvents = events.map(entry => ({
+      observedAt: typeof entry.observedAt === "string" ? entry.observedAt.slice(0, 40) : null,
+      mediaType: ["image", "video"].includes(entry.mediaType) ? entry.mediaType : "unknown",
+      transport: ["xhr", "fetch"].includes(entry.transport) ? entry.transport : "unknown",
+      payloadVersion: Number.isFinite(entry.payloadVersion) ? entry.payloadVersion : null,
+      payloadShape: typeof entry.payloadShape === "string" ? entry.payloadShape.slice(0, 80).replace(/[^a-zA-Z0-9_.:-]/g, "") : null,
+      pathClass: /image/i.test(String(entry.path || "")) ? "image" : /video/i.test(String(entry.path || "")) ? "video" : "other",
+      pathRecognized: entry.pathRecognized === true,
+      payloadMatched: entry.payloadMatched === true,
+      fields: Object.fromEntries(Object.entries(entry.fields || {}).slice(0, 32).map(([key, value]) => [String(key).replace(/[^a-zA-Z0-9_]/g, "").slice(0, 40), Boolean(value)])),
+      reasons: Array.isArray(entry.reasons) ? entry.reasons.slice(0, 16).map(reason => String(reason).replace(/[^A-Z0-9_]/gi, "").slice(0, 64)) : [],
+    }));
+    return {
+      ready: health.ready === true,
+      xhrHookActive: health.xhrHookActive === true,
+      fetchHookActive: health.fetchHookActive === true,
+      requestDiagnostics: { version: 1, count: safeEvents.length, events: safeEvents },
+    };
   }
 
   function nativeFlowCorrelationReceipt(attemptId) {
@@ -103,13 +233,32 @@
 
   function emitFlowProgress(command, progress) {
     try {
-      chrome.runtime.sendMessage({
+      const requestId = command.requestId || command.request_id || command.id || command.commandId || command.command_id;
+      const message = {
         type: "flow-mcp:progress",
-        commandId: command.id || command.commandId,
+        requestId,
+        commandId: requestId,
         jobId: command.job_id || command.jobId,
         progress,
-      }).catch(() => {});
-    } catch {}
+      };
+      const pending = chrome.runtime.sendMessage(message);
+      return Promise.resolve(pending).then(receipt => {
+        root.__flowProgressDiagnostic = {
+          requestId: String(requestId ?? ""), progress: String(progress || "").slice(0, 240),
+          sentAt: new Date().toISOString(), receipt: receipt || null,
+        };
+        return receipt;
+      }).catch(error => {
+        root.__flowProgressDiagnostic = {
+          requestId: String(requestId ?? ""), progress: String(progress || "").slice(0, 240),
+          sentAt: new Date().toISOString(), sendError: String(error?.message || error).slice(0, 300),
+        };
+        return { ok: false, error: root.__flowProgressDiagnostic.sendError };
+      });
+    } catch (error) {
+      root.__flowProgressDiagnostic = { sendError: String(error?.message || error).slice(0, 300), sentAt: new Date().toISOString() };
+      return Promise.resolve({ ok: false, error: root.__flowProgressDiagnostic.sendError });
+    }
   }
 
   function descriptor(item) {
@@ -447,6 +596,8 @@
     disarmNativeFlowCorrelation,
     nativeFlowCorrelationReceipt,
     nativeFlowCorrelationMap,
+    inspectNativeFlowCorrelationObserver,
+    readNativeFlowCorrelationHealth,
     flowPromptFingerprint,
     emitFlowProgress,
   });
@@ -464,6 +615,7 @@
   root.disarmNativeFlowCorrelation = disarmNativeFlowCorrelation;
   root.nativeFlowCorrelationReceipt = nativeFlowCorrelationReceipt;
   root.nativeFlowCorrelationMap = nativeFlowCorrelationMap;
+  root.inspectNativeFlowCorrelationObserver = inspectNativeFlowCorrelationObserver;
   root.retryNativeErrorTile = retryNativeErrorTile;
   root.emitFlowProgress = emitFlowProgress;
 })(globalThis);

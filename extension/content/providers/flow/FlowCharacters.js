@@ -10,6 +10,112 @@
     const current = el?.value !== undefined ? el.value : el?.innerText ?? el?.textContent;
     return String(current || "").replace(/\s+/g, " ").trim() === String(value || "").replace(/\s+/g, " ").trim();
   };
+  let lastCharacterNameDiagnostics = null;
+  function characterNameSnapshot(input, stage, requested) {
+    const value = input?.value ?? input?.innerText ?? input?.textContent ?? "";
+    const form = input?.closest?.("form") || null;
+    const headings = typeof document === "undefined" ? [] : [...document.querySelectorAll("h1,h2,[role=heading]")]
+      .filter(el => visible(el)).map(el => normalize(el.innerText || el.textContent)).filter(Boolean).slice(0, 4);
+    return {
+      stage,
+      route: typeof location === "undefined" ? null : location.pathname,
+      requested: String(requested || "").slice(0, 60),
+      field: input ? {
+        tag: input.tagName?.toLowerCase() || null,
+        type: input.type || null,
+        id: input.id || null,
+        name: input.name || null,
+        ariaLabel: input.getAttribute?.("aria-label") || null,
+        placeholder: input.getAttribute?.("placeholder") || null,
+        value: String(value).slice(0, 80),
+        defaultValue: String(input.defaultValue || "").slice(0, 80),
+        connected: input.isConnected === true,
+        invalid: input.getAttribute?.("aria-invalid") || null,
+        formText: form ? normalize(form.innerText || form.textContent).slice(0, 180) : null,
+      } : null,
+      headings,
+    };
+  }
+  function attachCharacterNameDiagnostics(error, diagnostics = lastCharacterNameDiagnostics) {
+    if (error && diagnostics) error.diagnostics = redactCharacterNameDiagnostics(diagnostics);
+    return error;
+  }
+  function safeMatchCount(value) {
+    return Number.isInteger(value) && value >= 0 ? value : null;
+  }
+  function characterNameLibraryEvidence(requestedMatches, previousMatches, scanComplete = true) {
+    const requested = safeMatchCount(requestedMatches);
+    const previous = safeMatchCount(previousMatches);
+    const complete = scanComplete === true && requested !== null && previous !== null;
+    return {
+      scan_complete: complete,
+      requested_name_matches: requested,
+      previous_name_matches: previous,
+      confirmed: complete && requested === 1 && previous === 0,
+    };
+  }
+  function redactCharacterNameDiagnostics(diagnostics = {}) {
+    const save = diagnostics.save_response || {};
+    const library = diagnostics.library_result || save.library_scan || null;
+    const entryConfirmed = diagnostics.field_value_confirmed === true;
+    const clickSent = diagnostics.save_clicked === true || save.click_sent === true;
+    const routeExited = diagnostics.route_exited === true || save.route_exited === true;
+    const requested = safeMatchCount(library?.requested_matches ?? library?.requested_name_matches);
+    const previous = safeMatchCount(library?.original_matches ?? library?.previous_name_matches);
+    return {
+      stage: library ? "post_save_library_verification" : entryConfirmed ? "name_entry_confirmed" : "name_entry",
+      name_entry_confirmed: entryConfirmed,
+      save_clicked: clickSent,
+      route_exited: routeExited,
+      library_scan: library ? {
+        scan_complete: library.scan_complete !== false && requested !== null && previous !== null,
+        requested_name_matches: requested,
+        previous_name_matches: previous,
+        confirmed: library.confirmed === true,
+      } : null,
+    };
+  }
+  function recordCharacterNameSaveResponse(response) {
+    const scan = response?.library_scan || null;
+    lastCharacterNameDiagnostics = {
+      ...(lastCharacterNameDiagnostics || {}),
+      save_clicked: response?.click_sent === true || lastCharacterNameDiagnostics?.save_clicked === true,
+      route_exited: response?.route_exited === true || lastCharacterNameDiagnostics?.route_exited === true,
+      library_result: scan ? {
+        scan_complete: scan.scan_complete !== false,
+        requested_matches: safeMatchCount(scan.requested_matches),
+        original_matches: safeMatchCount(scan.original_matches),
+        confirmed: scan.confirmed === true,
+      } : lastCharacterNameDiagnostics?.library_result,
+      save_response: {
+        control_present: Boolean(response?.control_label),
+        click_sent: response?.click_sent === true,
+        route_exited: response?.route_exited === true,
+        library_scan: scan ? {
+          scan_complete: scan.scan_complete !== false,
+          requested_matches: safeMatchCount(scan.requested_matches),
+          original_matches: safeMatchCount(scan.original_matches),
+          confirmed: scan.confirmed === true,
+        } : null,
+      },
+    };
+    return redactCharacterNameDiagnostics(lastCharacterNameDiagnostics);
+  }
+  async function commitCharacterName(input, value) {
+    const diagnostics = { before: characterNameSnapshot(input, "before_input", value) };
+    setEditable(input, value);
+    diagnostics.after_input = characterNameSnapshot(input, "after_input", value);
+    input.blur?.();
+    await wait(800);
+    diagnostics.after_blur = characterNameSnapshot(input, "after_blur", value);
+    diagnostics.field_value_confirmed = exactEditable(input, value);
+    lastCharacterNameDiagnostics = diagnostics;
+    if (!diagnostics.field_value_confirmed || input.isConnected === false || input.getAttribute?.("aria-invalid") === "true") {
+      const error = flowError("FLOW_CHARACTER_NAME_UNCONFIRMED", "Flow did not confirm the requested name in its character editor before save; the character name was not saved.", false, false);
+      throw attachCharacterNameDiagnostics(error, diagnostics);
+    }
+    return true;
+  }
   const visibleOptions = list => [...(list?.querySelectorAll('[role="option"]') || [])].filter(visible);
   function clickFlowControl(element) {
     const rect = element?.getBoundingClientRect();
@@ -113,10 +219,7 @@
 
   async function closeCurrentCharacterRoute() {
     if (newCharacterRoute(location.pathname)) {
-      const back = await waitForEnabledFlowButton("Go back", 3000);
-      if (!back) throw flowError("FLOW_CHARACTER_BACK_MISSING", "Flow's New character page has no Go back control; the current character form remains open.", true, true);
-      back.click();
-      await waitForFlowRoute(path => !newCharacterRoute(path), 15_000, "Flow did not leave the New character page.");
+      await leaveNewCharacterPage();
     } else if (characterEditorRoute(location.pathname)) {
       const done = await waitForEnabledFlowButton("Done", 3000) || await waitForEnabledFlowButton("Done editing", 1000);
       if (!done) throw flowError("FLOW_CHARACTER_SAVE_MISSING", "Flow's character editor has no save/close control; the character may be partially saved.", false, true);
@@ -125,54 +228,123 @@
     }
   }
 
-  async function ensureCharacterLibrary() {
+  async function leaveNewCharacterPage() {
+    const back = await waitForEnabledFlowButton("Go back", 3000) ||
+      await waitForEnabledFlowButton("Back", 1000) ||
+      await waitForEnabledFlowButton("Quay lại", 1000);
+    if (back) {
+      back.click();
+      if (await waitForFlowRoute(path => !newCharacterRoute(path), 5000, "Flow did not leave the New character page.").catch(() => false)) return true;
+    }
+    // Flow sometimes renders the route before its button; its navigation helper can recover through project root.
+    await root.FlowNavigation?.leaveFlowDetailView?.().catch(() => {});
+    if (newCharacterRoute(location.pathname)) {
+      await root.FlowNavigation?.ensureFlowProjectEditor?.().catch(() => {});
+    }
+    if (newCharacterRoute(location.pathname)) {
+      throw flowError("FLOW_CHARACTER_BACK_MISSING", "Flow's New character page did not leave after Go back or project navigation recovery.", true, true);
+    }
+    return true;
+  }
+
+  async function ensureCharacterLibrary({ allowNewCharacterPage = false } = {}) {
     await closeCurrentCharacterRoute();
     await ensureFlowLibrarySection("Characters");
+    if (newCharacterRoute(location.pathname) && allowNewCharacterPage &&
+        (flowButton("Add from project") || flowButton("Upload"))) {
+      return { newCharacterPage: true };
+    }
+    if (newCharacterRoute(location.pathname)) {
+      await leaveNewCharacterPage();
+      await ensureFlowLibrarySection("Characters");
+    }
     if (characterRoute(location.pathname)) {
       throw flowError("FLOW_CHARACTER_ROUTE_UNEXPECTED", "Flow is still on a character form or editor instead of the Characters library.", true, true);
     }
+    return { newCharacterPage: false };
   }
 
-  async function findCharacterTiles(name) {
+  async function findCharacterTiles(name, timeoutMs = 45_000) {
     const wanted = normalize(cleanCharacterName(name));
+    if (!wanted) throw flowError("FLOW_INVALID_ARGUMENT", "Character name is required for an exact library lookup.");
     const found = new Map();
-    const scroller = scrollContainer();
-    if (scroller) scroller.scrollTop = 0;
-    const readyDeadline = Date.now() + 15_000;
-    let stableAt = 0;
-    while (Date.now() < readyDeadline) {
-      const loading = [...document.querySelectorAll('[role="progressbar"],[aria-busy="true"]')].some(visible);
-      const hasTiles = [...document.querySelectorAll("flow-character-tile")].some(visible);
-      if (hasTiles && !loading) break;
-      if (!loading && !hasTiles) {
-        if (!stableAt) stableAt = Date.now();
-        if (Date.now() - stableAt >= 700) break;
-      } else stableAt = 0;
-      await wait(150);
-    }
-    for (let page = 0; page < 120; page++) {
-      for (const tile of document.querySelectorAll("flow-character-tile")) {
-        if (!visible(tile)) continue;
-        const actual = normalize(cleanCharacterName((tile.innerText || "").split("\n")[0] || tile.getAttribute("aria-label") || ""));
-        if (actual === wanted) found.set(tile.getAttribute("data-id") || tile.id || actual + "|" + (tile.querySelector("img")?.src || ""), tile);
+    let scroller = scrollContainer();
+    if (!scroller) {
+      const pageScroller = document.scrollingElement || document.documentElement;
+      if (pageScroller && Number.isFinite(pageScroller.clientHeight) && pageScroller.clientHeight > 0 && Number.isFinite(pageScroller.scrollHeight)) {
+        scroller = pageScroller;
       }
-      if (!scroller || scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 2) break;
-      const previous = scroller.scrollTop;
-      scroller.scrollTop = Math.min(scroller.scrollHeight - scroller.clientHeight, previous + Math.max(120, scroller.clientHeight * 0.75));
-      await wait(200);
-      if (scroller.scrollTop === previous) break;
     }
-    return [...found.values()];
+    if (!scroller || !Number.isFinite(scroller.scrollTop) || !Number.isFinite(scroller.scrollHeight) || !Number.isFinite(scroller.clientHeight) || scroller.clientHeight <= 0) {
+      throw flowError("FLOW_CHARACTER_SCAN_INCOMPLETE", "Flow's Characters library does not expose measurable scrolling state, so the full list cannot be confirmed; no character was selected.", true);
+    }
+    const originalTop = scroller?.scrollTop ?? 0;
+    if (scroller) scroller.scrollTop = 0;
+    const deadline = Date.now() + timeoutMs;
+    const readyDeadline = Math.min(deadline, Date.now() + 15_000);
+    let stableAt = 0;
+    let reachedEnd = false;
+    let librarySettled = false;
+    try {
+      while (Date.now() < readyDeadline) {
+        const loading = [...document.querySelectorAll('[role="progressbar"],[aria-busy="true"]')].some(visible);
+        const hasTiles = [...document.querySelectorAll("flow-character-tile")].some(visible);
+        if (hasTiles && !loading) { librarySettled = true; break; }
+        if (!loading && !hasTiles) {
+          if (!stableAt) stableAt = Date.now();
+          if (Date.now() - stableAt >= 700) { librarySettled = true; break; }
+        } else stableAt = 0;
+        await wait(Math.min(150, Math.max(1, readyDeadline - Date.now())));
+      }
+      if (!librarySettled) throw flowError("FLOW_CHARACTER_LIBRARY_LOADING", "Flow's Characters library did not settle before the lookup deadline; no character was selected.", true);
+      for (let page = 0; page < 120 && Date.now() < deadline; page++) {
+        for (const tile of document.querySelectorAll("flow-character-tile")) {
+          if (!visible(tile)) continue;
+          const actual = normalize(cleanCharacterName((tile.innerText || "").split("\n")[0] || tile.getAttribute("aria-label") || ""));
+          if (actual === wanted) found.set(tile.getAttribute("data-id") || tile.id || actual + "|" + (tile.querySelector("img")?.src || ""), tile);
+        }
+        if (scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 2) { reachedEnd = true; break; }
+        const previous = scroller.scrollTop;
+        scroller.scrollTop = Math.min(scroller.scrollHeight - scroller.clientHeight, previous + Math.max(120, scroller.clientHeight * 0.75));
+        await wait(Math.min(200, Math.max(1, deadline - Date.now())));
+        if (scroller.scrollTop <= previous) {
+          throw flowError("FLOW_CHARACTER_SCAN_INCOMPLETE", "Flow's character library stopped scrolling before its end; no character was selected.", true);
+        }
+      }
+      if (Date.now() >= deadline || !reachedEnd) {
+        throw flowError("FLOW_CHARACTER_SCAN_INCOMPLETE", "Flow's character library could not be fully scanned before the lookup deadline; no character was selected.", true);
+      }
+      return [...found.values()];
+    } finally {
+      scroller.scrollTop = originalTop;
+    }
+  }
+
+  async function waitForCharacterTiles(name, timeoutMs = 10_000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const matches = await findCharacterTiles(name, Math.min(3000, Math.max(1000, deadline - Date.now())));
+      if (matches.length) return matches;
+      await wait(Math.min(400, Math.max(1, deadline - Date.now())));
+    }
+    return [];
   }
 
   globalThis.FlowCharacterActions = Object.freeze({
+    commitName: commitCharacterName,
+    inspectNameDiagnostics: () => lastCharacterNameDiagnostics ? redactCharacterNameDiagnostics(lastCharacterNameDiagnostics) : null,
+    verifyNameLibrary: characterNameLibraryEvidence,
+    recordNameSaveResponse: recordCharacterNameSaveResponse,
+    findCharacterTiles,
     create: async (payload = {}, command = {}) => {
       const c = payload.character || payload.job?.params || payload;
-      if (!c.name) throw flowError("FLOW_INVALID_ARGUMENT", "Character name is required.");
+      if (!String(c.name || "").trim()) throw flowError("FLOW_INVALID_ARGUMENT", "Character name is required.");
+      const characterName = String(c.name).trim();
       const localImage = c.image && typeof c.image === "object" ? c.image : null;
       if (c.image && !localImage && !String(c.image).startsWith("asset:")) throw flowError("FLOW_INVALID_ARGUMENT", "Character image must be a project asset or a staged local image.");
       if (!c.image && !c.describe) throw flowError("FLOW_INVALID_ARGUMENT", "Pass an existing project image with image='asset:<title>' or provide describe.");
       let sourceTitle = c.image && !localImage ? String(c.image).replace(/^asset:/, "").trim() : "";
+      if (c.image && !localImage && !sourceTitle) throw flowError("FLOW_INVALID_ARGUMENT", "Character image asset title is empty.");
       let portraitMedia;
       await closeNativeAgentSession();
       await closeCurrentCharacterRoute();
@@ -182,10 +354,17 @@
         if (!validStagedLocalImage(localImage, /character/)) throw flowError("FLOW_TRANSFER_UNKNOWN", "The local character image transfer is invalid or no longer staged.", true);
         const file = stagedNativeFiles.get(localImage.transferId);
         if (!file) throw flowError("FLOW_TRANSFER_UNKNOWN", "The staged character image is no longer available.", true);
-      } else {
-        await ensureFlowLibrarySection("All media");
+      }
+      const characterEntry = await ensureCharacterLibrary({ allowNewCharacterPage: true });
+      let newPageReady = characterEntry.newCharacterPage;
+      if (!newPageReady) {
+        const existing = await findCharacterTiles(characterName);
+        if (existing.length > 1) throw flowError("FLOW_CHARACTER_AMBIGUOUS", `More than one character is already named "${characterName}"; no new character was created.`, true);
+        if (existing.length === 1) throw flowError("FLOW_CHARACTER_EXISTS", `A character named "${characterName}" already exists; no new character was created.`, true);
       }
       if (!c.image) {
+        await ensureFlowLibrarySection("All media");
+        newPageReady = false;
         if (!document.querySelector(".ProseMirror")) throw flowError("NATIVE_CAPABILITY_UNSUPPORTED", "Flow's image composer is unavailable for description-based character creation.", true);
         if (scrollContainer()) scrollContainer().scrollTop = 0;
         const before = collectNativeMedia().map(item => item.id || `title:${item.title}`);
@@ -210,9 +389,10 @@
 
       let characterUrl = "";
       let enteredEditor = false;
+      let completedResult;
       try {
-        await ensureFlowLibrarySection("Characters");
-        let newPage = newCharacterRoute(location.pathname);
+        if (!newPageReady) await ensureFlowLibrarySection("Characters");
+        let newPage = newPageReady || newCharacterRoute(location.pathname);
         if (!newPage) {
           const create = await waitForCharacterCreateButton(10_000);
           if (!create) throw flowError("FLOW_CHARACTER_CREATE_MISSING", "Flow's Characters library does not show New character.", true);
@@ -264,11 +444,8 @@
 
         const nameInput = [...document.querySelectorAll('input,[role="textbox"]')].find(el => visible(el) && /(?:Character name|Tên nhân vật)/i.test(accessibleName(el) || el.placeholder || ""));
         if (!nameInput) throw flowError("FLOW_CHARACTER_FORM_MISSING", "Flow's character name field is not visible; the character may be partially created.", false, true);
-        setEditable(nameInput, c.name);
-        nameInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-        const nameDeadline = Date.now() + 5000;
-        while (Date.now() < nameDeadline && !exactEditable(nameInput, c.name)) await wait(100);
-        if (!exactEditable(nameInput, c.name)) throw flowError("FLOW_CHARACTER_NAME_UNCONFIRMED", "Flow did not accept the requested character name; the character may be partially created.", false, true);
+        const initialCharacterName = String(nameInput.value ?? nameInput.innerText ?? nameInput.textContent ?? "").replace(/\s+/g, " ").trim();
+        await commitCharacterName(nameInput, characterName);
 
         if (c.personality) {
           const personality = [...document.querySelectorAll('textarea,input,[role="textbox"]')].find(el => visible(el) && /(?:Character personality|Tính cách nhân vật|Mô tả nhân vật)/i.test(accessibleName(el) || el.placeholder || ""));
@@ -314,41 +491,77 @@
         const done = await waitForEnabledFlowButton("Done", 10_000) || await waitForEnabledFlowButton("Done editing", 1000);
         if (!done) throw flowError("FLOW_CHARACTER_SAVE_MISSING", "Flow has not presented a Done button; character may be partially created.", false, true);
         done.click();
+        lastCharacterNameDiagnostics = { ...lastCharacterNameDiagnostics, save_clicked: true };
         await waitForFlowRoute(path => !characterRoute(path), 15_000, "Flow did not save and close the character editor.");
+        lastCharacterNameDiagnostics = { ...lastCharacterNameDiagnostics, route_exited: true };
         enteredEditor = false;
         await ensureFlowLibrarySection("Characters");
-        const saved = await findCharacterTiles(c.name);
-        if (saved.length > 1) throw flowError("FLOW_CHARACTER_AMBIGUOUS", `Flow saved more than one character named "${c.name}"; verify the Characters library.`, false, true);
-        if (!saved.length) throw flowError("FLOW_CHARACTER_SAVE_UNCONFIRMED", `Flow closed the editor but the Characters library does not show "${c.name}". Check Flow before retrying.`, false, true);
-        const clear = flowButton("Clear prompt"); if (clear) clear.click();
-        return { name: c.name, url: characterUrl || location.href, portraitMedia, trustedGesture: false };
-      } finally {
-        if (newCharacterRoute(location.pathname)) {
-          const back = flowButton("Go back");
-          if (back) { back.click(); await wait(500); }
-        } else if (enteredEditor && characterEditorRoute(location.pathname)) {
-          const done = flowButton("Done") || flowButton("Done editing");
-          if (done) { done.click(); await wait(500); }
+        let saved = [];
+        let previousNameMatches = [];
+        let libraryScanComplete = true;
+        try { saved = await waitForCharacterTiles(characterName); }
+        catch { libraryScanComplete = false; }
+        if (initialCharacterName && normalize(initialCharacterName) !== normalize(characterName)) {
+          try { previousNameMatches = await findCharacterTiles(initialCharacterName, 5000); }
+          catch { libraryScanComplete = false; }
         }
-        await ensureFlowLibrarySection("All media").catch(() => {});
+        const libraryEvidence = characterNameLibraryEvidence(saved.length, previousNameMatches.length, libraryScanComplete);
+        lastCharacterNameDiagnostics = {
+          ...lastCharacterNameDiagnostics,
+          library_result: {
+            requested_matches: libraryEvidence.requested_name_matches,
+            original_matches: libraryEvidence.previous_name_matches,
+            scan_complete: libraryEvidence.scan_complete,
+            confirmed: libraryEvidence.confirmed,
+          },
+        };
+        recordCharacterNameSaveResponse({ control_label: "Done", click_sent: true, route_exited: true,
+          library_scan: { requested_matches: saved.length, original_matches: previousNameMatches.length,
+            scan_complete: libraryScanComplete, confirmed: libraryEvidence.confirmed } });
+        if (!libraryEvidence.confirmed) {
+          const error = flowError("FLOW_CHARACTER_SAVE_UNCONFIRMED", "Flow closed the character editor, but the Characters library did not confirm a unique saved name. Check Flow before retrying.", false, true);
+          throw attachCharacterNameDiagnostics(error);
+        }
+        const clear = flowButton("Clear prompt"); if (clear) clear.click();
+        completedResult = { name: characterName, url: characterUrl || location.href, portraitMedia, trustedGesture: false };
+        return completedResult;
+      } finally {
+        try {
+          if (newCharacterRoute(location.pathname)) await leaveNewCharacterPage();
+          else if (enteredEditor && characterEditorRoute(location.pathname)) await closeCurrentCharacterRoute();
+          await ensureFlowLibrarySection("All media");
+          if (characterRoute(location.pathname)) throw flowError("FLOW_CHARACTER_CLEANUP_INCOMPLETE", "Flow remained on a character page after the create workflow cleanup.", true, true);
+        } catch (error) {
+          if (completedResult) completedResult.cleanupWarning = String(error?.message || error).slice(0, 300);
+        }
       }
     },
 
     edit: async (payload = {}, command = {}) => {
       const characterName = String(payload.name || "");
+      if (!characterName.trim()) throw flowError("FLOW_INVALID_ARGUMENT", "Character name is required for editing.");
+      const renameTo = String(payload.rename || "").replace(/\s+/g, " ").trim();
+      if (renameTo.length > 60) throw flowError("FLOW_INVALID_ARGUMENT", "A character name must contain at most 60 characters.");
+      if (renameTo && normalize(renameTo) === normalize(characterName)) throw flowError("FLOW_INVALID_ARGUMENT", "The new character name must differ from the current name.");
       await closeNativeAgentSession();
       await ensureCharacterLibrary();
       const activeAgent = flowButton("Agent");
       if (activeAgent?.getAttribute("aria-pressed") === "true") await setNativeAgentMode(false);
-      const matches = await findCharacterTiles(characterName);
+      const matches = await findCharacterTiles(characterName.trim());
       if (matches.length > 1) throw flowError("FLOW_CHARACTER_AMBIGUOUS", `More than one character is named "${characterName}". No character was opened.`);
       const target = matches[0];
       if (!target) throw flowError("FLOW_CHARACTER_NOT_FOUND", `No character called "${characterName}". Use flow_characters to list them.`, true);
       target.scrollIntoView({ block: "center" }); target.click();
       await waitForFlowRoute(path => characterEditorRoute(path), 20_000, `Flow did not open character "${characterName}".`);
       await wait(500);
+      let completedResult;
       try {
         let portrait = document.querySelector('img[aria-label="Generated character image"], img[aria-label="Ảnh nhân vật đã tạo"], img[aria-label*="nhân vật"]');
+        if (renameTo) {
+          const nameInput = [...document.querySelectorAll('input,[role="textbox"]')].find(el => visible(el) && /(?:Character name|Tên nhân vật)/i.test(accessibleName(el) || el.placeholder || ""));
+          if (!nameInput) throw flowError("FLOW_CHARACTER_FORM_MISSING", "Flow's character name field is not visible; the character name was not changed.", true, false);
+          await commitCharacterName(nameInput, renameTo);
+        }
         if (payload.change) {
           const box = [...document.querySelectorAll(".ProseMirror")].at(-1);
           if (!box) throw flowError("FLOW_CHARACTER_EDITOR_MISSING", "Character editor prompt is not visible.", true);
@@ -370,7 +583,7 @@
         }
         let downloadTriggered = false;
         const picture = document.querySelector('img[aria-label="Generated character image"], img[aria-label="Ảnh nhân vật đã tạo"], img[aria-label*="nhân vật"]');
-        if (picture) {
+        if (picture && !renameTo) {
           picture.scrollIntoView({ block: "center" });
           const rect = picture.getBoundingClientRect();
           for (let attempt = 0; attempt < 3 && !downloadTriggered; attempt++) {
@@ -383,16 +596,67 @@
         }
         const done = flowButton("Done") || flowButton("Done editing");
         if (!done) throw flowError("FLOW_CHARACTER_SAVE_MISSING", "Flow's character editor has no Done control; the character may be partially saved.", false, true);
-        done.click();
-        await waitForFlowRoute(path => !characterRoute(path), 15_000, "Flow did not close the character editor.");
-        return { name: characterName, downloadTriggered, note: downloadTriggered ? undefined : "The character was saved in Flow, but its portrait download button was unavailable.", trustedGesture: false };
-      } finally {
-        if (characterEditorRoute(location.pathname)) {
-          const done = flowButton("Done") || flowButton("Done editing");
-          if (done) done.click();
-          await wait(500);
+        const saveControlLabel = String(accessibleName(done) || done.innerText || done.textContent || "").replace(/\s+/g, " ").trim();
+        if (renameTo) {
+          lastCharacterNameDiagnostics = {
+            ...lastCharacterNameDiagnostics,
+            pre_save: characterNameSnapshot([...document.querySelectorAll('input,[role="textbox"]')].find(el => visible(el) && /(?:Character name|Tên nhân vật)/i.test(accessibleName(el) || el.placeholder || "")), "pre_save", renameTo),
+            save_control: {
+              label: String(accessibleName(done) || done.innerText || done.textContent || "").replace(/\s+/g, " ").trim().slice(0, 80),
+              disabled: Boolean(done.disabled || done.getAttribute("aria-disabled") === "true"),
+              tag: done.tagName?.toLowerCase() || null,
+            },
+          };
         }
-        await ensureFlowLibrarySection("All media").catch(() => {});
+        done.click();
+        if (renameTo) {
+          lastCharacterNameDiagnostics = { ...lastCharacterNameDiagnostics, save_clicked: true };
+          recordCharacterNameSaveResponse({ control_label: saveControlLabel, click_sent: true });
+        }
+        await waitForFlowRoute(path => !characterRoute(path), 15_000, "Flow did not close the character editor.");
+        if (renameTo) {
+          lastCharacterNameDiagnostics = { ...lastCharacterNameDiagnostics, route_exited: true, post_save_route: location.pathname };
+          recordCharacterNameSaveResponse({ control_label: saveControlLabel, click_sent: true, route_exited: true, post_save_route: location.pathname });
+        }
+        let savedName = characterName;
+        if (renameTo) {
+          await ensureFlowLibrarySection("Characters");
+          let renamed = [];
+          let originalMatches = [];
+          let libraryScanComplete = true;
+          try { renamed = await waitForCharacterTiles(renameTo); }
+          catch { libraryScanComplete = false; }
+          try { originalMatches = await findCharacterTiles(characterName.trim(), 5000); }
+          catch { libraryScanComplete = false; }
+          const libraryEvidence = characterNameLibraryEvidence(renamed.length, originalMatches.length, libraryScanComplete);
+          lastCharacterNameDiagnostics = {
+            ...lastCharacterNameDiagnostics,
+            library_result: {
+              requested_matches: libraryEvidence.requested_name_matches,
+              original_matches: libraryEvidence.previous_name_matches,
+              scan_complete: libraryEvidence.scan_complete,
+              confirmed: libraryEvidence.confirmed,
+            },
+          };
+          recordCharacterNameSaveResponse({ control_label: saveControlLabel, click_sent: true, route_exited: true, post_save_route: location.pathname,
+            library_scan: { requested_matches: renamed.length, original_matches: originalMatches.length,
+              scan_complete: libraryScanComplete, confirmed: libraryEvidence.confirmed } });
+          if (!libraryEvidence.confirmed) {
+            const error = flowError("FLOW_CHARACTER_RENAME_UNCONFIRMED", "Flow closed the editor, but the Characters library did not confirm that the new name is unique and the old name is gone.", false, true);
+            throw attachCharacterNameDiagnostics(error);
+          }
+          savedName = renameTo;
+        }
+        completedResult = { name: savedName, downloadTriggered, note: downloadTriggered ? undefined : "The character was saved in Flow, but its portrait download button was unavailable.", trustedGesture: false };
+        return completedResult;
+      } finally {
+        try {
+          if (characterRoute(location.pathname)) await closeCurrentCharacterRoute();
+          await ensureFlowLibrarySection("All media");
+          if (characterRoute(location.pathname)) throw flowError("FLOW_CHARACTER_CLEANUP_INCOMPLETE", "Flow remained on a character page after the edit workflow cleanup.", true, true);
+        } catch (error) {
+          if (completedResult) completedResult.cleanupWarning = String(error?.message || error).slice(0, 300);
+        }
         const clear = flowButton("Clear prompt"); if (clear) clear.click();
       }
     },

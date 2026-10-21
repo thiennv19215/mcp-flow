@@ -1,0 +1,15 @@
+{
+  "started": "2026-10-21T04:06:18.585Z",
+  "mode": "upload",
+  "api": "http://127.0.0.1:18897",
+  "probes": [
+    {
+      "name": "upload_media",
+      "status": "failed",
+      "seconds": 2.724,
+      "error": "Flow's visible Upload menu item did not appear. No file was selected."
+    }
+  ],
+  "finished": "2026-10-21T04:06:21.310Z",
+  "fatal_error": "Flow's visible Upload menu item did not appear. No file was selected."
+}

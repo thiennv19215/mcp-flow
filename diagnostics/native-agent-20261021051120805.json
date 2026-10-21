@@ -1,0 +1,8 @@
+{
+  "started": "2026-10-21T05:11:20.805Z",
+  "mode": "agent",
+  "api": "http://127.0.0.1:18897",
+  "probes": [],
+  "finished": "2026-10-21T05:11:20.806Z",
+  "fatal_error": "E2E agent has no configured, verifiable credit cap; nothing was submitted."
+}

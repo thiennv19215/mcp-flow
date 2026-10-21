@@ -1,0 +1,15 @@
+{
+  "started": "2026-10-21T05:03:26.673Z",
+  "mode": "upload",
+  "api": "http://127.0.0.1:18897",
+  "probes": [
+    {
+      "name": "upload_media",
+      "status": "failed",
+      "seconds": 72.612,
+      "error": "Flow did not confirm an exact video library tile for \"fm-604f67ded9da-upload.mp4\" before the bounded deadline. Picker selection confirmed: true; full-library scans: 3; last scan: 7 tiles, 3 pages, reached end true. Flow may not have accepted the file. Inspect Flow before retrying."
+    }
+  ],
+  "finished": "2026-10-21T05:04:39.286Z",
+  "fatal_error": "Flow did not confirm an exact video library tile for \"fm-604f67ded9da-upload.mp4\" before the bounded deadline. Picker selection confirmed: true; full-library scans: 3; last scan: 7 tiles, 3 pages, reached end true. Flow may not have accepted the file. Inspect Flow before retrying."
+}

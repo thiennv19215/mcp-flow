@@ -1,0 +1,86 @@
+{
+  "started": "2026-10-21T01:41:19.736Z",
+  "api": "http://127.0.0.1:18897",
+  "operation": "flow_clear_references after extension reload closed picker",
+  "observerHealth": {
+    "activeAttempts": 0,
+    "fetchHookActive": true,
+    "observerRevision": 23,
+    "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "ready": true,
+    "retiredCount": 0,
+    "retiredSaturated": false,
+    "structuredPromptVersion": 2,
+    "version": 1,
+    "xhrHookActive": true
+  },
+  "before": {
+    "pickerOpen": false,
+    "chipCount": 0,
+    "promptComposer": {
+      "tag": "div",
+      "aria": "Bạn muốn tạo những gì? add Tác nhân 🍌 Nano Banana 2.1 crop_9_16 x1 arrow_forward",
+      "text": "Bạn muốn tạo những gì? add Tác nhân 🍌 Nano Banana 2.1 crop_9_16 x1 arrow_forward",
+      "icon": "",
+      "className": "base-prompt-box",
+      "disabled": false,
+      "connected": true
+    },
+    "activeJobs": []
+  },
+  "result": {
+    "cleared": 0,
+    "remaining": 0,
+    "confirmed": true,
+    "picker_closed": true,
+    "prompt_preserved": true,
+    "prompt_text": ""
+  },
+  "after": {
+    "referenceActionDiagnostics": {
+      "action": "close",
+      "phase": "completed",
+      "step": "picker closed",
+      "error": null,
+      "cleanupError": null,
+      "updatedAt": "2026-10-21T01:41:19.198Z",
+      "pickerOpen": false,
+      "pickerRole": null,
+      "pickerOptionCount": 0,
+      "pickerOptionLabels": [],
+      "searchValue": "",
+      "categoryTabs": [],
+      "chipCount": 0,
+      "chips": []
+    },
+    "referenceClearDiagnostics": {
+      "composer": {
+        "tag": "flow-base-prompt-box",
+        "className": "",
+        "connected": true
+      },
+      "clearPromptButton": null,
+      "chipCount": 0,
+      "chips": [],
+      "helper": {
+        "phase": "returned",
+        "initialCount": 0,
+        "removedCount": 0,
+        "error": null,
+        "updatedAt": "2026-10-21T01:41:19.169Z",
+        "remainingCount": 0
+      }
+    },
+    "promptComposer": {
+      "tag": "div",
+      "aria": "Bạn muốn tạo những gì? add Tác nhân 🍌 Nano Banana 2.1 crop_9_16 x1 arrow_forward",
+      "text": "Bạn muốn tạo những gì? add Tác nhân 🍌 Nano Banana 2.1 crop_9_16 x1 arrow_forward",
+      "icon": "",
+      "className": "base-prompt-box",
+      "disabled": false,
+      "connected": true
+    },
+    "activeJobs": []
+  },
+  "promptComposerUnchanged": true
+}

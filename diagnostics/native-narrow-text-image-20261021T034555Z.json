@@ -1,0 +1,56 @@
+{
+  "started": "2026-10-21T03:45:55.9887510Z",
+  "mode": "text_to_image_submit_only",
+  "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+  "upload": {
+    "uuid": "3e54fcea-fc18-4f6e-a904-0e6259fd0347",
+    "evidence": "diagnostics/native-upload-20261020201209389.json",
+    "reused": true,
+    "duplicateUploadMade": false,
+    "title": "fm-9aa6f547c686-upload.png"
+  },
+  "limits": {
+    "max_credits": 0,
+    "retries": 0,
+    "submit_only": true,
+    "allow_unknown_quote": false,
+    "variants": 1
+  },
+  "preflight": {
+    "xhrHook": true,
+    "globalQuoteCandidateCount": 0,
+    "observerReady": true,
+    "queuedRunning": 0,
+    "activeAttempts": 0,
+    "fetchHook": true,
+    "quoteRead": "generation helper reads Flow quote before clicking; cap 0 blocks higher/unverified quote",
+    "chips": 0,
+    "promptChars": 0,
+    "pickerOpen": false
+  },
+  "jobId": "e7e6839c",
+  "outcome": "submitted",
+  "evidence": {
+    "outcome_unknown": false,
+    "jobId": "e7e6839c",
+    "status": "submitted",
+    "requestDiagnostics": null,
+    "credits": 0,
+    "server_acceptance_observed": false,
+    "request_dispatched": true,
+    "note": "Flow submit request was dispatched; rendering and downloads were not awaited.",
+    "credit_quote_verified": true
+  },
+  "postflight": {
+    "pickerOpen": false,
+    "agentPressed": "false",
+    "composer": "🍌 Nano Banana 2.1 crop_square x1",
+    "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "queuedRunning": [],
+    "activeAttempts": 1,
+    "observerReady": true,
+    "chips": 0,
+    "promptChars": 0
+  },
+  "finished": "2026-10-21T03:46:06.4775628Z"
+}

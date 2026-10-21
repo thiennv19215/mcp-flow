@@ -6,6 +6,8 @@
   const ARM_V2 = "TOBY_FLOW_V2_CORRELATION_ARM";
   const DISARM = "TOBY_FLOW_CORRELATION_DISARM";
   const DISARM_V2 = "TOBY_FLOW_V2_CORRELATION_DISARM";
+  const HEALTH_READ = "TOBY_FLOW_CORRELATION_HEALTH_READ";
+  const HEALTH_RESPONSE = "TOBY_FLOW_CORRELATION_HEALTH_RESPONSE";
   const RECEIPT = "TOBY_FLOW_CORRELATION_RECEIPT";
   const RECEIPT_V2 = "TOBY_FLOW_V2_CORRELATION_RECEIPT";
   const MEDIA_IDENTITIES = "TOBY_FLOW_MEDIA_IDENTITIES";
@@ -48,6 +50,288 @@
   const ERROR_CODE_RE =
     /^(?:PUBLIC_ERROR(?:_[A-Z0-9]+)*|SEXUALLY_EXPLICIT|CHILD_SAFETY|[A-Z][A-Z0-9_]*(?:_ERROR|_FAILED|_FAILURE))$/;
   const BATCHEXECUTE_PATH = "/_/AiSandboxAngularFrontend/data/batchexecute";
+  const REQUEST_DIAGNOSTIC_TTL_MS = 15 * 60_000;
+  const REQUEST_DIAGNOSTIC_MAX = 32;
+  const REQUEST_DIAGNOSTIC_PER_ATTEMPT_MAX = 12;
+  const safeRequestPath = (value) => {
+    try {
+      const url = new URL(String(value || ""), location.href);
+      if (url.origin !== location.origin) return null;
+      return url.pathname.split("/").map((part) => {
+        if (!part) return part;
+        if (["_", "AiSandboxAngularFrontend", "data", "batchexecute", "flow", "project", "u", "api", "v1", "rpc", ":id", ":uuid", ":segment"].includes(part)) return part;
+        if (part === "0") return ":id";
+        if (UUID_RE.test(part)) return ":uuid";
+        if (/^[0-9]+$/.test(part)) return ":id";
+        return ":segment";
+      }).join("/").slice(0, 180);
+    } catch (_) {
+      return null;
+    }
+  };
+  const safeRequestRpcId = (value) => typeof value === "string" && /^[A-Za-z0-9_.-]{1,64}$/.test(value)
+    ? value
+    : null;
+  const payloadShape = (value, depth = 0, budget = { remaining: 48 }) => {
+    if (--budget.remaining < 0) return { type: "truncated" };
+    if (value === null) return { type: "null" };
+    if (Array.isArray(value)) {
+      const result = { type: "array", length: value.length };
+      if (depth < 4) result.items = value.slice(0, 12).map((item) => payloadShape(item, depth + 1, budget));
+      return result;
+    }
+    if (typeof value === "string") return { type: "string", length: Math.min(value.length, 1_000_000) };
+    if (typeof value === "number") return { type: Number.isFinite(value) ? "number" : "nonfinite_number" };
+    if (typeof value === "boolean") return { type: "boolean" };
+    if (typeof value === "object") return { type: "object", keyCount: Math.min(Object.keys(value).length, 128) };
+    return { type: typeof value };
+  };
+  const DIAGNOSTIC_REASON_CODES = new Set([
+    "payload_unparsed", "payload_shape_mismatch", "quantity_mismatch", "prompt_mismatch",
+    "model_mismatch", "reference_ids_mismatch", "project_mismatch", "request_path_unrecognized",
+    "payload_match_failed", "retired_request_signature", "attempt_interfered",
+    "request_cardinality_exhausted", "rpc_payload_unparsed",
+  ]);
+  const ownData = (value, key) => {
+    if (!value || typeof value !== "object") return undefined;
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor && Object.prototype.hasOwnProperty.call(descriptor, "value")
+      ? descriptor.value
+      : undefined;
+  };
+  const sanitizePayloadShape = (shape, depth = 0, budget = { remaining: 48 }) => {
+    if (!shape || typeof shape !== "object" || --budget.remaining < 0) return null;
+    const type = ownData(shape, "type");
+    if (["truncated", "null", "number", "nonfinite_number", "boolean", "unparsed_body"].includes(type))
+      return { type };
+    if (type === "string") {
+      const length = ownData(shape, "length");
+      return Number.isInteger(length) && length >= 0 && length <= 1_000_000 ? { type, length } : null;
+    }
+    if (type === "object") {
+      const keyCount = ownData(shape, "keyCount");
+      return Number.isInteger(keyCount) && keyCount >= 0 && keyCount <= 128 ? { type, keyCount } : null;
+    }
+    if (type !== "array") return null;
+    const length = ownData(shape, "length");
+    if (!Number.isInteger(length) || length < 0 || length > 1_000_000) return null;
+    const result = { type, length };
+    const items = ownData(shape, "items");
+    if (items !== undefined) {
+      const itemLength = ownData(items, "length");
+      if (depth >= 4 || !Array.isArray(items) || !Number.isInteger(itemLength) || itemLength < 0 || itemLength > 12) return null;
+      result.items = [];
+      for (let index = 0; index < itemLength; index++) {
+        const item = ownData(items, String(index));
+        const sanitized = sanitizePayloadShape(item, depth + 1, budget);
+        if (!sanitized) return null;
+        result.items.push(sanitized);
+      }
+    }
+    return result;
+  };
+  const sanitizeRequestDiagnosticEvent = (entry, cutoff = Date.now() - REQUEST_DIAGNOSTIC_TTL_MS) => {
+    try {
+      if (!entry || typeof entry !== "object") return null;
+      const observedAt = ownData(entry, "observedAt");
+      const attemptId = ownData(entry, "attemptId");
+      const mediaType = ownData(entry, "mediaType");
+      const transport = ownData(entry, "transport");
+      const rawPath = ownData(entry, "path");
+      const rawRpcId = ownData(entry, "rpcId");
+      const payloadVersion = ownData(entry, "payloadVersion");
+      const rawShape = ownData(entry, "payloadShape");
+      const pathRecognized = ownData(entry, "pathRecognized");
+      const payloadMatched = ownData(entry, "payloadMatched");
+      const rawFields = ownData(entry, "fields");
+      const rawReasons = ownData(entry, "reasons");
+      if (!Number.isFinite(observedAt) || observedAt < cutoff || observedAt > Date.now() + 60_000 ||
+          typeof attemptId !== "string" || !UUID_RE.test(attemptId) ||
+          !["image", "video"].includes(mediaType) || !["fetch", "xhr"].includes(transport) ||
+          (rawPath !== null && typeof rawPath !== "string") ||
+          (rawRpcId !== null && typeof rawRpcId !== "string") ||
+          !["unknown", "image_rows_v1", "video_inputs_v1"].includes(payloadVersion) ||
+          typeof pathRecognized !== "boolean" || typeof payloadMatched !== "boolean" ||
+          !rawFields || typeof rawFields !== "object" || !Array.isArray(rawReasons) || rawReasons.length > 32) return null;
+      const path = rawPath === null ? null : safeRequestPath(rawPath);
+      const rpcId = rawRpcId === null ? null : safeRequestRpcId(rawRpcId);
+      const sanitizedShape = sanitizePayloadShape(rawShape);
+      if ((rawPath !== null && path === null) || (rawRpcId !== null && rpcId === null) || !sanitizedShape) return null;
+      const fieldNames = ["shape", "prompt", "model", "quantity", "referenceIds", "project"];
+      const nullableFields = new Set(["prompt", "model", "quantity", "referenceIds", "project"]);
+      const fields = {};
+      for (const name of fieldNames) {
+        const field = ownData(rawFields, name);
+        if (typeof field !== "boolean" && !(field === null && nullableFields.has(name))) return null;
+        fields[name] = field;
+      }
+      const reasons = [];
+      const seenReasons = new Set();
+      for (let index = 0; index < rawReasons.length && reasons.length < 8; index++) {
+        const reason = ownData(rawReasons, String(index));
+        if (typeof reason === "string" && DIAGNOSTIC_REASON_CODES.has(reason) && !seenReasons.has(reason)) {
+          reasons.push(reason);
+          seenReasons.add(reason);
+        }
+      }
+      return { observedAt, attemptId, mediaType, transport, path, rpcId, payloadVersion, payloadShape: sanitizedShape, pathRecognized, payloadMatched, fields, reasons };
+    } catch (_) {
+      return null;
+    }
+  };
+  const sanitizeRequestDiagnosticEvents = (events) => {
+    const cutoff = Date.now() - REQUEST_DIAGNOSTIC_TTL_MS;
+    const perAttempt = new Map();
+    const retained = [];
+    try {
+      const eventCount = ownData(events, "length");
+      if (!Array.isArray(events) || !Number.isSafeInteger(eventCount) || eventCount < 0 || eventCount > 1_000_000) return retained;
+      const oldestIndex = Math.max(0, eventCount - REQUEST_DIAGNOSTIC_MAX * 4);
+      for (let index = eventCount - 1; index >= oldestIndex && retained.length < REQUEST_DIAGNOSTIC_MAX; index--) {
+        const event = sanitizeRequestDiagnosticEvent(ownData(events, String(index)), cutoff);
+        if (!event) continue;
+        const count = perAttempt.get(event.attemptId) || 0;
+        if (count >= REQUEST_DIAGNOSTIC_PER_ATTEMPT_MAX) continue;
+        perAttempt.set(event.attemptId, count + 1);
+        retained.push(event);
+      }
+      return retained.reverse();
+    } catch (_) {
+      return [];
+    }
+  };
+  let previousRequestDiagnosticStore;
+  try { previousRequestDiagnosticStore = old?.requestDiagnosticStore; } catch (_) {}
+  let requestDiagnosticStore = { version: 1, events: [] };
+  try {
+    const previousVersion = ownData(previousRequestDiagnosticStore, "version");
+    const previousEvents = ownData(previousRequestDiagnosticStore, "events");
+    if (previousVersion === 1 && Array.isArray(previousEvents))
+      requestDiagnosticStore = { version: 1, events: sanitizeRequestDiagnosticEvents(previousEvents) };
+  } catch (_) {}
+  const pruneRequestDiagnostics = () => {
+    requestDiagnosticStore.events = sanitizeRequestDiagnosticEvents(requestDiagnosticStore.events);
+  };
+  const requestDiagnosticFields = (attempt, payload) => {
+    const rows = attempt.mediaType === "image" ? payload?.[1] : payload?.[0];
+    const quantity = Array.isArray(rows) && rows.length === attempt.expectedQuantity &&
+      (attempt.mediaType !== "image" || payload?.[2] === 1);
+    const shape = attempt.mediaType === "image"
+      ? payload?.[0] === null && Array.isArray(rows) && rows.every((row) => Array.isArray(row) && typeof row?.[5] === "string" && Array.isArray(row?.[8]?.[0]) && row[8][0].length > 0)
+      : Array.isArray(rows) && rows.length > 0 && rows.every((row) => !!decodeVideoInputRow(row));
+    let prompt = false;
+    if (attempt.mediaType === "image") {
+      const promptRows = Array.isArray(rows) ? rows.map((row) => row?.[8]?.[0]) : [];
+      prompt = promptRows.length > 0 && promptRows.every((nodes) => {
+        if (!Array.isArray(nodes) || !nodes.length) return false;
+        if (attempt.structuredPromptFingerprint) {
+          const structured = decodeStructuredNodes(nodes);
+          return !!structured && structured.fingerprint === attempt.structuredPromptFingerprint &&
+            structured.voiceIds.length === 0 && exactRefsMatch(structured.characterIds, attempt.expectedCharacterIds);
+        }
+        return nodes.every((node) => Array.isArray(node) && typeof node[0] === "string" && node.slice(1).every((part) => part == null)) &&
+          promptFingerprint(nodes.map((node) => node[0]).join("")) === attempt.promptFingerprint;
+      });
+    } else {
+      const plain = plainInputSummary(payload);
+      const fingerprint = plain?.fingerprint || null;
+      const structured = structuredInputFingerprints(payload);
+      prompt = attempt.expectedVoiceCount > 0
+        ? Array.isArray(rows) && rows.length > 0 && rows.every((row) => {
+          const decoded = decodeVideoInputRow(row);
+          const nodes = videoInputNodes(row);
+          const parsed = decodeStructuredNodes(nodes);
+          return !!decoded && !!parsed && parsed.textFingerprint === attempt.promptFingerprint &&
+            parsed.voiceIds.length === attempt.expectedVoiceCount && exactRefsMatch(parsed.characterIds, attempt.expectedCharacterIds);
+        })
+        : attempt.structuredPromptFingerprint
+        ? structured.length > 0 && structured.every((value) => value === attempt.structuredPromptFingerprint)
+        : fingerprint === attempt.promptFingerprint;
+    }
+    const expectedModel = attempt.mediaType === "image" ? attempt.expectedImageModelKey : attempt.expectedVideoModelKey;
+    const model = expectedModel
+      ? Array.isArray(rows) && rows.length > 0 && rows.every((row) => attempt.mediaType === "image" ? row?.[5] === expectedModel : decodeVideoInputRow(row)?.model === expectedModel)
+      : null;
+    const referenceIds = attempt.mediaType === "image"
+      ? Array.isArray(rows) && rows.length > 0 && rows.every((row) => {
+        const mediaRows = row?.[2] == null ? [] : row[2];
+        const characterRows = row?.[10] == null ? [] : row[10];
+        if (!Array.isArray(mediaRows) || mediaRows.some((ref) => !Array.isArray(ref) || typeof ref[0] !== "string" || !UUID_RE.test(ref[0]))) return false;
+        if (!Array.isArray(characterRows) || characterRows.some((ref) => !Array.isArray(ref) || ref.length !== 1 || typeof ref[0] !== "string" || !UUID_RE.test(ref[0]))) return false;
+        const mediaIds = mediaRows.map((ref) => ref[0]);
+        const characterIds = characterRows.map((ref) => ref[0]);
+        const mediaMatch = exactRefsMatch(mediaIds, attempt.expectedMediaReferenceIds);
+        const characterMatch = attempt.expectedGlobalCharacter === true
+          ? attempt.expectedCharacterIds.length === 0 && characterIds.length === globalCharacterCount(attempt) && normalizedRefs(characterIds).length === characterIds.length
+          : exactRefsMatch(characterIds, attempt.expectedCharacterIds);
+        return mediaMatch && characterMatch;
+      }) && refsMatch([...attempt.expectedMediaReferenceIds, ...attempt.expectedCharacterIds], attempt.expectedReferenceIds)
+      : Array.isArray(rows) && rows.length > 0 && rows.every((row) => {
+        const decoded = decodeVideoInputRow(row);
+        return !!decoded && attemptRefsMatch(decoded.refs, attempt);
+      });
+    const projectValues = attempt.mediaType === "image"
+      ? Array.isArray(rows) ? rows.flatMap((row) => [payload?.[3]?.[5], row?.[7]?.[5]]) : []
+      : [payload?.[1]?.[5]];
+    const project = projectValues.every((value) => typeof value !== "string" || !UUID_RE.test(value) || value === attempt.projectId);
+    const reasons = [];
+    if (!shape) reasons.push("payload_shape_mismatch");
+    if (!quantity) reasons.push("quantity_mismatch");
+    if (!prompt) reasons.push("prompt_mismatch");
+    if (model === false) reasons.push("model_mismatch");
+    if (!referenceIds) reasons.push("reference_ids_mismatch");
+    if (!project) reasons.push("project_mismatch");
+    return { shape, prompt, model, quantity, referenceIds, project, reasons };
+  };
+  const recordRequestDiagnostic = (attempt, call, transport, requestPath, reasons = []) => {
+    pruneRequestDiagnostics();
+    const attemptEventCount = requestDiagnosticStore.events.filter((entry) => entry.attemptId === attempt.attemptId).length;
+    if (attemptEventCount >= REQUEST_DIAGNOSTIC_PER_ATTEMPT_MAX) return;
+    const fields = call?.payload ? requestDiagnosticFields(attempt, call.payload) : {
+      shape: false, prompt: null, model: null, quantity: null, referenceIds: null, project: null, reasons: ["payload_unparsed"],
+    };
+    const callReasons = [...new Set([...fields.reasons, ...reasons])].slice(0, 8);
+    let payloadVersion = "unknown";
+    if (attempt.mediaType === "image" && call?.payload?.[0] === null && Array.isArray(call.payload?.[1]) && call.payload?.[2] === 1) payloadVersion = "image_rows_v1";
+    else if (attempt.mediaType === "video" && Array.isArray(call?.payload?.[0]) && call.payload[0].some((row) => !!decodeVideoInputRow(row))) payloadVersion = "video_inputs_v1";
+    requestDiagnosticStore.events.push({
+      observedAt: Date.now(),
+      attemptId: attempt.attemptId,
+      mediaType: attempt.mediaType,
+      transport: transport === "fetch" ? "fetch" : "xhr",
+      path: safeRequestPath(requestPath),
+      rpcId: safeRequestRpcId(call?.rpcId),
+      payloadVersion,
+      payloadShape: call?.payload ? payloadShape(call.payload) : { type: "unparsed_body" },
+      pathRecognized: !reasons.includes("request_path_unrecognized"),
+      payloadMatched: !!call?.payload && attemptMatchesPayload(call.payload, attempt),
+      fields: { shape: fields.shape, prompt: fields.prompt, model: fields.model, quantity: fields.quantity, referenceIds: fields.referenceIds, project: fields.project },
+      reasons: callReasons,
+    });
+    pruneRequestDiagnostics();
+  };
+  const recordUnmatchedTransport = (requestPath, transport, raw, reason = "request_path_unrecognized") => {
+    const active = [...attempts.values()];
+    if (!active.length) return;
+    const calls = parseCalls(raw);
+    if (calls.length) {
+      for (const attempt of active)
+        for (const call of calls.slice(0, 8)) recordRequestDiagnostic(attempt, call, transport, requestPath, [reason]);
+      return;
+    }
+    for (const attempt of active) recordRequestDiagnostic(attempt, null, transport, requestPath, [reason, "payload_unparsed"]);
+  };
+  const recordUnmatchedTransportAsync = async (requestPath, transport, raw, reason = "request_path_unrecognized") => {
+    const active = [...attempts.values()];
+    if (!active.length) return;
+    const calls = raw == null ? [] : await parseCallsAsync(raw).catch(() => []);
+    if (calls.length) {
+      for (const attempt of active)
+        for (const call of calls.slice(0, 8)) recordRequestDiagnostic(attempt, call, transport, requestPath, [reason]);
+      return;
+    }
+    for (const attempt of active) recordRequestDiagnostic(attempt, null, transport, requestPath, [reason, "payload_unparsed"]);
+  };
   const projectId = () => {
     const parts = location.pathname.split("/").filter(Boolean);
     const projectAt = parts.indexOf("project");
@@ -186,6 +470,7 @@
             )
         )
       ),
+        textFingerprint: promptFingerprint(parts.filter((part) => part.kind === "text").map((part) => normalize(part.text)).join("")),
       characterIds: normalizedRefs(characterIds),
       voiceIds: [...new Set(voiceIds)].sort(),
     };
@@ -473,6 +758,15 @@
       }
       if (rows.length !== attempt.expectedQuantity) return false;
     }
+    if (attempt.expectedVoiceCount > 0) {
+      if (attempt.mediaType !== "video") return false;
+      return payload[0].every((input) => {
+        const decoded = decodeVideoInputRow(input);
+        const parsed = decodeStructuredNodes(videoInputNodes(input));
+        return !!decoded && !!parsed && parsed.textFingerprint === attempt.promptFingerprint &&
+          parsed.voiceIds.length === attempt.expectedVoiceCount && exactRefsMatch(parsed.characterIds, attempt.expectedCharacterIds);
+      });
+    }
     if (!attempt.structuredPromptFingerprint) {
       if (plain === attempt.promptFingerprint) return true;
       return (
@@ -605,7 +899,7 @@
     window.dispatchEvent(new CustomEvent(RECEIPT, { detail: payload }));
     window.dispatchEvent(new CustomEvent(RECEIPT_V2, { detail: payload }));
   };
-  const parseCalls = (raw) => {
+  const parseCalls = (raw, context = {}) => {
     try {
       let fReq = null;
       if (typeof FormData !== "undefined" && raw instanceof FormData) {
@@ -625,6 +919,8 @@
       const envelope = JSON.parse(fReq || "null");
       return (Array.isArray(envelope?.[0]) ? envelope[0] : []).filter(Array.isArray).map((row) => ({
         rpcId: typeof row[0] === "string" ? row[0] : null,
+        requestPath: context.requestPath || null,
+        transport: context.transport || null,
         payload: (() => {
           try {
             return typeof row[1] === "string" ? JSON.parse(row[1]) : row[1];
@@ -637,14 +933,14 @@
       return [];
     }
   };
-  const parseCallsAsync = async (raw, immediate = parseCalls(raw)) => {
+  const parseCallsAsync = async (raw, immediate = parseCalls(raw), context = {}) => {
     if (immediate.length > 0) return immediate;
     try {
       if (typeof Blob !== "undefined" && raw instanceof Blob) {
-        return parseCalls(await raw.text());
+        return parseCalls(await raw.text(), context);
       }
       if (raw && typeof raw.text === "function") {
-        return parseCalls(await raw.text());
+        return parseCalls(await raw.text(), context);
       }
     } catch (_) {}
     return [];
@@ -1266,8 +1562,11 @@
       signature &&
       (retired.requestSignatures.includes(signature) ||
         retired.requestSignatures.includes(identityFingerprint(machineIds)))
-    )
+    ) {
+      for (const attempt of attempts.values())
+        recordRequestDiagnostic(attempt, call, call.transport, call.requestPath, ["retired_request_signature"]);
       return null;
+    }
     const now = Date.now();
     const candidates = [];
     for (const [id, attempt] of attempts) {
@@ -1277,11 +1576,23 @@
       }
     }
     for (const attempt of attempts.values()) {
-      if (attempt.interfered || attempt.requestCount >= attempt.requestCardinality) continue;
+      if (attempt.interfered || attempt.requestCount >= attempt.requestCardinality) {
+        recordRequestDiagnostic(attempt, call, call.transport, call.requestPath, [
+          attempt.interfered ? "attempt_interfered" : "request_cardinality_exhausted",
+        ]);
+        continue;
+      }
       const structured = attempt.structuredPromptFingerprint
         ? structuredInputFingerprints(call.payload)
         : [];
       const promptMatched = attemptMatchesPayload(call.payload, attempt);
+      recordRequestDiagnostic(
+        attempt,
+        call,
+        call.transport,
+        call.requestPath,
+        promptMatched ? [] : ["payload_match_failed"]
+      );
       if (!promptMatched && (attempt.bridgeInputDiagnostics || 0) < 2) {
         const mismatch = videoInputDiagnostic(call.payload, attempt);
         if (mismatch) {
@@ -1554,6 +1865,8 @@
       return;
     if (!["image", "video"].includes(d.mediaType) || d.projectId !== projectId()) return;
     if (!/^id-[0-9a-f]{8}$/.test(d.promptFingerprint || "")) return;
+    const expectedVoiceCount = Math.max(0, Math.min(1, Number(d.expectedVoiceCount) || 0));
+    if (expectedVoiceCount > 0 && d.mediaType !== "video") return;
     if (
       d.structuredPromptFingerprint != null &&
       !/^id-[0-9a-f]{8}$/.test(d.structuredPromptFingerprint)
@@ -1569,6 +1882,7 @@
       mediaType: d.mediaType,
       expectedQuantity,
       promptFingerprint: d.promptFingerprint,
+      expectedVoiceCount,
       promptAnchorFingerprint: /^id-[0-9a-f]{8}$/.test(d.promptAnchorFingerprint || "")
         ? d.promptAnchorFingerprint
         : null,
@@ -1698,13 +2012,17 @@
     try {
       absolute = new URL(absolute, location.href).href;
     } catch (_) {}
-    xhrState.set(this, { url: absolute });
+    xhrState.set(this, { url: absolute, method: String(method || "GET").toUpperCase() });
     return Reflect.apply(nativeOpen, this, [method, url, ...rest]);
   };
   XMLHttpRequest.prototype.send = function (body) {
     try {
       const state = xhrState.get(this) || {};
-      if (isFlowBatchExecuteUrl(state.url)) {
+      const requestPath = safeRequestPath(state.url);
+      const recognizedBatch = isFlowBatchExecuteUrl(state.url);
+      if (attempts.size > 0 && state.method === "POST" && requestPath && !recognizedBatch)
+        recordUnmatchedTransport(requestPath, "xhr", body);
+      if (recognizedBatch) {
         this.addEventListener(
           "load",
           () => {
@@ -1715,7 +2033,8 @@
           { once: true }
         );
         if (attempts.size > 0) {
-          const calls = parseCalls(body);
+          const calls = parseCalls(body, { requestPath, transport: "xhr" });
+          if (!calls.length) recordUnmatchedTransport(requestPath, "xhr", body, "rpc_payload_unparsed");
           if (attempts.size > 0 && diagnosticBudget-- > 0) {
             const bodyType = body == null ? "null" : body.constructor?.name || typeof body;
             console.info(
@@ -1739,7 +2058,7 @@
           const observedPromise =
             calls.length > 0
               ? Promise.resolve(matchedSync)
-              : parseCallsAsync(body, calls).then(matchObservedCalls);
+              : parseCallsAsync(body, calls, { requestPath, transport: "xhr" }).then(matchObservedCalls);
           let terminal = false;
           observedPromise
             .then((matches) => {
@@ -1789,13 +2108,18 @@
     window.fetch = function (...args) {
       let body = null;
       let observeBatchResponse = false;
+      let observeSameOriginPost = false;
+      let requestPath = null;
       try {
         const input = args[0];
         const url = typeof input === "string" || input instanceof URL ? String(input) : input?.url;
         const method = args[1]?.method || input?.method || "GET";
+        const parsedUrl = new URL(String(url || ""), location.href);
+        observeSameOriginPost = String(method).toUpperCase() === "POST" && parsedUrl.origin === location.origin;
+        requestPath = observeSameOriginPost ? safeRequestPath(parsedUrl.href) : null;
         observeBatchResponse =
-          String(method).toUpperCase() === "POST" && isFlowBatchExecuteUrl(url);
-        if (observeBatchResponse && attempts.size > 0) {
+          observeSameOriginPost && isFlowBatchExecuteUrl(url);
+        if (observeSameOriginPost && attempts.size > 0) {
           body =
             args[1]?.body != null
               ? args[1].body
@@ -1806,22 +2130,32 @@
       } catch (_) {
         body = null;
         observeBatchResponse = false;
+        observeSameOriginPost = false;
+        requestPath = null;
       }
       const result = Reflect.apply(nativeFetch, this, args);
-      if (!observeBatchResponse) return result;
+      if (!observeBatchResponse) {
+        if (observeSameOriginPost && attempts.size > 0 && requestPath)
+          void recordUnmatchedTransportAsync(requestPath, "fetch", body).catch(() => {});
+        return result;
+      }
       const statesPromise =
         body == null
-          ? Promise.resolve([])
+          ? recordUnmatchedTransportAsync(requestPath, "fetch", null, "rpc_payload_unparsed").then(() => [])
           : Promise.resolve()
-              .then(() => parseCallsAsync(body))
-              .then((calls) =>
-                matchObservedCalls(calls).map(({ call, attempt }) =>
+              .then(() => parseCallsAsync(body, parseCalls(body, { requestPath, transport: "fetch" }), { requestPath, transport: "fetch" }))
+              .then((calls) => {
+                if (!calls.length) {
+                  for (const attempt of attempts.values()) recordRequestDiagnostic(attempt, null, "fetch", requestPath, ["rpc_payload_unparsed"]);
+                  return [];
+                }
+                return matchObservedCalls(calls).map(({ call, attempt }) =>
                   attempt.requestCount < attempt.requestCardinality &&
                   attemptMatchesPayload(call.payload, attempt)
                     ? beginObservedRequest(attempt, call)
                     : beginFollowupRequest(attempt, call)
-                )
-              )
+                );
+              })
               .catch(() => []);
       Promise.resolve(result)
         .then(
@@ -1858,6 +2192,7 @@
     window.removeEventListener(ARM_V2, onArm);
     window.removeEventListener(DISARM, onDisarm);
     window.removeEventListener(DISARM_V2, onDisarm);
+    window.removeEventListener(HEALTH_READ, onHealthRead);
     window.removeEventListener(MEDIA_IDENTITIES_READ, publishMediaIdentities);
     window.removeEventListener(MEDIA_IDENTITIES_READ_V2, publishMediaIdentities);
     window.removeEventListener(MEDIA_SCHEMA, onMediaSchema);
@@ -1875,43 +2210,64 @@
   const patchedOpen = XMLHttpRequest.prototype.open;
   const patchedSend = XMLHttpRequest.prototype.send;
   const patchedFetch = window.fetch;
+  const observerHealth = () => {
+    const now = Date.now();
+    for (const [id, attempt] of attempts) {
+      if (now > attempt.expiresAt) {
+        retireUnbound(attempt);
+        attempts.delete(id);
+      }
+    }
+    const xhrHookActive =
+      XMLHttpRequest.prototype.open === patchedOpen &&
+      XMLHttpRequest.prototype.send === patchedSend;
+    const fetchHookActive = !!nativeFetch && window.fetch === patchedFetch;
+    pruneRequestDiagnostics();
+    const requestDiagnostics = requestDiagnosticStore.events.map((entry) => ({
+      observedAt: entry.observedAt,
+      attemptId: entry.attemptId,
+      mediaType: entry.mediaType,
+      transport: entry.transport,
+      path: entry.path,
+      rpcId: entry.rpcId,
+      payloadVersion: entry.payloadVersion,
+      payloadShape: entry.payloadShape,
+      pathRecognized: entry.pathRecognized,
+      payloadMatched: entry.payloadMatched,
+      fields: { ...entry.fields },
+      reasons: [...entry.reasons],
+    }));
+    return {
+      ready: !disposed && xhrHookActive && (!nativeFetch || fetchHookActive),
+      version: VERSION,
+      observerRevision: OBSERVER_REVISION,
+      structuredPromptVersion: 2,
+      projectId: projectId(),
+      activeAttempts: attempts.size,
+      retiredCount: retired.entries.length,
+      retiredSaturated: retired.saturated,
+      requestDiagnostics: { version: 1, count: requestDiagnostics.length, events: requestDiagnostics },
+      xhrHookActive,
+      fetchHookActive,
+    };
+  };
+  const onHealthRead = (event) => {
+    const nonce = event?.detail?.nonce;
+    if (typeof nonce !== "string" || nonce.length < 8 || nonce.length > 128) return;
+    window.dispatchEvent(new CustomEvent(HEALTH_RESPONSE, {
+      detail: { nonce, ...observerHealth() },
+    }));
+  };
+  window.addEventListener(HEALTH_READ, onHealthRead);
   const observerInstance = Object.freeze({
     version: VERSION,
     observerRevision: OBSERVER_REVISION,
     dispose,
     retired,
-    health: () => {
-      const now = Date.now();
-      for (const [id, attempt] of attempts) {
-        if (now > attempt.expiresAt) {
-          retireUnbound(attempt);
-          attempts.delete(id);
-        }
-      }
-      const xhrHookActive =
-        XMLHttpRequest.prototype.open === patchedOpen &&
-        XMLHttpRequest.prototype.send === patchedSend;
-      return {
-        activeAttempts: attempts.size,
-        retiredCount: retired.entries.length,
-        retiredSaturated: retired.saturated,
-        xhrHookActive,
-        fetchHookActive: !!nativeFetch && window.fetch === patchedFetch,
-      };
-    },
+    requestDiagnosticStore,
+    health: observerHealth,
   });
   window.__tobyFlowCorrelationObserver = observerInstance;
   window.__tobyFlowV2CorrelationObserver = observerInstance;
-      const fetchHookActive = !!nativeFetch && window.fetch === patchedFetch;
-      return {
-        ready: !disposed && xhrHookActive && (!nativeFetch || fetchHookActive),
-        observerRevision: OBSERVER_REVISION,
-        structuredPromptVersion: 2,
-        activeAttempts: attempts.size,
-        xhrHookActive,
-        fetchHookActive,
-      };
-    },
-  });
   window.dispatchEvent(new CustomEvent(MEDIA_SCHEMA_READ));
 })();

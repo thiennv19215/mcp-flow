@@ -1,0 +1,15 @@
+{
+  "started": "2026-10-20T20:11:53.398Z",
+  "mode": "upload",
+  "api": "http://127.0.0.1:18897",
+  "probes": [
+    {
+      "name": "upload_media",
+      "status": "failed",
+      "seconds": 1.415,
+      "error": "Flow's project Upload control is unavailable. No file was selected. Visible composer controls: []"
+    }
+  ],
+  "finished": "2026-10-20T20:11:54.815Z",
+  "fatal_error": "Flow's project Upload control is unavailable. No file was selected. Visible composer controls: []"
+}

@@ -195,13 +195,17 @@ export class RemoteCore implements Core {
     const mapped = await this.mapRemotePaths(result) as Record<string, unknown>;
     return this.session ? { ...mapped, output_root: this.localOutputRoot() } : mapped;
   }
+  observer_health = (a: Parameters<Core["observer_health"]>[0]) => this.request("observer_health", a);
   async generate(a: Parameters<Core["generate"]>[0]): Promise<unknown> { return this.mapRemotePaths(await this.stagedRequest("generate", a)); }
   cancel = async (a: Parameters<Core["cancel"]>[0]) => this.mapRemotePaths(await this.request("cancel", a));
   retry = async (a: Parameters<Core["retry"]>[0]) => this.mapRemotePaths(await this.request("retry", a));
   assets = (a: Parameters<Core["assets"]>[0]) => this.request("assets", a);
   attach_references = (a: Parameters<Core["attach_references"]>[0]) => this.request("attach_references", a);
+  clear_references = (a: Parameters<Core["clear_references"]>[0]) => this.request("clear_references", a);
   upload_media = (a: Parameters<Core["upload_media"]>[0]) => this.stagedRequest("upload_media", a);
   projects = () => this.request("projects", {});
+  voice_options = () => this.request("voice_options", {});
+  create_project = () => this.request("create_project", {});
   open_project = (a: Parameters<Core["open_project"]>[0]) => this.request("open_project", a);
   download = async (a: Parameters<Core["download"]>[0]) => this.mapRemotePaths(await this.request("download", a));
   assemble = async (a: Parameters<Core["assemble"]>[0]) => this.mapRemotePaths(await this.stagedRequest("assemble", a));
@@ -257,14 +261,18 @@ export class ForwardingCore implements Core {
     if (!this.remote || !result || typeof result !== "object" || Array.isArray(result)) return result;
     return { ...(result as object), studio: this.remoteBaseUrl };
   }
+  observer_health = (a: Parameters<Core["observer_health"]>[0]) => this.active().observer_health(a);
   generate = (a: Parameters<Core["generate"]>[0]) => this.active().generate(a);
   wait = (a: Parameters<Core["wait"]>[0]) => this.active().wait(a);
   cancel = (a: Parameters<Core["cancel"]>[0]) => this.active().cancel(a);
   retry = (a: Parameters<Core["retry"]>[0]) => this.active().retry(a);
   assets = (a: Parameters<Core["assets"]>[0]) => this.active().assets(a);
   attach_references = (a: Parameters<Core["attach_references"]>[0]) => this.active().attach_references(a);
+  clear_references = (a: Parameters<Core["clear_references"]>[0]) => this.active().clear_references(a);
   upload_media = (a: Parameters<Core["upload_media"]>[0]) => this.active().upload_media(a);
   projects = () => this.active().projects();
+  voice_options = () => this.active().voice_options();
+  create_project = () => this.active().create_project();
   open_project = (a: Parameters<Core["open_project"]>[0]) => this.active().open_project(a);
   download = (a: Parameters<Core["download"]>[0]) => this.active().download(a);
   assemble = (a: Parameters<Core["assemble"]>[0]) => this.active().assemble(a);

@@ -1,0 +1,35 @@
+{
+  "started": "2026-10-21T01:56:25.290Z",
+  "endpoint": "http://127.0.0.1:18897",
+  "operation": "single corrected character rename",
+  "payload": {
+    "name": "Untitled character",
+    "rename": "Native E2E Character 20261021-0135"
+  },
+  "preflight": {
+    "http": 200,
+    "data": [
+      {
+        "name": "Untitled character",
+        "use_as": "character:Untitled character"
+      }
+    ]
+  },
+  "active_jobs": [],
+  "rename_response": {
+    "http": 400,
+    "data": {
+      "error": "Flow closed the editor but the Characters library did not confirm the rename. Save diagnostics: {\"before\":{\"stage\":\"before_input\",\"route\":\"/project/0dc56af8-f217-4c0c-91db-8868145f29c0/character/ab3cb13c-9b71-41e4-99a3-e0f49ed283ac\",\"requested\":\"Native E2E Character 20261021-0135\",\"field\":{\"tag\":\"input\",\"type\":\"text\",\"id\":null,\"name\":null,\"ariaLabel\":\"Character name\",\"placeholder\":\"Character name\",\"value\":\"Untitled character\",\"defaultValue\":\"\",\"connected\":true,\"invalid\":null,\"formText\":\"edit voice_selection select a voice character info (optional) the flow agent can use this information to help craft scenes with your character.\"},\"headings\":[]},\"after_input\":{\"stage\":\"after_input\",\"route\":\"/project/0dc56af8-f217-4c0c-91db-8868145f29c0/character/ab3cb13c-9b71-41e4-99a3-e0f49ed283ac\",\"requested\":\"Native E2E Character 20261021-0135\",\"field\":{\"tag\":\"input\",\"type\":\"text\",\"id\":null,\"name\":null,\"ariaLabel\":\"Character name\",\"placeholder\":\"Character name\",\"value\":\"Native E2E Character 20261021-0135\",\"defaultValue\":\"\",\"connected\":true,\"invalid\":null,\"formText\":\"edit voice_selection select a voice character info (optional) the flow agent can use this information to help craft scenes with your character.\"},\"headings\":[]},\"after_blur\":{\"stage\":\"after_blur\",\"route\":\"/project/0dc56af8-f217-4c0c-91db-8868145f29c0/character/ab3cb13c-9b71-41e4-99a3-e0f49ed283ac\",\"requested\":\"Native E2E Character 20261021-0135\",\"field\":{\"tag\":\"input\",\"type\":\"text\",\"id\":null,\"name\":null,\"ariaLabel\":\"Character name\",\"placeholder\":\"Character name\",\"value\":\"Native E2E Character 20261021-0135\",\"defaultValue\":\"\",\"connected\":true,\"invalid\":null,\"formText\":\"edit voice_selection select a voice character info (optional) the flow agent can use this information to help craft scenes with your character.\"},\"headings\":[]},\"field_value_confirmed\":true,\"pre_save\":{\"stage\":\"pre_save\",\"route\":\"/project/0dc56af8-f217-4"
+    }
+  },
+  "postflight": {
+    "http": 200,
+    "data": [
+      {
+        "name": "Untitled character",
+        "use_as": "character:Untitled character"
+      }
+    ]
+  },
+  "finished": "2026-10-21T01:56:40.718Z"
+}

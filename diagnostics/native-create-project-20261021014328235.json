@@ -1,0 +1,143 @@
+{
+  "started": "2026-10-21T01:43:10.697Z",
+  "api": "http://127.0.0.1:18897",
+  "mode": "create-project",
+  "attempts": 1,
+  "before": {
+    "project": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "url": "https://flow.google.com/project/0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "activeJobs": [],
+    "picker": {
+      "action": "close",
+      "phase": "completed",
+      "step": "picker closed",
+      "error": null,
+      "cleanupError": null,
+      "updatedAt": "2026-10-21T01:43:10.746Z",
+      "pickerOpen": false,
+      "pickerRole": null,
+      "pickerOptionCount": 0,
+      "pickerOptionLabels": [],
+      "searchValue": "",
+      "categoryTabs": [],
+      "chipCount": 0,
+      "chips": []
+    },
+    "health": {
+      "http": 200,
+      "data": {
+        "activeAttempts": 0,
+        "fetchHookActive": true,
+        "observerRevision": 23,
+        "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+        "ready": true,
+        "retiredCount": 4,
+        "retiredSaturated": false,
+        "structuredPromptVersion": 2,
+        "version": 1,
+        "xhrHookActive": true
+      }
+    }
+  },
+  "create": {
+    "http": 200,
+    "data": {
+      "id": "d1443e56-40bf-418d-8145-118c415a4ec9",
+      "url": "https://flow.google.com/project/d1443e56-40bf-418d-8145-118c415a4ec9",
+      "name": "Untitled project"
+    }
+  },
+  "outcome": "confirmed create result",
+  "project": {
+    "id": "d1443e56-40bf-418d-8145-118c415a4ec9",
+    "url": "https://flow.google.com/project/d1443e56-40bf-418d-8145-118c415a4ec9",
+    "name": "Untitled project"
+  },
+  "projectList": {
+    "http": 200,
+    "data": [
+      {
+        "id": "d1443e56-40bf-418d-8145-118c415a4ec9",
+        "name": "Open project"
+      },
+      {
+        "id": "172cc8b0-cb73-44fb-9300-e1484f84a4bc",
+        "name": "Open project"
+      },
+      {
+        "id": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+        "name": "Open project"
+      },
+      {
+        "id": "055936db-feba-4b85-85f2-527d7b4f5c3a",
+        "name": "Open project"
+      },
+      {
+        "id": "8a040e8a-e8a5-4c2a-b32c-58766ae5402e",
+        "name": "Open project"
+      },
+      {
+        "id": "b342fc9b-4dfd-40c7-8a6c-59ddfdf92a79",
+        "name": "Open project"
+      },
+      {
+        "id": "4c7b9f68-67fd-49f7-bee0-b2f0f8df0f7e",
+        "name": "Open project"
+      },
+      {
+        "id": "4fd89536-74a9-425b-98bc-cbf83a5e7c7a",
+        "name": "Open project"
+      },
+      {
+        "id": "acdcffe9-5456-4ab4-9fb7-4e43d3641246",
+        "name": "Open project"
+      },
+      {
+        "id": "a42111fe-db1d-41a9-a432-adaf292c5eff",
+        "name": "Open project"
+      },
+      {
+        "id": "83218b7d-a5e7-403e-a9d5-839bff5a9495",
+        "name": "Open project"
+      },
+      {
+        "id": "709ee9d7-2cdb-43f7-9bb2-3ea5da31d3e5",
+        "name": "Open project"
+      },
+      {
+        "id": "ea59ddef-bf26-4509-83da-866b81be55ff",
+        "name": "Open project"
+      },
+      {
+        "id": "f1dd6682-ad57-4cca-92ee-a038a2303471",
+        "name": "Open project"
+      },
+      {
+        "id": "284bcf12-5c49-4ca7-91ab-f59e3ed47e41",
+        "name": "Open project"
+      },
+      {
+        "id": "1297ff11-d934-4ba5-8afb-fadf724966c2",
+        "name": "Open project"
+      },
+      {
+        "id": "2c409111-51ab-492f-a79f-f5e02fe6d15f",
+        "name": "Open project"
+      },
+      {
+        "id": "971f2c09-7152-43de-9b98-0861b6ffda05",
+        "name": "Open project"
+      },
+      {
+        "id": "4daffcd5-5e39-4007-85e5-37cccbda8f2d",
+        "name": "Open project"
+      },
+      {
+        "id": "408ba1a6-85b7-4f99-acdd-17ec5a2ff4da",
+        "name": "Open project"
+      }
+    ]
+  },
+  "project_list_confirmed": true,
+  "finished": "2026-10-21T01:43:28.235Z"
+}

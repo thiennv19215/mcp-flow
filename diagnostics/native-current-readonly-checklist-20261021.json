@@ -1,0 +1,66 @@
+{
+  "checked_at": "2026-10-21T02:13:00Z",
+  "api": "http://127.0.0.1:18897",
+  "scope": "read-only API checks; no Flow mutation or generation request",
+  "server": {
+    "pid": 2380,
+    "entrypoint": "dist/serve.js",
+    "started_before_current_build": true,
+    "extension_connected": true,
+    "transport": "http-poll"
+  },
+  "flow": {
+    "signed_in": true,
+    "project_id": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "project_editor": true,
+    "observer_ready": true,
+    "observer_xhr_hook": true,
+    "observer_fetch_hook": true,
+    "observer_active_attempts": 0,
+    "reference_picker_open": false,
+    "reference_chips": 0,
+    "credit_quote_candidates": []
+  },
+  "queue": {
+    "historical_job_count": 25,
+    "queued_or_running": [],
+    "known_submitted_history": [
+      {
+        "job_id": "a4e7c939",
+        "status": "submitted",
+        "request_dispatched": true,
+        "outcome_unknown": false,
+        "credits": 0,
+        "credit_quote_verified": true
+      }
+    ]
+  },
+  "assets": {
+    "image_count": 11,
+    "video_count": 1,
+    "uploaded_image_present": [
+      "fm-9aa6f547c686-upload.png",
+      "fm-fff737cedcc9-upload.png"
+    ],
+    "video_titles": ["12"],
+    "duplicate_image_titles_present": true
+  },
+  "characters": ["Untitled character"],
+  "probes": [
+    { "method": "POST /api/status", "http": 200, "result": "project open; latest queue has no active job" },
+    { "method": "POST /api/assets {kind:image}", "http": 200, "result": "11 images listed" },
+    { "method": "POST /api/assets {kind:video}", "http": 200, "result": "1 video listed" },
+    { "method": "POST /api/characters {}", "http": 200, "result": "exactly one Untitled character" },
+    { "method": "POST /api/observer_health {}", "http": 400, "result": "Flow is processing another operation; no health change" },
+    { "method": "later POST /api/status", "http": 200, "result": "observer reports ready; 0 active attempts" }
+  ],
+  "safe_next_steps": {
+    "read_status_projects_assets_characters": "safe through current API",
+    "reupload_existing_image": "unnecessary; uploaded assets already listed",
+    "create_another_character": "unsafe duplicate; one Untitled character already exists",
+    "rename_existing_character": "not attempted; requires explicit current operation mapping and current extension code",
+    "inspect_or_attach_reference": "defer; stale API process may not preserve inspect_only; picker currently closed and has zero chips",
+    "generation": "blocked; current build is newer than the running process and no credit quote is visible; Agent is not currently selected"
+  },
+  "report_source": "diagnostics/native-readonly-20261021021147718.json plus direct read-only typed asset/character/status API probes"
+}

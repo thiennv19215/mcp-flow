@@ -1,0 +1,32 @@
+{
+  "started": "2026-10-21T03:49:20.5659108Z",
+  "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+  "fixture": "diagnostics/character-attach-proof.png",
+  "preflight": {
+    "queuedRunning": 0,
+    "activeAttempts": 0,
+    "promptChars": 0,
+    "observerReady": true,
+    "existingMatchingFixtureCount": 0,
+    "pickerOpen": false,
+    "chips": 0
+  },
+  "outcome": "uploaded",
+  "upload": {
+    "name": "fm-b4ad4a4bd219-upload.png",
+    "id": "27dd914f-de46-4dff-b0cd-e0ea3b28acf4",
+    "kind": "image",
+    "uploaded": true,
+    "trustedGesture": false
+  },
+  "finished": "2026-10-21T03:49:31.6415132Z",
+  "listConfirmation": {
+    "matches": {
+      "name": "fm-b4ad4a4bd219-upload.png",
+      "kind": "image",
+      "id": null
+    },
+    "matchingTitleCount": 1
+  },
+  "listConfirmed": true
+}

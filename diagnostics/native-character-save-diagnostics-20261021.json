@@ -1,0 +1,113 @@
+{
+  "checked_at": "2026-10-21T01:56:45.604Z",
+  "http": 200,
+  "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+  "agentMode": "false",
+  "observer": {
+    "ready": false,
+    "version": 1,
+    "observerRevision": 23,
+    "structuredPromptVersion": 2,
+    "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "activeAttempts": 0,
+    "retiredCount": 0,
+    "retiredSaturated": false,
+    "xhrHookActive": false,
+    "fetchHookActive": false
+  },
+  "characterNameDiagnostics": {
+    "before": {
+      "stage": "before_input",
+      "route": "/project/0dc56af8-f217-4c0c-91db-8868145f29c0/character/ab3cb13c-9b71-41e4-99a3-e0f49ed283ac",
+      "requested": "Native E2E Character 20261021-0135",
+      "field": {
+        "tag": "input",
+        "type": "text",
+        "id": null,
+        "name": null,
+        "ariaLabel": "Character name",
+        "placeholder": "Character name",
+        "value": "Untitled character",
+        "defaultValue": "",
+        "connected": true,
+        "invalid": null,
+        "formText": "edit voice_selection select a voice character info (optional) the flow agent can use this information to help craft scenes with your character."
+      },
+      "headings": []
+    },
+    "after_input": {
+      "stage": "after_input",
+      "route": "/project/0dc56af8-f217-4c0c-91db-8868145f29c0/character/ab3cb13c-9b71-41e4-99a3-e0f49ed283ac",
+      "requested": "Native E2E Character 20261021-0135",
+      "field": {
+        "tag": "input",
+        "type": "text",
+        "id": null,
+        "name": null,
+        "ariaLabel": "Character name",
+        "placeholder": "Character name",
+        "value": "Native E2E Character 20261021-0135",
+        "defaultValue": "",
+        "connected": true,
+        "invalid": null,
+        "formText": "edit voice_selection select a voice character info (optional) the flow agent can use this information to help craft scenes with your character."
+      },
+      "headings": []
+    },
+    "after_blur": {
+      "stage": "after_blur",
+      "route": "/project/0dc56af8-f217-4c0c-91db-8868145f29c0/character/ab3cb13c-9b71-41e4-99a3-e0f49ed283ac",
+      "requested": "Native E2E Character 20261021-0135",
+      "field": {
+        "tag": "input",
+        "type": "text",
+        "id": null,
+        "name": null,
+        "ariaLabel": "Character name",
+        "placeholder": "Character name",
+        "value": "Native E2E Character 20261021-0135",
+        "defaultValue": "",
+        "connected": true,
+        "invalid": null,
+        "formText": "edit voice_selection select a voice character info (optional) the flow agent can use this information to help craft scenes with your character."
+      },
+      "headings": []
+    },
+    "field_value_confirmed": true,
+    "pre_save": {
+      "stage": "pre_save",
+      "route": "/project/0dc56af8-f217-4c0c-91db-8868145f29c0/character/ab3cb13c-9b71-41e4-99a3-e0f49ed283ac",
+      "requested": "Native E2E Character 20261021-0135",
+      "field": {
+        "tag": "input",
+        "type": "text",
+        "id": null,
+        "name": null,
+        "ariaLabel": "Character name",
+        "placeholder": "Character name",
+        "value": "Native E2E Character 20261021-0135",
+        "defaultValue": "",
+        "connected": true,
+        "invalid": null,
+        "formText": "edit voice_selection select a voice character info (optional) the flow agent can use this information to help craft scenes with your character."
+      },
+      "headings": []
+    },
+    "save_control": {
+      "label": "Done",
+      "disabled": false,
+      "tag": "button"
+    },
+    "save_clicked": true,
+    "route_exited": true,
+    "post_save_route": "/project/0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "library_result": {
+      "requested_matches": 0,
+      "original_matches": 1,
+      "visible_names": [
+        "untitled character"
+      ]
+    }
+  },
+  "activeJobs": []
+}

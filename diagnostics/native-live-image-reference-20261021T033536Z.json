@@ -1,0 +1,51 @@
+{
+  "started": "2026-10-21T03:35:36.9858494Z",
+  "mode": "image_reference",
+  "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+  "asset": {
+    "uuid": "3e54fcea-fc18-4f6e-a904-0e6259fd0347",
+    "currentListExactTitleCount": 1,
+    "uuidEvidence": "diagnostics/native-upload-20261020201209389.json",
+    "title": "fm-9aa6f547c686-upload.png"
+  },
+  "allow_unknown_quote": false,
+  "limits": {
+    "submit_only": true,
+    "variants": 1,
+    "max_credits": 15,
+    "retries": 0
+  },
+  "preflight": {
+    "chips": 0,
+    "fetchHook": true,
+    "observerReady": true,
+    "xhrHook": true,
+    "agentPressed": "false",
+    "pickerOpen": false,
+    "promptChars": 0,
+    "queuedRunning": 0,
+    "activeAttempts": 0
+  },
+  "jobId": "2ca70045",
+  "outcome": "outcome_unknown",
+  "evidence": {
+    "credits": null,
+    "request_dispatched": false,
+    "outcome_unknown": true,
+    "status": "failed",
+    "jobId": "2ca70045",
+    "error": "Flow did not emit a correlated generation request within the submit budget (click delivered: true). The outcome is unknown; inspect Flow before retrying.",
+    "credit_quote_verified": null,
+    "error_category": "unknown"
+  },
+  "postflight": {
+    "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "observerReady": true,
+    "promptChars": 0,
+    "pickerOpen": false,
+    "activeAttempts": 0,
+    "queuedRunning": [],
+    "chips": 0
+  },
+  "finished": "2026-10-21T03:36:16.2772225Z"
+}

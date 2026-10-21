@@ -1,0 +1,24 @@
+{
+  "started": "2026-10-21T04:54:45.847Z",
+  "request": {
+    "project": "FlowLibraryE2E-20261021",
+    "assets": [
+      "fm-415bc373e1e9-upload.png"
+    ],
+    "quality": "original"
+  },
+  "status": 200,
+  "result": {
+    "dir": "C:\\Users\\nguye\\flow-mcp-out\\FlowLibraryE2E-20261021",
+    "files": [
+      "C:\\Users\\nguye\\flow-mcp-out\\FlowLibraryE2E-20261021\\clip-01.jpeg"
+    ]
+  },
+  "files": [
+    {
+      "path": "C:\\Users\\nguye\\flow-mcp-out\\FlowLibraryE2E-20261021\\clip-01.jpeg",
+      "bytes": 10442,
+      "sha256": "69105bfe5e9e599d993abc1606eb677d2de87a626bf270c90c4684bfb7af2248"
+    }
+  ]
+}

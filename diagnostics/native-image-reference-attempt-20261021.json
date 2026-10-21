@@ -1,0 +1,69 @@
+{
+  "operation": "one image reference attach; no generation",
+  "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+  "asset": "fm-9aa6f547c686-upload.png",
+  "attachHttp": 400,
+  "attach": {
+    "error": "\r\n{\r\n  \"error\": \"Flow opened multiple or ambiguous reference surfaces; no supported picker transition was identified, so nothing was selected.\"\r\n}",
+    "exception": "Response status code does not indicate success: 400 (Bad Request)."
+  },
+  "postflight": {
+    "observerReady": true,
+    "activeAttempts": 0,
+    "activeJobs": [],
+    "promptCharacters": "",
+    "referenceChipCount": 0,
+    "chips": [],
+    "pickerOpen": false,
+    "visibleSurfaces": [
+      {
+        "labels": [
+          "Đóng bảng điều khiển tài khoản",
+          "Đăng xuất khỏi mọi tài khoản",
+          "Hình mờ có thể nhìn thấy"
+        ],
+        "role": "dialog",
+        "tag": "div",
+        "label": "Cài đặt tài khoản"
+      },
+      {
+        "labels": [
+          "upload Tải lên",
+          "folder Bộ sưu tập mới",
+          "account_circle Tạo nhân vật",
+          "play_movies Cảnh mới"
+        ],
+        "role": "menu",
+        "tag": "div",
+        "label": "upload Tải lên folder Bộ sưu tập mới account_circle Tạo nhân vật play_movies Cảnh mới"
+      }
+    ],
+    "action": "attach",
+    "phase": "failed",
+    "step": "picker closed",
+    "error": "FLOW_ASSET_PICKER_SURFACE_AMBIGUOUS: Flow opened multiple or ambiguous reference surfaces; no supported picker transition was identified, so nothing was selected.",
+    "cleanupError": null,
+    "creditCandidates": [
+      "movie_filter_auto 1.025 tín dụng Google Flow Nâng cấp",
+      "movie_filter_auto 1.025 tín dụng Google Flow",
+      "1.025 tín dụng Google Flow"
+    ],
+    "submitControls": [
+      {
+        "tag": "button",
+        "role": null,
+        "aria": "Bắt đầu tạo",
+        "title": "",
+        "text": "arrow_forward",
+        "ariaPressed": null,
+        "ariaSelected": null,
+        "dataState": null,
+        "checked": null,
+        "disabled": true,
+        "icon": "arrow_forward",
+        "className": "mdc-icon-button mat-mdc-icon-button mat-mdc-button-base generate-icon-button mat-mdc-button-disabled"
+      }
+    ]
+  },
+  "result": "STOPPED_ATTACH_FAILED"
+}

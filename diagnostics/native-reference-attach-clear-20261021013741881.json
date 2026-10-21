@@ -1,0 +1,59 @@
+{
+  "checkedAt": "2026-10-21T01:37:41.879Z",
+  "api": "http://127.0.0.1:18897",
+  "probe": "attach reference, no generation",
+  "attempt": {
+    "reference": "asset:fm-9aa6f547c686-upload.png",
+    "http": 400,
+    "error": "No exact reference named \"fm-9aa6f547c686-upload.png\" in the selected project. Nothing was attached."
+  },
+  "postAttempt": {
+    "status": {
+      "action": "attach",
+      "phase": "failed",
+      "step": "picker close failed",
+      "error": "FLOW_ASSET_NOT_FOUND: No exact reference named \"fm-9aa6f547c686-upload.png\" in the selected project. Nothing was attached.",
+      "cleanupError": "FLOW_ASSET_PICKER_CLOSE_FAILED: Flow's reference picker stayed open and could not be dismissed.",
+      "updatedAt": "2026-10-21T01:37:40.506Z",
+      "pickerOpen": true,
+      "pickerRole": "listbox",
+      "pickerOptionCount": 12,
+      "chipCount": 0,
+      "chips": [],
+      "lastResult": null
+    },
+    "clear": {
+      "composer": {
+        "tag": "flow-base-prompt-box",
+        "className": "",
+        "connected": true
+      },
+      "clearPromptButton": null,
+      "chipCount": 0,
+      "chips": [],
+      "helper": {
+        "phase": "idle"
+      }
+    },
+    "promptComposer": {
+      "tag": "div",
+      "aria": "Bạn muốn tạo những gì? close Tác nhân 🍌 Nano Banana 2.1 crop_9_16 x1 arrow_forward",
+      "text": "Bạn muốn tạo những gì? close Tác nhân 🍌 Nano Banana 2.1 crop_9_16 x1 arrow_forward",
+      "icon": "",
+      "className": "base-prompt-box",
+      "disabled": false,
+      "connected": true
+    },
+    "activeJobs": []
+  },
+  "assetList": [
+    {
+      "name": "fm-9aa6f547c686-upload.png",
+      "kind": "image"
+    },
+    {
+      "name": "fm-fff737cedcc9-upload.png",
+      "kind": "image"
+    }
+  ]
+}

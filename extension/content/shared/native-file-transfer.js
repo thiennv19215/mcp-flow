@@ -99,27 +99,72 @@
     });
   }
 
-  async function selectFileThroughPicker(file, openPicker) {
+  async function selectFileThroughPicker(file, openPicker, options = {}) {
     if (!(file instanceof Blob)) throw new Error("Upload value must be a Blob or File");
     if (typeof openPicker !== "function") throw new Error("Flow upload picker action is missing.");
+    const deadline = Number(options.deadline) > Date.now() ? Number(options.deadline) : Date.now() + 45_000;
+    const requireTime = operation => {
+      if (Date.now() >= deadline) {
+        const error = new Error(`Flow file picker timed out while ${operation}.`);
+        error.code = "FLOW_OPERATION_TIMEOUT";
+        error.outcome_unknown = false;
+        throw error;
+      }
+    };
+    const call = async (action, detail, preferredTimeout) => {
+      requireTime(`waiting for ${action}`);
+      return bridgeCall(action, detail, Math.max(1, Math.min(preferredTimeout, deadline - Date.now())));
+    };
     const owner = crypto.randomUUID();
+    let clickAttempted = false;
     try {
-      await bridgeCall("arm", { owner, file, timeoutMs: 10_000 }, 5000);
+      await call("arm", { owner, file, timeoutMs: Math.min(10_000, deadline - Date.now()) }, 5000);
+      requireTime("clicking Flow's Upload menu item");
+      // The callback can dispatch Flow's click and then throw while its menu is
+      // being replaced. Mark the boundary before awaiting it so callers never
+      // interpret that exception as a safe pre-click failure and replay the
+      // same file through drag-and-drop.
+      clickAttempted = true;
       const opened = await openPicker();
-      if (opened === false) throw new Error("Flow's Upload menu item was detached before it could be clicked.");
-      for (let attempt = 0; attempt < 25; attempt++) {
-        await new Promise(resolve => setTimeout(resolve, 200));
-        const status = await bridgeCall("status", { owner }, 1500);
+      if (opened === false) {
+        // The callback explicitly confirms that it did not click a live menu
+        // item, so a caller may safely choose a different upload mechanism.
+        clickAttempted = false;
+        const error = new Error("Flow's Upload menu item was detached before it could be clicked.");
+        error.code = "FLOW_UPLOAD_PICKER_NOT_OPENED";
+        error.outcome_unknown = false;
+        throw error;
+      }
+      for (let attempt = 0; attempt < 25 && Date.now() < deadline; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, Math.min(200, Math.max(1, deadline - Date.now()))));
+        const status = await call("status", { owner }, 1500);
         if (status.fired) {
           if (status.fileName !== file.name || status.fileSize !== file.size) {
-            throw new Error("Flow's picker selected a different file than the staged upload.");
+            const error = new Error("Flow's picker selected a different file than the staged upload.");
+            error.code = "FLOW_UPLOAD_PICKER_FILE_MISMATCH";
+            error.outcome_unknown = true;
+            throw error;
           }
-          return { selected: true, method: status.fired, trustedGesture: false };
+          return {
+            selected: true,
+            method: typeof status.fired === "string" ? status.fired : "unknown",
+            type: typeof status.fileType === "string" ? status.fileType.slice(0, 100) : "",
+            trustedGesture: false,
+          };
         }
       }
-      throw new Error("Flow did not open its file input after the upload control was clicked.");
+      const error = new Error("Flow did not confirm its file input after the upload control was clicked.");
+      error.code = "FLOW_UPLOAD_PICKER_OUTCOME_UNKNOWN";
+      error.outcome_unknown = clickAttempted;
+      throw error;
+    } catch (error) {
+      if (clickAttempted && !error?.outcome_unknown) {
+        error.code = error.code || "FLOW_UPLOAD_PICKER_OUTCOME_UNKNOWN";
+        error.outcome_unknown = true;
+      }
+      throw error;
     } finally {
-      await bridgeCall("cancel", { owner }).catch(() => {});
+      await bridgeCall("cancel", { owner }, Math.max(1, Math.min(750, deadline - Date.now()))).catch(() => {});
     }
   }
 

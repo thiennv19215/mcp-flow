@@ -1,0 +1,25 @@
+{
+  "at": "2026-10-21T01:35:18.519Z",
+  "operation": "character.rename_existing",
+  "http": 400,
+  "payload": {
+    "name": "Untitled character",
+    "rename": "Native E2E Character 20261021-0135"
+  },
+  "response": {
+    "error": "Flow closed the editor but did not confirm exactly one character named \"Native E2E Character 20261021-0135\". Check Flow before retrying."
+  },
+  "verification": {
+    "checked_at": "2026-10-21T01:35:23.130Z",
+    "http": 200,
+    "characters": [
+      {
+        "name": "Untitled character",
+        "use_as": "character:Untitled character"
+      }
+    ],
+    "requested_name": "Native E2E Character 20261021-0135",
+    "listed": false,
+    "stop_reason": "Rename attempt returned unconfirmed; no further rename/create calls will be made."
+  }
+}

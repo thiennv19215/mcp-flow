@@ -1,0 +1,32 @@
+{
+  "checkedAt": "2026-10-21T05:04:47.674Z",
+  "status": 200,
+  "count": 6,
+  "exactUploadMatches": [],
+  "assets": [
+    {
+      "name": "fm-415bc373e1e9-upload.png",
+      "kind": "image"
+    },
+    {
+      "name": "Display subject on white background",
+      "kind": "image"
+    },
+    {
+      "name": "fm-195a7ab985af-upload.png",
+      "kind": "image"
+    },
+    {
+      "name": "Photographing cobalt-blue teacup",
+      "kind": "image"
+    },
+    {
+      "name": "fm-b4ad4a4bd219-upload.png",
+      "kind": "image"
+    },
+    {
+      "name": "Cobalt-blue ceramic teacup on pl…",
+      "kind": "image"
+    }
+  ]
+}

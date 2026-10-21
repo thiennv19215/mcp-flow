@@ -19,7 +19,7 @@
       if (!this.supports(operation)) {
         return Promise.reject(this.error("UNSUPPORTED_OPERATION", `${this.key} does not implement ${operation}.`));
       }
-      if (operation !== "flow.state" && operation !== "flow.context" && operation !== "flow.projects.list" && !this.context.projectId) {
+      if (operation !== "flow.state" && operation !== "flow.context" && operation !== "flow.projects.list" && operation !== "flow.project.create" && !this.context.projectId) {
         return Promise.reject(this.error("FLOW_PROJECT_REQUIRED", "Open a project before running this operation.", true));
       }
       const expected = command?._flowTarget || command?.flowTarget || command?._target || command?.target;
@@ -65,10 +65,10 @@
   }
 
   BaseProviderDriver.OPERATIONS = Object.freeze([
-    "flow.context", "flow.state", "flow.projects.list", "flow.assets.list", "flow.characters.list",
+    "flow.context", "flow.state", "flow.projects.list", "flow.project.create", "flow.assets.list", "flow.characters.list",
     "flow.generation.upload.preflight", "flow.file.upload.begin", "flow.file.upload.chunk",
     "flow.file.upload.finish", "flow.file.upload.abort", "flow.media.upload",
-    "flow.generation.submit", "flow.generation.observe", "flow.references.attach", "flow.asset.download",
+    "flow.generation.submit", "flow.generation.observe", "flow.references.attach", "flow.references.clear", "flow.voices.options", "flow.asset.download",
     "flow.asset.rename", "flow.asset.trash", "flow.character.create", "flow.character.edit",
     "flow.edit.run", "flow.agent.batch", "flow.continue.run",
   ]);

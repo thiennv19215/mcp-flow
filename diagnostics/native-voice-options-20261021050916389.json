@@ -1,0 +1,15 @@
+{
+  "started": "2026-10-21T05:09:16.389Z",
+  "mode": "voice-options",
+  "api": "http://127.0.0.1:18897",
+  "probes": [
+    {
+      "name": "voice_options.read_only_picker_inspection",
+      "status": "failed",
+      "seconds": 0.063,
+      "error": "Flow opened a menu before the reference listbox, but this surface has no source-verified transition; nothing was selected."
+    }
+  ],
+  "finished": "2026-10-21T05:09:16.453Z",
+  "fatal_error": "Flow opened a menu before the reference listbox, but this surface has no source-verified transition; nothing was selected."
+}

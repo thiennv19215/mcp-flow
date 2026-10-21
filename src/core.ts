@@ -3,9 +3,9 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { assemble, localVoices, speakLocally } from "./assemble.js";
 import { GEMINI_VOICES, geminiKey, saveGeminiKey, speakWithGemini } from "./gemini.js";
 import { extractLastFrame } from "./chain.js";
-import { characterLook, createCharacter, downloadAsset, trashAsset, editCharacter, getFlowState, listAssets, listCharacters, listFlowProjects, openFlowProject, rememberCharacter, runAgentBatch, runContinue, runEdit, runGeneration, uploadFlowMediaToProject } from "./flow.js";
+import { characterLook, createCharacter, createFlowProject, downloadAsset, trashAsset, editCharacter, getCorrelationObserverHealth, getFlowState, listAssets, listCharacters, listFlowProjects, listFlowVoiceOptions, openFlowProject, rememberCharacter, runAgentBatch, runContinue, runEdit, runGeneration, uploadFlowMediaToProject } from "./flow.js";
 import { JobQueue, type Job } from "./queue.js";
-import { attachReferences } from "./flow.js";
+import { attachReferences, clearFlowReferences } from "./flow.js";
 import { buildAnglePrompt, listAnglePresets } from "./angles.js";
 import { BIN, COMPUTER, IS_MAC, IS_WIN, moveToBin } from "./platform.js";
 import { TECHNIQUES, techniqueById } from "./techniques.js";
@@ -13,13 +13,14 @@ import { OUTPUT_ROOT, outputRootForContext, projectDir } from "./paths.js";
 import { shapes, type Args } from "./schemas.js";
 import { extensionConnected } from "./extension.js";
 import { validateFlowSceneCapabilities } from "./flow-capabilities.js";
+import { sanitizeUnknownSubmitDiagnostics } from "./flow-request-diagnostics.js";
 
 export { OUTPUT_ROOT, projectDir };
 export { shapes, type Args };
 
 const words = (s: string) => s.split(/[^a-z0-9]+/i).filter((w) => w.length > 3).map((w) => w.toLowerCase());
 
-export const jobView = ({ id, status, params, files, attempts, credits, progress, note, error, errorCategory, retryAfterAt, failed_scenes, outcomeUnknown }: Job) => ({
+export const jobView = ({ id, status, params, files, attempts, credits, progress, note, error, errorCategory, retryAfterAt, failed_scenes, outcomeUnknown, requestDispatched, serverAcceptanceObserved, creditQuoteVerified, requestDiagnostics }: Job) => ({
   id,
   status,
   project: params.output_dir,
@@ -27,6 +28,7 @@ export const jobView = ({ id, status, params, files, attempts, credits, progress
   prompt: params.prompt,
   attempts,
   credits,
+  credit_quote_verified: creditQuoteVerified ?? null,
   progress,
   files,
   note,
@@ -35,19 +37,26 @@ export const jobView = ({ id, status, params, files, attempts, credits, progress
   retry_after: retryAfterAt,
   failed_scenes,
   outcome_unknown: outcomeUnknown ?? false,
+  request_dispatched: requestDispatched ?? false,
+  server_acceptance_observed: serverAcceptanceObserved ?? false,
+  request_diagnostics: outcomeUnknown ? sanitizeUnknownSubmitDiagnostics(requestDiagnostics) ?? null : null,
 });
 
 // One implementation runs in whichever process owns the Flow tab; the other process talks to it over HTTP (remote.ts).
 export interface Core {
   status(a: Args<"status">): Promise<unknown>;
+  observer_health(a: Args<"observer_health">): Promise<unknown>;
   generate(a: Args<"generate">): Promise<unknown>;
   wait(a: Args<"wait">): Promise<unknown>;
   cancel(a: Args<"cancel">): Promise<unknown>;
   retry(a: Args<"retry">): Promise<unknown>;
   assets(a: Args<"assets">): Promise<unknown>;
   attach_references(a: Args<"attach_references">): Promise<unknown>;
+  clear_references(a: Args<"clear_references">): Promise<unknown>;
   upload_media(a: Args<"upload_media">): Promise<unknown>;
   projects(): Promise<unknown>;
+  voice_options(): Promise<unknown>;
+  create_project(): Promise<unknown>;
   open_project(a: Args<"open_project">): Promise<unknown>;
   download(a: Args<"download">): Promise<unknown>;
   assemble(a: Args<"assemble">): Promise<unknown>;
@@ -130,6 +139,11 @@ export class LocalCore implements Core {
     return { flow, pacing: this.queue.pausedReason, output_root: outputRootForContext(), jobs: this.queue.list().map(jobView) };
   }
 
+  async observer_health(_args: Args<"observer_health">) {
+    if (this.mediaUploadActive || this.queue.busy) throw new Error("Flow is processing another operation. Check observer health after it finishes.");
+    return getCorrelationObserverHealth();
+  }
+
   suspendDevice(): void {
     this.queue.cancelQueued();
   }
@@ -145,6 +159,15 @@ export class LocalCore implements Core {
     const unknown = scenes.find((s) => s.technique && !techniqueById(s.technique));
     if (unknown) throw new Error(`Unknown technique "${unknown.technique}". Call flow_techniques for valid ids.`);
     for (const [index, scene] of scenes.entries()) validateFlowSceneCapabilities(scene, index);
+    const videoReferenceScene = scenes.findIndex(scene => scene.video_reference);
+    if (videoReferenceScene >= 0) {
+      throw Object.assign(new Error(`Scene ${videoReferenceScene + 1}: Toby-style video-reference editing requires Flow's dynamic video_edit_submit RPC configuration, which is not available in the native extension yet. Nothing was submitted.`), {
+        code: "FLOW_VIDEO_REFERENCE_CONFIG_UNAVAILABLE",
+        category: "unsupported",
+        retryable: false,
+        outcome_unknown: false,
+      });
+    }
 
     const output_dir = projectDir(project);
     // Continue numbering after whatever is already on disk or queued, so reruns never overwrite earlier scenes.
@@ -247,16 +270,35 @@ export class LocalCore implements Core {
     finally { this.mediaUploadActive = false; }
   }
 
-  async attach_references({ references }: Args<"attach_references">) {
+  async attach_references({ references, inspect_only }: Args<"attach_references">) {
     if (this.mediaUploadActive || this.queue.busy) throw new Error(BUSY);
     this.mediaUploadActive = true;
-    try { return await attachReferences(references); }
+    try { return await attachReferences(references, inspect_only === true); }
+    finally { this.mediaUploadActive = false; }
+  }
+
+  async clear_references(_args: Args<"clear_references">) {
+    if (this.mediaUploadActive || this.queue.busy) throw new Error(BUSY);
+    this.mediaUploadActive = true;
+    try { return await clearFlowReferences(); }
     finally { this.mediaUploadActive = false; }
   }
 
   async projects() {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     return listFlowProjects();
+  }
+
+  async voice_options() {
+    if (this.mediaUploadActive || this.queue.busy) throw new Error(BUSY);
+    this.mediaUploadActive = true;
+    try { return await listFlowVoiceOptions(); }
+    finally { this.mediaUploadActive = false; }
+  }
+
+  async create_project() {
+    if (this.mediaUploadActive || this.queue.busy) throw new Error(BUSY);
+    return createFlowProject();
   }
 
   async open_project({ project_id }: Args<"open_project">) {
@@ -314,15 +356,17 @@ export class LocalCore implements Core {
     return `${prefix}-${String(Math.max(0, ...onDisk, ...queued) + 1).padStart(2, "0")}`;
   }
 
-  async agent({ project, scenes, aspect_ratio, download_quality }: Args<"agent">) {
+  async agent({ project, scenes, aspect_ratio, download_quality, submit_only }: Args<"agent">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     const output_dir = projectDir(project);
     const job = this.queue.add({
       prompt: `Agent batch: ${scenes.length} images`,
       type: "image",
       max_credits: 0,
+      retries: submit_only ? 0 : undefined,
       aspect_ratio,
       download_quality,
+      submit_only,
       agent_scenes: scenes,
       output_dir,
       file_stem: this.nextStem(output_dir, "scene"),
@@ -330,15 +374,15 @@ export class LocalCore implements Core {
     return { output_dir, jobs: [jobView(job)] };
   }
 
-  async edit({ project, asset, prompt, download_quality }: Args<"edit">) {
+  async edit({ project, asset, prompt, download_quality, submit_only }: Args<"edit">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     const output_dir = projectDir(project);
-    const job = this.queue.add({ prompt, type: "video", max_credits: 0, edit_asset: asset, download_quality, output_dir, file_stem: this.nextStem(output_dir, "edit") });
+    const job = this.queue.add({ prompt, type: "video", max_credits: 0, edit_asset: asset, download_quality, submit_only, retries: submit_only ? 0 : undefined, output_dir, file_stem: this.nextStem(output_dir, "edit") });
     return { output_dir, jobs: [jobView(job)] };
   }
 
   // Flow's composer takes a start frame OR a character, never both; agent mode takes both, so this goes that way.
-  async continue_shot({ project, from_asset, prompt, attach, aspect_ratio, mode, download_quality, force }: Args<"continue_shot">) {
+  async continue_shot({ project, from_asset, prompt, attach, aspect_ratio, mode, download_quality, force, submit_only }: Args<"continue_shot">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     // A lost queue entry is not proof that nothing ran: when the owner process is replaced mid-job the job vanishes
     // while Flow carries on and charges for it. Re-running then spends twice, which is exactly what happened on
@@ -362,9 +406,11 @@ export class LocalCore implements Core {
       prompt,
       type: "video",
       max_credits: 0,
+      retries: submit_only ? 0 : undefined,
       continue_from: from_asset,
       attach,
       continue_mode: mode,
+      submit_only,
       aspect_ratio,
       download_quality,
       output_dir,
@@ -399,21 +445,24 @@ export class LocalCore implements Core {
     return { ...made, use_as: `character:${a.name}` };
   }
 
-  async character_edit({ name, change, look }: Args<"character_edit">) {
+  async character_edit({ name, rename, change, look }: Args<"character_edit">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     if (this.queue.busy) throw new Error(BUSY);
-    const out = await editCharacter(name, change);
+    const out = await editCharacter(name, change, undefined, rename);
     // Every scene that references the character quotes this description in its character lock, so it has to describe
     // the NEW look - "deep navy coat" left in it would argue with a portrait whose coat is now red.
     if (look) rememberCharacter(name, look);
     else if (change) rememberCharacter(name, `${characterLook(name) ?? ""} Changed since, and this wins over anything above: ${change.replace(/[.\s]+$/, "")}`.trim());
-    return { ...out, use_as: `character:${name}` };
+    return { ...out, use_as: `character:${rename || name}` };
   }
 
   async characters() {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     if (this.queue.busy) throw new Error(BUSY);
-    return (await listCharacters()).map((name) => ({ name, use_as: `character:${name}` }));
+    return (await listCharacters()).map((character) => ({
+      ...character,
+      use_as: `character:${character.name}`,
+    }));
   }
 
   // Panel only: deliberately NOT registered as an MCP tool, so a key typed into Flow Studio never reaches Claude.
@@ -450,6 +499,7 @@ export class LocalCore implements Core {
     extra_prompt,
     aspect_ratio,
     variants,
+    submit_only,
   }: Args<"reangle">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     const angleResult = buildAnglePrompt({
@@ -471,7 +521,8 @@ export class LocalCore implements Core {
           variants: variants || 1,
           reference_images: [reference_image],
           max_credits: 0,
-          retries: 1,
+          retries: submit_only ? 0 : 1,
+          submit_only,
         },
       ],
     });

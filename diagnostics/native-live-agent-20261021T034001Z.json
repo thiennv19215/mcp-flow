@@ -1,0 +1,268 @@
+{
+  "started": "2026-10-21T03:40:01.2379826Z",
+  "mode": "agent_image_batch",
+  "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+  "sceneCount": 1,
+  "prompt": "One clean editorial product photograph of a small cobalt-blue ceramic teacup on a pale limestone surface, soft daylight, single object, no lettering. Fresh Agent check 20261021T034001Z.",
+  "limits": {
+    "variants": 1,
+    "submit_only": true,
+    "retries": 0,
+    "max_credits_effective": 0,
+    "max_credits_source": "Core.agent hard-codes 0; API schema does not accept max_credits",
+    "unknown_quote_override": false
+  },
+  "settings": {
+    "persistentPreference": "Always ask; operation is source-constrained to Always",
+    "agentInitiallyPressed": "false"
+  },
+  "preflight": {
+    "queuedRunning": 0,
+    "chips": 0,
+    "promptChars": 0,
+    "xhrHook": true,
+    "observerReady": true,
+    "pickerOpen": false,
+    "activeAttempts": 0,
+    "fetchHook": true
+  },
+  "jobId": "b10dd105",
+  "outcome": "failed_before_dispatch",
+  "evidence": {
+    "error_category": "unsupported",
+    "status": "failed",
+    "credit_quote_verified": null,
+    "error": "Flow Agent confirmation settings are unavailable; nothing was submitted.",
+    "credits": null,
+    "requestDiagnostics": null,
+    "outcome_unknown": false,
+    "jobId": "b10dd105",
+    "request_dispatched": false
+  },
+  "postflight": {
+    "pickerOpen": false,
+    "promptChars": 0,
+    "queuedRunning": [],
+    "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "agentPressed": null,
+    "composer": "settings_2",
+    "activeAttempts": 0,
+    "requestDiagnostics": {
+      "version": 1,
+      "count": 4,
+      "events": [
+        {
+          "observedAt": 1792553746666,
+          "attemptId": "105dfb71-ca1f-4878-8d1c-bf870e4f621b",
+          "mediaType": "image",
+          "transport": "fetch",
+          "path": "/_/AiSandboxAngularFrontend/data/batchexecute",
+          "rpcId": "ogiZ0b",
+          "payloadVersion": "image_rows_v1",
+          "payloadShape": {
+            "type": "array",
+            "length": 5,
+            "items": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "length": 1,
+                "items": [
+                  {
+                    "type": "array",
+                    "length": 14,
+                    "items": "           "
+                  }
+                ]
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "array",
+                "length": 11,
+                "items": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "string",
+                    "length": 36
+                  },
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "array",
+                    "length": 2,
+                    "items": " "
+                  }
+                ]
+              },
+              {
+                "type": "array",
+                "length": 1,
+                "items": [
+                  {
+                    "type": "string",
+                    "length": 36
+                  }
+                ]
+              }
+            ]
+          },
+          "pathRecognized": true,
+          "payloadMatched": false,
+          "fields": {
+            "shape": true,
+            "prompt": true,
+            "model": null,
+            "quantity": true,
+            "referenceIds": false,
+            "project": true
+          },
+          "reasons": [
+            "reference_ids_mismatch",
+            "payload_match_failed"
+          ]
+        },
+        {
+          "observedAt": 1792553757191,
+          "attemptId": "105dfb71-ca1f-4878-8d1c-bf870e4f621b",
+          "mediaType": "image",
+          "transport": "fetch",
+          "path": "/_/AiSandboxAngularFrontend/data/batchexecute",
+          "rpcId": "WuwhI",
+          "payloadVersion": "unknown",
+          "payloadShape": {
+            "type": "array",
+            "length": 1,
+            "items": [
+              {
+                "type": "array",
+                "length": 2,
+                "items": [
+                  {
+                    "type": "array",
+                    "length": 2,
+                    "items": " "
+                  },
+                  {
+                    "type": "array",
+                    "length": 2,
+                    "items": " "
+                  }
+                ]
+              }
+            ]
+          },
+          "pathRecognized": true,
+          "payloadMatched": false,
+          "fields": {
+            "shape": false,
+            "prompt": false,
+            "model": null,
+            "quantity": false,
+            "referenceIds": false,
+            "project": true
+          },
+          "reasons": [
+            "payload_shape_mismatch",
+            "quantity_mismatch",
+            "prompt_mismatch",
+            "reference_ids_mismatch",
+            "payload_match_failed"
+          ]
+        },
+        {
+          "observedAt": 1792553760289,
+          "attemptId": "105dfb71-ca1f-4878-8d1c-bf870e4f621b",
+          "mediaType": "image",
+          "transport": "xhr",
+          "path": "/_/AiSandboxAngularFrontend/:segment",
+          "rpcId": null,
+          "payloadVersion": "unknown",
+          "payloadShape": {
+            "type": "unparsed_body"
+          },
+          "pathRecognized": false,
+          "payloadMatched": false,
+          "fields": {
+            "shape": false,
+            "prompt": null,
+            "model": null,
+            "quantity": null,
+            "referenceIds": null,
+            "project": null
+          },
+          "reasons": [
+            "payload_unparsed",
+            "request_path_unrecognized"
+          ]
+        },
+        {
+          "observedAt": 1792553765705,
+          "attemptId": "105dfb71-ca1f-4878-8d1c-bf870e4f621b",
+          "mediaType": "image",
+          "transport": "fetch",
+          "path": "/_/AiSandboxAngularFrontend/data/batchexecute",
+          "rpcId": "ngNC2",
+          "payloadVersion": "unknown",
+          "payloadShape": {
+            "type": "array",
+            "length": 1,
+            "items": [
+              {
+                "type": "string",
+                "length": 59
+              }
+            ]
+          },
+          "pathRecognized": true,
+          "payloadMatched": false,
+          "fields": {
+            "shape": false,
+            "prompt": false,
+            "model": null,
+            "quantity": false,
+            "referenceIds": false,
+            "project": true
+          },
+          "reasons": [
+            "payload_shape_mismatch",
+            "quantity_mismatch",
+            "prompt_mismatch",
+            "reference_ids_mismatch",
+            "payload_match_failed"
+          ]
+        }
+      ]
+    },
+    "chips": 0,
+    "observerReady": true
+  },
+  "finished": "2026-10-21T03:40:04.3332591Z"
+}

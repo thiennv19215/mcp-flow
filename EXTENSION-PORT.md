@@ -9,6 +9,10 @@ The Chrome extension is the only Flow browser driver. It connects to the backend
 3. Open the existing signed-in Flow project tab. In the connector popup, click **Connect active Flow tab**.
 4. Confirm the popup shows a backend connection and selected tab. `/api/health` reports the connector transport, protocol, and extension version on local deployments.
 
+## Local extension development
+
+For automatic reload while editing, load the repository's `extension/` folder once as an unpacked extension, then run `npm run dev:extension` from the repository root and leave it running. The watcher detects changes under `extension/`; Chrome reloads the extension and refreshes open Flow tabs automatically (the check runs on the extension's existing 30-second alarm). Stop it with Ctrl+C. This development helper uses `http://127.0.0.1:18898` on loopback.
+
 The connector remembers the selected tab while you browse elsewhere. Use the popup to select another Flow tab. If multiple Flow tabs are open and none is selected, choose one explicitly.
 
 ## Transport and lifecycle

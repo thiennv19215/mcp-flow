@@ -1,0 +1,15 @@
+{
+  "started": "2026-10-21T04:09:57.390Z",
+  "mode": "character",
+  "api": "http://127.0.0.1:18897",
+  "probes": [
+    {
+      "name": "character.create.from_asset",
+      "status": "failed",
+      "seconds": 19.857,
+      "error": "Flow closed the editor but the Characters library does not show \"MCP Diagnostic 20261021040957\". Check Flow before retrying."
+    }
+  ],
+  "finished": "2026-10-21T04:10:18.296Z",
+  "fatal_error": "Flow closed the editor but the Characters library does not show \"MCP Diagnostic 20261021040957\". Check Flow before retrying."
+}

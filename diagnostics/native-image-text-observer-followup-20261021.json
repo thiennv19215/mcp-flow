@@ -1,0 +1,42 @@
+{
+  "checked_at": "2026-10-21T02:22:31Z",
+  "source_report": "diagnostics/native-image-text-submit-20261021.json",
+  "job_id": "b41693d7",
+  "api_calls": ["POST /api/observer_health {}", "POST /api/status {detailed:false}"],
+  "job": {
+    "status": "submitted",
+    "request_dispatched": true,
+    "server_acceptance_observed": false,
+    "outcome_unknown": false,
+    "credits": 0,
+    "credit_quote_verified": true,
+    "note": "Flow submit request was dispatched; rendering and downloads were not awaited."
+  },
+  "observer_health": {
+    "http": 200,
+    "ready": true,
+    "xhrHookActive": true,
+    "fetchHookActive": true,
+    "activeAttempts": 0,
+    "retiredCount": 2,
+    "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0"
+  },
+  "status_diagnostics": {
+    "http": 200,
+    "observerProjectMatch": true,
+    "observerActiveAttempts": 0,
+    "armPreflight": "armed_and_disarmed",
+    "promptCharacters": 0,
+    "referenceChips": 0,
+    "composer": "🍌 Nano Banana 2.1 crop_square x1",
+    "submitEnabled": false,
+    "activeQueuedOrRunningJobs": 0
+  },
+  "assessment": {
+    "dispatch": "correlated dispatch is confirmed by the job's request_dispatched=true evidence",
+    "acceptance": "server acceptance was not observed",
+    "observer_attempt": "no longer active. The API job view does not expose its correlationAttemptId or final observer receipt, so this snapshot cannot distinguish normal response cleanup from expiry. Source sets observer attempts to a 60-second default TTL; the earlier active snapshot and this later zero-active snapshot are consistent with either path. The dispatched request itself remains correlated by request_dispatched=true.",
+    "safe_to_proceed": "no active observer attempt or queued/running job remains. A distinct next job is mechanically eligible only after its own exact state and verified credit preflight pass; this follow-up itself did not submit one."
+  },
+  "mutations": "No Flow composer, library, settings, or generation state was changed. Status diagnostics performed only a bounded observer arm-and-disarm readiness probe."
+}

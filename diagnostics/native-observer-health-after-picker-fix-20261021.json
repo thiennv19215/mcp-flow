@@ -1,0 +1,411 @@
+{
+  "checked_at": "2026-10-21T02:40:47.472Z",
+  "api": "http://127.0.0.1:18897",
+  "operation": "single health-only observer repair after open_project navigation",
+  "preflight_http": 200,
+  "before": {
+    "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "observer": {
+      "ready": false,
+      "version": 1,
+      "observerRevision": 23,
+      "structuredPromptVersion": 2,
+      "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+      "activeAttempts": 0,
+      "retiredCount": 0,
+      "retiredSaturated": false,
+      "xhrHookActive": false,
+      "fetchHookActive": false
+    },
+    "composer": "Video · 720p · 10s crop_16_9 x1",
+    "promptCharacterCount": 0,
+    "chipCount": 0,
+    "pickerOpen": false,
+    "jobs": [
+      {
+        "id": "9b601c3c",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "c51e14ca",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "e4671d1c",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "65954cf9",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "8e969368",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "669cba96",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "b03ac078",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "c8681212",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "d0229fc7",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "45226d09",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "734ea0cc",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "39b4e628",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "0e01c55a",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "5d30a9ec",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "c174c8f5",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "aecb4aea",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "31429aee",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "8d3eecb7",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "ea11a1b2",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "30f5c749",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "a4e7c939",
+        "status": "submitted",
+        "request_dispatched": true,
+        "outcome_unknown": false
+      },
+      {
+        "id": "f8ecc0f8",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "d221a462",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "6a175e38",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "bf7cdefe",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "f0efa71f",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "b41693d7",
+        "status": "submitted",
+        "request_dispatched": true,
+        "outcome_unknown": false
+      },
+      {
+        "id": "e19adaf3",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "2891d147",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      }
+    ]
+  },
+  "health_http": 200,
+  "health": {
+    "activeAttempts": 0,
+    "fetchHookActive": true,
+    "observerRevision": 23,
+    "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "ready": true,
+    "retiredCount": 0,
+    "retiredSaturated": false,
+    "structuredPromptVersion": 2,
+    "version": 1,
+    "xhrHookActive": true
+  },
+  "postflight_http": 200,
+  "postflight": {
+    "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "observer": {
+      "ready": true,
+      "version": 1,
+      "observerRevision": 23,
+      "structuredPromptVersion": 2,
+      "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+      "activeAttempts": 0,
+      "retiredCount": 0,
+      "retiredSaturated": false,
+      "xhrHookActive": true,
+      "fetchHookActive": true
+    },
+    "composer": "Video · 720p · 10s crop_16_9 x1",
+    "promptCharacterCount": 0,
+    "chipCount": 0,
+    "pickerOpen": false,
+    "jobs": [
+      {
+        "id": "9b601c3c",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "c51e14ca",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "e4671d1c",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "65954cf9",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "8e969368",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "669cba96",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "b03ac078",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "c8681212",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "d0229fc7",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "45226d09",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "734ea0cc",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "39b4e628",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "0e01c55a",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "5d30a9ec",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "c174c8f5",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "aecb4aea",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "31429aee",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "8d3eecb7",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "ea11a1b2",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "30f5c749",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "a4e7c939",
+        "status": "submitted",
+        "request_dispatched": true,
+        "outcome_unknown": false
+      },
+      {
+        "id": "f8ecc0f8",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "d221a462",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "6a175e38",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "bf7cdefe",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "f0efa71f",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "b41693d7",
+        "status": "submitted",
+        "request_dispatched": true,
+        "outcome_unknown": false
+      },
+      {
+        "id": "e19adaf3",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "2891d147",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      }
+    ]
+  },
+  "live_generation_calls": 0
+}

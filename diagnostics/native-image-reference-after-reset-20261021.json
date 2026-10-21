@@ -1,0 +1,39 @@
+{
+  "operation": "one image reference attach after supported open_project reset; no generation",
+  "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+  "asset": "fm-9aa6f547c686-upload.png",
+  "attachHttp": 200,
+  "attach": {
+    "attached": [
+      {
+        "name": "fm-9aa6f547c686-upload.png",
+        "kind": "image",
+        "source": "",
+        "id": "3e54fcea-fc18-4f6e-a904-0e6259fd0347",
+        "confirmed": true
+      }
+    ],
+    "submitted": false
+  },
+  "postflight": {
+    "ready": true,
+    "attempts": 0,
+    "activeJobs": 0,
+    "prompt": "fm-9aa6f547c686-upload.png",
+    "chipCount": 1,
+    "chips": [
+      {
+        "name": "fm-9aa6f547c686-upload.png",
+        "kind": "image",
+        "id": "3e54fcea-fc18-4f6e-a904-0e6259fd0347"
+      }
+    ],
+    "pickerOpen": false,
+    "visibleSurfaces": [],
+    "step": "picker closed",
+    "error": null,
+    "creditCandidates": [],
+    "submitDisabled": true
+  },
+  "result": "ATTACH_CONFIRMED"
+}

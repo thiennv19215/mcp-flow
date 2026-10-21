@@ -1,0 +1,156 @@
+{
+  "started": "2026-10-21T02:21:07.785Z",
+  "mode": "image_text_submit_only",
+  "project": "NativeE2E-image-20261021-0222-jade-bottle",
+  "prompt": "A pear-shaped jade-green glass perfume bottle with a brushed brass cap on folded rust-colored linen, one small white blossom beside it, soft morning window light, premium editorial still-life product photograph, square composition, no words or lettering.",
+  "limits": {
+    "submit_only": true,
+    "retries": 0,
+    "variants": 1,
+    "max_credits": 0
+  },
+  "events": [],
+  "start_http": 200,
+  "job_id": "b41693d7",
+  "initial_status": "running",
+  "latest_job": {
+    "id": "b41693d7",
+    "status": "submitted",
+    "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-image-20261021-0222-jade-bottle",
+    "scene": "scene-01",
+    "prompt": "A pear-shaped jade-green glass perfume bottle with a brushed brass cap on folded rust-colored linen, one small white blossom beside it, soft morning window light, premium editorial still-life product photograph, square composition, no words or lettering.",
+    "attempts": 1,
+    "credits": 0,
+    "credit_quote_verified": true,
+    "files": [],
+    "note": "Flow submit request was dispatched; rendering and downloads were not awaited.",
+    "outcome_unknown": false,
+    "request_dispatched": true,
+    "server_acceptance_observed": false
+  },
+  "result": "pass_dispatched",
+  "evidence": {
+    "job_id": "b41693d7",
+    "status": "submitted",
+    "request_dispatched": true,
+    "server_acceptance_observed": false,
+    "outcome_unknown": false,
+    "credits": 0,
+    "credit_quote_verified": true,
+    "note": "Flow submit request was dispatched; rendering and downloads were not awaited."
+  },
+  "finished": "2026-10-21T02:21:22.905Z",
+  "postflight": {
+    "http": 200,
+    "flow": {
+      "url": "https://flow.google.com/project/0dc56af8-f217-4c0c-91db-8868145f29c0?hl=en",
+      "signedIn": true,
+      "inProject": true,
+      "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+      "composer": "🍌 Nano Banana 2.1 crop_square x1",
+      "prompt": {
+        "contentEditable": true,
+        "characterCount": 0,
+        "chipCount": 0
+      },
+      "controls": [
+        {
+          "tag": "button",
+          "role": null,
+          "aria": "Add ingredients to the prompt box",
+          "title": "",
+          "text": "add",
+          "ariaPressed": null,
+          "ariaSelected": null,
+          "dataState": null,
+          "checked": null,
+          "disabled": false,
+          "icon": "add",
+          "className": "mdc-icon-button mat-mdc-icon-button mat-mdc-button-base mat-mdc-tooltip-trigger add-menu-trigger mat"
+        },
+        {
+          "tag": "button",
+          "role": null,
+          "aria": "Agent",
+          "title": "",
+          "text": "Agent",
+          "ariaPressed": "false",
+          "ariaSelected": null,
+          "dataState": null,
+          "checked": null,
+          "disabled": false,
+          "icon": "",
+          "className": "agent-mode-chip"
+        },
+        {
+          "tag": "button",
+          "role": null,
+          "aria": "Settings trigger",
+          "title": "",
+          "text": "🍌 Nano Banana 2.1 crop_square x1",
+          "ariaPressed": null,
+          "ariaSelected": null,
+          "dataState": null,
+          "checked": null,
+          "disabled": false,
+          "icon": "crop_square",
+          "className": "mdc-button mat-mdc-button-base settings-trigger-button mdc-button--unelevated mat-mdc-unelevated-but"
+        },
+        {
+          "tag": "button",
+          "role": null,
+          "aria": "Start generation",
+          "title": "",
+          "text": "arrow_forward",
+          "ariaPressed": null,
+          "ariaSelected": null,
+          "dataState": null,
+          "checked": null,
+          "disabled": true,
+          "icon": "arrow_forward",
+          "className": "mdc-icon-button mat-mdc-icon-button mat-mdc-button-base generate-icon-button mat-unthemed flow-icon-"
+        }
+      ],
+      "quoteCandidates": [],
+      "observer": {
+        "ready": true,
+        "version": 1,
+        "observerRevision": 23,
+        "structuredPromptVersion": 2,
+        "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+        "activeAttempts": 1,
+        "retiredCount": 2,
+        "retiredSaturated": false,
+        "xhrHookActive": true,
+        "fetchHookActive": true
+      },
+      "referencePicker": {
+        "action": "idle",
+        "phase": "idle",
+        "step": "idle",
+        "error": null,
+        "cleanupError": null,
+        "updatedAt": "2026-10-21T02:21:22.882Z",
+        "pickerOpen": false,
+        "pickerRole": null,
+        "pickerOptionCount": 0,
+        "pickerOptionLabels": [],
+        "searchValue": "",
+        "categoryTabs": [],
+        "chipCount": 0,
+        "chips": []
+      }
+    },
+    "activeJobs": [],
+    "job": {
+      "id": "b41693d7",
+      "status": "submitted",
+      "request_dispatched": true,
+      "server_acceptance_observed": false,
+      "outcome_unknown": false,
+      "credits": 0,
+      "credit_quote_verified": true
+    },
+    "jobCount": 27
+  }
+}

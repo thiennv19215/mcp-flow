@@ -198,8 +198,9 @@
 
   function isExcludedSubmitButton(el) {
     if (!el || typeof el.getAttribute !== "function") return true;
-    if (root.isFlowProjectNavigationControl?.(el)) return true;
-    if (el.closest?.('nav, [role="navigation"], mat-sidenav, header, mat-toolbar, [role="banner"], flow-navigation, [class*="sidebar"], [class*="drawer"], flow-library, [class*="media-gallery"], [class*="media-list"]')) return true;
+    const inComposer = Boolean(el.closest?.('flow-base-prompt-box, .flow-composer, form, [class*="composer"], [class*="prompt-box"], [class*="prompt-container"], [data-testid*="composer"]'));
+    if (!inComposer && root.isFlowProjectNavigationControl?.(el)) return true;
+    if (!inComposer && el.closest?.('nav, [role="navigation"], mat-sidenav, mat-drawer, .mat-sidenav, .mat-drawer, header, mat-toolbar, [role="banner"], flow-navigation, [class*="sidebar"], flow-library, [class*="media-gallery"], [class*="media-list"]')) return true;
 
     const name = (root.accessibleName?.(el) || "").toLowerCase();
     const text = (el.innerText || el.textContent || "").toLowerCase();
@@ -268,6 +269,22 @@
     // 1. Try finding in composer container first if one is identified
     const composer = getFlowComposerContainer();
     if (composer) {
+      // Keep the repository's action-name resolver scoped to the actual composer.
+      // Flow currently renders its submit control inside mat-sidenav-content, so
+      // broad navigation filters can mistake that wrapper for the project drawer.
+      const scopedFlowButton = root.flowButton?.("Start generation", composer);
+      if (scopedFlowButton && composer.contains(scopedFlowButton)) return scopedFlowButton;
+
+      const rawComposerButtons = [...composer.querySelectorAll('button, [role="button"]')].filter(el => root.visible?.(el));
+      const semanticSubmitButton = rawComposerButtons.find(button => {
+        const icon = getElementIconName(button);
+        const name = (root.accessibleName?.(button) || "").toLowerCase();
+        const text = (button.innerText || button.textContent || "").toLowerCase();
+        const explicitSubmit = button.getAttribute?.("type") === "submit" || button.getAttribute?.("data-action") === "submit" || button.getAttribute?.("data-action") === "generate";
+        return explicitSubmit && (SUBMIT_ICONS.includes(icon) || SUBMIT_TEXTS.some(value => name.includes(value) || text.includes(value)));
+      });
+      if (semanticSubmitButton) return semanticSubmitButton;
+
       const composerButtons = [...composer.querySelectorAll('button, [role="button"]')].filter(el =>
         root.visible?.(el) && !isExcludedSubmitButton(el));
 
@@ -370,25 +387,7 @@
 
       const baseOptions = { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true, composed: true };
 
-      // 1. Mod+Enter (Ctrl+Enter for Windows/Linux, Cmd+Enter for Mac)
-      editor.dispatchEvent(new KeyboardEvent("keydown", { ...baseOptions, ctrlKey: true }));
-      editor.dispatchEvent(new KeyboardEvent("keypress", { ...baseOptions, ctrlKey: true }));
-      editor.dispatchEvent(new KeyboardEvent("keyup", { ...baseOptions, ctrlKey: true }));
-
-      editor.dispatchEvent(new KeyboardEvent("keydown", { ...baseOptions, metaKey: true }));
-      editor.dispatchEvent(new KeyboardEvent("keypress", { ...baseOptions, metaKey: true }));
-      editor.dispatchEvent(new KeyboardEvent("keyup", { ...baseOptions, metaKey: true }));
-
-      // 2. Direct ProseMirror View handleKeyDown
-      try {
-        const pmView = editor.pmViewDesc?.view;
-        if (pmView && typeof pmView.someProp === "function") {
-          const ctrlEnter = new KeyboardEvent("keydown", { ...baseOptions, ctrlKey: true });
-          pmView.someProp("handleKeyDown", f => f(pmView, ctrlEnter));
-        }
-      } catch (_) {}
-
-      // 3. Plain Enter fallback
+      // Keep this as a single, plain Enter fallback after Flow's click path.
       editor.dispatchEvent(new KeyboardEvent("keydown", baseOptions));
       editor.dispatchEvent(new KeyboardEvent("keypress", baseOptions));
       editor.dispatchEvent(new KeyboardEvent("keyup", baseOptions));
@@ -432,6 +431,11 @@
     const acceptanceObserver = new MutationObserver(() => {
       if (targetButton.disabled || targetButton.getAttribute("aria-disabled") === "true") {
         controlAccepted = true;
+      } else if (!targetButton.isConnected) {
+        const liveButton = getFlowSubmitButton(expectedPrompt);
+        if (liveButton && (liveButton.disabled || liveButton.getAttribute("aria-disabled") === "true")) {
+          controlAccepted = true;
+        }
       }
     });
     try {
@@ -451,12 +455,28 @@
       try { targetButton.focus({ preventScroll: true }); } catch {}
 
       await Promise.all([
-        new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+        new Promise(resolve => {
+          let settled = false;
+          const finish = () => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(fallback);
+            resolve();
+          };
+          const fallback = setTimeout(finish, 250);
+          try { requestAnimationFrame(() => requestAnimationFrame(finish)); }
+          catch { finish(); }
+        }),
         new Promise(resolve => setTimeout(resolve, 120))
       ]);
 
       if (!targetButton.isConnected || targetButton.disabled || targetButton.getAttribute("aria-disabled") === "true") {
-        controlAccepted = true;
+        throw root.flowError(
+          "FLOW_SUBMIT_CLICK_NOT_DELIVERED",
+          "Flow replaced or disabled the submit button before the click was released; no submit click was delivered.",
+          false,
+          false
+        );
       }
 
       targetButton.dispatchEvent(new PointerEvent("pointerup", eventOptions));
@@ -496,26 +516,19 @@
       }
 
       const mainListenerInvoked = mainActivation?.success === true && Number(mainActivation?.invoked) > 0;
+      if (mainActivation?.error === "Bridge timeout") {
+        throw root.flowError("FLOW_SUBMIT_BRIDGE_TIMEOUT", "Flow's submit bridge timed out. The request outcome is unknown; inspect the project before retrying.", false, true);
+      }
       if (!mainListenerInvoked) {
-        // Fallback: direct click and inner icon click
+        // The bridge replied but found no page listener. Try one DOM click; the
+        // generation observer owns the later single Enter fallback if needed.
         targetButton.click();
-        const inner = targetButton.querySelector("mat-icon, .mat-icon, .google-symbols, svg");
-        if (inner) {
-          try { inner.dispatchEvent(new MouseEvent("click", eventOptions)); } catch {}
-        }
-        const form = targetButton.form || targetButton.closest("form");
-        if (form && typeof form.requestSubmit === "function") {
-          try { form.requestSubmit(targetButton); } catch {}
-        }
-        const editor = (typeof root.flowQuery === "function" ? root.flowQuery("editor") : null) || document.querySelector(".ProseMirror");
-        if (editor) {
-          pressFlowEditorSubmit(editor);
-        }
       }
 
       await new Promise(resolve => setTimeout(resolve, 180));
     } catch (err) {
       console.warn("[FlowEditor] activateFlowSubmitButton failed:", err);
+      throw err;
     } finally {
       try { acceptanceObserver.disconnect(); } catch (_) {}
       try { targetButton.removeEventListener("click", markDelivered, { capture: true }); } catch (_) {}
@@ -523,7 +536,7 @@
 
     const mainListenerInvoked = mainActivation?.success === true && Number(mainActivation?.invoked) > 0;
     return {
-      clickDelivered: clickDelivered || mainListenerInvoked || controlAccepted,
+      clickDelivered: clickDelivered || mainListenerInvoked,
       controlAccepted,
       mainListenerInvoked,
       strategy: mainListenerInvoked ? "angular_main_proxy" : "native_click_fallback",
@@ -578,33 +591,71 @@
   }
 
   const FLOW_CREDIT_QUOTE_REGEX = /(?:\b(?:generating\s+)?will\s+use\s+([\d,]+(?:\.\d+)?)\s+credits?\b|(?:quá trình tạo\s+)?(?:sẽ\s+dùng|sẽ\s+sử\s+dụng|tiêu\s+tốn)\s+([\d,]+(?:\.\d+)?)\s+(?:tín\s+dụng|điểm\s+tín\s+dụng|credits?))/i;
-  const FLOW_CREDIT_BARE_REGEX = /^([\d,]+(?:\.\d+)?)\s+(?:credits?|tín\s+dụng|điểm\s+tín\s+dụng)$/i;
+
+  function visibleCreditQuoteCandidates() {
+    const roots = [document];
+    const visited = new Set(roots);
+    const candidates = [];
+    let scanned = 0;
+    const editor = document.querySelector(".ProseMirror[contenteditable='true'], [contenteditable='true']");
+    // Flow renders some composer controls inside open component shadow roots. Walk
+    // those roots too, while keeping a strict cap so status/quote reads stay cheap.
+    for (let rootIndex = 0; rootIndex < roots.length && roots.length < 40; rootIndex++) {
+      const domRoot = roots[rootIndex];
+      let elements = [];
+      try { elements = [...domRoot.querySelectorAll("*")].slice(0, Math.min(2500, Math.max(0, 5000 - scanned))); } catch {}
+      for (const element of elements) {
+        scanned++;
+        if (element.shadowRoot && !visited.has(element.shadowRoot)) {
+          visited.add(element.shadowRoot);
+          roots.push(element.shadowRoot);
+        }
+        if (candidates.length >= 500 || !root.visible?.(element)) continue;
+        // Never accept prompt text or a wrapper containing the editable prompt as a price quote.
+        if (editor && (element === editor || element.contains?.(editor) || editor.contains?.(element))) continue;
+        if (!element.matches?.("a,button,[role],p,span,[aria-label],[title],[class*='credit'],[data-testid*='credit']")) continue;
+        const text = (element.innerText || element.textContent || root.accessibleName?.(element) || "").replace(/\s+/g, " ").trim();
+        if (!text || text.length > 300 || !/(?:credit|tín\s+dụng|will\s+use|sẽ\s+dùng|sẽ\s+sử\s+dụng|tiêu\s+tốn)/i.test(text)) continue;
+        candidates.push(text);
+      }
+    }
+    return [...new Set(candidates)].slice(0, 40);
+  }
 
   function readGenerationCreditQuote() {
-    const pageText = (document.body?.innerText || "").replace(/\s+/g, " ").trim();
-    const pageUsage = pageText.match(FLOW_CREDIT_QUOTE_REGEX);
-    if (pageUsage) return Number((pageUsage[1] || pageUsage[2]).replace(/,/g, ""));
-    const candidates = [...document.querySelectorAll("a,button,[role],p,span")]
-      .filter(el => root.visible?.(el))
-      .map(el => (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim())
-      .filter(Boolean);
+    const candidates = visibleCreditQuoteCandidates();
     const usage = candidates.map(text => ({ text, match: text.match(FLOW_CREDIT_QUOTE_REGEX) }))
       .filter(item => item.match)
       .sort((a, b) => a.text.length - b.text.length)[0];
     if (usage) return Number((usage.match[1] || usage.match[2]).replace(/,/g, ""));
-    const bare = candidates.map(text => ({ text, match: text.match(FLOW_CREDIT_BARE_REGEX) }))
-      .filter(item => item.match)
-      .sort((a, b) => a.text.length - b.text.length)[0];
-    return bare ? Number(bare.match[1].replace(/,/g, "")) : undefined;
+    return undefined;
   }
 
-  async function waitForGenerationCreditQuote(timeoutMs = 8000) {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
+  function inspectGenerationCreditQuote() {
+    const candidates = visibleCreditQuoteCandidates();
+    return {
+      quote: readGenerationCreditQuote(),
+      candidates: candidates.slice(0, 20),
+    };
+  }
+
+  async function waitForGenerationCreditQuote(timeoutMs = 8000, options = {}) {
+    const callerDeadline = Number.isFinite(options.deadline) ? options.deadline : Infinity;
+    const quoteDeadline = Math.min(Date.now() + Math.max(0, Number(timeoutMs) || 0), callerDeadline);
+    while (Date.now() < quoteDeadline) {
+      root.FlowUiDeadline?.requireTime(callerDeadline, "reading Flow's credit quote", false, options.signal);
       const quote = readGenerationCreditQuote();
       if (Number.isFinite(quote)) return quote;
-      await root.wait?.(200);
+      const remaining = quoteDeadline - Date.now();
+      if (remaining <= 0) break;
+      const waitMs = Math.min(200, remaining);
+      if (root.FlowUiDeadline?.boundedWait) await root.FlowUiDeadline.boundedWait(waitMs, callerDeadline, "reading Flow's credit quote", false, options.signal);
+      else await root.wait?.(waitMs);
     }
+    // The local quote observation window may expire without a quote. That is
+    // an unknown quote, not an expired Flow operation; callers can apply their
+    // fail-closed policy while the shared absolute deadline remains available.
+    root.FlowUiDeadline?.requireTime(callerDeadline, "reading Flow's credit quote", false, options.signal);
     return readGenerationCreditQuote();
   }
 
@@ -623,6 +674,7 @@
     activateFlowSubmitButton,
     currentFlowSubmitErrors,
     readGenerationCreditQuote,
+    inspectGenerationCreditQuote,
     waitForGenerationCreditQuote,
   });
 

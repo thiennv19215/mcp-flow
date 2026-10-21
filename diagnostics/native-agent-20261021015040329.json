@@ -1,0 +1,36 @@
+{
+  "started": "2026-10-21T01:50:40.329Z",
+  "mode": "agent",
+  "api": "http://127.0.0.1:18897",
+  "probes": [
+    {
+      "name": "image.agent_batch.submit_only",
+      "status": "queued",
+      "job_id": "bf7cdefe"
+    },
+    {
+      "name": "image.agent_batch.submit_only",
+      "status": "failed_before_dispatch",
+      "error": "Job bf7cdefe ended as failed before confirmed dispatch (outcome_unknown=false): Flow Agent confirmation settings are unavailable; nothing was submitted.. Do not replay this job."
+    }
+  ],
+  "job_id": "bf7cdefe",
+  "latest_job": {
+    "id": "bf7cdefe",
+    "status": "failed",
+    "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-agent-20261021015040329",
+    "scene": "scene-01",
+    "prompt": "Agent batch: 1 images",
+    "attempts": 1,
+    "credit_quote_verified": null,
+    "progress": "Flow Agent pass 1/3 for 1 remaining scene(s)",
+    "files": [],
+    "error": "Flow Agent confirmation settings are unavailable; nothing was submitted.",
+    "error_category": "unsupported",
+    "outcome_unknown": false,
+    "request_dispatched": false,
+    "server_acceptance_observed": false
+  },
+  "finished": "2026-10-21T01:50:49.429Z",
+  "fatal_error": "Job bf7cdefe ended as failed before confirmed dispatch (outcome_unknown=false): Flow Agent confirmation settings are unavailable; nothing was submitted.. Do not replay this job."
+}

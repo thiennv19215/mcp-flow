@@ -1,0 +1,53 @@
+{
+  "checked_at": "2026-10-21T02:19:46Z",
+  "api": "http://127.0.0.1:18897",
+  "mode": "first-frame video submit_only preflight",
+  "submitted": false,
+  "reason": "The current Flow state has no verifiable credit quote and the correlation observer hooks are inactive. The request was stopped before any operation was queued.",
+  "current_state": {
+    "project_id": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "signed_in": true,
+    "project_editor": true,
+    "composer": "Video · 720p · 10s crop_16_9 x1",
+    "prompt_characters": 0,
+    "reference_chips": 0,
+    "first_frame_slot": "empty",
+    "last_frame_slot": "empty",
+    "submit_enabled": false,
+    "generation_credit_quote_candidates": [],
+    "observer": {
+      "ready": false,
+      "xhr_hook_active": false,
+      "fetch_hook_active": false,
+      "active_attempts": 0,
+      "project_id": "0dc56af8-f217-4c0c-91db-8868145f29c0"
+    },
+    "reference_picker_open": false,
+    "active_jobs": []
+  },
+  "asset_preflight": {
+    "requested_title": "fm-9aa6f547c686-upload.png",
+    "kind": "image",
+    "exact_matches": 1
+  },
+  "prior_job": {
+    "id": "f0efa71f",
+    "status": "failed_before_dispatch",
+    "request_dispatched": false,
+    "outcome_unknown": false,
+    "replayed": false
+  },
+  "postflight": {
+    "same_as_preflight": true,
+    "prompt_characters": 0,
+    "reference_chips": 0,
+    "frame_slots_empty": true,
+    "submit_enabled": false,
+    "picker_open": false
+  },
+  "checks": [
+    { "method": "POST /api/status {detailed:false}", "http": 200 },
+    { "method": "POST /api/assets {kind:image}", "http": 200 },
+    { "live_generation_calls": 0 }
+  ]
+}

@@ -46,6 +46,8 @@ export function validateFlowSceneCapabilities(scene: {
   first_frame?: string;
   last_frame?: string;
   reference_images?: string[];
+  video_reference?: { asset: string; start_frame_index: number; end_frame_index: number };
+  voice?: string;
 }, index?: number): void {
   const prefix = index === undefined ? "" : `Scene ${index + 1}: `;
   const reject = (message: string): never => {
@@ -59,6 +61,17 @@ export function validateFlowSceneCapabilities(scene: {
 
   const frames = [scene.first_frame, scene.last_frame].filter(Boolean).length;
   const references = scene.reference_images?.length ?? 0;
+  if (scene.video_reference) {
+    if (scene.type !== "video") reject("Video-reference editing is only supported for video scenes.");
+    if (frames || references) reject("Toby-style video-reference editing accepts one video asset and frame range only; remove first/last frames and image references.");
+    if (!scene.video_reference.asset?.trim()) reject("Video-reference editing needs an exact video asset title.");
+    if (!Number.isInteger(scene.video_reference.start_frame_index) || scene.video_reference.start_frame_index < 0 ||
+        !Number.isInteger(scene.video_reference.end_frame_index) || scene.video_reference.end_frame_index <= scene.video_reference.start_frame_index) {
+      reject("Video-reference frame range must use integer indices with end_frame_index greater than start_frame_index.");
+    }
+  }
+  if (scene.voice && scene.type !== "video") reject("Flow voice chips are available for video generation only.");
+  if (scene.voice && frames) reject("Flow voice chips are not available in first/last frame mode.");
   const allowedAspectRatios = scene.type === "video" ? registry.defaults.videoAspectRatios : registry.defaults.imageAspectRatios;
   if (scene.aspect_ratio && !allowedAspectRatios.includes(scene.aspect_ratio)) {
     reject(`${scene.type} aspect ratio ${scene.aspect_ratio} is not supported. Allowed: ${allowedAspectRatios.join(", ")}.`);

@@ -1,0 +1,40 @@
+{
+  "operation": "first_frame_id_resolution_source_audit",
+  "checked_at": "2026-10-21T02:34:56.7867685Z",
+  "failed_jobs": [
+    "f0efa71f",
+    "e19adaf3"
+  ],
+  "fix": {
+    "details": [
+      "Frames picker now searches the active picker list for exactly one tile whose aria-label equals the exact requested asset title when the option wrapper has no tile.",
+      "The alias is resolved and required to be a UUID before clicking the frame option. Missing/conflicting alias or expected-ID mismatch fails closed without changing the slot.",
+      "No correlation checks were weakened."
+    ],
+    "file": "extension/content/providers/flow/FlowComponents.js"
+  },
+  "live_error": "Flow selected references, but exact backend IDs could not be verified; no request sent.",
+  "source_finding": {
+    "frame_path_before_fix": "chooseNativePickerAsset searched only option.querySelector(flow-grid-tile-container), extracted/resolved the ID after clicking, then relied on FlowGenerationOperations to reject non-UUID values.",
+    "attach_path": "FlowReferenceActions.attach first searches inside the exact option, then falls back to an exact aria-label tile in document; it resolves ASB before committing chip.",
+    "conclusion": "A Frames-picker-specific tile extraction gap is the strongest source-level explanation. Current evidence does not prove whether the live alias map was missing/conflicting or whether the running Frames function differed from source."
+  },
+  "live_e2e_still": "failed",
+  "focused_test": "node --test tests/native-references.test.mjs: 44 passed, 0 failed",
+  "live_retry": "prohibited/no live submit performed",
+  "fixture_test": {
+    "proof": [
+      "Tile outside the option wrapper resolves exact ASB alias to UUID.",
+      "Missing alias is rejected before click.",
+      "Conflicting alias mappings are rejected before click."
+    ],
+    "file": "tests/native-references.test.mjs"
+  },
+  "evidence_limits": [
+    "Both saved job reports stop at the generic exact-backend-ID validation error. Neither records selectedId, alias-map entries, schema epoch, or picker tile placement, so missing alias, conflicting alias, and runtime bundle provenance cannot be distinguished from live logs.",
+    "The earlier API image attach/clear path did confirm UUID 3e54fcea-fc18-4f6e-a904-0e6259fd0347, which proves UUID resolution for the ingredient-reference picker path but not the Frames picker path."
+  ],
+  "build": "npm run build passed",
+  "full_test": "npm test: 76 passed, 0 failed",
+  "diff_check": "git diff --check exited 0; only Git LF/CRLF conversion warnings"
+}

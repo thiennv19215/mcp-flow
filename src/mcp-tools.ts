@@ -77,6 +77,17 @@ async function waitFor({ job_ids, timeout_seconds }: { job_ids?: string[]; timeo
 }
 
 server.registerTool(
+  "flow_observer_health",
+  {
+    title: "Check Flow request observer",
+    description: "Check the Flow submit-request observer and make one bounded reinjection attempt if its XHR/fetch hooks were replaced. This does not navigate, click, attach media, or submit a generation request.",
+    inputSchema: shapes.observer_health,
+    annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
+  },
+  (args) => reply(core.observer_health(args)),
+);
+
+server.registerTool(
   "flow_status",
   {
     title: "Flow status",
@@ -89,11 +100,44 @@ server.registerTool(
 );
 
 server.registerTool(
+  "flow_projects",
+  {
+    title: "List Flow projects",
+    description: "List the projects visible from Flow's home page. This is a read-only library lookup and does not open or create a project.",
+    inputSchema: shapes.projects,
+    annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
+  },
+  () => reply(patient("flow_projects", core.projects())),
+);
+
+server.registerTool(
+  "flow_create_project",
+  {
+    title: "Create a Flow project",
+    description: "Create a new project from Flow's home page and return its confirmed project ID and URL. If the current tab is inside a project, Flow opens a temporary home tab for the creation. If Flow does not return a new project ID after the click, the result is marked unknown; check the project list before retrying.",
+    inputSchema: shapes.create_project,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  },
+  () => reply(patient("flow_create_project", core.create_project())),
+);
+
+server.registerTool(
+  "flow_open_project",
+  {
+    title: "Open a Flow project",
+    description: "Open the specified existing Flow project by UUID in the connected Flow tab. Use flow_projects to find project IDs.",
+    inputSchema: shapes.open_project,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  },
+  (args) => reply(patient("flow_open_project", core.open_project(args))),
+);
+
+server.registerTool(
   "flow_generate",
   {
     title: "Queue Flow generations",
     description:
-      "Queue one clip or image per scene in the open Flow project. Runs one at a time with human-like pauses and spends the user's Google AI credits (approx. per video: Omni 1.1 Flash 7-12, Veo 3.1 Lite 10, Fast 20, Quality 100; images 0). Each scene is checked against max_credits using Flow's own quote before anything is spent. Returns job ids immediately; use flow_wait for results.",
+      "Queue one clip or image per scene in the open Flow project. Runs one at a time with human-like pauses and spends the user's Google AI credits (approx. per video: Omni 1.1 Flash 7-12, Veo 3.1 Lite 10, Fast 20, Quality 100; images 0). Each scene is checked against max_credits using Flow's own quote before anything is spent. Returns job ids immediately; use flow_wait for results. A scene may set submit_only=true to finish after Flow's correlated request is dispatched, without waiting for render/download; flow_wait reports status=\"submitted\" and request_dispatched=true. Dispatch does not prove server acceptance or a finished result; server_acceptance_observed is reported separately.",
     inputSchema: shapes.generate,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },
@@ -157,6 +201,17 @@ server.registerTool(
 );
 
 server.registerTool(
+  "flow_clear_references",
+  {
+    title: "Remove Flow prompt references",
+    description: "Remove all image and character reference chips from the current Flow prompt while preserving prompt text. Each chip removal is confirmed with a bounded wait; fails if Flow does not visibly remove every reference.",
+    inputSchema: shapes.clear_references,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  },
+  (args) => reply(patient("flow_clear_references", core.clear_references(args))),
+);
+
+server.registerTool(
   "flow_upload_media",
   {
     title: "Upload media to Flow",
@@ -184,7 +239,7 @@ server.registerTool(
   {
     title: "Fast image batch via Flow's agent",
     description:
-      "Hand up to 50 image scenes to Flow's own Agent mode, which renders them all in parallel (about a minute for a whole batch) and enriches each prompt itself. Images only, 0 credits. Less exact than flow_generate: the agent picks the wording, no techniques/reference images, and file order is best-effort. Use flow_generate when every scene needs exact settings. Returns a job id; use flow_wait.",
+      "Hand up to 50 image scenes to Flow's own Agent mode, which renders them all in parallel (about a minute for a whole batch) and enriches each prompt itself. Images only, 0 credits. Less exact than flow_generate: the agent picks the wording, no techniques/reference images, and file order is best-effort. Use flow_generate when every scene needs exact settings. Returns a job id; use flow_wait. Set submit_only=true to return after the correlated request dispatch without waiting for renders or downloads.",
     inputSchema: shapes.agent,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },
@@ -196,7 +251,7 @@ server.registerTool(
   {
     title: "Edit an existing video",
     description:
-      "Video-to-video edit of a clip already in the Flow project (relight, change weather/background, remove or restyle objects) using Flow's edit view. Queued like a generation; use flow_wait for the file. Spends credits without a prior quote (about 20 for a 4 s clip), so ask the user before calling.",
+      "Video-to-video edit of a clip already in the Flow project (relight, change weather/background, remove or restyle objects) using Flow's edit view. Queued like a generation; use flow_wait for the file. Spends credits without a prior quote (about 20 for a 4 s clip), so ask the user before calling. Set submit_only=true to return after the correlated request dispatch without waiting for rendering or download.",
     inputSchema: shapes.edit,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },
@@ -208,7 +263,7 @@ server.registerTool(
   {
     title: "Continue a clip, keeping a character attached",
     description:
-      "Start a new clip from the last frame of one already in the project, for a continuous take across a cut. It saves the source clip's real final frame, animates it through Flow's agent mode, and downloads the result. mode 'exact' (default) gives an invisible join - the clip opens on the actual last frame - but attached characters are ignored, so the likeness must come from that frame; mode 'likeness' keeps a character or your avatar locked at the cost of an only-approximate opening frame. Flow cannot do both at once. Agent mode shows no credit quote beforehand, so ask the user before calling. Queued like a generation; use flow_wait for the file.",
+      "Start a new clip from the last frame of one already in the project, for a continuous take across a cut. It saves the source clip's real final frame, animates it through Flow's agent mode, and downloads the result. mode 'exact' (default) gives an invisible join - the clip opens on the actual last frame - but attached characters are ignored, so the likeness must come from that frame; mode 'likeness' keeps a character or your avatar locked at the cost of an only-approximate opening frame. Flow cannot do both at once. Agent mode shows no credit quote beforehand, so ask the user before calling. Queued like a generation; use flow_wait for the file. Set submit_only=true to return after the correlated request dispatch without waiting for rendering or download.",
     inputSchema: shapes.continue_shot,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },
@@ -242,9 +297,9 @@ server.registerTool(
 server.registerTool(
   "flow_character_edit",
   {
-    title: "Restyle an existing character",
+    title: "Edit or rename an existing character",
     description:
-      "Change how an existing character looks without creating a new one (Flow redraws the portrait in place, free), and save the new portrait to <films>/_cast. The character keeps its name, personality and voice, so every scene that references it picks up the new look. Pass `look` with the full updated description so scene prompts stop quoting the old one. With no `change` it only saves the current portrait.",
+      "Rename an existing character without changing its portrait, or change how it looks without creating a new one (Flow redraws the portrait in place, free). A rename is confirmed in Flow's Characters library. For a look change, save the new portrait to <films>/_cast; the character keeps its name, personality and voice. Pass `look` with the full updated description so scene prompts stop quoting the old one. With no `change` or `rename` it only saves the character's current portrait.",
     inputSchema: shapes.character_edit,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },
@@ -255,7 +310,7 @@ server.registerTool(
   "flow_characters",
   {
     title: "List characters",
-    description: "List the reusable characters in the open Flow project. Each can be used in a scene as 'asset:<name>'.",
+    description: "List the reusable characters in the open Flow project. Each includes its name and use_as reference; uuid is included only when Flow exposes a stable character UUID. The detailed Flow status reports whether the latest character scan completed successfully.",
     inputSchema: shapes.characters,
     annotations: { readOnlyHint: true, openWorldHint: true },
   },
@@ -284,6 +339,17 @@ server.registerTool(
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },
   (args) => reply(patient("flow_narrate", core.narrate(args))),
+);
+
+server.registerTool(
+  "flow_voice_options",
+  {
+    title: "Inspect Flow video voice options",
+    description: "Read the exact voice labels currently visible in Flow's v2 composer picker. It opens the picker only when needed, never selects a voice or submits a generation, and closes only a picker it opened. These are Flow prompt voice chips, separate from flow_voices narration options.",
+    inputSchema: shapes.voice_options,
+    annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
+  },
+  () => reply(patient("flow_voice_options", core.voice_options())),
 );
 
 server.registerTool(

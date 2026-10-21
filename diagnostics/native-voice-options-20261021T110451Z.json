@@ -1,0 +1,43 @@
+{
+  "timestampUtc": "2026-10-21T04:04:51Z",
+  "localHealth": {
+    "name": "flow-mcp",
+    "driver": "native",
+    "extension_connected": true,
+    "connector": {
+      "connected": true,
+      "connectors": 1,
+      "transport": "http-poll",
+      "protocol": 3
+    }
+  },
+  "preflight": {
+    "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "promptChars": 0,
+    "promptChips": 0,
+    "referenceChips": 0,
+    "pickerOpen": false,
+    "observerReady": true,
+    "activeAttempts": 0,
+    "queued": [],
+    "running": []
+  },
+  "operation": "flow_voice_options",
+  "result": {
+    "error": "Flow's voice options could not be enumerated completely within the bounded scan; no partial list was returned.",
+    "voices": [],
+    "count": 0,
+    "inspectionCompleted": false
+  },
+  "postflight": {
+    "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "promptChars": 0,
+    "promptChips": 0,
+    "referenceChips": 0,
+    "pickerOpen": false,
+    "observerReady": true,
+    "activeAttempts": 0,
+    "queued": [],
+    "running": []
+  }
+}

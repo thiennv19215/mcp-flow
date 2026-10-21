@@ -1,0 +1,639 @@
+{
+  "started": "2026-10-21T02:23:48.919Z",
+  "mode": "reference_attach_clear_no_generation",
+  "project_id": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+  "asset": "fm-9aa6f547c686-upload.png",
+  "events": [],
+  "generation_calls": 0,
+  "preflight_http": 200,
+  "preflight": {
+    "url": "https://flow.google.com/project/0dc56af8-f217-4c0c-91db-8868145f29c0?hl=en",
+    "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "signedIn": true,
+    "inProject": true,
+    "prompt": {
+      "contentEditable": true,
+      "characterCount": 0,
+      "chipCount": 0
+    },
+    "composer": "🍌 Nano Banana 2.1 crop_square x1",
+    "observer": {
+      "ready": true,
+      "version": 1,
+      "observerRevision": 23,
+      "structuredPromptVersion": 2,
+      "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+      "activeAttempts": 0,
+      "retiredCount": 3,
+      "retiredSaturated": false,
+      "xhrHookActive": true,
+      "fetchHookActive": true
+    },
+    "reference": {
+      "action": "idle",
+      "phase": "idle",
+      "step": "idle",
+      "error": null,
+      "cleanupError": null,
+      "updatedAt": "2026-10-21T02:23:48.964Z",
+      "pickerOpen": false,
+      "pickerRole": null,
+      "pickerOptionCount": 0,
+      "pickerOptionLabels": [],
+      "searchValue": null,
+      "categoryTabs": [],
+      "chipCount": 0,
+      "chips": []
+    },
+    "referenceClear": {
+      "composer": {
+        "tag": "flow-base-prompt-box",
+        "className": "",
+        "connected": true
+      },
+      "clearPromptButton": null,
+      "chipCount": 0,
+      "chips": [],
+      "helper": {
+        "phase": "returned",
+        "initialCount": 0,
+        "removedCount": 0,
+        "error": null,
+        "updatedAt": "2026-10-21T02:21:07.872Z",
+        "remainingCount": 0
+      }
+    },
+    "warnings": [],
+    "jobs": [
+      {
+        "id": "9b601c3c",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "c51e14ca",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "e4671d1c",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "65954cf9",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "8e969368",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "669cba96",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "b03ac078",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "c8681212",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "d0229fc7",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "45226d09",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "734ea0cc",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "39b4e628",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "0e01c55a",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "5d30a9ec",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "c174c8f5",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "aecb4aea",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "31429aee",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "8d3eecb7",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "ea11a1b2",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "30f5c749",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "a4e7c939",
+        "status": "submitted",
+        "request_dispatched": true,
+        "outcome_unknown": false
+      },
+      {
+        "id": "f8ecc0f8",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "d221a462",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "6a175e38",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "bf7cdefe",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "f0efa71f",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "b41693d7",
+        "status": "submitted",
+        "request_dispatched": true,
+        "outcome_unknown": false
+      }
+    ]
+  },
+  "asset_preflight_http": 200,
+  "asset_matches": 1,
+  "attach_http": 200,
+  "attach_response": {
+    "attached": [
+      {
+        "name": "fm-9aa6f547c686-upload.png",
+        "kind": "image",
+        "source": "",
+        "id": "3e54fcea-fc18-4f6e-a904-0e6259fd0347",
+        "confirmed": true
+      }
+    ],
+    "submitted": false
+  },
+  "attach_result": {
+    "attached": [
+      {
+        "name": "fm-9aa6f547c686-upload.png",
+        "kind": "image",
+        "source": "",
+        "id": "3e54fcea-fc18-4f6e-a904-0e6259fd0347",
+        "confirmed": true
+      }
+    ],
+    "submitted": false
+  },
+  "after_attach_http": 200,
+  "after_attach": {
+    "url": "https://flow.google.com/project/0dc56af8-f217-4c0c-91db-8868145f29c0?hl=en",
+    "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "signedIn": true,
+    "inProject": true,
+    "prompt": {
+      "contentEditable": true,
+      "characterCount": 0,
+      "chipCount": 0
+    },
+    "composer": "🍌 Nano Banana 2.1 crop_square x1",
+    "observer": {
+      "ready": true,
+      "version": 1,
+      "observerRevision": 23,
+      "structuredPromptVersion": 2,
+      "projectId": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+      "activeAttempts": 0,
+      "retiredCount": 5,
+      "retiredSaturated": false,
+      "xhrHookActive": true,
+      "fetchHookActive": true
+    },
+    "reference": {
+      "action": "attach",
+      "phase": "completed",
+      "step": "picker closed",
+      "error": null,
+      "cleanupError": null,
+      "updatedAt": "2026-10-21T02:23:53.901Z",
+      "pickerOpen": false,
+      "pickerRole": null,
+      "pickerOptionCount": 0,
+      "pickerOptionLabels": [],
+      "searchValue": "fm-9aa6f547c686-upload.png",
+      "categoryTabs": [],
+      "chipCount": 1,
+      "chips": [
+        {
+          "name": "fm-9aa6f547c686-upload.png",
+          "kind": "image",
+          "id": "3e54fcea-fc18-4f6e-a904-0e6259fd0347"
+        }
+      ],
+      "lastResult": {
+        "name": "fm-9aa6f547c686-upload.png",
+        "id": "3e54fcea-fc18-4f6e-a904-0e6259fd0347"
+      }
+    },
+    "referenceClear": {
+      "composer": {
+        "tag": "flow-base-prompt-box",
+        "className": "",
+        "connected": true
+      },
+      "clearPromptButton": {
+        "aria": "Clear prompt",
+        "disabled": false,
+        "connected": true
+      },
+      "chipCount": 0,
+      "chips": [],
+      "helper": {
+        "phase": "returned",
+        "initialCount": 0,
+        "removedCount": 0,
+        "error": null,
+        "updatedAt": "2026-10-21T02:21:07.872Z",
+        "remainingCount": 0
+      }
+    },
+    "warnings": [],
+    "jobs": [
+      {
+        "id": "9b601c3c",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "c51e14ca",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "e4671d1c",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "65954cf9",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "8e969368",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "669cba96",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "b03ac078",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "c8681212",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "d0229fc7",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "45226d09",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "734ea0cc",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "39b4e628",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "0e01c55a",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "5d30a9ec",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "c174c8f5",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "aecb4aea",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "31429aee",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "8d3eecb7",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "ea11a1b2",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "30f5c749",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "a4e7c939",
+        "status": "submitted",
+        "request_dispatched": true,
+        "outcome_unknown": false
+      },
+      {
+        "id": "f8ecc0f8",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": true
+      },
+      {
+        "id": "d221a462",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "6a175e38",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "bf7cdefe",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "f0efa71f",
+        "status": "failed",
+        "request_dispatched": false,
+        "outcome_unknown": false
+      },
+      {
+        "id": "b41693d7",
+        "status": "submitted",
+        "request_dispatched": true,
+        "outcome_unknown": false
+      }
+    ]
+  },
+  "result": "failed_clear_selector_mismatch_chip_still_reported_by_attach_diagnostics",
+  "finished": "2026-10-21T02:26:53.7932054Z",
+  "clear_preflight": {
+    "picker_open": false,
+    "active_jobs": 0,
+    "prompt_character_count": 0,
+    "active_attempts": 0,
+    "confirmed_chip": {
+      "name": "fm-9aa6f547c686-upload.png",
+      "id": "3e54fcea-fc18-4f6e-a904-0e6259fd0347",
+      "kind": "image"
+    },
+    "project_id": "0dc56af8-f217-4c0c-91db-8868145f29c0"
+  },
+  "clear_response": {
+    "confirmed": true,
+    "prompt_preserved": true,
+    "picker_closed": true,
+    "cleared": 0,
+    "prompt_text": "",
+    "remaining": 0
+  },
+  "postflight": {
+    "picker_open": false,
+    "active_jobs": 0,
+    "reference_action_chip": {
+      "name": "fm-9aa6f547c686-upload.png",
+      "id": "3e54fcea-fc18-4f6e-a904-0e6259fd0347",
+      "kind": "image"
+    },
+    "active_attempts": 0,
+    "reference_action_chip_count": 1,
+    "observer_ready": true,
+    "prompt": {
+      "generic_chip_count": 0,
+      "character_count": 0
+    },
+    "project_id": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "reference_clear_chip_count": 0
+  },
+  "source_fix": {
+    "build": "npm run build passed",
+    "files": [
+      "extension/content/shared/dom-utils.js",
+      "extension/content/providers/flow/FlowGenerationOperations.js",
+      "tests/native-references.test.mjs",
+      "tests/flow-reference-clear.test.mjs"
+    ],
+    "focused_tests": "node --test tests/flow-reference-clear.test.mjs tests/native-references.test.mjs passed 48/48",
+    "details": [
+      "Clear now recognizes the same Ingredient aria-label chip buttons as attachment diagnostics.",
+      "The remover clicks that chip button and verifies its count decreases.",
+      "Clear API confirms only when attachment diagnostics also report chipCount=0."
+    ],
+    "live_retest": "not run; current extension runtime may not contain this build"
+  },
+  "authorized_cleanup": {
+    "project_id": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "canonical_action_chip_count": 0,
+    "canonical_action_chips": [],
+    "reference_clear_diagnostics_chip_count": 0,
+    "generic_chip_count": 0,
+    "checked_at": "2026-10-21T02:27:40.6717895Z",
+    "active_jobs": 0,
+    "prompt_character_count": 0,
+    "picker_open": false,
+    "active_attempts": 0,
+    "status": "already_clean_no_clear_call"
+  },
+  "patched_live_verification": {
+    "clear_response": {
+      "confirmed": true,
+      "picker_closed": true,
+      "prompt_preserved": true,
+      "cleared": 1,
+      "prompt_text": "",
+      "remaining": 0
+    },
+    "generation_calls": 0,
+    "preflight": {
+      "active_jobs": 0,
+      "generic_chip_count": 0,
+      "prompt_character_count": 0,
+      "action_chip_count": 0,
+      "picker_open": false,
+      "active_attempts": 0,
+      "clear_chip_count": 0
+    },
+    "postflight": {
+      "action_chips": [],
+      "action_chip_count": 0,
+      "active_jobs": 0,
+      "active_attempts": 0,
+      "generic_chip_count": 0,
+      "picker_open": false,
+      "clear_chips": [],
+      "clear_helper": {
+        "removedCount": 1,
+        "initialCount": 1,
+        "phase": "returned",
+        "remainingCount": 0
+      },
+      "clear_chip_count": 0,
+      "prompt_character_count": 0
+    },
+    "project_id": "0dc56af8-f217-4c0c-91db-8868145f29c0",
+    "result": "passed",
+    "mode": "image_attach_clear_no_generation",
+    "after_attach": {
+      "action_chip_count": 1,
+      "active_jobs": 0,
+      "active_attempts": 0,
+      "generic_chip_count": 0,
+      "picker_open": false,
+      "action_chip": {
+        "kind": "image",
+        "id": "3e54fcea-fc18-4f6e-a904-0e6259fd0347",
+        "name": "fm-9aa6f547c686-upload.png"
+      },
+      "clear_chip": {
+        "kind": "image",
+        "id": "3e54fcea-fc18-4f6e-a904-0e6259fd0347",
+        "name": "fm-9aa6f547c686-upload.png"
+      },
+      "clear_chip_count": 1,
+      "prompt_character_count": 0
+    },
+    "attach_response": {
+      "submitted": false,
+      "attached": {
+        "confirmed": true,
+        "kind": "image",
+        "id": "3e54fcea-fc18-4f6e-a904-0e6259fd0347",
+        "name": "fm-9aa6f547c686-upload.png"
+      }
+    },
+    "started": "2026-10-21T02:28:49.4375980Z"
+  },
+  "character_probe": {
+    "status": "skipped",
+    "reason": "The read-only API character list contained no exact Untitled character match; no attach or clear call was made."
+  }
+}

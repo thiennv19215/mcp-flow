@@ -12,9 +12,17 @@ export const sceneSchema = z.object({
   duration: z.union([z.literal(4), z.literal(6), z.literal(8), z.literal(10)]).optional().describe("Video length in seconds. Omni models only; Veo 3.1 clips are fixed at 8s."),
   resolution: z.enum(["360p", "720p"]).optional().describe("Video resolution. Omni models only."),
   max_credits: z.number().int().min(0).default(25).describe("Safety cap: the scene is skipped (nothing spent) if Flow quotes more credits than this."),
+  submit_only: z.boolean().optional().describe("Return when Flow's correlated generation request is dispatched; do not wait for rendering or download results. The default waits for finished media."),
+  allow_unknown_quote: z.boolean().optional().describe("Explicitly acknowledge an unverified quote for one image request with exactly one existing project reference and submit_only=true. Default false; only use after the user authorizes this risk. If no quote is visible, max_credits cannot be checked and the returned job will report the quote as unknown."),
   variants: z.number().int().min(1).max(4).optional().describe("Outputs per prompt (each one spends credits). Default 1."),
   first_frame: z.string().optional().describe("First frame: absolute image path, or 'asset:<title>' for an image already in the Flow project."),
   last_frame: z.string().optional().describe("Last frame: absolute image path, or 'asset:<title>'."),
+  video_reference: z.object({
+    asset: z.string().trim().min(1).describe("Exact video asset title from flow_assets."),
+    start_frame_index: z.number().int().min(0),
+    end_frame_index: z.number().int().min(1),
+  }).optional().describe("Toby-style video reference edit. Uses the exact source video and configured frame range, through Flow's dedicated video_edit_submit RPC."),
+  voice: z.string().trim().min(1).max(120).optional().describe("Exact Flow v2 voice name to select as a composer chip for video generation. Not for images or frame mode; this selects Flow's video voice and is separate from TTS narration."),
   reference_images: z
     .array(z.string())
     .max(3)
@@ -36,11 +44,21 @@ export const sceneSchema = z.object({
 }).superRefine((scene, context) => {
   try { validateFlowSceneCapabilities(scene); }
   catch (error) { context.addIssue({ code: "custom", message: error instanceof Error ? error.message : String(error) }); }
+  if (scene.voice && scene.type !== "video") {
+    context.addIssue({ code: "custom", path: ["voice"], message: "Flow voice chips are available for video generation only." });
+  }
+  if (scene.voice && (scene.first_frame || scene.last_frame)) {
+    context.addIssue({ code: "custom", path: ["voice"], message: "Flow voice chips are not available in first/last frame mode." });
+  }
+  if (scene.video_reference && scene.type !== "video") {
+    context.addIssue({ code: "custom", path: ["video_reference"], message: "Video-reference editing is only supported for video scenes." });
+  }
 });
 
 // Raw shapes double as MCP input schemas and, wrapped in z.object, as HTTP body validators.
 export const shapes = {
   status: { detailed: z.boolean().default(true).describe("false skips the plan/credits readout, which briefly opens Flow's account panel.") },
+  observer_health: {},
   generate: {
     project: z.string().min(1).describe("Folder name for the downloaded clips, e.g. 'HotelPromo'."),
     scenes: z.array(sceneSchema).min(1).max(100),
@@ -52,9 +70,15 @@ export const shapes = {
   cancel: { job_id: z.string() },
   retry: { job_ids: z.array(z.string()).optional().describe("Jobs with a confirmed failed or cancelled result. Default: every safe failed job; jobs with an unknown submit outcome are blocked until you inspect Flow to avoid duplicates.") },
   assets: { kind: z.enum(["image", "video", "scene"]).optional() },
-  attach_references: { references: z.array(z.string().min(1)).min(1).max(3).describe("Named references to attach without generation. Use character:<name> for saved characters; asset:<title> for project media.") },
+  attach_references: {
+    references: z.array(z.string().min(1)).min(1).max(3).describe("Named references to attach without generation. Use character:<name> for saved characters; asset:<title> for project media."),
+    inspect_only: z.boolean().optional().describe("Open the reference picker, report its exact search/options, and close it without selecting or attaching anything."),
+  },
+  clear_references: {},
   upload_media: { path: z.string().min(1).describe("Absolute path to an image or video file to upload to the open Flow project. Supports PNG, JPG, WebP, GIF, HEIC, HEIF, AVIF, MP4, MOV, WebM, AVI, MKV or 3GP.") },
   projects: {},
+  voice_options: {},
+  create_project: {},
   open_project: { project_id: z.string().uuid() },
   download: {
     project: z.string().min(1).describe("Local folder name under the output root."),
@@ -81,6 +105,7 @@ export const shapes = {
     scenes: z.array(z.string().min(1)).min(1).max(50).describe("One image description per scene, in order."),
     aspect_ratio: z.enum(["16:9", "9:16", "1:1", "4:3", "3:4"]).default("16:9"),
     download_quality: z.enum(["original", "upscaled"]).optional(),
+    submit_only: z.boolean().optional().describe("Return after Flow's correlated image request is dispatched; rendering and downloads continue in Flow. Default waits for finished images."),
   },
   voices: {},
   narrate: {
@@ -103,6 +128,7 @@ export const shapes = {
       .literal(true)
       .describe("Must be true. Flow shows no quote for edits, so max_credits cannot protect you: a 4 s clip cost 20 credits when measured. The real cost is reported on the finished job."),
     download_quality: z.enum(["original", "upscaled"]).optional(),
+    submit_only: z.boolean().optional().describe("Return after Flow's correlated video edit request is dispatched; rendering and download are not awaited. Default waits for the finished edit."),
   },
   continue_shot: {
     project: z.string().min(1).describe("Local folder for the new clip."),
@@ -128,6 +154,7 @@ export const shapes = {
       .boolean()
       .optional()
       .describe("Skip the guard that refuses to run when Flow already holds a fresh-looking continuation of this clip. Only pass it when you have checked the grid and genuinely want another paid take."),
+    submit_only: z.boolean().optional().describe("Return after Flow's correlated continuation request is dispatched; rendering and download are not awaited. Default waits for the finished clip."),
   },
   trash: { name: z.string().min(1).describe("Exact title of the item to move to Flow's Trash, as listed by flow_assets.") },
   set_key: { key: z.string().min(1).max(200) },
@@ -136,6 +163,7 @@ export const shapes = {
   characters: {},
   character_edit: {
     name: z.string().min(1).describe("Character to change, as listed by flow_characters."),
+    rename: z.string().min(1).max(60).optional().describe("Rename the saved character without changing its portrait. The new name is confirmed in Flow's Characters library before returning."),
     change: z
       .string()
       .min(1)
@@ -182,6 +210,7 @@ export const shapes = {
     extra_prompt: z.string().optional().describe("Extra text appended to the prompt (e.g. lighting or background details)."),
     aspect_ratio: z.enum(["16:9", "9:16", "1:1", "4:3", "3:4"]).default("9:16").describe("Image aspect ratio."),
     variants: z.number().int().min(1).max(4).default(1).describe("Number of takes/variants to generate."),
+    submit_only: z.boolean().optional().describe("Return after Flow's correlated image request is dispatched; rendering and download are not awaited. Default waits for the finished image."),
   },
   angle_presets: {},
 };

@@ -1,0 +1,46 @@
+{
+  "started": "2026-10-21T04:11:05.077Z",
+  "mode": "character_reference_image_submit_only",
+  "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+  "character": "Untitled character",
+  "limits": {
+    "max_credits": 0,
+    "retries": 0,
+    "variants": 1,
+    "submit_only": true
+  },
+  "preflight": {
+    "queued_running": 0,
+    "active_attempts": 0,
+    "blank_prompt": true,
+    "zero_chips": true,
+    "picker_closed": true,
+    "observer_ready": true
+  },
+  "probes": [
+    {
+      "stage": "submit",
+      "status": "queued",
+      "job_id": "41d8526c"
+    },
+    {
+      "stage": "wait",
+      "status": "terminal_before_dispatch",
+      "request_dispatched": false,
+      "outcome_unknown": true,
+      "error": "Flow detected unusual activity or requires captcha verification: \"warning Failed We noticed some unusual activity. Note that browser extensions that modify the page may cause issues. Please visit the Help Center for more information. You have not been charged for this generation. refresh undo delete_forever\". Automatic retries halted to protect your account. Please complete verification directly on the Flow tab."
+    }
+  ],
+  "job_id": "41d8526c",
+  "latest_job": {
+    "status": "failed",
+    "request_dispatched": false,
+    "server_acceptance_observed": false,
+    "credits": null,
+    "credit_quote_verified": false,
+    "outcome_unknown": true,
+    "error_category": "extension"
+  },
+  "finished": "2026-10-21T04:11:17.174Z",
+  "outcome": "FAILED_PRE_DISPATCH"
+}

@@ -1,0 +1,36 @@
+{
+  "started": "2026-10-21T01:20:13.330Z",
+  "mode": "reference",
+  "api": "http://127.0.0.1:18897",
+  "probes": [
+    {
+      "name": "image.reference.submit_only",
+      "status": "queued",
+      "job_id": "f8ecc0f8"
+    },
+    {
+      "name": "image.reference.submit_only",
+      "status": "outcome_unknown",
+      "error": "Job f8ecc0f8 ended as failed before confirmed dispatch (outcome_unknown=true): Flow did not emit a correlated generation request within the submit budget (click delivered: true). The outcome is unknown; inspect Flow before retrying.. Do not replay this job."
+    }
+  ],
+  "job_id": "f8ecc0f8",
+  "latest_job": {
+    "id": "f8ecc0f8",
+    "status": "failed",
+    "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-20261021012013330",
+    "scene": "scene-01",
+    "prompt": "Show the same subject on a plain white background, no text.",
+    "attempts": 1,
+    "credit_quote_verified": null,
+    "progress": "Waiting for Flow to dispatch the generation request",
+    "files": [],
+    "error": "Flow did not emit a correlated generation request within the submit budget (click delivered: true). The outcome is unknown; inspect Flow before retrying.",
+    "error_category": "unknown",
+    "outcome_unknown": true,
+    "request_dispatched": false,
+    "server_acceptance_observed": false
+  },
+  "finished": "2026-10-21T01:20:53.705Z",
+  "fatal_error": "Job f8ecc0f8 ended as failed before confirmed dispatch (outcome_unknown=true): Flow did not emit a correlated generation request within the submit budget (click delivered: true). The outcome is unknown; inspect Flow before retrying.. Do not replay this job."
+}

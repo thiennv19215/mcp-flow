@@ -1,0 +1,58 @@
+{
+  "checkedAt": "2026-10-21T04:54:25.732Z",
+  "count": 1,
+  "characters": [
+    {
+      "name": {
+        "name": "Untitled character"
+      },
+      "use_as": "character:[object Object]"
+    }
+  ],
+  "flowStatus": {
+    "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "characterListDiagnostics": {
+      "url": "https://flow.google.com/project/e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+      "route": "/project/e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+      "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+      "currentSection": "Characters",
+      "sectionActive": true,
+      "activeEvidence": [
+        "new_character_action",
+        "character_tiles_visible"
+      ],
+      "routeIsCharacterForm": false,
+      "navigation": {
+        "text": "accessibility_new Characters",
+        "ariaCurrent": null,
+        "ariaSelected": null,
+        "ariaPressed": null,
+        "dataState": null,
+        "className": "mat-mdc-list-item mdc-list-item mat-mdc-tooltip-trigger mat-mdc-list-item-interactive mdc-list-item--with-leading-icon m"
+      },
+      "createActionVisible": true,
+      "explicitEmptyState": false,
+      "visibleTileCount": 1,
+      "totalTileCount": 1,
+      "loadingCount": 0,
+      "scrollContainer": {
+        "tag": "div",
+        "className": "cdk-virtual-scrollable page-container",
+        "scrollTop": 163.1999969482422,
+        "clientHeight": 735,
+        "scrollHeight": 898,
+        "connected": true
+      },
+      "result": "complete",
+      "scanComplete": true,
+      "nameCount": 1,
+      "stableUuidCount": 0,
+      "checkedAt": "2026-10-21T04:54:25.390Z"
+    },
+    "observer": {
+      "ready": true,
+      "activeAttempts": 1
+    },
+    "pickerOpen": true
+  }
+}

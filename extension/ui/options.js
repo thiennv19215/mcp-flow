@@ -1,10 +1,11 @@
 const BACKEND_ORIGIN = "https://mcp.shopcongngheso5.io.vn";
+const LOCAL_BACKEND_ORIGIN = "http://127.0.0.1:18897";
 
 const I18N = {
   vi: {
     pageTitle: "Cài đặt Flow MCP Connector",
     title: "Cài đặt Flow MCP Connector",
-    subtitle: "Đăng nhập extension vào backend Flow MCP trên VPS.",
+    subtitle: "Kết nối extension với MCP local hoặc VPS.",
     cardTitle: "Đăng nhập backend",
     txtHelp: `Máy chủ: ${BACKEND_ORIGIN}`,
     lblAccount: "Tài khoản",
@@ -15,7 +16,9 @@ const I18N = {
     guideTitle: "Hướng dẫn nhanh",
     step1: "Mở <code>flow.google.com</code> và đăng nhập Google Flow.",
     step2: "Nhập tài khoản và mật khẩu backend do quản trị viên cấp.",
-    step3: "Bấm <b>Đăng nhập và kết nối</b>. Extension và MCP sẽ dùng trực tiếp backend VPS.",
+    step3: "Chọn backend local hoặc đăng nhập VPS. Extension và MCP phải cùng kết nối một backend.",
+    useLocal: "Dùng MCP local (127.0.0.1:18897)",
+    localConnected: "Đã chuyển extension sang MCP local.",
     saving: "Đang đăng nhập…",
     credentialsRequired: "Nhập cả tài khoản và mật khẩu.",
     loginRequired: "Hãy đăng nhập tài khoản để kết nối extension này.",
@@ -28,7 +31,7 @@ const I18N = {
   en: {
     pageTitle: "Flow MCP Connector Settings",
     title: "Flow MCP Connector Settings",
-    subtitle: "Sign in to the Flow MCP VPS backend.",
+    subtitle: "Connect the extension to the local MCP or the VPS.",
     cardTitle: "Backend Sign In",
     txtHelp: `Server: ${BACKEND_ORIGIN}`,
     lblAccount: "Account",
@@ -39,7 +42,9 @@ const I18N = {
     guideTitle: "Quick Guide",
     step1: "Open <code>flow.google.com</code> and sign in to Google Flow.",
     step2: "Enter the backend account and password provided by your administrator.",
-    step3: "Select <b>Sign in and connect</b>. The extension and MCP will use the VPS backend directly.",
+    step3: "Select the local backend or sign in to the VPS. The extension and MCP must use the same backend.",
+    useLocal: "Use local MCP (127.0.0.1:18897)",
+    localConnected: "The extension is now set to the local MCP.",
     saving: "Signing in…",
     credentialsRequired: "Enter both the account name and password.",
     loginRequired: "Sign in to connect this extension.",
@@ -71,6 +76,7 @@ function applyLanguage() {
   document.querySelector("#lblPassword").textContent = t("lblPassword");
   document.querySelector("#txtPasswordHelp").textContent = t("txtPasswordHelp");
   document.querySelector("#txtBtnSave").textContent = t("btnSave");
+  document.querySelector("#txtUseLocal").textContent = t("useLocal");
   document.querySelector("#txtGuideTitle").textContent = t("guideTitle");
   document.querySelector("#step1").textContent = t("step1");
   document.querySelector("#step2").innerHTML = t("step2");
@@ -83,9 +89,9 @@ function applyLanguage() {
   document.querySelector("#langEn").classList.toggle("active", currentLang === "en");
 }
 
-async function showMcpConfig(token) {
+async function showMcpConfig(token, backendMode = "vps") {
   const section = document.querySelector("#mcpConfig");
-  if (!token) { section.hidden = true; return; }
+  if (!token || backendMode !== "vps") { section.hidden = true; return; }
   section.hidden = false;
   document.querySelector("#deviceToken").value = token;
   document.querySelector("#mcpSnippet").value = `[mcp_servers.flow]\nurl = "${BACKEND_ORIGIN}/mcp"\nbearer_token_env_var = "FLOW_MCP_DEVICE_TOKEN"`;
@@ -94,7 +100,7 @@ async function showMcpConfig(token) {
 chrome.storage.local.get({ lang: "vi", loginAccount: "", deviceToken: "" }).then((stored) => {
   currentLang = stored.lang === "en" ? "en" : "vi";
   accountInput.value = stored.loginAccount || "";
-  void showMcpConfig(stored.deviceToken);
+  void showMcpConfig(stored.deviceToken, stored.backendMode || "local");
   applyLanguage();
 });
 
@@ -148,6 +154,7 @@ document.querySelector("#save").addEventListener("click", async () => {
       }
       token = result.device_token;
       await chrome.storage.local.set({
+        backendMode: "vps",
         bridge: BACKEND_ORIGIN,
         loginAccount: account,
         deviceToken: result.device_token,
@@ -166,7 +173,7 @@ document.querySelector("#save").addEventListener("click", async () => {
     }
 
     if (!token) throw new Error(t("loginRequired"));
-    await chrome.storage.local.set({ bridge: BACKEND_ORIGIN });
+    await chrome.storage.local.set({ backendMode: "vps", bridge: BACKEND_ORIGIN });
     await chrome.runtime.sendMessage({ type: "flow-mcp:connect" });
 
     let connectionStatus;
@@ -180,10 +187,40 @@ document.querySelector("#save").addEventListener("click", async () => {
       throw new Error(connectionStatus?.error || t("connectFailed"));
     }
 
-    await showMcpConfig(token);
+    await showMcpConfig(token, "vps");
 
     statusMsg.className = "status-msg success show";
     statusMsg.textContent = t("savedSuccess");
+  } catch (error) {
+    statusMsg.className = "status-msg error show";
+    statusMsg.textContent = error?.message || String(error);
+  } finally {
+    button.disabled = false;
+    setTimeout(() => statusMsg.classList.remove("show"), 8000);
+  }
+});
+
+document.querySelector("#useLocal").addEventListener("click", async () => {
+  const button = document.querySelector("#useLocal");
+  button.disabled = true;
+  statusMsg.className = "status-msg show";
+  statusMsg.textContent = t("saving");
+
+  try {
+    await chrome.storage.local.set({ backendMode: "local", bridge: LOCAL_BACKEND_ORIGIN });
+    await chrome.runtime.sendMessage({ type: "flow-mcp:connect" });
+
+    let connectionStatus;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      connectionStatus = await chrome.runtime.sendMessage({ type: "flow-mcp:status" });
+      if (connectionStatus?.connected) break;
+      if (connectionStatus?.error && attempt >= 3) throw new Error(connectionStatus.error);
+    }
+    if (!connectionStatus?.connected) throw new Error(connectionStatus?.error || "Local MCP did not accept the connection.");
+
+    statusMsg.className = "status-msg success show";
+    statusMsg.textContent = t("localConnected");
   } catch (error) {
     statusMsg.className = "status-msg error show";
     statusMsg.textContent = error?.message || String(error);

@@ -6,6 +6,7 @@
     supports(operation) {
       return [
         "flow.projects.list",
+        "flow.project.create",
         "flow.asset.download",
         "flow.state",
         "flow.assets.list",
@@ -27,6 +28,48 @@
         return menu.scanNativeProjects();
       }
 
+      if (name === "flow.project.create") {
+        const registry = root.ProviderRegistry || root.FlowDriverRegistry;
+        const current = registry?.describeUrl?.(location.href);
+        if (!current || current.projectId) {
+          throw this.error("FLOW_HOMEPAGE_REQUIRED", "Create a Flow project from the Flow home page.", true);
+        }
+
+        const config = root.FlowSelectors?.navigation?.newProjectButton;
+        const labelPattern = config?.textRegex || /new project|tạo dự án|dự án mới|create project/i;
+        const selector = (Array.isArray(config?.selectors) && config.selectors.length ? config.selectors : ["button", "a[role='button']"]).join(",");
+        const candidates = [...document.querySelectorAll(selector)].filter(button => {
+          if (!root.visible?.(button)) return false;
+          const label = (root.accessibleName?.(button) || button.innerText || button.textContent || "").trim();
+          const hasAddIcon = [...button.querySelectorAll("mat-icon")].some(icon => /add|create|new/i.test((icon.innerText || icon.textContent || "").trim()));
+          return (root.matchesFlowUiRegex?.(label, labelPattern) || labelPattern.test(label)) ||
+            (hasAddIcon && /project|dự án/i.test(label));
+        });
+        if (candidates.length !== 1) {
+          throw this.error(candidates.length ? "FLOW_CREATE_PROJECT_AMBIGUOUS" : "FLOW_CREATE_PROJECT_CONTROL_MISSING",
+            candidates.length ? `Found ${candidates.length} possible New project controls; no project was created.` : "Flow did not show a New project control; no project was created.", true);
+        }
+
+        candidates[0].click();
+        const deadline = Date.now() + Math.min(20_000, Number(command.timeoutMs) || 20_000);
+        let created = null;
+        while (Date.now() < deadline) {
+          const described = registry?.describeUrl?.(location.href);
+          const id = String(described?.projectId || "");
+          if (described?.isProjectEditor && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+            created = { id, url: location.href };
+            break;
+          }
+          await root.wait?.(250);
+        }
+        if (!created) {
+          throw this.error("FLOW_CREATE_PROJECT_RESULT_UNKNOWN", "Flow accepted the New project click, but a new project ID could not be confirmed. Check the project list before retrying.", false, true);
+        }
+        const title = [...document.querySelectorAll("h1,[role=heading]")].find(el => root.visible?.(el));
+        const name = String(title?.innerText || title?.textContent || "").trim() || "Untitled project";
+        return { project: { ...created, name }, created: true };
+      }
+
       if (name === "flow.asset.download") {
         const prefix = String(payload.name || "").toLowerCase();
         if (!prefix && !payload.id) throw this.error("FLOW_INVALID_ARGUMENT", "Asset name or media id is required.");
@@ -46,8 +89,14 @@
 
       if (name === "flow.state") {
         const state = menu.nativeRead("flowState");
+        if (payload.progressDiagnosticsPing) await tiles.emitFlowProgress(command, "Flow progress telemetry check");
         const settingsButton = root.flowButton?.("Settings trigger");
         if (settingsButton) state.composer = (settingsButton.innerText || root.accessibleName?.(settingsButton)).replace(/\s+/g, " ").trim();
+        const quoteInspection = root.FlowEditor?.inspectGenerationCreditQuote?.();
+        if (quoteInspection) {
+          state.generation_credit_quote = quoteInspection.quote;
+          state.generation_credit_quote_candidates = quoteInspection.candidates;
+        }
         if (payload.detailed && state.signedIn) {
           const account = root.flowButton?.("Account details");
           if (account) {
@@ -60,11 +109,33 @@
             const close = root.flowButton?.("Close account panel"); if (close) close.click();
           }
         }
+        if (payload.includeProgressDiagnostics && chrome.runtime?.sendMessage) {
+          const progress = await chrome.runtime.sendMessage({ type: "flow-mcp:progress-diagnostics" }).catch(() => null);
+          state.progress_diagnostics = progress?.diagnostic || null;
+        }
+        if (typeof tiles.inspectNativeFlowCorrelationObserver === "function") {
+          state.correlation_observer_diagnostics = await tiles.inspectNativeFlowCorrelationObserver().catch(error => ({
+            pageProjectId: null,
+            observer: null,
+            projectMatch: false,
+            armPreflight: { result: "diagnostic_error", reason: String(error?.message || error).slice(0, 240) },
+          }));
+        }
         return state;
       }
 
       if (name === "flow.assets.list") return menu.scanNativeAssets();
-      if (name === "flow.characters.list") return menu.scanNativeCharacters();
+      if (name === "flow.characters.list") {
+        if (typeof menu?.scanNativeCharacters !== "function") {
+          throw this.error("NATIVE_CAPABILITY_UNSUPPORTED", "Flow's character library scanner is unavailable in this extension context. Reload the extension and Flow tab, then retry.", true);
+        }
+        const deadline = root.FlowUiDeadline?.makeDeadline(command, 45_000, 10_000) || Date.now() + 35_000;
+        const characters = await menu.scanNativeCharacters({ deadline, signal: command.signal });
+        if (!Array.isArray(characters) || characters.some(character => !character || typeof character.name !== "string" || !character.name.trim() || (character.uuid !== undefined && typeof character.uuid !== "string"))) {
+          throw this.error("FLOW_CHARACTER_SCAN_INVALID_RESULT", "Flow's character library scan returned an invalid list; no partial list was returned.", true);
+        }
+        return characters;
+      }
 
       if (name === "flow.asset.rename" || name === "flow.asset.trash") {
         const title = String(payload.name || "");

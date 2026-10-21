@@ -1,10 +1,13 @@
 import { readFlowDownloadChunk } from "./flow-download-relay.js";
+import { ensureCorrelationObserver } from "./flow-observer-health.js";
 
+const LOCAL_BRIDGE = "http://127.0.0.1:18897";
 const defaults = { bridge: "https://mcp.shopcongngheso5.io.vn" };
 const flowUrl = url => /^https:\/\/flow\.google\.com\//.test(url || "");
 const nativeFlowOperations = new Set([
-  "flow.context", "flow.state", "flow.projects.list", "flow.project.open", "flow.assets.list", "flow.characters.list",
-  "flow.generation.submit", "flow.generation.observe", "flow.references.attach",
+  "flow.context", "flow.state", "flow.projects.list", "flow.project.create", "flow.project.open", "flow.assets.list", "flow.characters.list",
+  "flow.generation.submit", "flow.generation.observe", "flow.references.attach", "flow.references.clear", "flow.voices.options",
+  "flow.generation.observer.health",
   "flow.generation.upload.preflight",
   "flow.file.upload.begin", "flow.file.upload.chunk", "flow.file.upload.finish", "flow.file.upload.abort", "flow.media.upload",
   "flow.asset.download",
@@ -22,15 +25,21 @@ let reconnectAttempt = 0;
 let heartbeat;
 let selectedTabId;
 let lastError = "";
+let progressReceiptSequence = 0;
+let lastProgressDiagnostic = null;
 const activeInteractiveRequests = new Map();
 const activeInteractiveCounts = new Map();
 const reloadedUploadBridgeTabs = new Set();
 const reloadedSubmitCleanupTabs = new Set();
 const tabPreparations = new Map();
 const activeTabOperations = new Map();
+let devReloadCheckInProgress = false;
 const maybeSubmittedOperations = new Set([
   "flow.generation.submit", "flow.edit.run", "flow.continue.run", "flow.agent.batch",
   "flow.character.create", "flow.character.edit",
+]);
+const correlationRequiredOperations = new Set([
+  "flow.generation.submit", "flow.edit.run", "flow.continue.run", "flow.agent.batch",
 ]);
 const tabOperationActive = tabId => (activeTabOperations.get(tabId) || 0) > 0;
 function enterTabOperation(tabId) {
@@ -40,6 +49,44 @@ function leaveTabOperation(tabId) {
   const remaining = (activeTabOperations.get(tabId) || 1) - 1;
   if (remaining > 0) activeTabOperations.set(tabId, remaining);
   else activeTabOperations.delete(tabId);
+}
+async function checkDevExtensionReload() {
+  if (devReloadCheckInProgress) return;
+  devReloadCheckInProgress = true;
+  try {
+    const storageKeys = ["flowMcpDevReloadRevision", "flowMcpDevReloadRefreshPending"];
+    const stored = await chrome.storage.local.get(storageKeys);
+    if (stored.flowMcpDevReloadRefreshPending) {
+      await chrome.storage.local.remove("flowMcpDevReloadRefreshPending");
+      const tabs = await chrome.tabs.query({ url: "https://flow.google.com/*" });
+      await Promise.all(tabs.map(tab => tab.id === undefined ? Promise.resolve() : chrome.tabs.reload(tab.id).catch(() => {})));
+    }
+
+    let response;
+    try {
+      response = await fetch("http://127.0.0.1:18898/status", { cache: "no-store", signal: AbortSignal.timeout(1500) });
+    } catch {
+      return;
+    }
+    if (!response.ok) return;
+    const { revision } = await response.json();
+    if (typeof revision !== "string" || !revision) return;
+
+    const previousRevision = stored.flowMcpDevReloadRevision;
+    if (!previousRevision) {
+      await chrome.storage.local.set({ flowMcpDevReloadRevision: revision });
+      return;
+    }
+    if (revision === previousRevision || activeTabOperations.size > 0) return;
+
+    await chrome.storage.local.set({
+      flowMcpDevReloadRevision: revision,
+      flowMcpDevReloadRefreshPending: true,
+    });
+    chrome.runtime.reload();
+  } finally {
+    devReloadCheckInProgress = false;
+  }
 }
 async function ensureActivityOverlay(tabId) {
   await chrome.scripting.executeScript({ target: { tabId }, files: ["content/shared/activity-overlay.js"] });
@@ -165,7 +212,17 @@ async function sendFlowCommand(tabId, message) {
         "content/dom-actions.js",
       ],
     }).catch(() => {});
-    await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["content/bridge/flow-upload-main.js"] }).catch(() => {});
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      files: [
+        "content/bridge/flow-upload-main.js",
+        "content/bridge/flow-correlation-observer.js",
+        "content/bridge/slate-bridge.js",
+      ],
+    }).catch(error => {
+      console.warn(`[ServiceWorker] Could not reinject Flow MAIN-world bridges for tab ${tabId}: ${error?.message || error}`);
+    });
     await new Promise(resolve => setTimeout(resolve, 200));
     return await chrome.tabs.sendMessage(tabId, message);
   }
@@ -210,6 +267,35 @@ async function listFlowProjects() {
     return await scan(tab.id);
   } finally {
     await chrome.tabs.remove(tab.id).catch(() => {});
+  }
+}
+async function createFlowProject() {
+  const selected = await chrome.tabs.get(selectedTabId);
+  if (!flowUrl(selected.url)) throw new Error("The selected tab is no longer a Flow tab. Reconnect the extension.");
+  const fromProject = /\/project\/[0-9a-f-]{36}(?:\/|$)/i.test(new URL(selected.url).pathname);
+  let tabId = selectedTabId;
+  let temporaryTab = null;
+  if (fromProject) {
+    temporaryTab = await chrome.tabs.create({ url: "https://flow.google.com/?hl=en", active: false });
+    tabId = temporaryTab.id;
+    await waitForTabComplete(tabId);
+    await new Promise(resolve => setTimeout(resolve, 700));
+  }
+  try {
+    const response = await sendFlowCommand(tabId, {
+      type: "flow-mcp:execute",
+      command: { op: "flowOperation", name: "flow.project.create", payload: {} },
+    });
+    if (!response?.ok) {
+      const error = new Error(response?.error?.message || response?.error || "Could not create a Flow project.");
+      error.code = response?.error?.code || "FLOW_CREATE_PROJECT_FAILED";
+      error.retryable = Boolean(response?.error?.retryable);
+      error.outcome_unknown = Boolean(response?.error?.outcome_unknown);
+      throw error;
+    }
+    return response.value;
+  } finally {
+    if (temporaryTab) await chrome.tabs.remove(temporaryTab.id).catch(() => {});
   }
 }
 async function openFlowProject(projectId) {
@@ -278,26 +364,32 @@ function endInteractiveRequest(key, tabId) {
 }
 const config = async () => {
   const stored = await chrome.storage.local.get(null);
-  if (["http://127.0.0.1:8799", "http://localhost:8799", "http://127.0.0.1:18899", "http://localhost:18899"].includes(stored.bridge)) {
-    stored.bridge = defaults.bridge;
-    await chrome.storage.local.set({ bridge: stored.bridge });
+  // Existing profiles without a mode switch to this repository's local MCP.
+  // Signing in from options.js explicitly selects the VPS again.
+  const backendMode = stored.backendMode === "vps" ? "vps" : "local";
+  const desiredBridge = backendMode === "local" ? LOCAL_BRIDGE : defaults.bridge;
+  if (stored.backendMode !== backendMode || stored.bridge !== desiredBridge) {
+    stored.backendMode = backendMode;
+    stored.bridge = desiredBridge;
+    await chrome.storage.local.set({ backendMode, bridge: desiredBridge });
   }
   let bridgeUrl;
-  try { bridgeUrl = new URL(stored.bridge); } catch { throw new Error("Bridge URL is invalid"); }
-  if (stored.deviceToken && stored.tokenBridgeOrigin !== bridgeUrl.origin) {
+  try { bridgeUrl = new URL(desiredBridge); } catch { throw new Error("Bridge URL is invalid"); }
+  if (backendMode === "vps" && stored.deviceToken && stored.tokenBridgeOrigin !== bridgeUrl.origin) {
     await chrome.storage.local.remove(["deviceToken", "deviceId", "tokenBridgeOrigin"]);
     delete stored.deviceToken;
     delete stored.deviceId;
     delete stored.tokenBridgeOrigin;
   }
-  return { ...defaults, ...stored };
+  return { ...defaults, ...stored, backendMode, bridge: desiredBridge };
 };
 
 function bridgeUrl(value) {
   const url = new URL(value);
   const configuredVps = url.hostname === "mcp.shopcongngheso5.io.vn";
-  if (url.username || url.password || url.search || url.hash || !configuredVps || url.protocol !== "https:") {
-    throw new Error("Use https://mcp.shopcongngheso5.io.vn for the VPS backend.");
+  const local = ["127.0.0.1", "localhost"].includes(url.hostname) && url.port === "18897" && url.protocol === "http:";
+  if (url.username || url.password || url.search || url.hash || !(local || (configuredVps && url.protocol === "https:"))) {
+    throw new Error("Use the local MCP at http://127.0.0.1:18897 or the configured HTTPS VPS backend.");
   }
   return url;
 }
@@ -315,14 +407,15 @@ function bridgeConnected() {
     ? Boolean(httpSession && !httpSession.stopped)
     : socket?.readyState === WebSocket.OPEN;
 }
-function event(method, params) {
+async function event(method, params) {
   if (httpSession && !httpSession.stopped) {
-    void postHttpMessage(httpSession, "/api/extension/progress", { ...params[0], method, session_id: httpSession.sessionId }).catch(error => {
-      if (httpSession) lastError = `Progress could not reach backend: ${String(error?.message || error)}`;
-    });
-    return;
+    return postHttpMessage(httpSession, "/api/extension/progress", { ...params[0], method, session_id: httpSession.sessionId }, { timeoutMs: 2500, retries: 1 });
   }
-  if (socket) send(socket, { type: "event", method, params });
+  if (socket) {
+    send(socket, { type: "event", method, params });
+    return { transport: "websocket", sent: socket.readyState === WebSocket.OPEN };
+  }
+  throw new Error("No active Flow bridge transport.");
 }
 async function chooseTab() {
   const tabs = await chrome.tabs.query({ url: "https://flow.google.com/*" });
@@ -384,7 +477,27 @@ async function execute(_ws, method, args = []) {
     const operation = command.name;
     const pendingPreparation = tabPreparations.get(tabId);
     if (pendingPreparation) await pendingPreparation;
+    if (operation === "flow.generation.observer.health") {
+      if (tabOperationActive(tabId)) {
+        throw Object.assign(new Error("Flow is processing another operation in this tab; observer health was not changed."), {
+          code: "FLOW_TAB_BUSY", retryable: true, outcome_unknown: false,
+        });
+      }
+      enterTabOperation(tabId);
+      try { return await ensureCorrelationObserver(tabId); }
+      finally { leaveTabOperation(tabId); }
+    }
     if (operation === "flow.projects.list") return listFlowProjects();
+    if (operation === "flow.project.create") {
+      if (tabOperationActive(tabId)) {
+        throw Object.assign(new Error("Flow is processing another operation in the selected tab. Try creating the project again when it finishes."), {
+          code: "FLOW_TAB_BUSY", retryable: true, outcome_unknown: false,
+        });
+      }
+      enterTabOperation(tabId);
+      try { return await createFlowProject(); }
+      finally { leaveTabOperation(tabId); }
+    }
     if (operation === "flow.project.open") {
       if (tabOperationActive(tabId)) {
         throw Object.assign(new Error("Flow is processing another operation in the selected tab. Try opening the project again when it finishes."), {
@@ -395,8 +508,9 @@ async function execute(_ws, method, args = []) {
       try { return await openFlowProject(command.payload?.projectId); }
       finally { leaveTabOperation(tabId); }
     }
+    if (correlationRequiredOperations.has(operation)) await ensureCorrelationObserver(tabId);
     if (operation === "flow.generation.upload.preflight") await prepareFlowTab(tabId);
-    const interactive = !["flow.state", "flow.assets.list", "flow.characters.list", "flow.generation.observe", "flow.generation.upload.preflight", "flow.file.upload.begin", "flow.file.upload.chunk", "flow.file.upload.finish", "flow.file.upload.abort"].includes(operation);
+    const interactive = !["flow.state", "flow.assets.list", "flow.characters.list", "flow.voices.options", "flow.generation.observe", "flow.generation.upload.preflight", "flow.file.upload.begin", "flow.file.upload.chunk", "flow.file.upload.finish", "flow.file.upload.abort"].includes(operation);
     const requestId = command.requestId ?? command.request_id ?? command.id;
     const activityKey = interactive ? beginInteractiveRequest(tabId, requestId) : undefined;
     let response;
@@ -456,18 +570,20 @@ async function fetchBackend(url, token, body, timeoutMs = 15_000) {
     return await fetch(url, { method: "POST", headers, body: JSON.stringify(body), signal: controller.signal, cache: "no-store" });
   } finally { clearTimeout(timer); }
 }
-async function postHttpMessage(session, path, body) {
+async function postHttpMessage(session, path, body, options = {}) {
   let lastFailure;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  const retries = Math.max(1, Number(options.retries) || 3);
+  const timeoutMs = Math.max(250, Number(options.timeoutMs) || 15_000);
+  for (let attempt = 0; attempt < retries; attempt += 1) {
     try {
-      const response = await fetchBackend(`${session.bridge}${path}`, session.token, body, 15_000);
+      const response = await fetchBackend(`${session.bridge}${path}`, session.token, body, timeoutMs);
       if (!response.ok) {
         const detail = await response.json().catch(() => ({}));
         const error = new Error(detail.error || `Backend returned HTTP ${response.status}.`);
         error.status = response.status;
         if (response.status < 500 || attempt === 2) throw error;
         lastFailure = error;
-      } else return await response.json().catch(() => ({}));
+      } else return { transport: "http-poll", httpStatus: response.status, body: await response.json().catch(() => ({})) };
     } catch (error) {
       lastFailure = error;
       if (error?.status && error.status < 500) throw error;
@@ -491,7 +607,7 @@ function dispatchCommand(command, sendResult) {
   // Keep the receive loop responsive while a page operation waits.
   void execute(null, command.method, command.args).then(
     value => sendResult({ type: "result", id: commandId, result: { ok: true, value } }),
-    error => sendResult({ type: "result", id: commandId, result: { ok: false, error: { code: error?.code || "EXTENSION_COMMAND_FAILED", message: String(error?.message || error), retryable: Boolean(error?.retryable), outcome_unknown: Boolean(error?.outcome_unknown) } } }),
+    error => sendResult({ type: "result", id: commandId, result: { ok: false, error: { code: error?.code || "EXTENSION_COMMAND_FAILED", message: String(error?.message || error), retryable: Boolean(error?.retryable), outcome_unknown: Boolean(error?.outcome_unknown), ...(error?.diagnostics ? { diagnostics: error.diagnostics } : {}) } } }),
   );
 }
 async function pollHttp(session) {
@@ -579,7 +695,9 @@ async function connect() {
   try {
     const settings = await config();
     backendOrigin = new URL(settings.bridge).origin;
-    const token = settings.tokenBridgeOrigin === new URL(settings.bridge).origin ? settings.deviceToken : "";
+    const token = settings.backendMode === "vps" && settings.tokenBridgeOrigin === backendOrigin
+      ? settings.deviceToken
+      : "";
     stopHttpSession();
     const httpConnected = await connectHttp(settings, token);
     if (httpConnected) return;
@@ -674,9 +792,9 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 chrome.tabs.onCreated.addListener(tab => {
   if (tab.active && flowUrl(tab.url)) void adoptFlowTab(tab, true).catch(error => { lastError = String(error?.message || error); });
 });
-chrome.runtime.onInstalled.addListener(() => { chrome.alarms.create("flow-mcp-connect", { periodInMinutes: 0.5 }); void connect(); });
-chrome.runtime.onStartup.addListener(() => { chrome.alarms.create("flow-mcp-connect", { periodInMinutes: 0.5 }); void connect(); });
-chrome.alarms.onAlarm.addListener(() => { void connect(); });
+chrome.runtime.onInstalled.addListener(() => { chrome.alarms.create("flow-mcp-connect", { periodInMinutes: 0.5 }); void connect(); void checkDevExtensionReload(); });
+chrome.runtime.onStartup.addListener(() => { chrome.alarms.create("flow-mcp-connect", { periodInMinutes: 0.5 }); void connect(); void checkDevExtensionReload(); });
+chrome.alarms.onAlarm.addListener(() => { void connect(); void checkDevExtensionReload(); });
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local" || !changes.bridge) return;
   clearTimeout(reconnectTimer); reconnectTimer = undefined;
@@ -704,6 +822,7 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
   if (message?.type === "flow-mcp:progress") {
     const requestId = message.requestId ?? message.request_id ?? message.commandId ?? message.command_id;
     const tabId = _sender.tab?.id;
+    const receiptId = ++progressReceiptSequence;
 
     // Broadcast to UI pages (sidebar, popup) for real-time progress display
     chrome.runtime.sendMessage({
@@ -717,8 +836,39 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
     const isSelectedFlowTab = tabId !== undefined && tabId === selectedTabId;
     const ok = flowUrl(_sender.tab?.url) && (typeof requestId === "string" || typeof requestId === "number")
       && (isInteractive || isSelectedFlowTab);
-    if (ok) event("extension.progress", [{ requestId: String(requestId), jobId: message.jobId ?? message.job_id, tabId, progress: message.progress }]);
-    respond({ ok: Boolean(ok) });
+    lastProgressDiagnostic = {
+      receiptId, receivedAt: new Date().toISOString(), requestId: String(requestId ?? ""), tabId,
+      flowUrl: flowUrl(_sender.tab?.url), isInteractive, isSelectedFlowTab, acceptedByWorker: Boolean(ok),
+      progress: String(message.progress || "").slice(0, 240), transport: bridgeTransport,
+      backendState: ok ? "pending" : "rejected_by_worker",
+    };
+    if (!ok) { respond({ ok: false, receiptId, diagnostic: lastProgressDiagnostic }); return; }
+    const diagnostic = lastProgressDiagnostic;
+    void event("extension.progress", [{ requestId: String(requestId), jobId: message.jobId ?? message.job_id, tabId, progress: message.progress }])
+      .then(receipt => {
+        const matched = receipt?.transport === "http-poll" ? receipt.body?.matched : undefined;
+        const backendState = receipt?.transport !== "http-poll"
+          ? "socket_send_attempted"
+          : matched === true
+            ? "backend_matched_pending_command"
+            : matched === false
+              ? "backend_received_unmatched_request"
+              : "backend_ack_match_unreported";
+        const completed = { ...diagnostic, backendState, backendMatchedRequest: matched, httpStatus: receipt?.httpStatus, forwardedAt: new Date().toISOString() };
+        if (lastProgressDiagnostic?.receiptId === receiptId) lastProgressDiagnostic = completed;
+        respond({ ok: true, receiptId, diagnostic: completed });
+      })
+      .catch(error => {
+        const detail = String(error?.message || error);
+        if (httpSession) lastError = `Progress could not reach backend: ${detail}`;
+        const failed = { ...diagnostic, backendState: "forward_failed", backendError: detail.slice(0, 300), forwardedAt: new Date().toISOString() };
+        if (lastProgressDiagnostic?.receiptId === receiptId) lastProgressDiagnostic = failed;
+        respond({ ok: true, receiptId, diagnostic: failed });
+      });
+    return true;
+  }
+  if (message?.type === "flow-mcp:progress-diagnostics") {
+    respond({ ok: true, diagnostic: lastProgressDiagnostic });
     return;
   }
   if (message?.type === "flow-mcp:preview") {
@@ -773,4 +923,5 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
 });
 void chrome.alarms.create("flow-mcp-connect", { periodInMinutes: 0.5 });
 void connect();
+void checkDevExtensionReload();
 
