@@ -291,6 +291,115 @@
     }
   }
 
+  // Setup Reference Image Upload for Image & Video
+  let refFilesImage = [];
+  let refFilesVideo = [];
+
+  function setupRefUpload(type) {
+    const isImage = type === "image";
+    const uploadSlot = document.querySelector(isImage ? "#refUploadSlotImage" : "#refUploadSlotVideo");
+    const fileInput = document.querySelector(isImage ? "#refFileInputImage" : "#refFileInputVideo");
+    const dropzoneHint = document.querySelector(isImage ? "#refDropzoneHintImage" : "#refDropzoneHintVideo");
+    const cardsList = document.querySelector(isImage ? "#refCardsListImage" : "#refCardsListVideo");
+    const countBadge = document.querySelector(isImage ? "#refImageCountImage" : "#refImageCountVideo");
+
+    if (!uploadSlot || !fileInput) return;
+
+    uploadSlot.onclick = () => fileInput.click();
+    if (dropzoneHint) dropzoneHint.onclick = () => fileInput.click();
+
+    fileInput.onchange = (e) => {
+      const files = Array.from(e.target.files || []);
+      addFiles(files);
+      fileInput.value = "";
+    };
+
+    const dropTarget = cardsList?.parentElement;
+    if (dropTarget) {
+      dropTarget.ondragover = (e) => {
+        e.preventDefault();
+        dropTarget.style.borderColor = "var(--primary)";
+      };
+      dropTarget.ondragleave = () => {
+        dropTarget.style.borderColor = "";
+      };
+      dropTarget.ondrop = (e) => {
+        e.preventDefault();
+        dropTarget.style.borderColor = "";
+        const files = Array.from(e.dataTransfer?.files || []).filter(f => f.type.startsWith("image/"));
+        addFiles(files);
+      };
+    }
+
+    function addFiles(files) {
+      const list = isImage ? refFilesImage : refFilesVideo;
+      for (const f of files) {
+        if (list.length >= 3) break;
+        list.push(f);
+      }
+      renderCards();
+    }
+
+    function renderCards() {
+      const list = isImage ? refFilesImage : refFilesVideo;
+      if (countBadge) countBadge.textContent = `${list.length}/3 ảnh`;
+
+      cardsList.querySelectorAll(".ref-card").forEach(el => el.remove());
+
+      list.forEach((file, idx) => {
+        const card = document.createElement("div");
+        card.className = "ref-card";
+
+        const img = document.createElement("img");
+        img.src = URL.createObjectURL(file);
+
+        const badge = document.createElement("div");
+        badge.className = "ref-badge";
+        badge.textContent = String(idx + 1);
+
+        const tag = document.createElement("div");
+        tag.className = "ref-tag";
+        tag.textContent = "Chờ upload";
+
+        const rmBtn = document.createElement("button");
+        rmBtn.className = "ref-remove-btn";
+        rmBtn.title = "Xóa ảnh này";
+        rmBtn.innerHTML = `
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        `;
+        rmBtn.onclick = (e) => {
+          e.stopPropagation();
+          list.splice(idx, 1);
+          renderCards();
+        };
+
+        card.appendChild(img);
+        card.appendChild(badge);
+        card.appendChild(tag);
+        card.appendChild(rmBtn);
+
+        cardsList.insertBefore(card, uploadSlot);
+      });
+
+      if (uploadSlot) {
+        uploadSlot.style.display = list.length >= 3 ? "none" : "flex";
+      }
+    }
+  }
+
+  setupRefUpload("image");
+  setupRefUpload("video");
+
+  async function uploadReferenceImage(file, onProgress) {
+    if (window.FlowUploadClient) {
+      return await window.FlowUploadClient.upload(file, { onProgress, kind: "image" });
+    }
+    throw new Error("Dịch vụ tải ảnh lên Flow chưa được khởi tạo");
+  }
+
   // SUBMIT TẠO ẢNH (GENERATE IMAGE)
   document.querySelector("#btnSubmitImage").onclick = async () => {
     const prompt = document.querySelector("#inputPromptImage").value.trim();
@@ -300,11 +409,21 @@
     }
     const aspect_ratio = document.querySelector("#selectRatioImage").value;
     const count = Number(document.querySelector("#selectQtyImage").value) || 1;
+    const model = document.querySelector("#selectModelImage")?.value || "nano banana";
     const character = document.querySelector("#selectCharImage").value;
 
     const attachments = [];
     if (character) {
       attachments.push({ assetName: `character:${character}` });
+    }
+
+    // Upload các ảnh tham chiếu nếu có
+    if (refFilesImage.length > 0) {
+      for (let i = 0; i < refFilesImage.length; i++) {
+        setFeedback(`Đang tải ảnh tham chiếu ${i + 1}/${refFilesImage.length} lên Flow...`, true);
+        const uploadedName = await uploadReferenceImage(refFilesImage[i]);
+        attachments.push({ assetName: `asset:${uploadedName}` });
+      }
     }
 
     const btn = document.querySelector("#btnSubmitImage");
@@ -314,6 +433,7 @@
       prompt,
       aspect_ratio,
       count,
+      model,
       attachments,
       btn,
       btnTextEl,
@@ -329,13 +449,24 @@
       return;
     }
     const aspect_ratio = document.querySelector("#selectRatioVideo").value;
-    const duration = Number(document.querySelector("#selectDurationVideo").value) || 5;
+    const duration = Number(document.querySelector("#selectDurationVideo").value) || 8;
+    const model = document.querySelector("#selectModelVideo")?.value || "veo 3.1";
+    const resolution = document.querySelector("#selectResolutionVideo")?.value || "1080p";
     const mode = document.querySelector("#selectModeVideo").value || "ingredients";
     const character = document.querySelector("#selectCharVideo").value;
 
     const attachments = [];
     if (character) {
       attachments.push({ assetName: `character:${character}` });
+    }
+
+    // Upload các ảnh tham chiếu nếu có
+    if (refFilesVideo.length > 0) {
+      for (let i = 0; i < refFilesVideo.length; i++) {
+        setFeedback(`Đang tải ảnh tham chiếu ${i + 1}/${refFilesVideo.length} lên Flow...`, true);
+        const uploadedName = await uploadReferenceImage(refFilesVideo[i]);
+        attachments.push({ assetName: `asset:${uploadedName}` });
+      }
     }
 
     const btn = document.querySelector("#btnSubmitVideo");
@@ -347,7 +478,9 @@
       count: 1,
       video_settings: {
         mode,
-        duration
+        duration,
+        model,
+        resolution
       },
       attachments,
       btn,

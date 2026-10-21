@@ -330,6 +330,169 @@
       gap: 10px;
     }
 
+    /* Reference Image Section (TobyFlow style) */
+    .ref-section {
+      background: #141414;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .ref-section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .ref-section-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .ref-count-badge {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      background: rgba(255, 255, 255, 0.05);
+      padding: 2px 8px;
+      border-radius: 10px;
+    }
+
+    .ref-container {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .ref-cards-list {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      overflow-x: auto;
+      padding: 4px 2px;
+    }
+
+    .ref-upload-slot {
+      width: 72px;
+      height: 72px;
+      border: 1.5px dashed var(--border-hover);
+      border-radius: var(--radius-sm);
+      background: rgba(255, 255, 255, 0.02);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      color: var(--text-muted);
+      font-size: 10.5px;
+      font-weight: 600;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: all 0.18s ease;
+    }
+
+    .ref-upload-slot:hover {
+      border-color: var(--primary);
+      color: var(--primary);
+      background: rgba(204, 255, 0, 0.04);
+    }
+
+    .ref-card {
+      position: relative;
+      width: 72px;
+      height: 72px;
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      border: 1.5px solid var(--border);
+      background: #0f0f12;
+      flex-shrink: 0;
+    }
+
+    .ref-card img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .ref-badge {
+      position: absolute;
+      top: 4px;
+      left: 4px;
+      width: 18px;
+      height: 18px;
+      border-radius: 4px;
+      background: var(--primary);
+      color: #000;
+      font-size: 11px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+    }
+
+    .ref-tag {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: rgba(0, 0, 0, 0.75);
+      color: var(--primary);
+      font-size: 9px;
+      font-weight: 700;
+      text-align: center;
+      padding: 2px 0;
+      letter-spacing: -0.2px;
+    }
+
+    .ref-remove-btn {
+      position: absolute;
+      top: 3px;
+      right: 3px;
+      width: 18px;
+      height: 18px;
+      border-radius: 4px;
+      background: rgba(0, 0, 0, 0.7);
+      color: #ef4444;
+      border: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      opacity: 0.8;
+      transition: opacity 0.15s, background 0.15s;
+    }
+
+    .ref-remove-btn:hover {
+      opacity: 1;
+      background: #ef4444;
+      color: #fff;
+    }
+
+    .ref-dropzone-hint {
+      font-size: 11px;
+      color: var(--text-dim);
+      text-align: center;
+      padding: 6px;
+      border-radius: var(--radius-sm);
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px dashed rgba(255, 255, 255, 0.06);
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+
+    .ref-dropzone-hint:hover {
+      border-color: var(--border-hover);
+      color: var(--text-muted);
+    }
+
     /* Buttons */
     .btn {
       display: inline-flex;
@@ -613,12 +776,42 @@
           <textarea class="form-textarea" id="inputPromptImage" placeholder="Mô tả bức ảnh bạn muốn tạo..."></textarea>
         </div>
 
+        <!-- Khung Tải Ảnh Tham Chiếu (Reference Images) -->
+        <div class="ref-section">
+          <div class="ref-section-header">
+            <span class="ref-section-title">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                <circle cx="8.5" cy="8.5" r="1.5"/>
+                <polyline points="21 15 16 10 5 21"/>
+              </svg>
+              Ảnh tham chiếu (Reference)
+            </span>
+            <span class="ref-count-badge" id="refImageCountImage">0/3 ảnh</span>
+          </div>
+
+          <div class="ref-container">
+            <div class="ref-cards-list" id="refCardsListImage">
+              <div class="ref-upload-slot" id="refUploadSlotImage" title="Chọn ảnh tải lên từ máy tính">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="17 8 12 3 7 8"/>
+                  <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                <span>Tải ảnh</span>
+              </div>
+            </div>
+            <div class="ref-dropzone-hint" id="refDropzoneHintImage">Chọn ảnh hoặc kéo thả vào đây (Tối đa 3 ảnh)</div>
+            <input type="file" id="refFileInputImage" accept="image/*" multiple style="display: none;" />
+          </div>
+        </div>
+
         <div class="grid-2">
           <div class="form-group">
             <label class="form-label" id="lblRatioImage">Tỷ lệ khung hình:</label>
             <select class="form-select" id="selectRatioImage">
-              <option value="16:9">16:9 (Ngang)</option>
-              <option value="9:16">9:16 (Dọc Shorts/TikTok)</option>
+              <option value="9:16">9:16 (Dọc TikTok/Shorts)</option>
+              <option value="16:9">16:9 (Ngang YouTube)</option>
               <option value="1:1">1:1 (Vuông)</option>
               <option value="4:3">4:3</option>
               <option value="3:4">3:4</option>
@@ -635,11 +828,20 @@
           </div>
         </div>
 
-        <div class="form-group">
-          <label class="form-label" id="lblCharImage">Nhân vật tham chiếu (Tùy chọn):</label>
-          <select class="form-select" id="selectCharImage">
-            <option value="">Không chọn (Mặc định)</option>
-          </select>
+        <div class="grid-2">
+          <div class="form-group">
+            <label class="form-label">Mô hình AI:</label>
+            <select class="form-select" id="selectModelImage">
+              <option value="nano banana">Nano Banana 2.1 (Tối ưu)</option>
+              <option value="imagen 3">Imagen 3</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" id="lblCharImage">Nhân vật:</label>
+            <select class="form-select" id="selectCharImage">
+              <option value="">Không chọn (Mặc định)</option>
+            </select>
+          </div>
         </div>
 
         <button class="btn btn-primary" id="btnSubmitImage">
@@ -657,19 +859,70 @@
           <textarea class="form-textarea" id="inputPromptVideo" placeholder="Mô tả chuyển động video, góc quay, hành động..."></textarea>
         </div>
 
+        <!-- Khung Tải Ảnh Tham Chiếu Cho Video (Reference Images) -->
+        <div class="ref-section">
+          <div class="ref-section-header">
+            <span class="ref-section-title">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                <circle cx="8.5" cy="8.5" r="1.5"/>
+                <polyline points="21 15 16 10 5 21"/>
+              </svg>
+              Ảnh tham chiếu (Reference)
+            </span>
+            <span class="ref-count-badge" id="refImageCountVideo">0/3 ảnh</span>
+          </div>
+
+          <div class="ref-container">
+            <div class="ref-cards-list" id="refCardsListVideo">
+              <div class="ref-upload-slot" id="refUploadSlotVideo" title="Chọn ảnh tải lên từ máy tính">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="17 8 12 3 7 8"/>
+                  <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                <span>Tải ảnh</span>
+              </div>
+            </div>
+            <div class="ref-dropzone-hint" id="refDropzoneHintVideo">Chọn ảnh hoặc kéo thả vào đây (Tối đa 3 ảnh)</div>
+            <input type="file" id="refFileInputVideo" accept="image/*" multiple style="display: none;" />
+          </div>
+        </div>
+
         <div class="grid-2">
           <div class="form-group">
             <label class="form-label" id="lblRatioVideo">Tỷ lệ khung hình:</label>
             <select class="form-select" id="selectRatioVideo">
-              <option value="16:9">16:9 (Ngang)</option>
               <option value="9:16">9:16 (Dọc TikTok/Reels)</option>
+              <option value="16:9">16:9 (Ngang YouTube)</option>
             </select>
           </div>
           <div class="form-group">
-            <label class="form-label" id="lblDurationVideo">Thời lượng:</label>
+            <label class="form-label" id="lblDurationVideo">Thời lượng (Duration):</label>
             <select class="form-select" id="selectDurationVideo">
+              <option value="2">2 giây</option>
+              <option value="4">4 giây</option>
               <option value="5">5 giây</option>
+              <option value="8" selected>8 giây</option>
               <option value="10">10 giây</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="form-group">
+            <label class="form-label">Mô hình Video:</label>
+            <select class="form-select" id="selectModelVideo">
+              <option value="veo 3.1">Veo 3.1 (Mới nhất)</option>
+              <option value="veo 2">Veo 2</option>
+              <option value="omni">Omni Video</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Độ phân giải:</label>
+            <select class="form-select" id="selectResolutionVideo">
+              <option value="720p">720p (HD)</option>
+              <option value="1080p" selected>1080p (Full HD)</option>
             </select>
           </div>
         </div>
@@ -695,6 +948,8 @@
             <polygon points="5 3 19 12 5 21 5 3"></polygon>
           </svg>
           <span id="txtBtnSubmitVideo">Tạo video ngay</span>
+        </button>
+      </div>
         </button>
       </div>
 
@@ -818,6 +1073,7 @@
   </div>
 
   <script src="../content/shared/I18n.js"></script>
+  <script src="flow-upload-client.js"></script>
   <script src="sidebar.js"></script>
 </body>
 </html>

@@ -1434,6 +1434,8 @@ function findAddMediaButton() {
     "add media menu", "add media", "add to prompt", "add to prompt box", "add component",
     "add ingredients to the prompt box", "add ingredient", "add content", "add", "+",
     "thêm nội dung nghe nhìn", "thêm tệp", "thêm vào lời nhắc", "thêm thành phần",
+    "thêm thành phần vào hộp lời nhắc", "thêm thành phần vào hộp câu lệnh", "thêm vào hộp lời nhắc",
+    "thêm phương tiện", "thêm ảnh", "thêm video", "thêm hình ảnh", "thêm",
   ]);
   const clean = value => String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
   const labelOf = el => [accessibleName(el), el.getAttribute("aria-label"), el.getAttribute("title"), el.innerText, el.textContent]
@@ -1441,7 +1443,14 @@ function findAddMediaButton() {
   // This is TobyFlow's configured V2 trigger name. Since the search is already
   // restricted to the lowest shared composer ancestor, accept the exact named
   // button even if broader page-navigation heuristics classify its wrapper.
-  const exact = candidates.find(el => labelOf(el).some(label => names.has(label)));
+  const exact = candidates.find(el => labelOf(el).some(label => {
+    if (names.has(label)) return true;
+    const norm = typeof normalizeFlowUiText === "function" ? normalizeFlowUiText(label) : label;
+    for (const name of names) {
+      if ((typeof normalizeFlowUiText === "function" ? normalizeFlowUiText(name) : name) === norm) return true;
+    }
+    return false;
+  }));
   if (exact) return exact;
   const addIcons = new Set(["add", "add_circle", "add_2", "add_circle_outline", "add_box", "add_rounded"]);
   const iconCandidates = candidates.filter(el => {
@@ -1519,6 +1528,16 @@ async function ensureAddMediaButton(deadline = Date.now() + 10_000, signal) {
   return button;
 }
 
+function cleanFlowMediaCandidateName(str) {
+  if (!str) return "";
+  let clean = String(str).replace(/\s+/g, " ").trim().toLowerCase();
+  // Strip tiền tố ở đầu (prefix): "hình ảnh ", "ảnh ", "video ", "nội dung nghe nhìn ", "tệp ", "nhân vật ", "image ", "media "
+  clean = clean.replace(/^(?:h\u00ECnh\s+\u1EA3nh|\u1EA3nh|video|n\u1ED9i\s+dung(?:\s+nghe\s+nh\u00ECn)?|t\u1EC7p|nh\u00E2n\s+v\u1EADt|image|media)\s+/i, "");
+  // Strip hậu tố ở cuối (suffix): " hình ảnh", " ảnh", " video", " nhân vật", " avatar", " nội dung nghe nhìn", " image"
+  clean = clean.replace(/\s+(?:h\u00ECnh\s+\u1EA3nh|\u1EA3nh|video|nh\u00E2n\s+v\u1EADt|avatar|n\u1ED9i\s+dung(?:\s+nghe\s+nh\u00ECn)?|image)$/i, "");
+  return clean.trim();
+}
+
 function matchesFlowTile(tile, assetName) {
   if (!tile || !assetName) return false;
   const norm = s => String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
@@ -1534,8 +1553,12 @@ function matchesFlowTile(tile, assetName) {
 
   const candidates = [label, title, dataName, imgAlt, imgAria, text].filter(Boolean);
   return candidates.some(candidate => {
-    const exact = candidate.replace(/\s+(?:image|video|character|avatar|ảnh|nhân vật)$/i, "").trim();
-    return exact === full || exact === stem;
+    const rawClean = cleanFlowMediaCandidateName(candidate);
+    if (rawClean === full || rawClean === stem) return true;
+    const normClean = typeof normalizeFlowUiText === "function" ? normalizeFlowUiText(rawClean) : rawClean;
+    const normFull = typeof normalizeFlowUiText === "function" ? normalizeFlowUiText(full) : full;
+    const normStem = typeof normalizeFlowUiText === "function" ? normalizeFlowUiText(stem) : stem;
+    return Boolean(normClean && (normClean === normFull || normClean === normStem));
   });
 }
 
@@ -1544,10 +1567,15 @@ function normalizeFlowUploadName(value) {
 }
 
 function flowUploadNameMatches(value, assetName) {
-  const name = normalizeFlowUploadName(value).replace(/\s+(?:image|video|character|avatar|ảnh|nhân vật)$/i, "").trim();
+  if (!value || !assetName) return false;
+  const name = cleanFlowMediaCandidateName(normalizeFlowUploadName(value));
   const full = normalizeFlowUploadName(assetName);
   const stem = normalizeFlowUploadName(String(assetName || "").replace(/\.(?:png|jpe?g|webp|gif|heic|heif|avif|mp4|m4v|mov|webm|avi|mkv|3gp)$/i, ""));
-  return Boolean(name && (name === full || name === stem));
+  if (name && (name === full || name === stem)) return true;
+  const normName = typeof normalizeFlowUiText === "function" ? normalizeFlowUiText(name) : name;
+  const normFull = typeof normalizeFlowUiText === "function" ? normalizeFlowUiText(full) : full;
+  const normStem = typeof normalizeFlowUiText === "function" ? normalizeFlowUiText(stem) : stem;
+  return Boolean(normName && (normName === normFull || normName === normStem));
 }
 
 function flowUploadTileKind(tile) {
@@ -1782,7 +1810,14 @@ async function uploadStagedFlowMedia(file, kind, command, options = {}) {
 
   const uploadButton = await ensureAddMediaButton(deadline, options.signal);
   const normalize = value => String(value || "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
-  const uploadNames = new Set(["upload", "upload media", "upload file", "tải lên", "tải tệp", "tải tệp lên", "tải lên tệp", "tải ảnh lên", "tải hình ảnh lên", "tải nội dung nghe nhìn lên", "tải phương tiện lên"]);
+  const uploadNames = new Set([
+    "upload", "upload media", "upload file", "upload from computer", "upload from device", "uploads",
+    "tải lên", "tải tệp", "tải tệp lên", "tải lên tệp", "tải ảnh lên", "tải hình ảnh lên",
+    "tải nội dung nghe nhìn lên", "tải phương tiện lên", "nội dung tải lên", "tệp tải lên",
+    "tải lên từ máy tính", "tải lên từ thiết bị", "tải tệp từ thiết bị", "chọn tệp để tải lên",
+    "tải nội dung lên", "tải phương tiện",
+  ]);
+  const normUploadNames = new Set([...uploadNames].map(name => typeof normalizeFlowUiText === "function" ? normalizeFlowUiText(name) : name));
   const labelOf = el => {
     const labels = [accessibleName(el), el.getAttribute("aria-label"), el.getAttribute("title"), el.innerText, el.textContent];
     // Material icon ligatures are exposed as text in some Flow builds (for example,
@@ -1797,27 +1832,51 @@ async function uploadStagedFlowMedia(file, kind, command, options = {}) {
   const isUploadLabel = el => {
     const icon = el.querySelector("mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined,svg")?.textContent?.trim() || "";
     if (["upload", "file_upload", "upload_file", "cloud_upload"].includes(icon)) return true;
-    return labelOf(el).some(label => uploadNames.has(label) || uploadNames.has(label.replace(/^(?:upload|upload_file|file_upload|arrow_upward)\s+/, "")));
+    return labelOf(el).some(label => {
+      if (uploadNames.has(label)) return true;
+      const stripped = label.replace(/^(?:upload|upload_file|file_upload|arrow_upward)\s+/, "");
+      if (uploadNames.has(stripped)) return true;
+      const folded = typeof normalizeFlowUiText === "function" ? normalizeFlowUiText(label) : label;
+      return normUploadNames.has(folded);
+    });
   };
   const isUploadAction = el => {
     if (el.matches('[role="tab"]') || el.getAttribute("aria-selected") !== null) return false;
     const icon = el.querySelector("mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined,svg")?.textContent?.trim() || "";
-    if (["file_upload", "upload_file", "cloud_upload"].includes(icon)) return true;
-    const actionNames = new Set(["upload", "upload media", "upload file", "tải lên", "tải tệp", "tải tệp lên", "tải lên tệp", "tải ảnh lên", "tải hình ảnh lên", "tải nội dung nghe nhìn lên", "tải phương tiện lên"]);
-    return labelOf(el).some(label => actionNames.has(label));
+    if (["file_upload", "upload_file", "cloud_upload", "upload"].includes(icon)) return true;
+    const actionNames = new Set([
+      "upload", "upload media", "upload file", "upload from computer", "upload from device",
+      "tải lên", "tải tệp", "tải tệp lên", "tải lên tệp", "tải ảnh lên", "tải hình ảnh lên",
+      "tải nội dung nghe nhìn lên", "tải phương tiện lên", "tải lên từ máy tính", "tải lên từ thiết bị",
+      "tải tệp từ thiết bị", "chọn tệp để tải lên", "tải nội dung lên",
+    ]);
+    const normActionNames = new Set([...actionNames].map(a => typeof normalizeFlowUiText === "function" ? normalizeFlowUiText(a) : a));
+    return labelOf(el).some(label => {
+      if (actionNames.has(label)) return true;
+      const folded = typeof normalizeFlowUiText === "function" ? normalizeFlowUiText(label) : label;
+      if (normActionNames.has(folded)) return true;
+      // Cho phép substring match tương tự TobyFlow: "tải nội dung nghe nhìn lên" hoặc "tải lên từ máy tính"
+      return folded.includes("tai len") || folded.includes("tai tep") || folded.includes("tai noi dung") ||
+        label.includes("upload media") || label.includes("upload file") || label.includes("upload from");
+    });
   };
   const menuRoots = () => [...document.querySelectorAll('[role="menu"],mat-menu-panel,[role="dialog"],.cdk-overlay-pane,[data-state="open"]')]
     .filter(root => visible(root) && [...root.querySelectorAll('[role="tab"],button,[role="button"],[role="menuitem"],a,[tabindex],mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined')].some(isUploadLabel));
 
   const switchUploadCategoryTab = async roots => {
-    const tabs = [...new Set(roots.flatMap(root => [...root.querySelectorAll('[role="tab"],button')]))].filter(tab => {
+    // Ưu tiên chỉ tìm trong [role="tab"] thực sự để không bị nhầm lẫn với button upload bên dưới
+    const allRoleTabs = roots.flatMap(root => [...root.querySelectorAll('[role="tab"]')]);
+    const tabCandidates = allRoleTabs.length > 0 ? allRoleTabs : roots.flatMap(root => [...root.querySelectorAll('button')]);
+    const validTabs = [...new Set(tabCandidates)].filter(tab => {
       if (!visible(tab) || tab.disabled || tab.getAttribute("aria-disabled") === "true") return false;
       const icon = tab.querySelector("mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined,svg")?.textContent?.trim() || "";
       const label = accessibleName(tab).replace(/\s+/g, " ").trim().toLowerCase();
+      const folded = typeof normalizeFlowUiText === "function" ? normalizeFlowUiText(label) : label;
       return ["upload", "file_upload", "upload_file", "cloud_upload"].includes(icon) ||
-        ["upload", "upload file", "tải lên", "tải tệp", "tải tệp lên", "tải lên tệp", "tải ảnh lên", "tải hình ảnh lên"].includes(label);
+        ["upload", "uploads", "upload file", "tải lên", "nội dung tải lên", "tệp tải lên", "các tệp tải lên", "tải tệp", "tải tệp lên", "tải lên tệp", "tải ảnh lên", "tải hình ảnh lên"].includes(label) ||
+        ["upload", "uploads", "tai len", "noi dung tai len", "tep tai len", "cac tep tai len", "tai tep", "tai tep len", "tai len tep"].includes(folded);
     });
-    const tab = resolveUniqueUploadTarget(tabs, "FLOW_UPLOAD_CATEGORY_AMBIGUOUS", "Upload category");
+    const tab = resolveUniqueUploadTarget(validTabs, "FLOW_UPLOAD_CATEGORY_AMBIGUOUS", "Upload category");
     if (!tab) return false;
     const isSelected = tab.getAttribute("aria-selected") === "true" || tab.getAttribute("data-state") === "active";
     if (!isSelected) {
@@ -1961,7 +2020,7 @@ async function confirmFlowVideoUploadIfPrompted(deadline = Date.now() + 10_000, 
     const dialog = specificDialogs[0];
     const confirms = [...dialog.querySelectorAll("button,[role=button]")].filter(el =>
       visible(el) && !el.disabled && el.getAttribute("aria-disabled") !== "true" &&
-      /^(?:upload|continue|confirm|tải lên|tiếp tục|xác nhận|đồng ý)$/i.test(accessibleName(el).replace(/\s+/g, " ").trim()));
+      /^(?:upload|continue|confirm|agree|accept|tải lên|tiếp tục|xác nhận|đồng ý|chấp nhận|tải video|tải video lên)(?:\s+(?:và\s+)?(?:tiếp tục|upload|tải lên))?$/i.test(accessibleName(el).replace(/\s+/g, " ").trim()));
     if (confirms.length > 1) ambiguous("multiple enabled confirmation controls", 1, confirms.length);
     const confirm = confirms[0];
     if (confirm) { confirm.click(); result.confirmationButtonClicked = true; await globalThis.FlowUiDeadline?.boundedWait(250, deadline, "confirming Flow's video upload", true, signal); return result; }

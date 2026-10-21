@@ -259,3 +259,109 @@ test('video upload confirmation rejects duplicate enabled controls without click
 });
 
 
+
+
+test('matchesFlowTile correctly resolves Vietnamese and English prefixed/suffixed tile names', () => {
+  const context = vm.createContext({
+    visible: () => true,
+    normalizeFlowUiText: s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim(),
+  });
+  vm.runInContext(source, context);
+
+  const makeTile = ariaLabel => ({
+    getAttribute: attr => attr === 'aria-label' ? ariaLabel : null,
+    querySelector: () => null,
+  });
+
+  const target = 'ref-174000123.png';
+
+  // Tiếng Việt tiền tố (prefix)
+  assert.equal(context.matchesFlowTile(makeTile('Hình ảnh ref-174000123.png'), target), true);
+  assert.equal(context.matchesFlowTile(makeTile('Ảnh ref-174000123.png'), target), true);
+  assert.equal(context.matchesFlowTile(makeTile('Nội dung nghe nhìn ref-174000123.png'), target), true);
+  assert.equal(context.matchesFlowTile(makeTile('Video ref-174000123.mp4'), 'ref-174000123.mp4'), true);
+
+  // Tiếng Việt hậu tố (suffix)
+  assert.equal(context.matchesFlowTile(makeTile('ref-174000123.png hình ảnh'), target), true);
+  assert.equal(context.matchesFlowTile(makeTile('ref-174000123.png ảnh'), target), true);
+  assert.equal(context.matchesFlowTile(makeTile('ref-174000123.png nội dung'), target), true);
+
+  // Tiếng Anh tiền tố & hậu tố
+  assert.equal(context.matchesFlowTile(makeTile('Image ref-174000123.png'), target), true);
+  assert.equal(context.matchesFlowTile(makeTile('ref-174000123.png image'), target), true);
+  assert.equal(context.matchesFlowTile(makeTile('ref-174000123 image'), target), true);
+  assert.equal(context.matchesFlowTile(makeTile('ref-174000123.png'), target), true);
+});
+
+test('flowUploadNameMatches matches bilingual asset names', () => {
+  const context = vm.createContext({
+    normalizeFlowUiText: s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim(),
+  });
+  vm.runInContext(source, context);
+
+  const file = 'ref-portrait-555.png';
+  assert.equal(context.flowUploadNameMatches('Hình ảnh ref-portrait-555.png', file), true);
+  assert.equal(context.flowUploadNameMatches('Ảnh ref-portrait-555', file), true);
+  assert.equal(context.flowUploadNameMatches('ref-portrait-555.png hình ảnh', file), true);
+  assert.equal(context.flowUploadNameMatches('ref-portrait-555 image', file), true);
+  assert.equal(context.flowUploadNameMatches('ref-portrait-555.png', file), true);
+});
+
+test('video upload confirmation recognizes Vietnamese buttons like "Đồng ý và tiếp tục" and "Tải video lên"', async () => {
+  let clicks = 0;
+  const dialog = {
+    innerText: 'Tải video lên dự án?',
+    textContent: 'Tải video lên dự án?',
+    querySelectorAll: () => [{ label: 'Đồng ý và tiếp tục', getAttribute: () => null, click: () => { clicks++; } }]
+  };
+  const context = vm.createContext({
+    document: { querySelectorAll: selector => selector.includes('dialog') ? [dialog] : [] },
+    Date: { now: () => 100 },
+    wait: async () => {},
+    visible: () => true,
+    accessibleName: element => element.label,
+    FlowUiDeadline: { boundedWait: async () => {} },
+    flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
+  });
+  vm.runInContext(source, context);
+  const result = await context.confirmFlowVideoUploadIfPrompted(Date.now() + 5000);
+  assert.equal(result.confirmationButtonClicked, true);
+  assert.equal(clicks, 1);
+});
+
+
+test('findAddMediaButton finds Vietnamese composer add button', () => {
+  const addBtn = {
+    tagName: 'button',
+    getAttribute: attr => attr === 'aria-label' ? 'Thêm thành phần vào hộp lời nhắc' : null,
+    innerText: '',
+    textContent: '',
+    disabled: false,
+    isConnected: true,
+    querySelector: () => null,
+  };
+  const editor = { isContentEditable: true, parentElement: null };
+  const submit = { previousElementSibling: addBtn };
+  const composer = {
+    contains: el => el === addBtn || el === editor || el === submit,
+    querySelectorAll: () => [addBtn],
+    tagName: 'DIV',
+    className: 'composer-box',
+  };
+  editor.parentElement = composer;
+
+  const context = vm.createContext({
+    visible: () => true,
+    accessibleName: el => el.getAttribute('aria-label'),
+    flowButton: () => null,
+    isFlowProjectNavigationControl: () => false,
+    FlowEditor: { getFlowSubmitButton: () => submit },
+    flowQuery: key => key === 'editor' ? editor : key === 'composerRoot' ? composer : null,
+    document: { querySelector: () => editor },
+    normalizeFlowUiText: s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim(),
+  });
+  vm.runInContext(source, context);
+
+  const found = context.findAddMediaButton();
+  assert.equal(found, addBtn);
+});
