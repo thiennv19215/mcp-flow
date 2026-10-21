@@ -401,7 +401,8 @@
 
         const tag = document.createElement("div");
         tag.className = "ref-tag";
-        tag.textContent = "Chờ upload";
+        tag.textContent = file.name || "Chờ upload";
+        tag.title = file.name || "Chờ upload";
 
         const rmBtn = document.createElement("button");
         rmBtn.className = "ref-remove-btn";

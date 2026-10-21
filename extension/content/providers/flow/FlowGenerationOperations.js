@@ -27,8 +27,10 @@
       if (!value || typeof value !== "object") return undefined;
       if (typeof value.assetName === "string" && value.assetName.trim()) {
         const expectedId = value.expectedId;
-        if (expectedId !== undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(expectedId))) return null;
-        return { assetName: value.assetName.trim(), ...(expectedId ? { expectedId: String(expectedId).toLowerCase() } : {}) };
+        const isUuid = typeof expectedId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(expectedId);
+        const isAsb = typeof expectedId === "string" && expectedId.startsWith("asb:");
+        if (expectedId !== undefined && !isUuid && !isAsb) return null;
+        return { assetName: value.assetName.trim(), ...(expectedId ? { expectedId: isUuid ? String(expectedId).toLowerCase() : String(expectedId) } : {}) };
       }
       if (root.validStagedLocalImage?.(value, /(?:start|end)/)) return value;
       return null;
@@ -321,6 +323,7 @@
         const expectedMediaReferenceIds = [];
         const expectedCharacterIds = [];
         const expectedVideoReferenceIds = [];
+        let confirmedAttachmentCount = 0;
         if (root.scrollContainer?.()) root.scrollContainer().scrollTop = 0;
         const before = tiles.collectNativeMedia().map(item => item.id || `title:${item.title}`);
         const activeAgent = root.flowButton?.("Agent");
@@ -371,51 +374,46 @@
         if (lastFrame) recordSelectedReference(await resolveValue(lastFrame, "end"));
         for (const item of referenceAttachments) {
           const attachment = typeof item === "string" ? { assetName: item.replace(/^asset:/i, "").trim() } : item;
-          recordSelectedReference(await resolveValue(attachment, undefined));
+          const selected = await resolveValue(attachment, undefined);
+          if (!selected?.confirmed) {
+            throw this.error("FLOW_REFERENCE_ATTACH_UNCONFIRMED", "Flow did not confirm every requested reference image in the composer; no generation was submitted.", false, true);
+          }
+          confirmedAttachmentCount += 1;
+          recordSelectedReference(selected);
         }
 
-        const correlationReferenceIds = framesMode
-          ? [...expectedVideoReferenceIds]
-          : [...expectedMediaReferenceIds, ...expectedCharacterIds];
         const requestedReferenceCount = framesMode
           ? Number(Boolean(firstFrame)) + Number(Boolean(lastFrame))
           : referenceAttachments.length;
         const isUuid = value => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
-        if (correlationReferenceIds.length !== requestedReferenceCount || correlationReferenceIds.some(id => !isUuid(id)) || new Set(correlationReferenceIds.map(id => id.toLowerCase())).size !== correlationReferenceIds.length) {
+        const validMediaUuids = expectedMediaReferenceIds.filter(isUuid);
+        const validCharacterUuids = expectedCharacterIds.filter(isUuid);
+        const validVideoUuids = expectedVideoReferenceIds.filter(isUuid);
+        const verifiedReferenceUuids = framesMode
+          ? validVideoUuids
+          : [...validMediaUuids, ...validCharacterUuids];
+        const unverifiedUploadRefCount = requestedReferenceCount - verifiedReferenceUuids.length;
+
+        if (expectedCharacterIds.length > 0 && expectedCharacterIds.some(id => !isUuid(id))) {
           throw this.error(
             "FLOW_SUBMIT_CORRELATION_REFERENCE_ID_UNAVAILABLE",
-            "Flow selected the requested references, but their exact backend IDs could not be verified for submit correlation. No generation request was sent; inspect the composer before retrying.",
+            "Flow selected character references, but their backend character IDs could not be verified for submit correlation. Inspect the composer before retrying.",
+            false,
+            false
+          );
+        }
+        if (new Set(verifiedReferenceUuids.map(id => id.toLowerCase())).size !== verifiedReferenceUuids.length) {
+          throw this.error(
+            "FLOW_SUBMIT_CORRELATION_REFERENCE_ID_UNAVAILABLE",
+            "Flow detected duplicate reference IDs for submit correlation. Inspect the composer before retrying.",
             false,
             false
           );
         }
 
         const expectedRefs = referenceAttachments.length;
-        if (expectedRefs > 0) {
-          const isRefChip = el => {
-            if (!root.visible?.(el)) return false;
-            const lbl = (root.accessibleName?.(el) || el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
-            return /(?:Ingredient|Thành phần)/i.test(lbl) || /Xóa thành phần|Remove ingredient/i.test(lbl);
-          };
-          let attachedCount = 0;
-          const countDeadline = Math.min(Date.now() + 2500, flowDeadline);
-          while (Date.now() < countDeadline) {
-            attachedCount = [...document.querySelectorAll("button,[role=button],[role=listitem],mat-chip,[data-chip]")].filter(isRefChip).length;
-            if (attachedCount >= expectedRefs) break;
-            await root.FlowUiDeadline?.boundedWait(250, countDeadline, "confirming attached Flow reference chips", true, flowAbort.signal);
-          }
-          if (attachedCount < expectedRefs) {
-            const composerRoot = document.querySelector(".ProseMirror")?.closest(".flow-composer, [class*='composer'], form") || document.body;
-            const chipsInComposer = [...composerRoot.querySelectorAll("img, button, [role=button]")].filter(el => {
-              if (!root.visible?.(el)) return false;
-              const lbl = (root.accessibleName?.(el) || el.getAttribute("alt") || el.getAttribute("title") || "").toLowerCase();
-              return /(?:ingredient|thành phần)/i.test(lbl);
-            });
-            const finalCount = Math.max(attachedCount, chipsInComposer.length);
-            if (finalCount < expectedRefs) {
-              throw this.error("FLOW_REFERENCE_ATTACH_UNCONFIRMED", `Flow shows ${finalCount} of ${expectedRefs} reference attachment(s); no generation was submitted. Inspect Flow before retrying.`, false, true);
-            }
-          }
+        if (confirmedAttachmentCount !== expectedRefs) {
+          throw this.error("FLOW_REFERENCE_ATTACH_UNCONFIRMED", "Flow confirmed fewer reference attachments than requested; no generation was submitted. Inspect the composer before retrying.", false, true);
         }
 
         const activeBox = await runFlowStage("finding the prompt editor", () => editor.preflightGenerationPrompt(payload, framesMode));
@@ -462,10 +460,11 @@
           mediaType: payload.type === "image" ? "image" : "video",
           prompt: payload.prompt,
           expectedQuantity: variants,
-          expectedReferenceIds: correlationReferenceIds,
-          expectedMediaReferenceIds: payload.type === "image" ? expectedMediaReferenceIds : [],
-          expectedCharacterIds: payload.type === "image" ? expectedCharacterIds : [],
+          expectedReferenceIds: verifiedReferenceUuids,
+          expectedMediaReferenceIds: payload.type === "image" ? validMediaUuids : [],
+          expectedCharacterIds: payload.type === "image" ? validCharacterUuids : [],
           expectedVoiceCount: payload.voice ? 1 : 0,
+          unverifiedMediaCount: unverifiedUploadRefCount,
         }));
         if (!correlationAttemptId || !tiles.nativeFlowCorrelationMap().has(correlationAttemptId)) {
           throw this.error(

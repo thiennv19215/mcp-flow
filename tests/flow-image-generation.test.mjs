@@ -181,7 +181,13 @@ test('FlowComponents category("All") does not throw when picker has no explicit 
     accessibleName: () => '',
     mediaId: () => undefined,
     flowError: (code, message) => Object.assign(new Error(message), { code }),
-    chrome: { runtime: { getURL: () => '' } },
+    window: {
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => {},
+      innerWidth: 1280,
+      innerHeight: 800,
+    },
     location: { href: 'https://flow.google.com/project/test', pathname: '/project/test' },
   });
 
@@ -191,4 +197,125 @@ test('FlowComponents category("All") does not throw when picker has no explicit 
   // when no tab is present, falling back gracefully to default view
   const refActions = context.FlowReferenceActions;
   assert.ok(refActions, 'FlowReferenceActions must be defined');
+});
+
+test('FlowComponents attachUploadedImageFromTile handles ASB id without requiring pre-known UUID', async () => {
+  const componentsSource = readFileSync(new URL('../extension/content/providers/flow/FlowComponents.js', import.meta.url), 'utf8');
+
+  const target = {
+    id: 'media-trigger',
+    getBoundingClientRect: () => ({ left: 100, top: 100, width: 200, height: 200 }),
+    dispatchEvent(event) {
+      if (event.type === 'contextmenu') {
+        menuOpen = true;
+      }
+    },
+  };
+
+  const tile = {
+    isConnected: true,
+    getAttribute(name) {
+      if (name === 'aria-label' || name === 'title') return 'My Upload.png';
+      return null;
+    },
+    querySelector: (sel) => (sel === 'img,[role=\'img\']' ? target : null),
+    querySelectorAll: () => [],
+    scrollIntoView: () => {},
+    getBoundingClientRect: () => ({ left: 100, top: 100, width: 200, height: 200 }),
+  };
+
+  const contextPoint = { x: 200, y: 200 };
+  const addAction = {
+    innerText: 'Thêm vào lời nhắc',
+    getAttribute: () => null,
+    disabled: false,
+    click: () => {
+      chipsList.push({
+        element: { getAttribute: () => null },
+        name: 'My Upload.png',
+        kind: 'image',
+        source: 'flow_tile',
+      });
+    },
+  };
+
+  const menu = {
+    id: 'mat-menu-1',
+    isConnected: true,
+    closest: (sel) => (sel.includes('cdk-overlay-container') ? {} : null),
+    getAttribute: () => null,
+    getBoundingClientRect: () => ({ left: 205, top: 205, width: 120, height: 80 }),
+    querySelectorAll: (sel) => {
+      if (sel.includes('role="menuitem"') || sel.includes('button')) {
+        return [addAction];
+      }
+      return [];
+    },
+  };
+
+  const chipsList = [];
+  const mockDoc = {
+    body: { innerText: '' },
+    querySelectorAll: (sel) => {
+      if (sel === 'flow-grid-tile-container') return [tile];
+      if (sel.includes('actionMenus') || sel.includes('mat-menu-panel') || sel.includes('[role="menu"]')) {
+        return menuOpen ? [menu] : [];
+      }
+      if (sel.includes('button[aria-label="Ingredient"]') || sel.includes('mat-chip')) return chipsList;
+      return [];
+    },
+    querySelector: () => null,
+    activeElement: null,
+    dispatchEvent: () => {},
+  };
+
+  let menuOpen = false;
+  const context = vm.createContext({
+    Date, Promise, Set, Map, Array, Object, String, Number, Boolean, Error, RegExp,
+    setTimeout, clearTimeout,
+    document: mockDoc,
+    visible: () => true,
+    accessibleName: (el) => el.innerText || '',
+    mediaId: () => 'asb:AG5pmQ0123456789abcdefghijklmnopqrstuvwxyz',
+    findFlowTile: async () => tile,
+    flowButton: () => null,
+    wait: async () => {},
+    flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
+    window: {
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => {},
+      innerWidth: 1280,
+      innerHeight: 800,
+    },
+    location: { href: 'https://flow.google.com/project/11111111-2222-3333-4444-555555555555', pathname: '/project/11111111-2222-3333-4444-555555555555' },
+    CustomEvent: class CustomEvent { constructor(type, options) { this.type = type; Object.assign(this, options); } },
+    MouseEvent: class { constructor(t, o) { Object.assign(this, o, { type: t }); } },
+    KeyboardEvent: class { constructor(t, o) { Object.assign(this, o, { type: t }); } },
+  });
+
+  // Emulate opening the menu on contextmenu event
+  context.addEventListener = () => {};
+  context.removeEventListener = () => {};
+  context.dispatchEvent = () => {};
+
+  vm.runInContext(componentsSource, context);
+
+  // Hook simulateContextMenu to open the menu
+  const origSimulateContextMenu = context.simulateContextMenu;
+  context.simulateContextMenu = (target, x, y) => {
+    menuOpen = true;
+    if (origSimulateContextMenu) origSimulateContextMenu(target, x, y);
+  };
+
+  const result = await context.FlowReferenceActions.attach('My Upload.png', undefined, {
+    expectedId: 'asb:AG5pmQ0123456789abcdefghijklmnopqrstuvwxyz',
+    deadline: Date.now() + 5000,
+  });
+
+  assert.ok(result, 'Result must be returned');
+  assert.equal(result.confirmed, true);
+  assert.equal(result.kind, 'image');
+  assert.equal(result.id, 'asb:AG5pmQ0123456789abcdefghijklmnopqrstuvwxyz');
+  assert.equal(result.idSource, 'verified_asb_tile_action');
 });

@@ -261,12 +261,14 @@
         if (!Array.isArray(characterRows) || characterRows.some((ref) => !Array.isArray(ref) || ref.length !== 1 || typeof ref[0] !== "string" || !UUID_RE.test(ref[0]))) return false;
         const mediaIds = mediaRows.map((ref) => ref[0]);
         const characterIds = characterRows.map((ref) => ref[0]);
-        const mediaMatch = exactRefsMatch(mediaIds, attempt.expectedMediaReferenceIds);
+        const mediaMatch = attempt.unverifiedMediaCount > 0
+          ? attempt.expectedMediaReferenceIds.every((id) => mediaIds.includes(id)) && mediaIds.length === attempt.expectedMediaReferenceIds.length + attempt.unverifiedMediaCount
+          : exactRefsMatch(mediaIds, attempt.expectedMediaReferenceIds);
         const characterMatch = attempt.expectedGlobalCharacter === true
           ? attempt.expectedCharacterIds.length === 0 && characterIds.length === globalCharacterCount(attempt) && normalizedRefs(characterIds).length === characterIds.length
           : exactRefsMatch(characterIds, attempt.expectedCharacterIds);
         return mediaMatch && characterMatch;
-      }) && refsMatch([...attempt.expectedMediaReferenceIds, ...attempt.expectedCharacterIds], attempt.expectedReferenceIds)
+      }) && (attempt.unverifiedMediaCount > 0 || refsMatch([...attempt.expectedMediaReferenceIds, ...attempt.expectedCharacterIds], attempt.expectedReferenceIds))
       : Array.isArray(rows) && rows.length > 0 && rows.every((row) => {
         const decoded = decodeVideoInputRow(row);
         return !!decoded && attemptRefsMatch(decoded.refs, attempt);
@@ -539,6 +541,17 @@
       ? Math.max(1, Number(attempt.expectedGlobalCharacterCount) || 1)
       : 0;
   const attemptRefsMatch = (actual, attempt) => {
+    if (attempt.unverifiedMediaCount > 0) {
+      const actualIds = normalizedRefs(actual);
+      const expectedIds = normalizedRefs(attempt.expectedReferenceIds);
+      const extraCount = globalCharacterCount(attempt) + attempt.unverifiedMediaCount;
+      return (
+        actual.every((id) => typeof id === "string" && UUID_RE.test(id)) &&
+        actual.length === actualIds.length &&
+        actualIds.length === expectedIds.length + extraCount &&
+        expectedIds.every((id) => actualIds.includes(id))
+      );
+    }
     if (attempt.expectedGlobalCharacter !== true)
       return refsMatch(actual, attempt.expectedReferenceIds);
     const actualIds = normalizedRefs(actual);
@@ -670,13 +683,15 @@
       rows.length !== attempt.expectedQuantity
     )
       return false;
-    if (
-      !refsMatch(
-        [...attempt.expectedMediaReferenceIds, ...attempt.expectedCharacterIds],
-        attempt.expectedReferenceIds
+    if (attempt.unverifiedMediaCount === 0) {
+      if (
+        !refsMatch(
+          [...attempt.expectedMediaReferenceIds, ...attempt.expectedCharacterIds],
+          attempt.expectedReferenceIds
+        )
       )
-    )
-      return false;
+        return false;
+    }
     return rows.every((row) => {
       const nodes = row?.[8]?.[0];
       if (typeof row?.[5] !== "string" || !Array.isArray(nodes) || !nodes.length) return false;
@@ -698,7 +713,13 @@
       )
         return false;
       const mediaRefs = (row[2] || []).map((ref) => ref[0]);
-      if (!exactRefsMatch(mediaRefs, attempt.expectedMediaReferenceIds)) return false;
+      if (attempt.unverifiedMediaCount > 0) {
+        const hasAllExpected = attempt.expectedMediaReferenceIds.every((id) => mediaRefs.includes(id));
+        const countMatches = mediaRefs.length === attempt.expectedMediaReferenceIds.length + attempt.unverifiedMediaCount;
+        if (!hasAllExpected || !countMatches) return false;
+      } else {
+        if (!exactRefsMatch(mediaRefs, attempt.expectedMediaReferenceIds)) return false;
+      }
       const declaredCharacters = row[10] == null ? [] : row[10];
       if (
         !Array.isArray(declaredCharacters) ||
@@ -840,7 +861,7 @@
       quantityMatched: quantity === attempt.expectedQuantity,
       referencesMatched: attemptRefsMatch(actualRefs, attempt),
       actualReferenceCount: actualRefs.length,
-      expectedReferenceCount: expectedRefs.length + globalCharacterCount(attempt),
+      expectedReferenceCount: expectedRefs.length + globalCharacterCount(attempt) + (attempt.unverifiedMediaCount || 0),
     };
   };
   const imageInputDiagnostic = (payload, attempt) => {
@@ -853,9 +874,12 @@
     const characterRefs = (row[10] || [])
       .map((ref) => ref?.[0])
       .filter((id) => typeof id === "string" && UUID_RE.test(id));
+    const mediaMatch = attempt.unverifiedMediaCount > 0
+      ? attempt.expectedMediaReferenceIds.every((id) => mediaRefs.includes(id)) && mediaRefs.length === attempt.expectedMediaReferenceIds.length + attempt.unverifiedMediaCount
+      : exactRefsMatch(mediaRefs, attempt.expectedMediaReferenceIds);
     return {
       referencesMatched:
-        exactRefsMatch(mediaRefs, attempt.expectedMediaReferenceIds) &&
+        mediaMatch &&
         (attempt.expectedGlobalCharacter === true
           ? attempt.expectedCharacterIds.length === 0 &&
             characterRefs.length === globalCharacterCount(attempt) &&
@@ -865,7 +889,8 @@
       expectedReferenceCount:
         attempt.expectedMediaReferenceIds.length +
         attempt.expectedCharacterIds.length +
-        globalCharacterCount(attempt),
+        globalCharacterCount(attempt) +
+        (attempt.unverifiedMediaCount || 0),
     };
   };
   const retireUnbound = (attempt) => {
@@ -1943,6 +1968,7 @@
         0,
         Number(d.expectedGlobalCharacterCount) || (d.expectedGlobalCharacter === true ? 1 : 0)
       ),
+      unverifiedMediaCount: Math.max(0, Number(d.unverifiedMediaCount) || 0),
       expectedImageModelKey:
         typeof d.expectedImageModelKey === "string" &&
         /^[a-zA-Z0-9_-]{1,128}$/.test(d.expectedImageModelKey)

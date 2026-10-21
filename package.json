@@ -1,6 +1,6 @@
 {
   "name": "flow-mcp-native",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Google Flow MCP with browser-side Chrome extension automation",
   "main": "index.js",
   "scripts": {
@@ -8,8 +8,6 @@
     "build": "tsc && node scripts/sync-extension-capabilities.mjs && node scripts/extension-build-revision.mjs",
     "dev:extension": "node scripts/dev-extension.mjs",
     "start": "node dist/index.js",
-    "serve": "node dist/auth-server.js",
-    "login": "node dist/login.js",
     "studio": "node dist/studio.js"
   },
   "keywords": [],

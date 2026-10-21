@@ -1,7 +1,14 @@
 // Legacy local-MCP queue retained for compatibility with existing persisted jobs and older integrations.
 // LocalCore no longer instantiates it; active Flow jobs are owned by extension/background/flow-job-queue.js.
 import { randomUUID } from "node:crypto";
-import { loadJobs, saveJob } from "./users.js";
+const memJobs = new Map<string, Job[]>();
+const loadJobs = (scope = "default"): Job[] => memJobs.get(scope) || [];
+const saveJob = (scope = "default", job: Job): void => {
+  const list = memJobs.get(scope) || [];
+  const idx = list.findIndex(j => j.id === job.id);
+  if (idx >= 0) list[idx] = job; else list.push(job);
+  memJobs.set(scope, list);
+};
 import { classifyFlowFailure, type FlowErrorCategory } from "./flow-error-policy.js";
 import { sanitizeFlowOperationDiagnostics, sanitizeUnknownSubmitDiagnostics, type SafeFlowOperationDiagnostics, type SafeUnknownSubmitDiagnostics } from "./flow-request-diagnostics.js";
 

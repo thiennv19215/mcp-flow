@@ -57,6 +57,7 @@
     expectedMediaReferenceIds = [],
     expectedCharacterIds = [],
     expectedVoiceCount = 0,
+    unverifiedMediaCount = 0,
   }) {
     if (!projectId || !["image", "video"].includes(mediaType)) return null;
     const attemptId = crypto.randomUUID();
@@ -103,6 +104,7 @@
         expectedMediaReferenceIds,
         expectedCharacterIds,
         expectedVoiceCount: Math.max(0, Math.min(1, Number(expectedVoiceCount) || 0)),
+        unverifiedMediaCount: Math.max(0, Number(unverifiedMediaCount) || 0),
         expectedGlobalCharacter: false,
         strictDispatch: true,
         ttlMs: 15 * 60_000,

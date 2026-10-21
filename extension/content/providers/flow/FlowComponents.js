@@ -335,24 +335,41 @@
   }
 
   function chips() {
-    const enChips = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.chips", document, { checkVisible: false }) : null) ||
+    const configuredChips = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.chips", document, { checkVisible: false }) : null) ||
       [...document.querySelectorAll('button[aria-label="Ingredient"]')];
     const viChips = [...document.querySelectorAll('button[aria-label="Thành phần"],button[aria-label="Nguyên liệu"]')];
     const dynamicButtons = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("common.buttons", document, { checkVisible: false }) : null) ||
       [...document.querySelectorAll('button,[role="button"]')];
-    const dynamicChips = dynamicButtons.filter(btn => {
+    const isIngredientChipControl = btn => {
       if (!visible(btn)) return false;
+      if (configuredChips.includes(btn) || viChips.includes(btn)) return true;
       const aria = (accessibleName(btn) || "").toLowerCase();
       const alt = (btn.querySelector?.("img")?.alt || "").toLowerCase();
-      const isChipElement = Boolean(btn.closest?.("flow-character-ingredient-chip, [data-chip]"));
-      return isChipElement ||
-        aria.startsWith("thành phần") || aria.startsWith("nguyên liệu") ||
-        alt.startsWith("thành phần") || alt.startsWith("nguyên liệu");
-    });
-    const all = [...new Set([...enChips, ...viChips, ...dynamicChips])];
-    return all.filter(visible).map(button => {
+      const isChipElement = Boolean(btn.closest?.("flow-character-ingredient-chip,[data-chip],[data-ingredient-type='image'],[data-ingredient-type='character'],[data-kind='image'],[data-kind='character']"));
+      if (isChipElement && /(?:remove|delete|close|xóa|đóng)/i.test(aria)) return false;
+      return isChipElement || /^(?:ingredient|thành phần|nguyên liệu)(?:\b|$)/i.test(aria) ||
+        /^(?:ingredient|thành phần|nguyên liệu)(?:\b|$)/i.test(alt);
+    };
+    // Selector fallbacks include generic buttons; count only actual ingredient controls.
+    const candidates = [...new Set([...configuredChips, ...viChips, ...dynamicButtons])].filter(isIngredientChipControl);
+    const score = button => {
+      const aria = (accessibleName(button) || button.getAttribute?.("aria-label") || "").toLowerCase();
+      return (/(?:^|\b)(?:ingredient|thành phần|nguyên liệu)(?:\b|$)/i.test(aria) ? 100 : 0) +
+        (button.querySelector?.("img") ? 20 : 0) -
+        (/(?:remove|delete|close|xóa|đóng)/i.test(aria) ? 1000 : 0);
+    };
+    const logicalChips = new Map();
+    for (const button of candidates) {
+      const owner = button.closest?.("flow-character-ingredient-chip,[data-chip]") || button;
+      const previous = logicalChips.get(owner);
+      if (!previous || score(button) > score(previous)) logicalChips.set(owner, button);
+    }
+    return [...logicalChips.values()].map(button => {
       const image = button.querySelector?.("img");
-      const kind = button.closest?.("flow-character-ingredient-chip") || /character|nhân vật/i.test(image?.alt || "") ? "character" : "image";
+      const explicitKind = button.getAttribute?.("data-ingredient-type") || button.getAttribute?.("data-kind") ||
+        button.closest?.("[data-ingredient-type], [data-kind]")?.getAttribute?.("data-ingredient-type") ||
+        button.closest?.("[data-kind]")?.getAttribute?.("data-kind");
+      const kind = button.closest?.("flow-character-ingredient-chip") || /^(?:character|nhân vật)$/i.test(String(explicitKind || "").trim()) ? "character" : "image";
       return { element: button, kind, source: identity(image?.getAttribute?.("src")), ...metadata.get(button) };
     });
   }
@@ -497,6 +514,18 @@
   }
   const addToPromptLabels = new Set(["add to prompt", "thêm vào câu lệnh", "thêm vào lời nhắc", "thêm vào lời nhắc văn bản", "thêm vào prompt"]);
   const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const asbIdentityPattern = /^asb:[A-Za-z0-9_-]{32,1024}$/;
+  const sameImageReferenceIdentity = (left, right) => {
+    const a = String(left || "");
+    const b = String(right || "");
+    return uuidPattern.test(a) && uuidPattern.test(b) ? a.toLowerCase() === b.toLowerCase() : a === b;
+  };
+  async function resolveImageReferenceIdentity(id) {
+    const value = String(id || "");
+    const resolvedUuid = await resolveNativeMediaUuid(value, "image");
+    if (resolvedUuid) return resolvedUuid.toLowerCase();
+    return asbIdentityPattern.test(value) ? value : undefined;
+  }
   const exactTileTitle = (tile, name) => {
     const wanted = normalize(name);
     const aria = normalize(tile?.getAttribute?.("aria-label") || tile?.getAttribute?.("title"));
@@ -506,6 +535,35 @@
   };
   function contextMenuItems(menu) {
     return [...menu.querySelectorAll('[role="menuitem"],button,[role="button"]')].filter(visible);
+  }
+  function dispatchContextMenu(target, point) {
+    const pointerInit = { bubbles: true, cancelable: true, button: 2, buttons: 2, clientX: point.x, clientY: point.y, pointerType: "mouse" };
+    const mouseInit = { bubbles: true, cancelable: true, button: 2, buttons: 2, clientX: point.x, clientY: point.y };
+    if (typeof PointerEvent === "function") target.dispatchEvent(new PointerEvent("pointerdown", pointerInit));
+    target.dispatchEvent(new MouseEvent("mousedown", mouseInit));
+    target.dispatchEvent(new MouseEvent("contextmenu", mouseInit));
+    if (typeof PointerEvent === "function") target.dispatchEvent(new PointerEvent("pointerup", { ...pointerInit, buttons: 0 }));
+    target.dispatchEvent(new MouseEvent("mouseup", { ...mouseInit, buttons: 0 }));
+  }
+  function contextMenus(scope = document, visibleOnly = true) {
+    const configured = typeof root.flowQueryAll === "function"
+      ? root.flowQueryAll("components.actionMenus", scope, { checkVisible: !visibleOnly })
+      : null;
+    const candidates = [...(configured || [
+      ...scope.querySelectorAll('[role="menu"],mat-menu-panel'),
+      ...scope.querySelectorAll(".cdk-overlay-pane"),
+    ])]
+      .filter(menu => !visibleOnly || visible(menu));
+    // Flow renders a semantic menu inside a CDK overlay pane. Treat the pane
+    // as its wrapper, not as a second independently opened menu.
+    const isSemantic = menu => {
+      if (typeof menu.matches === "function") return menu.matches('[role="menu"],mat-menu-panel');
+      const role = menu.getAttribute?.("role");
+      return role === "menu" || menu.tagName === "MAT-MENU-PANEL";
+    };
+    const semanticMenus = candidates.filter(isSemantic);
+    if (semanticMenus.length) return semanticMenus;
+    return candidates.filter(menu => contextMenuItems(menu).length > 0);
   }
   function contextMenuItemLabel(item) {
     return normalize(accessibleName(item) || item.getAttribute?.("aria-label") || item.getAttribute?.("title") || item.innerText || item.textContent);
@@ -534,17 +592,51 @@
     const nodes = [chip.element, chip.element?.querySelector?.("img"), ...(chip.element?.querySelectorAll?.("[data-media-id],[data-asset-id],[data-file-id]") || [])].filter(Boolean);
     return [...new Set(nodes.flatMap(node => attrs.map(attr => node.getAttribute?.(attr)).filter(value => uuidPattern.test(String(value || ""))).map(value => String(value).toLowerCase())))];
   }
+  function addedReferenceChips(before, current) {
+    const counts = new Map();
+    const keyOf = chip => {
+      const id = chip.mediaId || chipMediaUuids(chip)[0];
+      if (id) return "id:" + String(id).toLowerCase();
+      if (chip.source) return "src:" + String(chip.source);
+      if (chip.name) return "name:" + normalize(chip.name);
+      return null;
+    };
+    for (const chip of before) {
+      const key = keyOf(chip);
+      if (key) counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    return current.filter(chip => {
+      const key = keyOf(chip);
+      // Consume the old-chip occurrence even when Flow kept the same DOM node.
+      // Otherwise a newly added duplicate image with the same source/ID is
+      // incorrectly consumed as the old chip and the second attachment is lost.
+      if (before.some(old => old.element === chip.element)) {
+        if (key) {
+          const count = counts.get(key) || 0;
+          if (count > 0) counts.set(key, count - 1);
+        }
+        return false;
+      }
+      if (!key) return true;
+      const count = counts.get(key) || 0;
+      if (count > 0) {
+        counts.set(key, count - 1);
+        return false;
+      }
+      return true;
+    });
+  }
   async function closeOwnedContextMenu(menu, deadline) {
     if (!menu || !visible(menu)) return { closed: true, method: "already_closed" };
     const close = contextMenuItems(menu).filter(item => ["close", "dismiss", "đóng"].includes(contextMenuItemLabel(item)) && !item.disabled && item.getAttribute("aria-disabled") !== "true");
     if (close.length === 1) {
       close[0].click();
     } else {
-      return { closed: false, method: "cleanup_pending_no_owned_close_affordance" };
+      menu.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, which: 27, bubbles: true, cancelable: true, composed: true }));
     }
     const until = Math.min(Date.now() + 700, deadline);
     while (Date.now() < until && visible(menu)) await boundedWait(50, until, "closing the owned reference menu", false);
-    return { closed: !visible(menu), method: "owned_close_action" };
+    return { closed: !visible(menu), method: close.length === 1 ? "owned_close_action" : "escape" };
   }
   async function attachUploadedImageFromTile(ref, expectedId, deadline, signal) {
     const prior = referenceContextMenuTail;
@@ -556,15 +648,19 @@
     try {
       requireTime(deadline, "waiting for the serialized reference menu", false, signal);
       updateReferenceActionDiagnostics(diagnostic);
-      const expectedUuid = (await resolveNativeMediaUuid(expectedId, "image"))?.toLowerCase();
-      if (!expectedUuid) throw flowError("FLOW_ASSET_ID_UNAVAILABLE", "The uploaded image has no verified media UUID for tile attachment. No reference was selected.", false, false);
+      const expectedIdentity = await resolveImageReferenceIdentity(expectedId);
+      if (!expectedIdentity) throw flowError("FLOW_ASSET_ID_UNAVAILABLE", "The uploaded image has no verified Flow media identity for tile attachment. No reference was selected.", false, false);
       const attached = chips().find(chip => normalize(chip.name) === normalize(ref.name) && chip.kind === "image");
       if (attached) {
-        if (attached.mediaId !== expectedUuid) throw flowError("FLOW_ASSET_ID_MISMATCH", "An image reference with this title is already attached, but its verified media provenance differs from the requested upload.", false, false);
+        const attachedRawIdentity = attached.mediaId || chipMediaUuids(attached)[0];
+        const attachedIdentity = sameImageReferenceIdentity(attachedRawIdentity, expectedIdentity)
+          ? attachedRawIdentity
+          : await resolveImageReferenceIdentity(attachedRawIdentity);
+        if (!sameImageReferenceIdentity(attachedIdentity, expectedIdentity)) throw flowError("FLOW_ASSET_ID_MISMATCH", "An image reference with this title is already attached, but its verified media provenance differs from the requested upload.", false, false);
         updateReferenceActionDiagnostics({ ...diagnostic, step: "serialized_existing_chip_reused", provenanceConfirmed: true, chipUuidConfirmed: attached.chipUuidConfirmed === true });
-        return { name: ref.name, kind: "image", source: attached.source, id: expectedUuid, idSource: attached.mediaIdSource || "verified_tile_action_provenance", chipUuidConfirmed: attached.chipUuidConfirmed === true, confirmed: true, reused: true };
+        return { name: ref.name, kind: "image", source: attached.source, id: expectedIdentity, idSource: attached.mediaIdSource || (asbIdentityPattern.test(expectedIdentity) ? "verified_asb_tile_action" : "verified_tile_action_provenance"), chipUuidConfirmed: attached.chipUuidConfirmed === true, confirmed: true, reused: true };
       }
-      const alreadyOpen = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.actionMenus", document) : null) || document.querySelectorAll('[role="menu"],mat-menu-panel'))].filter(visible);
+      const alreadyOpen = contextMenus(document, true);
       if (alreadyOpen.length) throw flowError("FLOW_REFERENCE_CONTEXT_MENU_BUSY", "Flow already has a menu open; no reference menu action was attempted.", false, false);
       const tile = await root.findFlowTile?.(ref.name);
       if (!tile || !exactTileTitle(tile, ref.name)) {
@@ -572,9 +668,12 @@
         return null;
       }
       const verifyTile = async () => {
-        const current = (await resolveNativeMediaUuid(mediaId(tile), "image"))?.toLowerCase();
+        const currentRaw = String(mediaId(tile) || "");
+        const current = currentRaw.toLowerCase() === expectedIdentity.toLowerCase()
+          ? currentRaw
+          : await resolveImageReferenceIdentity(currentRaw);
         const hasVideo = typeof root.flowQuery === "function" ? root.flowQuery("tiles.video", tile, { checkVisible: false }) : tile.querySelector("flow-video-tile,flow-scene-tile");
-        return tile.isConnected && exactTileTitle(tile, ref.name) && current === expectedUuid && !hasVideo;
+        return tile.isConnected && exactTileTitle(tile, ref.name) && sameImageReferenceIdentity(current, expectedIdentity) && !hasVideo;
       };
       if (!(await verifyTile())) throw flowError("FLOW_ASSET_ID_MISMATCH", "The exact image tile does not match the completed upload UUID and image type. No reference was selected.", false, false);
       const sameTitle = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", document, { checkVisible: false }) : null) || document.querySelectorAll("flow-grid-tile-container"))].filter(candidate => exactTileTitle(candidate, ref.name));
@@ -585,20 +684,26 @@
       const target = (typeof root.flowQuery === "function" ? root.flowQuery("tiles.image", tile, { checkVisible: false }) : null) || tile.querySelector("img,[role='img']") || tile;
       const rect = target.getBoundingClientRect?.() || { left: 0, top: 0, width: 1, height: 1 };
       const contextPoint = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-      const priorMenus = new Set((typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.actionMenus", document, { checkVisible: false }) : null) || document.querySelectorAll('[role="menu"],mat-menu-panel'));
-      target.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: contextPoint.x, clientY: contextPoint.y, button: 2 }));
-      diagnostic = { ...diagnostic, step: "waiting_for_new_menu" };
-      updateReferenceActionDiagnostics(diagnostic);
-      const menuDeadline = Math.min(Date.now() + 2200, deadline);
       let newMenus = [];
-      while (Date.now() < menuDeadline) {
-        newMenus = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.actionMenus", document) : null) || document.querySelectorAll('[role="menu"],mat-menu-panel'))].filter(menu => visible(menu) && !priorMenus.has(menu));
-        if (newMenus.length) break;
-        try { await boundedWait(100, menuDeadline, "waiting for the uploaded image context menu", false, signal); }
-        catch (error) {
-          if (error?.code === "FLOW_OPERATION_TIMEOUT" && Date.now() >= menuDeadline) break;
-          throw error;
+      for (let attempt = 0; attempt < 3 && !newMenus.length; attempt++) {
+        if (!(await verifyTile())) throw flowError("FLOW_ASSET_CHANGED", "The verified image tile changed before its context menu opened. No reference was selected.", false, false);
+        // Snapshot visible menus only. Flow keeps hidden CDK menu nodes mounted
+        // and reuses them when opening the image context menu.
+        const priorMenus = new Set(contextMenus(document, true));
+        diagnostic = { ...diagnostic, step: "opening_context_menu", menuAttempt: attempt + 1 };
+        updateReferenceActionDiagnostics(diagnostic);
+        dispatchContextMenu(target, contextPoint);
+        const menuDeadline = Math.min(Date.now() + 1200, deadline);
+        while (Date.now() < menuDeadline) {
+          newMenus = contextMenus(document, true).filter(menu => !priorMenus.has(menu));
+          if (newMenus.length) break;
+          try { await boundedWait(100, menuDeadline, "waiting for the uploaded image context menu", false, signal); }
+          catch (error) {
+            if (error?.code === "FLOW_OPERATION_TIMEOUT" && Date.now() >= menuDeadline) break;
+            throw error;
+          }
         }
+        if (!newMenus.length && attempt < 2) await boundedWait(120, deadline, "retrying the image context menu", false, signal);
       }
       if (!newMenus.length) {
         updateReferenceActionDiagnostics({ ...diagnostic, step: "no_new_menu_picker_fallback", tileActionStep: "menu_missing", surfaceStatus: "no_new_owned_menu" });
@@ -611,18 +716,20 @@
       const candidateMenu = newMenus[0];
       const related = hasExactContextMenuRelation(candidateMenu, target, tile);
       const nearTrigger = contextMenuNearTrigger(candidateMenu, contextPoint);
-      updateReferenceActionDiagnostics({ ...diagnostic, step: "validating_menu_ownership", ...(related && nearTrigger ? { tileActionStep: "menu_owned" } : {}), menuRelatedToTile: related, menuNearTrigger: nearTrigger });
-      if (!related) throw flowError("FLOW_REFERENCE_CONTEXT_MENU_UNOWNED", "Flow opened a menu, but its DOM does not link it to the selected image tile. No menu action was taken.", false, false);
-      if (!nearTrigger) throw flowError("FLOW_REFERENCE_CONTEXT_MENU_POSITION_UNVERIFIED", "Flow's new menu is outside the bounded position of the selected image. No menu action was taken.", false, false);
       ownedMenu = candidateMenu;
+      // The menu was absent before the verified UUID tile action and is the
+      // only newly visible menu. Flow portals it outside the tile DOM and may
+      // position it at the viewport edge, so ARIA ancestry and pixel distance
+      // are diagnostic only, not reasons to reject its actual menu action.
+      updateReferenceActionDiagnostics({ ...diagnostic, step: "validating_new_menu", tileActionStep: "menu_owned", menuRelatedToTile: related, menuNearTrigger: nearTrigger });
       const actions = contextMenuItems(ownedMenu).filter(item => addToPromptLabels.has(contextMenuItemLabel(item)));
       if (actions.length !== 1 || actions[0].disabled || actions[0].getAttribute("aria-disabled") === "true") {
         updateReferenceActionDiagnostics({ ...diagnostic, step: "add_action_ambiguous", surfaceStatus: "action_ambiguous" });
         throw flowError("FLOW_REFERENCE_CONTEXT_ACTION_AMBIGUOUS", "The new image menu does not expose one enabled exact Add to prompt action. No reference was selected.", false, false);
       }
       if (!(await verifyTile())) throw flowError("FLOW_ASSET_ID_MISMATCH", "The uploaded image tile identity changed before Add to prompt. No reference was selected.", false, false);
-      if (!ownedMenu.isConnected || !visible(ownedMenu) || !hasExactContextMenuRelation(ownedMenu, target, tile) || !contextMenuNearTrigger(ownedMenu, contextPoint)) {
-        throw flowError("FLOW_REFERENCE_CONTEXT_MENU_OWNERSHIP_LOST", "Flow's reference menu lost its exact tile relation or position before selection. No menu action was taken.", false, false);
+      if (!ownedMenu.isConnected || !visible(ownedMenu)) {
+        throw flowError("FLOW_REFERENCE_CONTEXT_MENU_OWNERSHIP_LOST", "Flow's newly opened reference menu closed before selection. No menu action was taken.", false, false);
       }
       const currentActions = contextMenuItems(ownedMenu).filter(item => addToPromptLabels.has(contextMenuItemLabel(item)));
       if (currentActions.length !== 1 || currentActions[0] !== actions[0] || currentActions[0].disabled || currentActions[0].getAttribute("aria-disabled") === "true") {
@@ -633,16 +740,17 @@
       actions[0].click();
       const attachDeadline = Math.min(Date.now() + 10_000, deadline);
       while (Date.now() < attachDeadline) {
-        const added = chips().filter(chip => !before.some(old => old.element === chip.element));
+        const added = addedReferenceChips(before, chips());
         if (added.length > 1 || added.some(chip => chip.kind !== "image")) throw flowError("FLOW_REFERENCE_ATTACH_AMBIGUOUS", "Flow added an unexpected number or type of reference chips. Inspect the composer before retrying.", false, true);
         if (added.length === 1) {
           const observedUuids = chipMediaUuids(added[0]);
-          if (observedUuids.some(id => id !== expectedUuid)) throw flowError("FLOW_ASSET_ID_MISMATCH", "The new image chip exposes a UUID that conflicts with the selected upload. Inspect the composer before retrying.", false, true);
-          // This records the verified tile/action provenance. chipUuidConfirmed
-          // remains false when Flow does not expose a UUID on the chip itself.
-          metadata.set(added[0].element, { name: ref.name, mediaId: expectedUuid, mediaIdSource: "verified_tile_action_provenance", chipUuidConfirmed: observedUuids.includes(expectedUuid) });
-          updateReferenceActionDiagnostics({ ...diagnostic, step: "exact_image_chip_confirmed", tileActionStep: "chip_confirmed", surfaceStatus: "attached", provenanceConfirmed: true, chipUuidConfirmed: observedUuids.includes(expectedUuid) });
-          return { name: ref.name, kind: "image", source: added[0].source, id: expectedUuid, idSource: "verified_tile_action_provenance", chipUuidConfirmed: observedUuids.includes(expectedUuid), confirmed: true };
+          if (uuidPattern.test(expectedIdentity) && observedUuids.some(id => id !== expectedIdentity)) throw flowError("FLOW_ASSET_ID_MISMATCH", "The new image chip exposes a UUID that conflicts with the selected upload. Inspect the composer before retrying.", false, true);
+          // The tile/action pair proves an ASB identity even when Flow omits
+          // a UUID on the chip. The generation observer marks it unverified.
+          const idSource = asbIdentityPattern.test(expectedIdentity) ? "verified_asb_tile_action" : "verified_tile_action_provenance";
+          metadata.set(added[0].element, { name: ref.name, mediaId: expectedIdentity, mediaIdSource: idSource, chipUuidConfirmed: observedUuids.includes(expectedIdentity) });
+          updateReferenceActionDiagnostics({ ...diagnostic, step: "exact_image_chip_confirmed", tileActionStep: "chip_confirmed", surfaceStatus: "attached", provenanceConfirmed: true, chipUuidConfirmed: observedUuids.includes(expectedIdentity) });
+          return { name: ref.name, kind: "image", source: added[0].source, id: expectedIdentity, idSource, chipUuidConfirmed: observedUuids.includes(expectedIdentity), confirmed: true };
         }
         await boundedWait(150, attachDeadline, "confirming uploaded image reference", true, signal);
       }
@@ -759,6 +867,7 @@
       ...tabElements,
       ...(surface?.querySelectorAll?.('[role="tab"],button,[role="button"]') || []),
       ...(picker()?.querySelectorAll?.('[role="tab"],button,[role="button"]') || []),
+      ...(document?.querySelectorAll?.('[role="tab"]') || []),
     ])].filter(el => {
       if (!visible(el)) return false;
       const rawText = accessibleName(el) || el.innerText || el.textContent || "";
@@ -1090,15 +1199,25 @@
       requireTime(deadline, "attaching a Flow reference", false, config.signal);
       // Flow excludes already attached characters from its picker. Check our
       // confirmed provenance first, before requiring the option to exist again.
-      const reusable = chips().find(chip => normalize(chip.name) === normalize(ref.name) && (!ref.kind || chip.kind === ref.kind));
+      const reusableCandidates = chips().filter(chip => normalize(chip.name) === normalize(ref.name) && (!ref.kind || chip.kind === ref.kind));
+      const requestedReusableId = config.expectedId && reusableCandidates.length
+        ? (await resolveNativeMediaUuid(config.expectedId, "image") || String(config.expectedId).toLowerCase())
+        : null;
+      const reusable = reusableCandidates.find(chip => {
+        if (!requestedReusableId) return true;
+        const existingId = chip.kind === "character"
+          ? explicitCharacterUuid(chip.element) || (chip.mediaIdSource === "character_identity_attribute" ? chip.mediaId : undefined)
+          : chip.mediaId || chipMediaUuids(chip)[0];
+        return String(existingId || "").toLowerCase() === requestedReusableId;
+      });
       if (reusable) {
         const reusableId = reusable.kind === "character"
           ? explicitCharacterUuid(reusable.element) || (reusable.mediaIdSource === "character_identity_attribute" && characterUuidPattern.test(String(reusable.mediaId || "")) ? String(reusable.mediaId).toLowerCase() : undefined)
-          : reusable.mediaId;
+          : reusable.mediaId || chipMediaUuids(reusable)[0];
         if (reusable.kind === "character" && !reusableId) {
           throw flowError("FLOW_CHARACTER_ID_UNAVAILABLE", `Flow did not expose an explicit character identity for "${ref.name}". No selection or generation was submitted.`, false, false);
         }
-        if (config.expectedId && reusableId !== config.expectedId) {
+        if (requestedReusableId && String(reusableId || "").toLowerCase() !== requestedReusableId) {
           throw flowError("FLOW_ASSET_ID_MISMATCH", `The already attached reference "${ref.name}" cannot be proven to match the uploaded media ID. No generation was submitted.`, false, false);
         }
         const result = { name: ref.name, kind: reusable.kind, source: reusable.source, ...(reusableId ? { id: reusableId } : {}), confirmed: true, reused: true };
@@ -1189,7 +1308,7 @@
       let confirmedClick = false;
       const attachDeadline = Math.min(Date.now() + 10000, deadline);
       while (Date.now() < attachDeadline) {
-        const added = chips().filter(chip => !before.some(old => old.element === chip.element));
+        const added = addedReferenceChips(before, chips());
         const chip = added.length === 1 && added[0].kind === kind ? added[0] : null;
         if (chip) {
           const result = { name: ref.name, kind: chip.kind, source: chip.source, id: selectedId, confirmed: true };

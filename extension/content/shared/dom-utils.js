@@ -16,10 +16,10 @@ function semanticActionText(el) {
   const labels = el.labels ? [...el.labels].map(label => label.innerText || label.textContent || "").join(" ").trim() : "";
   const labelledBy = (el.getAttribute?.("aria-labelledby") || "").split(/\s+/).filter(Boolean)
     .map(id => document.getElementById?.(id)?.innerText || document.getElementById?.(id)?.textContent || "").join(" ").trim();
-  const explicit = el.getAttribute?.("aria-label") || labelledBy || el.getAttribute?.("title") || labels || el.getAttribute?.("alt");
+  const explicit = el.getAttribute?.("aria-label") || labelledBy || el.getAttribute?.("title") || labels || el.getAttribute?.("alt") || (typeof el.name === "string" ? el.name : "");
   if (explicit) return explicit;
   if (typeof document.createTreeWalker !== "function" || typeof NodeFilter === "undefined") {
-    return el.innerText || el.textContent || "";
+    return el.innerText || el.textContent || (typeof el.name === "string" ? el.name : "") || "";
   }
   const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
   const text = [];

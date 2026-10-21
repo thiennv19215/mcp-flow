@@ -500,12 +500,12 @@ test('uploaded image attachment leaves an unrelated pre-existing menu untouched'
   assert.equal(fixture.unrelatedKeyEvents(), 0);
 });
 
-test('missing project-tile menu retains tile-attempt evidence when the picker fallback is unavailable', async () => {
+test('missing project-tile menu retries three times and retains tile-attempt evidence when picker fallback is unavailable', async () => {
   const fixture = uploadedTileMenuHarness({ noNewMenu: true });
   await assert.rejects(fixture.api.attach('Uploaded exact.png', undefined, { expectedId: fixture.mediaUuid, deadline: Date.now() + 5000 }), error =>
     error.code === 'FLOW_ASSET_PICKER_MISSING' && error.diagnostics?.tileActionAttempted === true &&
       error.diagnostics?.tileActionStep === 'menu_missing' && error.diagnostics?.tileActionMenuObserved === false);
-  assert.equal(fixture.contextEvents(), 1);
+  assert.equal(fixture.contextEvents(), 3);
   assert.equal(fixture.actionClicks(), 0);
   assert.equal(fixture.chipCount(), 0);
 });
@@ -518,31 +518,33 @@ test('uploaded image attachment rejects multiple newly opened menus', async () =
   assert.equal(fixture.chipCount(), 0);
 });
 
-test('uploaded image attachment rejects one unrelated menu that appears during the menu wait', async () => {
+test('uploaded image attachment uses the unique newly visible Add to prompt menu without requiring ARIA ancestry', async () => {
   const fixture = uploadedTileMenuHarness({ relation: false });
-  await assert.rejects(fixture.api.attach('Uploaded exact.png', undefined, { expectedId: fixture.mediaUuid, deadline: Date.now() + 1000 }), error => error.code === 'FLOW_REFERENCE_CONTEXT_MENU_UNOWNED');
+  const result = await fixture.api.attach('Uploaded exact.png', undefined, { expectedId: fixture.mediaUuid, deadline: Date.now() + 1000 });
+  assert.equal(result.confirmed, true);
   assert.equal(fixture.contextEvents(), 1);
-  assert.equal(fixture.actionClicks(), 0);
-  assert.equal(fixture.chipCount(), 0);
-  assert.equal(fixture.ownedOpen(), true, 'an unowned menu is left untouched');
+  assert.equal(fixture.actionClicks(), 1);
+  assert.equal(fixture.chipCount(), 1);
+  assert.equal(fixture.ownedOpen(), false);
 });
 
-test('uploaded image attachment rejects a related menu outside the trigger position bound', async () => {
+test('uploaded image attachment uses the unique newly visible Add to prompt menu at the viewport edge', async () => {
   const fixture = uploadedTileMenuHarness({ farMenu: true, farMenuClose: true });
-  await assert.rejects(fixture.api.attach('Uploaded exact.png', undefined, { expectedId: fixture.mediaUuid, deadline: Date.now() + 1000 }), error => error.code === 'FLOW_REFERENCE_CONTEXT_MENU_POSITION_UNVERIFIED');
-  assert.equal(fixture.actionClicks(), 0);
-  assert.equal(fixture.closeClicks(), 0, 'a menu outside the full ownership bound never receives cleanup');
-  assert.equal(fixture.ownedOpen(), true, 'a related menu without verified position is left untouched');
+  const result = await fixture.api.attach('Uploaded exact.png', undefined, { expectedId: fixture.mediaUuid, deadline: Date.now() + 1000 });
+  assert.equal(result.confirmed, true);
+  assert.equal(fixture.actionClicks(), 1);
+  assert.equal(fixture.closeClicks(), 0);
+  assert.equal(fixture.ownedOpen(), false);
 });
 
-test('uploaded image attachment rejects a conflicting chip UUID and cleans up only its owned menu', async () => {
+test('uploaded image attachment rejects a conflicting chip UUID and dismisses only its owned menu', async () => {
   const fixture = uploadedTileMenuHarness({ chipIdentity: 'mismatched', leaveOwnedMenuOpen: true, openUnrelatedAfterAction: true });
   await assert.rejects(fixture.api.attach('Uploaded exact.png', undefined, { expectedId: fixture.mediaUuid, deadline: Date.now() + 1000 }), error => error.code === 'FLOW_ASSET_ID_MISMATCH' && error.outcome_unknown === true);
   assert.equal(fixture.actionClicks(), 1);
   assert.equal(fixture.unrelatedOpen(), true, 'the unrelated menu opened by an independent UI event is not closed');
-  assert.equal(fixture.ownedOpen(), true, 'menu remains open when no exact owned close affordance exists');
+  assert.equal(fixture.ownedOpen(), false, 'the owned menu is dismissed with Escape');
   assert.equal(fixture.unrelatedKeyEvents(), 0);
-  assert.equal(fixture.api.inspectDiagnostics().cleanup, 'cleanup_pending_no_owned_close_affordance');
+  assert.equal(fixture.api.inspectDiagnostics().cleanup, 'escape');
 });
 
 test('uploaded image attachment records provenance separately when the new chip exposes no UUID', async () => {

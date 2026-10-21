@@ -86,89 +86,6 @@
       }
       return result;
     }
-    async runAgentBatchPass(params, command, deadline, before) {
-      const nav = root.FlowNavigation, editor = root.FlowEditor, tiles = root.FlowTiles, agent = root.FlowAgent;
-      let submitted = false, outcomeUnknown = false, submitOnlyDispatched = false;
-      try {
-        await agent.closeNativeAgentSession();
-        const activeAgent = root.flowButton?.("Agent");
-        if (activeAgent?.getAttribute("aria-pressed") === "true") await agent.setNativeAgentMode(false);
-        await nav.ensureFlowLibrarySection("All media", { deadline });
-        await agent.setNativeAgentMode(true);
-        const agentSettingsEvidence = await agent.setNativeAgentSettings("Always", params.aspect_ratio || "16:9");
-        await root.FlowSettings?.chooseNativeModel?.("Nano Banana", "image", { deadline });
-        const box = document.querySelector(".ProseMirror");
-        if (!box) throw this.error("FLOW_AGENT_COMPOSER_MISSING", "Flow's Agent composer is not visible.", true);
-        const scenes = params.agent_scenes || [];
-        const sceneText = scenes.map((scene, index) => `Scene ${index + 1}: ${String(scene).replace(/\s+/g, " ").trim()}`).join("\n");
-        const script = `Generate exactly ${scenes.length} separate images: one image for each scene below, in the listed scene order. Do not combine scenes into a collage or a single image. Images only, never video. ${params.aspect_ratio || "16:9"} aspect ratio. Do not ask questions; generate them now.\n${sceneText}`;
-        root.setEditable?.(box, script);
-        await this.waitWorkflow(deadline, 300, "entering the Flow Agent batch prompt");
-        const preflight = { ...this.verifyAgentBatchPreflight({ editor, box, prompt: script }), agent_settings: agentSettingsEvidence };
-        const evidence = await this.submitAndConfirmDispatch({
-          editor, tiles, command, prompt: script, mediaType: "image", expectedQuantity: scenes.length, deadline,
-          checkConfirmation: () => agent.inspectAgentRunConfirmation(),
-        });
-        submitted = true;
-        if (params.submit_only === true) {
-          submitOnlyDispatched = true;
-          return { ...evidence, preflight, submitted: true, before, type: "image", expectedCount: scenes.length, media: [], prompts: [], trustedGesture: false };
-        }
-        let media, partialFailure = false, failedMedia = [];
-        try {
-          const remaining = Math.max(1, Math.min(Number(params.timeout_ms || 1800000), deadline - Date.now()));
-          media = await tiles.waitForProgressResult(command, before, scenes.length, "image", remaining, "flow-grid-tile-container", true);
-        } catch (error) {
-          if (error?.code !== "FLOW_GENERATION_FAILED" || error?.outcome_unknown !== false
-            || !Array.isArray(error.partialMedia) || !Array.isArray(error.failedMedia)) throw error;
-          media = error.partialMedia;
-          failedMedia = error.failedMedia;
-          partialFailure = true;
-        }
-        const prompts = [];
-        for (const item of media) {
-          const scroller = root.scrollContainer?.();
-          if (scroller) scroller.scrollTop = 0;
-          await root.wait?.(250);
-          let targetTile;
-          for (let step = 0; step < 160 && !targetTile; step++) {
-            targetTile = [...document.querySelectorAll("flow-grid-tile-container")].find(c =>
-              item.id && !item.id.startsWith("title:") ? root.mediaId?.(c) === item.id : c.getAttribute("aria-label") === item.title);
-            if (!targetTile && scroller) {
-              const top = scroller.scrollTop, max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-              if (top >= max - 2) break;
-              scroller.scrollTop = Math.min(max, top + Math.max(200, scroller.clientHeight * 0.78));
-              await root.wait?.(250);
-            }
-          }
-          if (!targetTile) { prompts.push(""); continue; }
-          targetTile.scrollIntoView({ block: "center" });
-          targetTile.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
-          await root.wait?.(250);
-          const reuse = root.flowButton?.("Reuse prompt", targetTile);
-          if (!reuse) { prompts.push(""); continue; }
-          reuse.click();
-          await root.wait?.(550);
-          prompts.push(document.querySelector(".ProseMirror")?.innerText || "");
-          const close = root.flowButton?.("Close");
-          if (close && root.flowButton?.("Start new session")) { close.click(); await root.wait?.(350); }
-        }
-        const clear = root.flowButton?.("Clear prompt");
-        if (clear) clear.click();
-        return { ...evidence, preflight, before, type: "image", expectedCount: scenes.length, media, prompts, ...(partialFailure ? { partial: true, failedMedia } : {}), trustedGesture: false };
-      } catch (error) {
-        outcomeUnknown = Boolean(error?.outcome_unknown) || submitted;
-        throw error;
-      } finally {
-        if (!outcomeUnknown && !submitOnlyDispatched) {
-          const session = root.flowButton?.("Start new session");
-          if (session) { const close = root.flowButton?.("Close"); if (close) { close.click(); await root.wait?.(500); } }
-          try { await agent.setNativeAgentSettings("Always"); } catch {}
-          await agent.setNativeAgentMode(false).catch(() => {});
-          const clear = root.flowButton?.("Clear prompt"); if (clear) clear.click();
-        }
-      }
-    }
     async submitAndConfirmDispatch({ editor, tiles, command, prompt, mediaType = "video", expectedQuantity = 1, expectedReferenceIds = [], expectedMediaReferenceIds = [], expectedCharacterIds = [], deadline, afterClick, checkConfirmation }) {
       this.requireWorkflowTime(deadline, "arming the Flow request observer");
       const projectId = (root.ProviderRegistry || root.FlowDriverRegistry).describeUrl(location.href)?.projectId;
@@ -343,6 +260,90 @@
       }
 
       if (name === "flow.agent.batch") {
+        const runAgentBatchPass = async (params, command, deadline, before) => {
+      const nav = root.FlowNavigation, editor = root.FlowEditor, tiles = root.FlowTiles, agent = root.FlowAgent;
+      let submitted = false, outcomeUnknown = false, submitOnlyDispatched = false;
+      try {
+        await agent.closeNativeAgentSession();
+        const activeAgent = root.flowButton?.("Agent");
+        if (activeAgent?.getAttribute("aria-pressed") === "true") await agent.setNativeAgentMode(false);
+        await nav.ensureFlowLibrarySection("All media", { deadline });
+        await agent.setNativeAgentMode(true);
+        const agentSettingsEvidence = await agent.setNativeAgentSettings("Always", params.aspect_ratio || "16:9");
+        await root.FlowSettings?.chooseNativeModel?.("Nano Banana", "image", { deadline });
+        const box = document.querySelector(".ProseMirror");
+        if (!box) throw this.error("FLOW_AGENT_COMPOSER_MISSING", "Flow's Agent composer is not visible.", true);
+        const scenes = params.agent_scenes || [];
+        const sceneText = scenes.map((scene, index) => `Scene ${index + 1}: ${String(scene).replace(/\s+/g, " ").trim()}`).join("\n");
+        const script = `Generate exactly ${scenes.length} separate images: one image for each scene below, in the listed scene order. Do not combine scenes into a collage or a single image. Images only, never video. ${params.aspect_ratio || "16:9"} aspect ratio. Do not ask questions; generate them now.\n${sceneText}`;
+        root.setEditable?.(box, script);
+        await this.waitWorkflow(deadline, 300, "entering the Flow Agent batch prompt");
+        const preflight = { ...this.verifyAgentBatchPreflight({ editor, box, prompt: script }), agent_settings: agentSettingsEvidence };
+        const evidence = await this.submitAndConfirmDispatch({
+          editor, tiles, command, prompt: script, mediaType: "image", expectedQuantity: scenes.length, deadline,
+          checkConfirmation: () => agent.inspectAgentRunConfirmation(),
+        });
+        submitted = true;
+        if (params.submit_only === true) {
+          submitOnlyDispatched = true;
+          return { ...evidence, preflight, submitted: true, before, type: "image", expectedCount: scenes.length, media: [], prompts: [], trustedGesture: false };
+        }
+        let media, partialFailure = false, failedMedia = [];
+        try {
+          const remaining = Math.max(1, Math.min(Number(params.timeout_ms || 1800000), deadline - Date.now()));
+          media = await tiles.waitForProgressResult(command, before, scenes.length, "image", remaining, "flow-grid-tile-container", true);
+        } catch (error) {
+          if (error?.code !== "FLOW_GENERATION_FAILED" || error?.outcome_unknown !== false
+            || !Array.isArray(error.partialMedia) || !Array.isArray(error.failedMedia)) throw error;
+          media = error.partialMedia;
+          failedMedia = error.failedMedia;
+          partialFailure = true;
+        }
+        const prompts = [];
+        for (const item of media) {
+          const scroller = root.scrollContainer?.();
+          if (scroller) scroller.scrollTop = 0;
+          await root.wait?.(250);
+          let targetTile;
+          for (let step = 0; step < 160 && !targetTile; step++) {
+            targetTile = [...document.querySelectorAll("flow-grid-tile-container")].find(c =>
+              item.id && !item.id.startsWith("title:") ? root.mediaId?.(c) === item.id : c.getAttribute("aria-label") === item.title);
+            if (!targetTile && scroller) {
+              const top = scroller.scrollTop, max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+              if (top >= max - 2) break;
+              scroller.scrollTop = Math.min(max, top + Math.max(200, scroller.clientHeight * 0.78));
+              await root.wait?.(250);
+            }
+          }
+          if (!targetTile) { prompts.push(""); continue; }
+          targetTile.scrollIntoView({ block: "center" });
+          targetTile.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+          await root.wait?.(250);
+          const reuse = root.flowButton?.("Reuse prompt", targetTile);
+          if (!reuse) { prompts.push(""); continue; }
+          reuse.click();
+          await root.wait?.(550);
+          prompts.push(document.querySelector(".ProseMirror")?.innerText || "");
+          const close = root.flowButton?.("Close");
+          if (close && root.flowButton?.("Start new session")) { close.click(); await root.wait?.(350); }
+        }
+        const clear = root.flowButton?.("Clear prompt");
+        if (clear) clear.click();
+        return { ...evidence, preflight, before, type: "image", expectedCount: scenes.length, media, prompts, ...(partialFailure ? { partial: true, failedMedia } : {}), trustedGesture: false };
+      } catch (error) {
+        outcomeUnknown = Boolean(error?.outcome_unknown) || submitted;
+        throw error;
+      } finally {
+        if (!outcomeUnknown && !submitOnlyDispatched) {
+          const session = root.flowButton?.("Start new session");
+          if (session) { const close = root.flowButton?.("Close"); if (close) { close.click(); await root.wait?.(500); } }
+          try { await agent.setNativeAgentSettings("Always"); } catch {}
+          await agent.setNativeAgentMode(false).catch(() => {});
+          const clear = root.flowButton?.("Clear prompt"); if (clear) clear.click();
+        }
+      }
+    }
+
         const params = payload.job?.params || payload.params || {};
         const deadline = this.workflowDeadline(command, params.submit_only ? 120_000 : 32 * 60_000);
         const scenes = params.agent_scenes || [];

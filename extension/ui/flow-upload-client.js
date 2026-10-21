@@ -25,7 +25,18 @@ class FlowUploadClient {
     const sha256 = [...new Uint8Array(hashBuffer)].map(b => b.toString(16).padStart(2, "0")).join("");
 
     const ext = (file.name || "media").split(".").pop() || (kind === "video" ? "mp4" : "png");
-    const safeName = options.name || ("ref-" + Date.now() + "." + ext);
+    let safeName = options.name;
+    if (!safeName) {
+      if (file.name) {
+        const lastDot = file.name.lastIndexOf(".");
+        let base = lastDot > 0 ? file.name.slice(0, lastDot) : file.name;
+        const fileExt = lastDot > 0 ? file.name.slice(lastDot + 1).toLowerCase() : ext;
+        base = base.replace(/[/\\?%*:|"<>#]/g, "-").replace(/\s+/g, " ").trim();
+        safeName = base ? `${base}.${fileExt}` : `ref-${Date.now()}.${fileExt}`;
+      } else {
+        safeName = `ref-${Date.now()}.${ext}`;
+      }
+    }
 
     // 1. Khởi tạo phiên chuyển nhượng nhị phân
     const beginRes = await chrome.runtime.sendMessage({

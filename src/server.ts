@@ -14,7 +14,7 @@ import {
 import { runWithDeviceContext } from "./request-context.js";
 import { outputRootForContext, uploadDirForContext } from "./paths.js";
 import { getFlowSelectors } from "./selectors.js";
-import { authenticateDevice, createUser, listDevicesForUser, listUsers, loginDevice, pairDevice, revokeDevice, rotatePairingCode, setUserPassword, setUserStatus } from "./users.js";
+const authenticateDevice = (bearer: string) => (bearer ? { user_id: "local", device_id: "local", label: "Local Device" } : undefined);
 
 export const PORT = Number(process.env.FLOW_MCP_PORT ?? 18899);
 export const HOST = process.env.FLOW_MCP_HOST ?? "127.0.0.1";
@@ -339,100 +339,6 @@ export async function startServer(
         if (sessionId) adminSessions.delete(sessionId);
         res.setHeader("set-cookie", `${ADMIN_SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`);
         return json(res, 200, { ok: true });
-      }
-      if (req.method === "POST" && url.pathname === "/api/device/login") {
-        const ip = trustedClientIp(req);
-        const now = Date.now();
-        if (deviceLoginAttempts.size > 1000) {
-          for (const [key, attempt] of deviceLoginAttempts) if (attempt.resetsAt <= now) deviceLoginAttempts.delete(key);
-        }
-        const attempt = deviceLoginAttempts.get(ip);
-        if (attempt && attempt.resetsAt > now && attempt.count >= 10) {
-          res.setHeader("retry-after", String(Math.max(1, Math.ceil((attempt.resetsAt - now) / 1000))));
-          return json(res, 429, { error: "Quá nhiều lần đăng nhập. Hãy thử lại sau một phút." });
-        }
-        if (!attempt || attempt.resetsAt <= now) deviceLoginAttempts.set(ip, { count: 1, resetsAt: now + 60_000 });
-        else attempt.count += 1;
-        const body = JSON.parse((await readBody(req, 8192)).toString() || "{}");
-        if (typeof body.account !== "string" || typeof body.password !== "string" || typeof body.device_name !== "string" || body.account.length > 100 || body.password.length > 1024) {
-          return json(res, 400, { error: "Vui lòng nhập tài khoản và mật khẩu." });
-        }
-        try {
-          const device = loginDevice(body.account, body.password, body.device_name);
-          deviceLoginAttempts.delete(ip);
-          return json(res, 200, device);
-        } catch {
-          return json(res, 401, { error: "Tài khoản hoặc mật khẩu chưa đúng, hoặc tài khoản đã bị khóa." });
-        }
-      }
-      if (req.method === "POST" && url.pathname === "/api/pair") {
-        const ip = trustedClientIp(req);
-        const now = Date.now();
-        if (pairAttempts.size > 1000) {
-          for (const [key, value] of pairAttempts) if (value.resetsAt <= now) pairAttempts.delete(key);
-        }
-        const attempt = pairAttempts.get(ip);
-        if (attempt && attempt.resetsAt > now && attempt.count >= 10) return json(res, 429, { error: "Too many pairing attempts. Try again in a minute." });
-        if (!attempt || attempt.resetsAt <= now) pairAttempts.set(ip, { count: 1, resetsAt: now + 60_000 });
-        else attempt.count += 1;
-        const body = JSON.parse((await readBody(req, 8192)).toString() || "{}");
-        if (typeof body.user_code !== "string" || typeof body.device_name !== "string") return json(res, 400, { error: "user_code and device_name are required." });
-        return json(res, 200, pairDevice(body.user_code, body.device_name));
-      }
-      if (url.pathname.startsWith("/api/admin/users")) {
-        if (!requireAdmin(req, res)) return;
-        if (req.method === "GET" && url.pathname === "/api/admin/users") return json(res, 200, { users: listUsers() });
-        if (req.method === "POST" && url.pathname === "/api/admin/users") {
-          const body = JSON.parse((await readBody(req, 8192)).toString() || "{}");
-          if (typeof body.label !== "string") return json(res, 400, { error: "label is required." });
-          return json(res, 201, createUser(body.label));
-        }
-        const userActionRoute = url.pathname.match(/^\/api\/admin\/users\/([0-9a-f-]+)\/(rotate-code|status)$/i);
-        const userPasswordRoute = url.pathname.match(/^\/api\/admin\/users\/([0-9a-f-]+)\/password$/i);
-        if (userPasswordRoute && req.method === "POST") {
-          const body = JSON.parse((await readBody(req, 8192)).toString() || "{}");
-          if (typeof body.password !== "string" || body.password.length < 12 || body.password.length > 1024) return json(res, 400, { error: "Mật khẩu phải có từ 12 ký tự trở lên." });
-          try {
-            setUserPassword(userPasswordRoute[1], body.password);
-            return json(res, 200, { ok: true, login_enabled: true });
-          } catch {
-            return json(res, 404, { error: "Không tìm thấy người dùng đang hoạt động." });
-          }
-        }
-        if (userActionRoute && req.method === "POST") {
-          const [, userId, action] = userActionRoute;
-          if (action === "rotate-code") return json(res, 200, rotatePairingCode(userId));
-          if (action === "status") {
-            const body = JSON.parse((await readBody(req, 8192)).toString() || "{}");
-            if (body.status !== "active" && body.status !== "disabled") return json(res, 400, { error: "status must be active or disabled." });
-            setUserStatus(userId, body.status);
-            if (body.status === "disabled") listDevicesForUser(userId).forEach(({ id }) => suspendDevice(id));
-            return json(res, 200, { ok: true });
-          }
-        }
-        const adminRevokeDevice = url.pathname.match(/^\/api\/admin\/users\/([0-9a-f-]+)\/devices\/([0-9a-f-]+)\/revoke$/i);
-        if (req.method === "POST" && adminRevokeDevice) {
-          const revoked = revokeDevice(adminRevokeDevice[1], adminRevokeDevice[2]);
-          if (revoked) suspendDevice(adminRevokeDevice[2]);
-          return json(res, revoked ? 200 : 404, { ok: revoked });
-        }
-        const userDevicesRoute = url.pathname.match(/^\/api\/admin\/users\/([0-9a-f-]+)\/devices$/i);
-        if (req.method === "GET" && userDevicesRoute) {
-          return json(res, 200, { devices: listDevicesForUser(userDevicesRoute[1]) });
-        }
-        return json(res, 404, { error: "Not found." });
-      }
-      if (url.pathname === "/api/user/me" && req.method === "GET") {
-        const device = deviceFromRequest(req);
-        return device ? json(res, 200, { ...device, devices: listDevicesForUser(device.user_id) }) : json(res, 401, { error: "Valid device bearer token required." });
-      }
-      const revokeOwnDevice = url.pathname.match(/^\/api\/user\/devices\/([0-9a-f-]+)\/revoke$/i);
-      if (req.method === "POST" && revokeOwnDevice) {
-        const device = deviceFromRequest(req);
-        if (!device) return json(res, 401, { error: "Valid device bearer token required." });
-        const revoked = revokeDevice(device.user_id, revokeOwnDevice[1]);
-        if (revoked) suspendDevice(revokeOwnDevice[1]);
-        return json(res, revoked ? 200 : 404, { ok: revoked });
       }
       if (url.pathname === "/favicon.ico") return void res.writeHead(204).end();
       if (req.method === "GET" && url.pathname === "/admin") {
