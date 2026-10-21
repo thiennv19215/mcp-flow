@@ -1,0 +1,49 @@
+{
+  "checked": "2026-10-21T08:41:33.2382904Z",
+  "mode": "image-reference-vi-visible-uploads-fallback",
+  "generationSubmitted": false,
+  "reason": "Fresh preflight blocked: a visible dialog surface was reported by /api/status; no API endpoint was used to dismiss or bypass it.",
+  "preflight": {
+    "project": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "url": "https://flow.google.com/project/e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "locale": "vi",
+    "composer": {
+      "tag": "flow-base-prompt-box",
+      "className": "",
+      "connected": true
+    },
+    "promptDiagnostics": null,
+    "chipCount": 0,
+    "pickerOpen": false,
+    "visibleSurfaces": [
+      {
+        "role": "dialog",
+        "tag": "div",
+        "labelCount": 3
+      }
+    ],
+    "busyJobs": [],
+    "activeAttempts": 0,
+    "observerReady": true,
+    "extensionBuild": {
+      "status": "current",
+      "matchesWatcher": true,
+      "backgroundRevision": "47fe27a1d922b78185cb446e2dd7a3b9720af09c285d3f74e33a94d120b2cbaf",
+      "contentRevision": "47fe27a1d922b78185cb446e2dd7a3b9720af09c285d3f74e33a94d120b2cbaf",
+      "watcherRevision": "47fe27a1d922b78185cb446e2dd7a3b9720af09c285d3f74e33a94d120b2cbaf"
+    },
+    "watcher": {
+      "revision": "710cf5449bffec5a49c172142106ed810c5e1d3f0de0243d69b68e1a14ffee5f",
+      "buildRevision": "47fe27a1d922b78185cb446e2dd7a3b9720af09c285d3f74e33a94d120b2cbaf",
+      "reloadEpoch": 3,
+      "reloadKey": "710cf5449bffec5a49c172142106ed810c5e1d3f0de0243d69b68e1a14ffee5f"
+    },
+    "asset": [
+      {
+        "name": "fm-a6f6c32f9203-upload.png",
+        "kind": "image"
+      }
+    ],
+    "uploadReceiptUuid": "b5d304ab-eeb8-4001-8110-86a225761c0f"
+  }
+}

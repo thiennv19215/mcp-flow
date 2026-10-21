@@ -6,7 +6,7 @@ import { ensureCorrelationObserver } from '../extension/background/flow-observer
 const healthy = (overrides = {}) => ({
   ready: true,
   version: 1,
-  observerRevision: 23,
+  observerRevision: 24,
   projectId: '00000000-0000-4000-8000-000000000000',
   activeAttempts: 0,
   xhrHookActive: true,
@@ -32,7 +32,7 @@ test('observer health returns the existing healthy state without reinjecting', a
   const harness = scriptingHarness({ initial: healthy() });
   const result = await ensureCorrelationObserver(17, harness.scripting);
   assert.equal(result.ready, true);
-  assert.equal(result.observerRevision, 23);
+  assert.equal(result.observerRevision, 24);
   assert.equal(harness.repairs(), 0);
 });
 

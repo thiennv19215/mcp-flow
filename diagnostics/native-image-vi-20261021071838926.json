@@ -1,0 +1,105 @@
+{
+  "started": "2026-10-21T07:18:38.926Z",
+  "operation": "Vietnamese text-to-image submit_only",
+  "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+  "preflight": {
+    "observer": {
+      "ready": true,
+      "activeAttempts": 0,
+      "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa"
+    },
+    "flow": {
+      "url": "https://flow.google.com/project/e4bf4bae-626d-4718-a66a-cbdb04c8e6fa?hl=vi",
+      "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+      "prompt": {
+        "contentEditable": true,
+        "characterCount": 0,
+        "chipCount": 0
+      },
+      "referenceActionDiagnostics": {
+        "action": "attach",
+        "phase": "failed",
+        "step": "picker closed",
+        "errorCode": "FLOW_ASSET_NOT_FOUND",
+        "cleanupErrorCode": null,
+        "pickerOpen": true,
+        "pickerRole": "listbox",
+        "pickerOptionCount": 10,
+        "locale": "vi",
+        "searchLabelRecognized": false,
+        "searchLabel": null,
+        "searchResultsVerified": false,
+        "activeCategory": "all",
+        "categorySelected": true,
+        "pickerScanPages": 1,
+        "pickerScanEndReached": true,
+        "optionLabelHashes": [
+          "h-9c1c938d",
+          "h-2c2ef930",
+          "h-f32c2b43",
+          "h-f87ef7e0",
+          "h-eba34d86",
+          "h-e9561ea6",
+          "h-72eb99a6",
+          "h-d1a77521",
+          "h-6731e2ed"
+        ],
+        "exactTargetFound": false,
+        "scrollOwnerCount": 1,
+        "scrollOwnerDepth": 0,
+        "scrollClientHeight": 515,
+        "scrollHeight": 515,
+        "scrollTop": 0,
+        "visibleSurfaces": [
+          {
+            "role": "dialog",
+            "tag": "div",
+            "labelCount": 3
+          },
+          {
+            "role": "listbox",
+            "tag": "cdk-virtual-scroll-viewport",
+            "labelCount": 10
+          }
+        ],
+        "categoryTabs": [
+          {
+            "selected": true
+          },
+          {
+            "selected": false
+          },
+          {
+            "selected": false
+          },
+          {
+            "selected": false
+          },
+          {
+            "selected": false
+          },
+          {
+            "selected": false
+          }
+        ],
+        "chipCount": 0,
+        "chips": [],
+        "surfaceStatus": null,
+        "path": null,
+        "provenanceConfirmed": false,
+        "chipUuidConfirmed": false,
+        "menuRelatedToTile": false,
+        "menuNearTrigger": false,
+        "cleanup": null,
+        "updatedAt": "2026-10-21T07:18:38.988Z",
+        "lastResult": null
+      },
+      "warnings": [
+        "close An van nvthien11052001@gmail.com Chuyển đổi tài khoản movie_filter_auto 1.040 tín dụng Google Flow Nâng cấp Quản lý gói thuê bao Đăng xuất khỏi mọi tài khoản frame_spark Hình mờ có thể nhìn thấy Khu vực của bạn yêu cầu phải có hình mờ có thể nhìn thấy Quyền riêng tư · Điều khoản dịch vụ · Giấy phép Trang web này được bảo vệ bằng reCAPTCHA, đồng thời có áp dụng Chính sách quyền riêng tư và Điều khoản dịch vụ của Google."
+      ]
+    },
+    "busyJobs": []
+  },
+  "stopped": "preflight failed; no submit",
+  "finished": "2026-10-21T07:18:39.524Z"
+}

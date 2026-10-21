@@ -1,0 +1,43 @@
+{
+  "output_dir": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-first-frame-20261021-0647",
+  "jobs": [
+    {
+      "id": "b2af8370",
+      "status": "running",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-first-frame-20261021-0647",
+      "scene": "scene-01",
+      "prompt": "A handcrafted cobalt blue glass teapot on a pale stone table, gentle camera push in from the supplied opening frame, soft morning window light, realistic product film, no text.",
+      "attempts": 1,
+      "credit_quote_verified": null,
+      "files": [],
+      "outcome_unknown": false,
+      "request_dispatched": false,
+      "server_acceptance_observed": false,
+      "request_diagnostics": null
+    }
+  ],
+  "postflight": {
+    "observedAt": "2026-10-21T06:48:38.4993096Z",
+    "job": {
+      "id": "b2af8370",
+      "status": "failed",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-first-frame-20261021-0647",
+      "scene": "scene-01",
+      "prompt": "A handcrafted cobalt blue glass teapot on a pale stone table, gentle camera push in from the supplied opening frame, soft morning window light, realistic product film, no text.",
+      "attempts": 1,
+      "credit_quote_verified": null,
+      "progress": "Flow submit: selecting asset fm-a6f6c32f9203-upload.png",
+      "files": [],
+      "error": "Flow's exact frame option for \"fm-a6f6c32f9203-upload.png\" did not expose a uniquely verifiable backend UUID. No frame was selected.",
+      "error_category": "unknown",
+      "outcome_unknown": false,
+      "request_dispatched": false,
+      "server_acceptance_observed": false,
+      "request_diagnostics": null
+    },
+    "activeAttempts": 0,
+    "observerReady": true,
+    "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "busyJobs": []
+  }
+}

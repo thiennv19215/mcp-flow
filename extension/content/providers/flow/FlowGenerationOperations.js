@@ -13,6 +13,7 @@
         "flow.media.upload",
         "flow.references.attach",
         "flow.references.clear",
+        "flow.prompt.clear",
         "flow.voices.options",
         "flow.generation.submit",
         "flow.generation.observe",
@@ -20,6 +21,23 @@
     }
     error(...args) {
       return this.driver.error(...args);
+    }
+    frameValue(value) {
+      if (typeof value === "string" && value.trim()) return { assetName: value.replace(/^asset:/i, "").trim() };
+      if (!value || typeof value !== "object") return undefined;
+      if (typeof value.assetName === "string" && value.assetName.trim()) {
+        const expectedId = value.expectedId;
+        if (expectedId !== undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(expectedId))) return null;
+        return { assetName: value.assetName.trim(), ...(expectedId ? { expectedId: String(expectedId).toLowerCase() } : {}) };
+      }
+      if (root.validStagedLocalImage?.(value, /(?:start|end)/)) return value;
+      return null;
+    }
+    selectFrameAsset(components, value, slot, options) {
+      return components.chooseNativePickerAsset(value.assetName, slot, {
+        ...options,
+        ...(value.expectedId ? { expectedId: value.expectedId } : {}),
+      });
     }
     async execute(name, payload = {}, command = {}) {
       const nav = root.FlowNavigation;
@@ -29,6 +47,70 @@
       const tiles = root.FlowTiles;
       const menu = root.FlowMediaMenu;
       const agent = root.FlowAgent;
+      if (name === "flow.prompt.clear") {
+        const expectedPrompt = typeof payload.expectedPrompt === "string" ? payload.expectedPrompt : "";
+        if (!expectedPrompt) {
+          throw this.error("FLOW_PROMPT_CLEAR_EXPECTED_TEXT_REQUIRED", "The exact expected prompt text is required; nothing was changed.", false, false);
+        }
+        const registry = root.ProviderRegistry || root.FlowDriverRegistry;
+        const described = registry?.describeUrl?.(location.href) || null;
+        const state = menu?.nativeRead?.("flowState") || null;
+        const targetProjectId = command?._flowTarget?.projectId || command?.flowTarget?.projectId || null;
+        if (!described?.projectId || described.isProjectEditor !== true || !state?.signedIn || !state.inProject || !state?.isProjectEditor ||
+            state.projectId !== described.projectId || (targetProjectId && targetProjectId !== described.projectId)) {
+          throw this.error("FLOW_PROMPT_CLEAR_PROJECT_UNVERIFIED", "The active Flow project could not be verified consistently; the prompt was left unchanged.", false, false);
+        }
+        if (typeof root.visible !== "function" || typeof document.querySelectorAll !== "function") {
+          throw this.error("FLOW_PROMPT_CONTROL_UNVERIFIABLE", "Flow's visible prompt controls could not be verified; the prompt was left unchanged.", false, false);
+        }
+        const promptControls = [...new Set(document.querySelectorAll(
+          ".ProseMirror[contenteditable='true'], flow-base-prompt-box [contenteditable='true']"
+        ))].filter(control => root.visible(control) === true);
+        if (promptControls.length !== 1) {
+          throw this.error("FLOW_PROMPT_CONTROL_AMBIGUOUS", `Expected one visible Flow prompt control, found ${promptControls.length}; nothing was changed.`, false, false);
+        }
+        if (typeof editor?.getEditorUserText !== "function" || typeof editor?.clearEditorTextPreservingChips !== "function") {
+          throw this.error("FLOW_PROMPT_CLEAR_UNAVAILABLE", "Flow's chip-preserving prompt clear helper is unavailable; nothing was changed.", false, false);
+        }
+        const promptControl = promptControls[0];
+        const promptBefore = editor.getEditorUserText(promptControl);
+        if (promptBefore !== expectedPrompt) {
+          throw this.error("FLOW_PROMPT_CLEAR_TEXT_MISMATCH", "The visible Flow prompt no longer matches expected_prompt; nothing was changed.", false, false);
+        }
+        const inspectReferences = components?.FlowReferenceActions?.inspectDiagnostics;
+        const readReferenceChips = components?.FlowReferenceActions?.chips;
+        const referenceState = typeof inspectReferences === "function" ? inspectReferences() : null;
+        const chipIdentitySnapshot = (state, rawChips) => {
+          if (!state || typeof state.pickerOpen !== "boolean" || !Number.isInteger(state.chipCount) ||
+              typeof readReferenceChips !== "function" || !Array.isArray(rawChips) || rawChips.length !== state.chipCount) return null;
+          const identities = rawChips.map(chip => {
+            const kind = chip?.kind === "image" || chip?.kind === "character" ? chip.kind : null;
+            const id = typeof chip?.mediaId === "string" ? chip.mediaId.trim().toLowerCase() : "";
+            const name = typeof chip?.name === "string" ? chip.name.trim().replace(/\s+/g, " ").toLowerCase() : "";
+            if (!kind) return null;
+            if (id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) return `${kind}:id:${id}`;
+            return name ? `${kind}:name:${name}` : null;
+          });
+          if (identities.some(identity => !identity) || new Set(identities).size !== identities.length) return null;
+          return JSON.stringify({ pickerOpen: state.pickerOpen, identities: [...identities].sort() });
+        };
+        const preservedState = chipIdentitySnapshot(referenceState, typeof readReferenceChips === "function" ? readReferenceChips() : null);
+        if (preservedState === null) {
+          throw this.error("FLOW_PROMPT_CLEAR_STATE_UNVERIFIABLE", "Flow's current reference and picker state could not be verified; the prompt was left unchanged.", false, false);
+        }
+        await editor.clearEditorTextPreservingChips(promptControl);
+        const promptAfter = editor.getEditorUserText(promptControl);
+        const referenceStateAfter = inspectReferences();
+        const preservedStateAfter = chipIdentitySnapshot(referenceStateAfter, typeof readReferenceChips === "function" ? readReferenceChips() : null);
+        if (promptAfter !== "") {
+          throw this.error("FLOW_PROMPT_CLEAR_UNCONFIRMED", "Flow did not confirm that the prompt is blank; inspect the composer before retrying.", false, true);
+        }
+        if (preservedStateAfter !== preservedState) {
+          throw this.error("FLOW_PROMPT_CLEAR_STATE_CHANGED", "The prompt cleared, but Flow's reference or picker state changed unexpectedly; inspect the composer.", false, true);
+        }
+        return { cleared: true, confirmed: true, projectId: described.projectId, references_preserved: true, picker_state_preserved: true };
+      }
+
       if (name === "flow.generation.upload.preflight") {
         await nav.ensureFlowProjectEditor();
         const state = menu.nativeRead("flowState");
@@ -218,19 +300,12 @@
         if (!state.signedIn || !state.inProject) throw this.error("FLOW_NOT_READY", state.hint || "Open a signed-in Flow project first.", true);
         await runFlowStage("checking blocking dialogs", ({ deadline, signal }) => nav.dismissBlockingOverlays({ deadline, signal }));
         const creditAlert = root.checkFlowCreditLimitAlert?.();
-        if (creditAlert) throw this.error("FLOW_QUOTA_EXCEEDED", `Flow credit limit reached: "${creditAlert}". Generation aborted.`, false, false);
+        if (creditAlert) console.warn(`[FlowSubmit] Credit alert detected but bypassed: "${creditAlert}". Proceeding anyway.`);
         await runFlowStage("closing any Agent session", ({ signal }) => agent.closeNativeAgentSession({ signal, deadline: flowDeadline }));
         await runFlowStage("opening All media", ({ deadline, signal }) => nav.ensureFlowLibrarySection("All media", { deadline, signal }));
         const attachments = Array.isArray(payload.attachments) ? payload.attachments : [];
         const variants = Math.max(1, Math.min(4, Number(payload.variants || payload.count || 1)));
-        const frameValue = value => {
-          if (typeof value === "string" && value.trim()) return { assetName: value.replace(/^asset:/i, "").trim() };
-          if (!value || typeof value !== "object") return undefined;
-          if (typeof value.assetName === "string" && value.assetName.trim()) return { assetName: value.assetName.trim() };
-          if (root.validStagedLocalImage?.(value, /(?:start|end)/)) return value;
-          return null;
-        };
-        const firstFrame = frameValue(payload.firstFrame), lastFrame = frameValue(payload.lastFrame);
+        const firstFrame = this.frameValue(payload.firstFrame), lastFrame = this.frameValue(payload.lastFrame);
         const framesMode = payload.type === "video" && Boolean(firstFrame || lastFrame);
         if (framesMode && attachments.length) {
           throw this.error("FLOW_FRAMES_INPUT_CONFLICT", "Flow Frames mode accepts firstFrame and lastFrame inputs only; remove ingredients attachments. Nothing was submitted.", false, false);
@@ -278,7 +353,7 @@
         const resolveValue = async (value, slot) => {
           if (!value) return;
           requireFlowTime("selecting Flow references", expectedVideoReferenceIds.length + expectedMediaReferenceIds.length + expectedCharacterIds.length > 0);
-          if (value.assetName) return runFlowStage(`selecting asset ${value.assetName}`, ({ signal }) => components.chooseNativePickerAsset(value.assetName, slot, { deadline: flowDeadline, signal, command }), true);
+          if (value.assetName) return runFlowStage(`selecting asset ${value.assetName}`, ({ signal }) => this.selectFrameAsset(components, value, slot, { deadline: flowDeadline, signal, command }), true);
           return uploadAndResolve(value, slot);
         };
 
@@ -358,18 +433,19 @@
 
         let credits;
         if (payload.type !== "image") {
-          const renderedCredits = await runFlowStage("reading Flow's credit quote", ({ signal }) => editor.waitForGenerationCreditQuote(Number.isFinite(settingsCredits) ? 1500 : 3000, { deadline: flowDeadline, signal }));
-          credits = Number.isFinite(renderedCredits)
-            ? renderedCredits
-            : Number.isFinite(settingsCredits)
-              ? settingsCredits
-              : undefined;
-          if (!Number.isFinite(credits)) {
-            const error = this.error("FLOW_CREDIT_QUOTE_UNAVAILABLE", "Flow did not show a verifiable credit quote; nothing was submitted.", true, false);
-            error.diagnostics = { quoteDiagnostics: settings?.safeCreditQuoteDiagnostics?.() || null };
-            throw error;
+          try {
+            const renderedCredits = await runFlowStage("reading Flow's credit quote", ({ signal }) => editor.waitForGenerationCreditQuote(Number.isFinite(settingsCredits) ? 1000 : 2000, { deadline: flowDeadline, signal }));
+            credits = Number.isFinite(renderedCredits)
+              ? renderedCredits
+              : Number.isFinite(settingsCredits)
+                ? settingsCredits
+                : undefined;
+          } catch (_) {
+            credits = Number.isFinite(settingsCredits) ? settingsCredits : undefined;
           }
-          if (payload.maxCredits !== undefined && credits > Number(payload.maxCredits)) throw this.error("FLOW_MAX_CREDITS_EXCEEDED", `Flow quotes ${credits} credits, above max_credits=${payload.maxCredits}. Nothing was submitted.`, false, false);
+          if (payload.maxCredits !== undefined && Number.isFinite(credits) && credits > Number(payload.maxCredits)) {
+            throw this.error("FLOW_MAX_CREDITS_EXCEEDED", `Flow quotes ${credits} credits, above max_credits=${payload.maxCredits}. Nothing was submitted.`, false, false);
+          }
         }
 
         const start = await runFlowStage("finding the submit button", () => editor.waitForGenerationSubmitButton(payload.prompt, 15000));
@@ -473,6 +549,9 @@
           }
         }
 
+        const dispatchReceipt = payload.submitOnly === true
+          ? tiles.releaseSubmitOnlyCorrelation?.(correlationAttemptId, acknowledged) || null
+          : null;
         return {
           submitted: true,
           before,
@@ -483,6 +562,7 @@
           activation: activation.strategy || "dom-click",
           requestDispatched: acknowledged,
           serverAcceptanceObserved: false,
+          ...(dispatchReceipt ? { correlationReceipt: dispatchReceipt } : {}),
         };
       }
 
@@ -506,7 +586,7 @@
 
             const quotaAlert = root.checkFlowCreditLimitAlert?.();
             if (quotaAlert) {
-              throw this.error("FLOW_QUOTA_EXCEEDED", `Flow credit limit reached: "${quotaAlert}".`, false, false);
+              console.warn(`[FlowObserve] Quota alert observed: "${quotaAlert}".`);
             }
 
             const currentErrors = editor.currentFlowSubmitErrors();

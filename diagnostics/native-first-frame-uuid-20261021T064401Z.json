@@ -1,0 +1,18 @@
+{
+  "timestampUtc": "20261021T064401Z",
+  "mode": "first-frame-explicit-uuid",
+  "prompt": "Animate the verified uploaded blue teacup image into a gentle tabletop camera move. Keep the cup silhouette and glaze unchanged; soft window light, no text. Frame identity check 20261021T064401Z.",
+  "request": {
+    "frameAsset": "fm-a6f6c32f9203-upload.png",
+    "submitOnly": true,
+    "frameId": "b5d304ab-eeb8-4001-8110-86a225761c0f",
+    "maxCredits": 15,
+    "retries": 0,
+    "project": "NativeE2E-first-frame-uuid-20261021T064401Z",
+    "variants": 1
+  },
+  "result": null,
+  "request_error": "Local API rejected scenes.0.first_frame before queueing: Invalid input: expected string, received object.",
+  "request_dispatched": false,
+  "queued": false
+}

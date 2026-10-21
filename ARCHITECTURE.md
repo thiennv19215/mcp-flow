@@ -6,7 +6,7 @@ MCP tools, validation, job queue, retries, local file handling, media assembly, 
 
 - `src/` contains MCP tools, job orchestration, backend file transfer, Chrome download collection, and local media processing.
 - `extension/background/` selects the Flow tab and keeps an authenticated HTTPS long-poll connection to the backend, with WebSocket compatibility for older deployments.
-- `extension/content/` resolves the Flow route to a page driver and implements Flow operations.
+- `extension/content/` resolves the Flow route to a page driver and implements Flow operations. DOM query engine guidelines and dynamic selector details are documented in [DOM-ARCHITECTURE.md](./DOM-ARCHITECTURE.md).
 - `extension/ui/` contains the connector popup and settings.
 - `studio/` contains the local control panel.
 

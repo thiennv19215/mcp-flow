@@ -1,0 +1,88 @@
+{
+  "started": "2026-10-21T08:28:29.7932525Z",
+  "mode": "text-video-vi",
+  "api": "http://127.0.0.1:18897",
+  "preflight": {
+    "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "locale": "vi",
+    "build": "554ca35533183b32fb1f1f5853f5c0e508017e94c20ee12f0f9520556b951fbc",
+    "observerReady": true,
+    "activeAttempts": 0,
+    "promptChars": 0,
+    "chipCount": 0,
+    "pickerOpen": false,
+    "visibleSurfaces": [],
+    "busyJobs": [],
+    "warnings": null
+  },
+  "request": {
+    "scenes": [
+      {
+        "prompt": "A slow cinematic camera push toward a handmade amber glass carafe on a pale stone counter, soft morning window light and subtle reflections, steady movement, no text.",
+        "variants": 1,
+        "max_credits": 15,
+        "retries": 0,
+        "type": "video",
+        "submit_only": true
+      }
+    ],
+    "project": "NativeE2E-video-text-vi-20261021"
+  },
+  "response": {
+    "output_dir": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-video-text-vi-20261021",
+    "jobs": [
+      {
+        "id": "ae283a15",
+        "status": "running",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-video-text-vi-20261021",
+        "scene": "scene-01",
+        "prompt": "A slow cinematic camera push toward a handmade amber glass carafe on a pale stone counter, soft morning window light and subtle reflections, steady movement, no text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "files": [],
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      }
+    ]
+  },
+  "apiError": null,
+  "finished": "2026-10-21T08:28:29.8037133Z",
+  "quoteDispatchOutcome": {
+    "jobId": "ae283a15",
+    "status": "failed",
+    "creditQuoteVerified": false,
+    "credits": null,
+    "quoteReasonCodes": [
+      "no_candidate"
+    ],
+    "requestDispatched": false,
+    "serverAcceptanceObserved": false,
+    "outcomeUnknown": false,
+    "error": "Flow did not show a verifiable credit quote; nothing was submitted."
+  },
+  "promptCleanup": {
+    "endpoint": "/api/clear_prompt",
+    "expectedPromptMatched": true,
+    "cleared": true,
+    "confirmed": true,
+    "referencesPreserved": true,
+    "pickerStatePreserved": true
+  },
+  "postflight": {
+    "observerReady": true,
+    "activeAttempts": 0,
+    "build": "554ca35533183b32fb1f1f5853f5c0e508017e94c20ee12f0f9520556b951fbc",
+    "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "locale": "vi",
+    "promptChars": 0,
+    "chipCount": 0,
+    "pickerOpen": false,
+    "visibleSurfaces": [],
+    "busyJobs": [],
+    "warnings": null,
+    "pacing": null
+  }
+}

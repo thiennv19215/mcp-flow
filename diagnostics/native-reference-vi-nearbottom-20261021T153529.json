@@ -1,0 +1,169 @@
+{
+  "started": "2026-10-21T08:35:19.2103639Z",
+  "mode": "image-reference-vi-nearbottom",
+  "preflight": {
+    "project": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "url": "https://flow.google.com/project/e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "language": "vi",
+    "promptDiagnostics": null,
+    "composer": {
+      "tag": "flow-base-prompt-box",
+      "className": "",
+      "connected": true
+    },
+    "chips": 0,
+    "pickerOpen": false,
+    "busyJobs": 0,
+    "activeAttempts": 0,
+    "observerReady": true,
+    "extensionBuild": {
+      "status": "current",
+      "matchesWatcher": true,
+      "backgroundRevision": "344208b65688118ad0b4c7c721629c2a70be1f3376979068f5b63ad6517e7800",
+      "contentRevision": "344208b65688118ad0b4c7c721629c2a70be1f3376979068f5b63ad6517e7800",
+      "watcherRevision": "344208b65688118ad0b4c7c721629c2a70be1f3376979068f5b63ad6517e7800"
+    },
+    "watcher": {
+      "revision": "b44423dc057a028e376066a48135b927774fc84c0c628f1f80651475614d9c0d",
+      "buildRevision": "344208b65688118ad0b4c7c721629c2a70be1f3376979068f5b63ad6517e7800",
+      "reloadEpoch": 2,
+      "reloadKey": "b44423dc057a028e376066a48135b927774fc84c0c628f1f80651475614d9c0d"
+    },
+    "assetTitle": "fm-a6f6c32f9203-upload.png",
+    "assetKind": "image",
+    "uploadReceiptId": "b5d304ab-eeb8-4001-8110-86a225761c0f",
+    "clean": true
+  },
+  "submission": {
+    "output_dir": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-vi-nearbottom-20261021",
+    "jobs": [
+      {
+        "id": "ada338ce",
+        "status": "running",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-vi-nearbottom-20261021",
+        "scene": "scene-01",
+        "prompt": "Unique VI reference picker validation 2026-10-21: create a refined product still of the same cobalt glass vase on a dark moss-green pedestal, pale limestone background, soft side lighting, no text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "files": [],
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      }
+    ]
+  },
+  "job_id": "ada338ce",
+  "latest_job": {
+    "id": "ada338ce",
+    "status": "failed",
+    "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-vi-nearbottom-20261021",
+    "scene": "scene-01",
+    "prompt": "Unique VI reference picker validation 2026-10-21: create a refined product still of the same cobalt glass vase on a dark moss-green pedestal, pale limestone background, soft side lighting, no text.",
+    "attempts": 1,
+    "credit_quote_verified": null,
+    "progress": "Flow submit: selecting asset fm-a6f6c32f9203-upload.png",
+    "files": [],
+    "error": "No exact reference named \"fm-a6f6c32f9203-upload.png\" in the selected project after a complete picker scan. Nothing was attached.",
+    "error_category": "unknown",
+    "outcome_unknown": false,
+    "request_dispatched": false,
+    "server_acceptance_observed": false,
+    "request_diagnostics": null,
+    "operation_diagnostics": {
+      "locale": "vi",
+      "activeCategory": "all",
+      "categorySelected": true,
+      "searchLabelRecognized": false,
+      "searchLabel": null,
+      "searchResultsVerified": false,
+      "optionCount": 11,
+      "pages": 1,
+      "endReached": true,
+      "optionLabelHashes": [
+        "h-79bc4213",
+        "h-22190779",
+        "h-9c1c938d",
+        "h-2c2ef930",
+        "h-f32c2b43",
+        "h-f87ef7e0",
+        "h-eba34d86",
+        "h-e9561ea6",
+        "h-72eb99a6",
+        "h-d1a77521",
+        "h-6731e2ed"
+      ],
+      "exactTargetFound": false,
+      "scrollOwnerCount": 1,
+      "scrollOwnerDepth": 0,
+      "scrollClientHeight": 515,
+      "scrollHeight": 528,
+      "scrollTop": 0,
+      "errorCode": "FLOW_ASSET_NOT_FOUND"
+    }
+  },
+  "polls": [
+    {
+      "at": "2026-10-21T08:35:27.5293912Z",
+      "status": "running",
+      "dispatched": false,
+      "unknown": false,
+      "error": null,
+      "operation_diagnostics": null,
+      "credits": null,
+      "quote_verified": null
+    },
+    {
+      "at": "2026-10-21T08:35:29.5556677Z",
+      "status": "failed",
+      "dispatched": false,
+      "unknown": false,
+      "error": "No exact reference named \"fm-a6f6c32f9203-upload.png\" in the selected project after a complete picker scan. Nothing was attached.",
+      "operation_diagnostics": {
+        "locale": "vi",
+        "activeCategory": "all",
+        "categorySelected": true,
+        "searchLabelRecognized": false,
+        "searchLabel": null,
+        "searchResultsVerified": false,
+        "optionCount": 11,
+        "pages": 1,
+        "endReached": true,
+        "optionLabelHashes": [
+          "h-79bc4213",
+          "h-22190779",
+          "h-9c1c938d",
+          "h-2c2ef930",
+          "h-f32c2b43",
+          "h-f87ef7e0",
+          "h-eba34d86",
+          "h-e9561ea6",
+          "h-72eb99a6",
+          "h-d1a77521",
+          "h-6731e2ed"
+        ],
+        "exactTargetFound": false,
+        "scrollOwnerCount": 1,
+        "scrollOwnerDepth": 0,
+        "scrollClientHeight": 515,
+        "scrollHeight": 528,
+        "scrollTop": 0,
+        "errorCode": "FLOW_ASSET_NOT_FOUND"
+      },
+      "credits": null,
+      "quote_verified": null
+    }
+  ],
+  "outcome": "terminal_before_dispatch",
+  "finished": "2026-10-21T08:35:29.5579486Z",
+  "postflight": {
+    "project": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "promptDiagnostics": null,
+    "chips": 0,
+    "pickerOpen": false,
+    "activeAttempts": 0,
+    "observerReady": true,
+    "busyJobs": []
+  }
+}

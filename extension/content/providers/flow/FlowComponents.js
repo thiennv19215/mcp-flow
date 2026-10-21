@@ -94,10 +94,253 @@
     if (matches.length > 1) throw flowError("FLOW_ASSET_AMBIGUOUS", `More than one reference is named "${name}". Select a unique name or use character:<name> for a character. Nothing was attached.`);
     return matches[0] || null;
   }
+  function referenceOptionMediaId(option) {
+    // Identity must come from this exact option's tile/attributes; a global
+    // same-title tile elsewhere in the library is not proof for this category.
+    const tile = (typeof root.flowQuery === "function" ? root.flowQuery("tiles.container", option, { checkVisible: false }) : null) ||
+      option?.querySelector?.("flow-grid-tile-container");
+    const tileId = tile && mediaId(tile);
+    return (tileId && !tileId.startsWith("title:") ? tileId : null) || option?.getAttribute?.("data-media-id") ||
+      option?.querySelector?.("[data-media-id]")?.getAttribute("data-media-id") || tileId || undefined;
+  }
+  function referenceOptionLabels(option) {
+    const labels = [accessibleName(option), option.getAttribute("aria-label"), option.getAttribute("title")];
+    for (const node of option.querySelectorAll("[aria-label],[title],img[alt],flow-grid-tile-container")) {
+      labels.push(node.getAttribute("aria-label"), node.getAttribute("title"), node.getAttribute("alt"));
+    }
+    return labels.map(value => String(value || "").replace(/\s+/g, " ").trim()).filter(Boolean);
+  }
+  function referenceOptionIdentity(option, page, index) {
+    for (const attr of ["data-index", "aria-posinset", "data-virtual-index"]) {
+      const value = option.getAttribute(attr);
+      if (value) return `${attr}:${value}`;
+    }
+    if (option.id) return `option:${option.id}`;
+    return `page:${page}:option:${index}`;
+  }
+  function diagnosticLabelHash(value) {
+    let hash = 2166136261;
+    const text = normalize(value);
+    for (let index = 0; index < text.length; index++) { hash ^= text.charCodeAt(index); hash = Math.imul(hash, 16777619); }
+    return `h-${(hash >>> 0).toString(16).padStart(8, "0")}`;
+  }
+  function diagnosticOptionHashes(options) {
+    return [...new Set(options.flatMap(referenceOptionLabels).map(diagnosticLabelHash))].slice(0, 60);
+  }
+  function diagnosticCategory(value) {
+    return ["all", "characters", "voices", "uploads", "ingredients"].includes(value) ? value : "unknown";
+  }
+  function referenceScrollOwner(list) {
+    const candidates = [];
+    const addCandidate = (element, depth) => {
+      const clientHeight = Number(element?.clientHeight) || 0;
+      const scrollHeight = Number(element?.scrollHeight) || 0;
+      if (!visible(element) || clientHeight <= 0 || scrollHeight <= clientHeight + 5) return;
+      let overflowY = String(element?.style?.overflowY || "").toLowerCase();
+      try { overflowY = String(globalThis.getComputedStyle?.(element)?.overflowY || overflowY).toLowerCase(); } catch {}
+      if (!/^(?:auto|scroll|overlay)$/.test(overflowY)) return;
+      if (!Number.isFinite(element.scrollTop)) return;
+      if (!candidates.some(candidate => candidate.element === element)) candidates.push({ element, depth, clientHeight, scrollHeight });
+    };
+    // Descendant scroll viewports are within the listbox surface.
+    for (const child of list.querySelectorAll("*")) addCandidate(child, 1);
+    // Flow sometimes places the virtual viewport around, rather than inside,
+    // the listbox. Walk only its own ancestor chain and stop at the picker
+    // dialog or after five levels; never search a global document scroller.
+    const boundary = list.closest?.('[role="dialog"]') || null;
+    let current = list;
+    for (let depth = 0; current && depth <= 5; depth++) {
+      addCandidate(current, -depth);
+      if (current === boundary) break;
+      current = current.parentElement;
+    }
+    // A measured listbox with no overflow is a complete static list. Use it
+    // only when there are no scrollable owners anywhere in the bounded surface.
+    if (!candidates.length && Number(list.clientHeight) > 0 && Number(list.scrollHeight) > 0 && Number(list.scrollHeight) <= Number(list.clientHeight) + 5 && Number.isFinite(list.scrollTop)) {
+      candidates.push({ element: list, depth: 0, clientHeight: Number(list.clientHeight), scrollHeight: Number(list.scrollHeight) });
+    }
+    const evidence = candidate => ({
+      scrollOwnerCount: candidates.length,
+      scrollOwnerDepth: candidate?.depth ?? null,
+      scrollClientHeight: candidate?.clientHeight ?? 0,
+      scrollHeight: candidate?.scrollHeight ?? 0,
+      scrollTop: Number(candidate?.element?.scrollTop) || 0,
+    });
+    return { candidate: candidates.length === 1 ? candidates[0] : null, count: candidates.length, evidence: evidence(candidates.length === 1 ? candidates[0] : null) };
+  }
+  function referencePageSignature(list) {
+    return JSON.stringify(listOptions(list).map((option, index) => ({
+      labels: referenceOptionLabels(option).map(normalize).sort(),
+      identity: referenceOptionIdentity(option, 0, index),
+    })));
+  }
+  function referenceScanEvidence(patch = {}) {
+    const language = String(document.documentElement?.lang || "").trim().toLowerCase().split(/[-_]/, 1)[0];
+    return {
+      locale: ["en", "vi"].includes(language) ? language : "unknown",
+      searchLabelRecognized: lastReferenceActionDiagnostics.searchLabelRecognized === true,
+      searchLabel: lastReferenceActionDiagnostics.searchLabel || null,
+      searchResultsVerified: lastReferenceActionDiagnostics.searchResultsVerified === true,
+      activeCategory: diagnosticCategory(lastReferenceActionDiagnostics.activeCategory),
+      categoriesScanned: Array.isArray(lastReferenceActionDiagnostics.categoriesScanned)
+        ? [...new Set(lastReferenceActionDiagnostics.categoriesScanned.filter(value => ["all", "uploads"].includes(value)))].slice(0, 2) : [],
+      categorySelected: lastReferenceActionDiagnostics.categorySelected === true,
+      optionCount: Number(lastReferenceActionDiagnostics.pickerOptionCount) || 0,
+      pages: Number(lastReferenceActionDiagnostics.pickerScanPages) || 0,
+      endReached: lastReferenceActionDiagnostics.pickerScanEndReached === true,
+      optionLabelHashes: Array.isArray(lastReferenceActionDiagnostics.optionLabelHashes) ? lastReferenceActionDiagnostics.optionLabelHashes.slice(0, 60) : [],
+      exactTargetFound: lastReferenceActionDiagnostics.exactTargetFound === true,
+      scrollOwnerCount: Number(lastReferenceActionDiagnostics.scrollOwnerCount) || 0,
+      scrollOwnerDepth: Number.isInteger(lastReferenceActionDiagnostics.scrollOwnerDepth) ? lastReferenceActionDiagnostics.scrollOwnerDepth : null,
+      scrollClientHeight: Number(lastReferenceActionDiagnostics.scrollClientHeight) || 0,
+      scrollHeight: Number(lastReferenceActionDiagnostics.scrollHeight) || 0,
+      scrollTop: Number(lastReferenceActionDiagnostics.scrollTop) || 0,
+      tileActionAttempted: lastReferenceActionDiagnostics.path === "uploaded_tile_context_menu",
+      tileActionStep: ["queued", "menu_missing", "menu_owned", "action_clicked", "chip_confirmed"].includes(lastReferenceActionDiagnostics.tileActionStep)
+        ? lastReferenceActionDiagnostics.tileActionStep : null,
+      tileActionMenuObserved: lastReferenceActionDiagnostics.surfaceStatus === "unique_new_menu_and_action" || lastReferenceActionDiagnostics.surfaceStatus === "attached",
+      ...patch,
+    };
+  }
+  async function scanExactReferenceOption(name, decorated, deadline, signal) {
+    let list = picker();
+    if (!list) throw flowError("FLOW_ASSET_PICKER_LOADING", "Flow's reference picker closed before its options could be scanned.", true, false);
+    const scrollOwner = referenceScrollOwner(list);
+    const scroller = scrollOwner.candidate?.element || null;
+    lastReferenceActionDiagnostics = { ...lastReferenceActionDiagnostics, ...scrollOwner.evidence };
+    if (!scroller) {
+      const code = scrollOwner.count > 1 ? "FLOW_REFERENCE_SCAN_SCROLL_OWNER_AMBIGUOUS" : "FLOW_REFERENCE_SCAN_SCROLL_OWNER_MISSING";
+      const error = flowError(code, "Flow's active reference picker has no unique measurable scroll owner; no reference was selected.", true, false);
+      error.diagnostics = referenceScanEvidence({ pages: 0, endReached: false, optionCount: options().length, errorCode: code, ...scrollOwner.evidence });
+      throw error;
+    }
+    const seen = new Set();
+    const exact = new Map();
+    const labelHashes = new Set();
+    let pages = 0;
+    let reachedEnd = false;
+    const addVisible = () => {
+      list = picker();
+      if (!list) return false;
+      const current = listOptions(list);
+      pages++;
+      current.forEach((option, index) => {
+        for (const hash of diagnosticOptionHashes([option])) labelHashes.add(hash);
+        const key = referenceOptionIdentity(option, pages, index);
+        if (seen.has(key)) return;
+        seen.add(key);
+        if (exactOption([option], name, decorated) && !exact.has(key)) exact.set(key, { option, scrollTop: scroller?.scrollTop || 0, key, page: pages });
+      });
+      return true;
+    };
+    try {
+      if (scroller) scroller.scrollTop = 0;
+      await boundedWait(120, deadline, "starting a bounded reference picker scan", false, signal);
+      const maxPages = 60;
+      for (let page = 0; page < maxPages; page++) {
+        requireTime(deadline, "scanning Flow reference options", false, signal);
+        if (!addVisible()) throw flowError("FLOW_REFERENCE_SCAN_INCOMPLETE", "Flow's reference picker disappeared during its bounded scan.", true, false);
+        const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+        if (scroller.scrollTop >= maxScroll - 2) { reachedEnd = true; break; }
+        const previous = scroller.scrollTop;
+        const previousSignature = referencePageSignature(list);
+        const pageStep = Math.max(180, scroller.clientHeight * 0.8);
+        // When the remaining overflow is smaller than one page, explicitly
+        // request the exact bottom of this already-verified picker scroller.
+        // A short final movement may not change the visible option signature.
+        const targetTop = maxScroll - previous <= pageStep ? maxScroll : previous + pageStep;
+        scroller.scrollTop = targetTop;
+        if (scroller.scrollTop <= previous) break;
+        const pageDeadline = Math.min(Date.now() + 1600, deadline);
+        let pageChanged = false;
+        let bottomReached = false;
+        while (Date.now() < pageDeadline) {
+          try { await boundedWait(120, pageDeadline, "waiting for the Flow reference picker page to change", false, signal); }
+          catch (error) {
+            if (error?.code === "FLOW_OPERATION_TIMEOUT" && Date.now() >= pageDeadline) break;
+            throw error;
+          }
+          list = picker();
+          if (!list) break;
+          const signatureChanged = referencePageSignature(list) !== previousSignature;
+          if (scroller.scrollTop >= targetTop - 2 && scroller.scrollTop >= maxScroll - 2) {
+            // Re-read the bottom viewport if the short final scroll exposed a
+            // different set of options. Identical labels are safe here because
+            // reaching maxScroll on the unique owner proves the list end.
+            if (signatureChanged && !addVisible()) break;
+            reachedEnd = true;
+            bottomReached = true;
+            break;
+          }
+          if (scroller.scrollTop >= targetTop - 2 && signatureChanged) {
+            pageChanged = true;
+            break;
+          }
+        }
+        if (bottomReached) break;
+        if (!list || !pageChanged) {
+          const error = flowError("FLOW_REFERENCE_SCAN_INCOMPLETE", "Flow's reference picker did not render a verifiably different page after scrolling; no reference was selected.", true, false);
+          error.diagnostics = referenceScanEvidence({ pages, endReached: false, optionCount: options().length,
+            errorCode: error.code, ...scrollOwner.evidence,
+            scrollTop: Number(scroller.scrollTop) || 0 });
+          throw error;
+        }
+      }
+      lastReferenceActionDiagnostics = { ...lastReferenceActionDiagnostics, pickerScanPages: pages, pickerScanEndReached: reachedEnd,
+        pickerOptionCount: seen.size, optionLabelHashes: [...labelHashes].slice(0, 60), exactTargetFound: exact.size > 0,
+        scrollTop: Number(scroller.scrollTop) || 0 };
+      if (!reachedEnd) {
+        const error = flowError("FLOW_REFERENCE_SCAN_INCOMPLETE", "Flow's reference picker scan did not reach a verifiable end; no reference was selected.", true, false);
+        error.diagnostics = referenceScanEvidence({ pages, endReached: false, optionCount: options().length, errorCode: error.code });
+        throw error;
+      }
+      if (exact.size > 1) {
+        const error = flowError("FLOW_ASSET_AMBIGUOUS", `More than one reference is named "${name}". Nothing was attached.`, false, false);
+        error.diagnostics = referenceScanEvidence({ pages, endReached: true, optionCount: options().length, errorCode: error.code });
+        throw error;
+      }
+      const match = exact.values().next().value || null;
+      if (match && scroller && scroller.scrollTop !== match.scrollTop) {
+        scroller.scrollTop = match.scrollTop;
+        await boundedWait(180, deadline, "returning to the exact Flow reference option", false, signal);
+        list = picker();
+        const current = list && listOptions(list);
+        const restored = current?.find((option, index) => referenceOptionIdentity(option, match.page, index) === match.key && exactOption([option], name, decorated));
+        if (!restored) {
+          const error = flowError("FLOW_REFERENCE_SCAN_INCOMPLETE", "Flow's exact reference option changed while restoring the picker position; nothing was attached.", true, false);
+          error.diagnostics = referenceScanEvidence({ pages, endReached: true, optionCount: seen.size, errorCode: error.code });
+          throw error;
+        }
+        match.option = restored;
+      }
+      return { option: match?.option || null, pages, reachedEnd, optionCount: seen.size };
+    } catch (error) {
+      lastReferenceActionDiagnostics = { ...lastReferenceActionDiagnostics, pickerScanPages: pages, pickerScanEndReached: reachedEnd,
+        pickerOptionCount: seen.size, optionLabelHashes: [...labelHashes].slice(0, 60), exactTargetFound: exact.size > 0,
+        scrollTop: Number(scroller.scrollTop) || 0 };
+      if (!error?.diagnostics) error.diagnostics = referenceScanEvidence({ pages, endReached: reachedEnd, optionCount: options().length, errorCode: error?.code || "FLOW_REFERENCE_SCAN_ERROR" });
+      throw error;
+    } finally {
+      if (scroller?.isConnected) scroller.scrollTop = 0;
+    }
+  }
+  function listOptions(list, checkVis = true) {
+    if (!list) return [];
+    if (typeof root.flowQueryAll === "function") {
+      const results = root.flowQueryAll("components.optionItem", list, { checkVisible: checkVis });
+      if (results && results.length) return results;
+    }
+    const raw = [...(list.querySelectorAll?.('[role="option"]') || [])];
+    return checkVis ? raw.filter(visible) : raw;
+  }
+
   function chips() {
-    const enChips = [...document.querySelectorAll('button[aria-label="Ingredient"]')];
+    const enChips = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.chips", document, { checkVisible: false }) : null) ||
+      [...document.querySelectorAll('button[aria-label="Ingredient"]')];
     const viChips = [...document.querySelectorAll('button[aria-label="Thành phần"],button[aria-label="Nguyên liệu"]')];
-    const dynamicChips = [...document.querySelectorAll('button,[role="button"]')].filter(btn => {
+    const dynamicButtons = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("common.buttons", document, { checkVisible: false }) : null) ||
+      [...document.querySelectorAll('button,[role="button"]')];
+    const dynamicChips = dynamicButtons.filter(btn => {
       if (!visible(btn)) return false;
       const aria = (accessibleName(btn) || "").toLowerCase();
       const alt = (btn.querySelector?.("img")?.alt || "").toLowerCase();
@@ -129,7 +372,8 @@
     return undefined;
   }
   function picker() {
-    return (typeof root.flowQuery === "function" ? root.flowQuery("components.listBox") : null) ||
+    return (typeof root.flowQueryVisible === "function" ? root.flowQueryVisible("components.listBox", document) : null) ||
+      (typeof root.flowQuery === "function" ? root.flowQuery("components.listBox") : null) ||
       [...document.querySelectorAll('[role="listbox"]')].find(visible);
   }
   function visiblePickerSurfaces() {
@@ -187,6 +431,12 @@
       pickerOpen: Boolean(activePicker),
       pickerRole: activePicker?.getAttribute("role") || null,
       pickerOptionCount: activePicker ? activePicker.querySelectorAll('[role="option"]').length : 0,
+      pickerScanPages: Number(lastReferenceActionDiagnostics.pickerScanPages) || 0,
+      pickerScanEndReached: lastReferenceActionDiagnostics.pickerScanEndReached === true,
+      locale: ["en", "vi"].includes(String(document.documentElement?.lang || "").trim().toLowerCase().split(/[-_]/, 1)[0])
+        ? String(document.documentElement.lang).trim().toLowerCase().split(/[-_]/, 1)[0] : "unknown",
+      searchLabelRecognized: lastReferenceActionDiagnostics.searchLabelRecognized === true,
+      searchLabel: lastReferenceActionDiagnostics.searchLabel || null,
       pickerOptionLabels,
       visibleSurfaces: visiblePickerSurfaces(),
       searchValue,
@@ -213,6 +463,23 @@
       pickerOpen: snapshot.pickerOpen,
       pickerRole: snapshot.pickerRole,
       pickerOptionCount: snapshot.pickerOptionCount,
+      locale: snapshot.locale || "unknown",
+      searchLabelRecognized: snapshot.searchLabelRecognized === true,
+      searchLabel: snapshot.searchLabel || null,
+      searchResultsVerified: snapshot.searchResultsVerified === true,
+      activeCategory: diagnosticCategory(snapshot.activeCategory),
+      categoriesScanned: Array.isArray(snapshot.categoriesScanned)
+        ? [...new Set(snapshot.categoriesScanned.filter(value => ["all", "uploads"].includes(value)))].slice(0, 2) : [],
+      categorySelected: snapshot.categorySelected === true,
+      pickerScanPages: Number(snapshot.pickerScanPages) || 0,
+      pickerScanEndReached: snapshot.pickerScanEndReached === true,
+      optionLabelHashes: Array.isArray(snapshot.optionLabelHashes) ? snapshot.optionLabelHashes.slice(0, 60) : [],
+      exactTargetFound: snapshot.exactTargetFound === true,
+      scrollOwnerCount: Number(snapshot.scrollOwnerCount) || 0,
+      scrollOwnerDepth: Number.isInteger(snapshot.scrollOwnerDepth) ? snapshot.scrollOwnerDepth : null,
+      scrollClientHeight: Number(snapshot.scrollClientHeight) || 0,
+      scrollHeight: Number(snapshot.scrollHeight) || 0,
+      scrollTop: Number(snapshot.scrollTop) || 0,
       visibleSurfaces: (snapshot.visibleSurfaces || []).map(surface => ({ role: surface.role, tag: surface.tag, labelCount: (surface.labels || []).length })),
       categoryTabs: (snapshot.categoryTabs || []).map(tab => ({ selected: tab.selected })),
       chipCount: snapshot.chipCount,
@@ -279,7 +546,7 @@
     referenceContextMenuTail = new Promise(resolve => { release = resolve; });
     await prior;
     let ownedMenu = null;
-    let diagnostic = { path: "uploaded_tile_context_menu", step: "queued" };
+      let diagnostic = { path: "uploaded_tile_context_menu", step: "queued", tileActionStep: "queued" };
     try {
       requireTime(deadline, "waiting for the serialized reference menu", false, signal);
       updateReferenceActionDiagnostics(diagnostic);
@@ -291,36 +558,44 @@
         updateReferenceActionDiagnostics({ ...diagnostic, step: "serialized_existing_chip_reused", provenanceConfirmed: true, chipUuidConfirmed: attached.chipUuidConfirmed === true });
         return { name: ref.name, kind: "image", source: attached.source, id: expectedUuid, idSource: attached.mediaIdSource || "verified_tile_action_provenance", chipUuidConfirmed: attached.chipUuidConfirmed === true, confirmed: true, reused: true };
       }
-      const alreadyOpen = [...document.querySelectorAll('[role="menu"],mat-menu-panel')].filter(visible);
+      const alreadyOpen = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.actionMenus", document) : null) || document.querySelectorAll('[role="menu"],mat-menu-panel'))].filter(visible);
       if (alreadyOpen.length) throw flowError("FLOW_REFERENCE_CONTEXT_MENU_BUSY", "Flow already has a menu open; no reference menu action was attempted.", false, false);
       const tile = await root.findFlowTile?.(ref.name);
-      if (!tile || !exactTileTitle(tile, ref.name)) throw flowError("FLOW_ASSET_NOT_FOUND", "The exact uploaded image tile was not found. No reference was selected.", true, false);
+      if (!tile || !exactTileTitle(tile, ref.name)) {
+        updateReferenceActionDiagnostics({ ...diagnostic, step: "tile_missing_picker_fallback", tileActionStep: "menu_missing", surfaceStatus: "tile_missing" });
+        return null;
+      }
       const verifyTile = async () => {
         const current = (await resolveNativeMediaUuid(mediaId(tile), "image"))?.toLowerCase();
-        return tile.isConnected && exactTileTitle(tile, ref.name) && current === expectedUuid && !tile.querySelector("flow-video-tile,flow-scene-tile");
+        const hasVideo = typeof root.flowQuery === "function" ? root.flowQuery("tiles.video", tile, { checkVisible: false }) : tile.querySelector("flow-video-tile,flow-scene-tile");
+        return tile.isConnected && exactTileTitle(tile, ref.name) && current === expectedUuid && !hasVideo;
       };
       if (!(await verifyTile())) throw flowError("FLOW_ASSET_ID_MISMATCH", "The exact image tile does not match the completed upload UUID and image type. No reference was selected.", false, false);
-      const sameTitle = [...document.querySelectorAll("flow-grid-tile-container")].filter(candidate => exactTileTitle(candidate, ref.name));
+      const sameTitle = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", document, { checkVisible: false }) : null) || document.querySelectorAll("flow-grid-tile-container"))].filter(candidate => exactTileTitle(candidate, ref.name));
       if (sameTitle.length !== 1 || sameTitle[0] !== tile) throw flowError("FLOW_ASSET_AMBIGUOUS", "Flow does not expose one unique exact-title image tile. No reference was selected.", false, false);
       tile.scrollIntoView?.({ behavior: "instant", block: "center" });
       await boundedWait(100, deadline, "settling the exact uploaded image tile", false, signal);
       if (!(await verifyTile())) throw flowError("FLOW_ASSET_CHANGED", "The uploaded image tile changed before its context menu opened. No reference was selected.", false, false);
-      const target = tile.querySelector("img,[role='img']") || tile;
+      const target = (typeof root.flowQuery === "function" ? root.flowQuery("tiles.image", tile, { checkVisible: false }) : null) || tile.querySelector("img,[role='img']") || tile;
       const rect = target.getBoundingClientRect?.() || { left: 0, top: 0, width: 1, height: 1 };
       const contextPoint = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-      const priorMenus = new Set(document.querySelectorAll('[role="menu"],mat-menu-panel'));
+      const priorMenus = new Set((typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.actionMenus", document, { checkVisible: false }) : null) || document.querySelectorAll('[role="menu"],mat-menu-panel'));
       target.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: contextPoint.x, clientY: contextPoint.y, button: 2 }));
       diagnostic = { ...diagnostic, step: "waiting_for_new_menu" };
       updateReferenceActionDiagnostics(diagnostic);
       const menuDeadline = Math.min(Date.now() + 2200, deadline);
       let newMenus = [];
       while (Date.now() < menuDeadline) {
-        newMenus = [...document.querySelectorAll('[role="menu"],mat-menu-panel')].filter(menu => visible(menu) && !priorMenus.has(menu));
+        newMenus = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.actionMenus", document) : null) || document.querySelectorAll('[role="menu"],mat-menu-panel'))].filter(menu => visible(menu) && !priorMenus.has(menu));
         if (newMenus.length) break;
-        await boundedWait(100, menuDeadline, "waiting for the uploaded image context menu", false, signal);
+        try { await boundedWait(100, menuDeadline, "waiting for the uploaded image context menu", false, signal); }
+        catch (error) {
+          if (error?.code === "FLOW_OPERATION_TIMEOUT" && Date.now() >= menuDeadline) break;
+          throw error;
+        }
       }
       if (!newMenus.length) {
-        updateReferenceActionDiagnostics({ ...diagnostic, step: "no_new_menu_picker_fallback" });
+        updateReferenceActionDiagnostics({ ...diagnostic, step: "no_new_menu_picker_fallback", tileActionStep: "menu_missing", surfaceStatus: "no_new_owned_menu" });
         return null;
       }
       if (newMenus.length !== 1 || !(await verifyTile())) {
@@ -330,7 +605,7 @@
       const candidateMenu = newMenus[0];
       const related = hasExactContextMenuRelation(candidateMenu, target, tile);
       const nearTrigger = contextMenuNearTrigger(candidateMenu, contextPoint);
-      updateReferenceActionDiagnostics({ ...diagnostic, step: "validating_menu_ownership", menuRelatedToTile: related, menuNearTrigger: nearTrigger });
+      updateReferenceActionDiagnostics({ ...diagnostic, step: "validating_menu_ownership", ...(related && nearTrigger ? { tileActionStep: "menu_owned" } : {}), menuRelatedToTile: related, menuNearTrigger: nearTrigger });
       if (!related) throw flowError("FLOW_REFERENCE_CONTEXT_MENU_UNOWNED", "Flow opened a menu, but its DOM does not link it to the selected image tile. No menu action was taken.", false, false);
       if (!nearTrigger) throw flowError("FLOW_REFERENCE_CONTEXT_MENU_POSITION_UNVERIFIED", "Flow's new menu is outside the bounded position of the selected image. No menu action was taken.", false, false);
       ownedMenu = candidateMenu;
@@ -348,7 +623,7 @@
         throw flowError("FLOW_REFERENCE_CONTEXT_ACTION_CHANGED", "The unique Add to prompt action changed before selection. No menu action was taken.", false, false);
       }
       const before = chips();
-      updateReferenceActionDiagnostics({ ...diagnostic, step: "clicking_exact_add_action", surfaceStatus: "unique_new_menu_and_action" });
+      updateReferenceActionDiagnostics({ ...diagnostic, step: "clicking_exact_add_action", tileActionStep: "action_clicked", surfaceStatus: "unique_new_menu_and_action" });
       actions[0].click();
       const attachDeadline = Math.min(Date.now() + 10_000, deadline);
       while (Date.now() < attachDeadline) {
@@ -360,7 +635,7 @@
           // This records the verified tile/action provenance. chipUuidConfirmed
           // remains false when Flow does not expose a UUID on the chip itself.
           metadata.set(added[0].element, { name: ref.name, mediaId: expectedUuid, mediaIdSource: "verified_tile_action_provenance", chipUuidConfirmed: observedUuids.includes(expectedUuid) });
-          updateReferenceActionDiagnostics({ ...diagnostic, step: "exact_image_chip_confirmed", surfaceStatus: "attached", provenanceConfirmed: true, chipUuidConfirmed: observedUuids.includes(expectedUuid) });
+          updateReferenceActionDiagnostics({ ...diagnostic, step: "exact_image_chip_confirmed", tileActionStep: "chip_confirmed", surfaceStatus: "attached", provenanceConfirmed: true, chipUuidConfirmed: observedUuids.includes(expectedUuid) });
           return { name: ref.name, kind: "image", source: added[0].source, id: expectedUuid, idSource: "verified_tile_action_provenance", chipUuidConfirmed: observedUuids.includes(expectedUuid), confirmed: true };
         }
         await boundedWait(150, attachDeadline, "confirming uploaded image reference", true, signal);
@@ -380,7 +655,7 @@
   ].filter(visible);
   function emptyPickerMessage() {
     return [...document.querySelectorAll('[role="dialog"],main,[role="listbox"]')].filter(visible)
-      .some(el => /no (?:assets|characters) found|không tìm thấy (?:nội dung|nhân vật|kết quả)/i.test(el.innerText || el.textContent || ""));
+      .some(el => /no (?:assets|characters) found|không tìm thấy (?:tài sản|nội dung|nhân vật|giọng nói|giọng|kết quả)(?: nào)?/i.test(el.innerText || el.textContent || ""));
   }
   async function settled(deadline, signal, listGetter = picker) {
     // Wait for both the picker and its loading state; an empty list is a valid settled state.
@@ -460,19 +735,24 @@
     "ingredients": ["ingredients", "thành phần", "nguyên liệu"],
     "uploads": ["uploads", "tải lên", "tai len"]
   };
-  function findPickerCategoryTab(name) {
+  function pickerCategoryTabs(name) {
     const norm = normalize(name);
     const synonyms = CATEGORY_SYNONYMS[norm] || [norm];
     return [...new Set([
       ...document.querySelectorAll('[role="tab"]'),
       ...(norm === "voices" ? (picker()?.querySelectorAll('button,[role="button"]') || []) : []),
-    ])].find(el => {
+    ])].filter(el => {
       if (!visible(el)) return false;
       const label = normalize(accessibleName(el)).replace(/^(?:accessibility_new|dashboard|face|voice_selection|graphic_eq|record_voice_over)\s*/, "");
       const icon = normalize(el.querySelector?.("mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined")?.textContent);
       return synonyms.includes(label) || synonyms.some(syn => label.includes(syn)) ||
         norm === "voices" && ["voice_selection", "graphic_eq", "record_voice_over"].includes(icon);
     });
+  }
+  function findPickerCategoryTab(name) {
+    const matches = pickerCategoryTabs(name);
+    if (matches.length > 1) throw flowError("FLOW_REFERENCE_CATEGORY_AMBIGUOUS", `Flow's ${name} picker category is ambiguous; no category was selected.`, false, false);
+    return matches[0] || null;
   }
   async function category(name, deadline, signal) {
     requireTime(deadline, `selecting the ${name} picker category`);
@@ -490,6 +770,15 @@
       if (tab?.getAttribute("aria-selected") !== "true") throw flowError("FLOW_REFERENCE_CATEGORY_UNCONFIRMED", `Flow did not select the ${name} category.`, true);
     }
     await settled(deadline, signal);
+    const list = picker();
+    const visibleOptions = list ? listOptions(list) : [];
+    lastReferenceActionDiagnostics = {
+      ...lastReferenceActionDiagnostics,
+      activeCategory: diagnosticCategory(norm),
+      categorySelected: true,
+      pickerOptionCount: visibleOptions.length,
+      optionLabelHashes: diagnosticOptionHashes(visibleOptions),
+    };
   }
   async function close(deadline = Date.now() + 3200, signal) {
     updateReferenceActionDiagnostics({ step: "closing picker" });
@@ -538,6 +827,12 @@
       throw error;
     }
     updateReferenceActionDiagnostics({ step: "picker closed" });
+  }
+  async function closeAfterOperation(deadline, signal, operationError) {
+    // A cancelled/expired picker operation must still get a short cleanup
+    // window. Reusing its aborted signal or expired deadline skips the close
+    // verification and can leave the picker mounted for the next queued job.
+    return operationError ? close(Date.now() + 3200) : close(deadline, signal);
   }
   async function closePicker(config = {}) {
     const deadline = config.deadline || makeDeadline(config.command, 10_000, 2_000);
@@ -590,7 +885,7 @@
       throw error;
     } finally {
       if (openedByOperation) {
-        try { await close(deadline, config.signal); }
+        try { await closeAfterOperation(deadline, config.signal, operationError); }
         catch (cleanupError) {
           updateReferenceActionDiagnostics({ cleanupError: `${cleanupError?.code || "FLOW_PICKER_CLOSE_ERROR"}: ${cleanupError?.message || String(cleanupError)}` });
           if (!operationError) throw cleanupError;
@@ -598,18 +893,37 @@
       }
     }
   }
+  function referenceSearchControl() {
+    const supported = ["search assets", "tìm kiếm nội dung nghe nhìn", "tìm kiếm nội dung", "tìm kiếm", "search"];
+    let owner = picker();
+    // Search controls are only trusted when owned by this picker surface. A
+    // project-level/global search can have the same label and accept text while
+    // leaving the reference list untouched.
+    for (let depth = 0; owner && depth < 8; depth++, owner = owner.parentElement) {
+      const controls = [...(owner.querySelectorAll?.('input,[role="textbox"]') || [])].filter(visible);
+      if (!controls.length) continue;
+      for (const el of controls) {
+        const raw = accessibleName(el) || el.placeholder || "";
+        const label = normalize(raw);
+        const canonical = supported.find(value => label === value || value !== "search" && value !== "tìm kiếm" && label.startsWith(`${value} `));
+        if (canonical) return { element: el, label: canonical };
+      }
+      // A nearer owner has controls but none has a supported search label;
+      // widening the scope could select a decoy from a parent surface.
+      return null;
+    }
+    return null;
+  }
   async function search(name, deadline, signal) {
     requireTime(deadline, "searching Flow references");
-    const input = [...document.querySelectorAll('input,[role="textbox"]')].find(el => {
-      if (!visible(el)) return false;
-      const aria = accessibleName(el).trim().toLowerCase();
-      const placeholder = (el.placeholder || "").trim().toLowerCase();
-      return /^(?:search assets|tìm kiếm nội dung nghe nhìn|tìm kiếm|search)$/i.test(aria) ||
-        /^(?:search assets|tìm kiếm nội dung nghe nhìn|tìm kiếm|search)$/i.test(placeholder);
-    });
-    if (!input) return;
+    const control = referenceSearchControl();
+    if (!control) {
+      lastReferenceActionDiagnostics = { ...lastReferenceActionDiagnostics, searchLabelRecognized: false, searchLabel: null };
+      return { recognized: false };
+    }
+    const input = control.element;
+    lastReferenceActionDiagnostics = { ...lastReferenceActionDiagnostics, searchLabelRecognized: true, searchLabel: control.label };
     setEditable(input, name);
-    // Search is debounced by Flow; wait before accepting a possibly stale option.
     const wanted = String(name || "");
     const searchDeadline = Math.min(Date.now() + 8000, deadline);
     while (Date.now() < searchDeadline) {
@@ -620,8 +934,49 @@
     if (String(input.value ?? input.innerText ?? "").trim() !== wanted.trim()) {
       throw flowError("FLOW_REFERENCE_SEARCH_UNCONFIRMED", "Flow did not accept the reference search text.", true);
     }
-    await boundedWait(650, deadline, "waiting for reference search results", false, signal);
-    await settled(deadline, signal);
+    const wantedNorm = normalize(wanted);
+    const resultDeadline = Math.min(Date.now() + 8000, deadline);
+    let previousSignature = null;
+    let stable = 0;
+    while (Date.now() < resultDeadline) {
+      const list = picker();
+      const visibleOptions = list ? listOptions(list) : [];
+      const names = visibleOptions.flatMap(referenceOptionLabels).map(normalize);
+      const exact = visibleOptions.some(option => exactOption([option], wanted, true));
+      const matchesQuery = names.length > 0 && names.every(label => label.includes(wantedNorm) || undecorate(label) === wantedNorm);
+      const empty = Boolean(list && /(?:no (?:assets|characters) found|không tìm thấy)/i.test(list.innerText || list.textContent || ""));
+      const signature = JSON.stringify(names.slice().sort());
+      stable = signature === previousSignature ? stable + 1 : 0;
+      previousSignature = signature;
+      if (exact || empty || matchesQuery && stable >= 2) {
+        await boundedWait(100, deadline, "settling Flow reference search results", false, signal);
+        lastReferenceActionDiagnostics = { ...lastReferenceActionDiagnostics, searchResultsVerified: true };
+        return { recognized: true, resultsVerified: true };
+      }
+      try { await boundedWait(150, resultDeadline, "waiting for Flow reference search results to match the query", false, signal); }
+      catch (error) {
+        if (error?.code === "FLOW_OPERATION_TIMEOUT" && Date.now() >= resultDeadline) break;
+        throw error;
+      }
+    }
+    // The picker-owned input accepted the query, but its current rows may be
+    // stale. Clear and verify the query before scanning the full virtualized
+    // list. The scanner will only select after it proves a unique match and
+    // reaches the end.
+    setEditable(input, "");
+    const clearDeadline = Math.min(Date.now() + 2500, deadline);
+    while (Date.now() < clearDeadline && String(input.value ?? input.innerText ?? "").trim() !== "") {
+      await boundedWait(100, clearDeadline, "verifying cleared Flow reference search", false, signal);
+    }
+    if (String(input.value ?? input.innerText ?? "").trim() !== "") {
+      const error = flowError("FLOW_REFERENCE_SEARCH_CLEAR_UNCONFIRMED", "Flow did not clear the stale reference search; no reference was selected.", true, false);
+      error.diagnostics = referenceScanEvidence({ optionCount: options().length, pages: 0, endReached: false, errorCode: error.code });
+      lastReferenceActionDiagnostics = { ...lastReferenceActionDiagnostics, searchResultsVerified: false, pickerScanPages: 0, pickerScanEndReached: false };
+      throw error;
+    }
+    await boundedWait(180, deadline, "settling the cleared Flow reference search", false, signal);
+    lastReferenceActionDiagnostics = { ...lastReferenceActionDiagnostics, searchResultsVerified: false, pickerScanPages: 0, pickerScanEndReached: false };
+    return { recognized: true, resultsVerified: false, fallbackToScan: true };
   }
   async function returnToProjectComposer() {
     if (isNewCharacterRoute(location.pathname)) {
@@ -683,7 +1038,7 @@
       updateReferenceActionDiagnostics({ phase: "failed", step: "character listing failed", error: `${error?.code || "FLOW_CHARACTER_LIST_ERROR"}: ${error?.message || String(error)}` });
       throw error;
     } finally {
-      try { await close(deadline, config.signal); }
+      try { await closeAfterOperation(deadline, config.signal, operationError); }
       catch (cleanupError) {
         updateReferenceActionDiagnostics({ cleanupError: `${cleanupError?.code || "FLOW_PICKER_CLOSE_ERROR"}: ${cleanupError?.message || String(cleanupError)}` });
         if (!operationError) throw cleanupError;
@@ -693,7 +1048,9 @@
   async function attach(value, slot, config = {}) {
     const ref = parse(value);
     const deadline = config.deadline || makeDeadline(config.command, 45_000, 10_000);
-    updateReferenceActionDiagnostics({ action: "attach", phase: "running", step: "preparing reference", error: null, cleanupError: null, lastResult: null });
+    updateReferenceActionDiagnostics({ action: "attach", phase: "running", step: "preparing reference", error: null, cleanupError: null, lastResult: null,
+      searchLabelRecognized: false, searchLabel: null, searchResultsVerified: false, pickerScanPages: 0, pickerScanEndReached: false,
+      categoriesScanned: [] });
     let operationError;
     try {
       requireTime(deadline, "attaching a Flow reference", false, config.signal);
@@ -725,10 +1082,44 @@
       await open(slot, deadline, config.signal);
       updateReferenceActionDiagnostics({ step: "selecting picker category" });
       await category(ref.kind === "character" ? "Characters" : "All", deadline, config.signal);
-      updateReferenceActionDiagnostics({ step: "searching for exact reference" });
-      await search(ref.name, deadline, config.signal);
-      const option = exactOption(options(), ref.name, ref.kind !== "character");
-      if (!option) throw flowError("FLOW_ASSET_NOT_FOUND", `No exact ${ref.kind || "reference"} named "${ref.name}" in the selected project. Nothing was attached.`, true);
+      const scanCategories = [ref.kind === "character" ? "characters" : "all"];
+      if (!slot && ref.kind !== "character" && config.expectedId) {
+        const uploadsTabs = pickerCategoryTabs("uploads");
+        if (uploadsTabs.length > 1) throw flowError("FLOW_REFERENCE_CATEGORY_AMBIGUOUS", "Flow's Uploads picker category is ambiguous; no category was selected.", false, false);
+        if (uploadsTabs.length === 1) scanCategories.push("uploads");
+      }
+      let scan = null;
+      let option = null;
+      let exactTitleWithWrongId = false;
+      for (const scanCategory of scanCategories) {
+        if (scanCategory !== (ref.kind === "character" ? "characters" : "all")) {
+          await category(scanCategory, deadline, config.signal);
+        }
+        const categoriesScanned = [...new Set([...(lastReferenceActionDiagnostics.categoriesScanned || []), scanCategory])];
+        updateReferenceActionDiagnostics({ categoriesScanned, step: `searching ${scanCategory} for exact reference` });
+        await search(ref.name, deadline, config.signal);
+        const categoryScan = await scanExactReferenceOption(ref.name, ref.kind !== "character", deadline, config.signal);
+        scan = categoryScan;
+        updateReferenceActionDiagnostics({ pickerScanPages: categoryScan.pages, pickerScanEndReached: categoryScan.reachedEnd, pickerOptionCount: categoryScan.optionCount });
+        if (!categoryScan.option) continue;
+        if (config.expectedId && ref.kind !== "character") {
+          const candidateId = await resolveNativeMediaUuid(referenceOptionMediaId(categoryScan.option), "image") || referenceOptionMediaId(categoryScan.option);
+          const expectedId = await resolveNativeMediaUuid(config.expectedId, "image") || config.expectedId;
+          if (candidateId !== expectedId) {
+            exactTitleWithWrongId = true;
+            continue;
+          }
+        }
+        option = categoryScan.option;
+        break;
+      }
+      if (!option) {
+        const error = exactTitleWithWrongId
+          ? flowError("FLOW_ASSET_ID_MISMATCH", `Flow's reference picker did not expose the exact uploaded UUID for "${ref.name}" in the scanned categories. Nothing was attached.`, false, false)
+          : flowError("FLOW_ASSET_NOT_FOUND", `No exact ${ref.kind || "reference"} named "${ref.name}" in the scanned project categories after complete picker scans. Nothing was attached.`, true, false);
+        error.diagnostics = referenceScanEvidence({ pages: scan?.pages || 0, endReached: scan?.reachedEnd === true, optionCount: scan?.optionCount || 0, errorCode: error.code });
+        throw error;
+      }
       const tile = option.querySelector("flow-grid-tile-container") || [...document.querySelectorAll("flow-grid-tile-container")].find(el => normalize(el.getAttribute("aria-label")) === normalize(ref.name));
       const tileId = tile && mediaId(tile);
       const kind = ref.kind || (tile?.querySelector("flow-character-tile") || /\bCharacter$/i.test(accessibleName(option)) ? "character" : "image");
@@ -736,7 +1127,7 @@
       // builds. Only character-specific identity attributes prove the entity.
       let selectedId = kind === "character"
         ? explicitCharacterUuid(option, tile)
-        : (tileId && !tileId.startsWith("title:") ? tileId : null) || option.getAttribute("data-media-id") || option.querySelector("[data-media-id]")?.getAttribute("data-media-id") || tileId || undefined;
+        : referenceOptionMediaId(option);
       if (kind === "character" && !selectedId) {
         throw flowError("FLOW_CHARACTER_ID_UNAVAILABLE", `Flow did not expose an explicit character identity for "${ref.name}". No selection or generation was submitted.`, false, false);
       }
@@ -785,10 +1176,13 @@
       throw flowError("FLOW_REFERENCE_ATTACH_UNCONFIRMED", `Flow did not show a matching ${ref.kind || "reference"} chip for "${ref.name}". The picker action may have been accepted; inspect the composer before retrying.`, false, true);
     } catch (error) {
       operationError = error;
+      if (error?.outcome_unknown !== true && !error?.diagnostics) {
+        error.diagnostics = referenceScanEvidence({ errorCode: String(error?.code || "FLOW_REFERENCE_ATTACH_ERROR").slice(0, 90) });
+      }
       updateReferenceActionDiagnostics({ phase: "failed", step: "reference attachment failed", error: `${error?.code || "FLOW_REFERENCE_ATTACH_ERROR"}: ${error?.message || String(error)}` });
       throw error;
     } finally {
-      try { await close(deadline, config.signal); }
+      try { await closeAfterOperation(deadline, config.signal, operationError); }
       catch (cleanupError) {
         updateReferenceActionDiagnostics({ cleanupError: `${cleanupError?.code || "FLOW_PICKER_CLOSE_ERROR"}: ${cleanupError?.message || String(cleanupError)}` });
         if (!operationError) throw cleanupError;
@@ -859,7 +1253,7 @@
       throw error;
     } finally {
       if (picker()) {
-        try { await close(deadline, config.signal); }
+        try { await closeAfterOperation(deadline, config.signal, operationError); }
         catch (cleanupError) { if (!operationError) throw cleanupError; }
       }
     }
@@ -958,7 +1352,7 @@
       throw error;
     } finally {
       if (ownsPicker && picker()) {
-        try { await close(deadline, config.signal); }
+        try { await closeAfterOperation(deadline, config.signal, operationError); }
         catch (cleanupError) { if (!operationError) throw cleanupError; }
       }
     }
@@ -966,9 +1360,22 @@
   globalThis.FlowReferenceActions = Object.freeze({ attach, listCharacters, chips, parse, exactOption, closePicker, inspectPicker, inspectDiagnostics: inspectReferenceActionDiagnostics });
   globalThis.selectNativeFlowVoice = selectNativeFlowVoice;
   globalThis.listNativeFlowVoiceOptions = listNativeFlowVoiceOptions;
+  globalThis.listOptions = listOptions;
 })();
+var root = typeof globalThis !== "undefined" ? globalThis : (typeof window !== "undefined" ? window : self);
 var nativeUploadAssemblers = new Map();
 var stagedNativeFiles = new Map();
+
+function listOptions(list, checkVis = true) {
+  if (!list) return [];
+  if (typeof root.flowQueryAll === "function") {
+    const results = root.flowQueryAll("components.optionItem", list, { checkVisible: checkVis });
+    if (results && results.length) return results;
+  }
+  const raw = [...(list.querySelectorAll?.('[role="option"]') || [])];
+  const isVis = typeof visible === "function" ? visible : (typeof root.visible === "function" ? root.visible : (() => true));
+  return checkVis ? raw.filter(isVis) : raw;
+}
 
 function validStagedLocalImage(value, suffixPattern) {
   return Boolean(value && typeof value.transferId === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(value.transferId) && stagedNativeFiles.has(value.transferId) &&
@@ -1153,6 +1560,11 @@ function flowUploadTileKind(tile) {
 
 function flowUploadKindMatches(expectedKind, actualKind) {
   return expectedKind === "video" ? actualKind === "video" || actualKind === "scene" : actualKind === expectedKind;
+}
+
+function resolveUniqueUploadTarget(candidates, code, actionLabel) {
+  if (candidates.length > 1) throw flowError(code, `Flow shows multiple matching ${actionLabel} controls. No control was selected.`, false, false);
+  return candidates[0] || null;
 }
 
 function assertReusableFlowUploadKind(tile, assetName, expectedKind) {
@@ -1398,24 +1810,21 @@ async function uploadStagedFlowMedia(file, kind, command, options = {}) {
     .filter(root => visible(root) && [...root.querySelectorAll('[role="tab"],button,[role="button"],[role="menuitem"],a,[tabindex],mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined')].some(isUploadLabel));
 
   const switchUploadCategoryTab = async roots => {
-    for (const root of roots) {
-      const tabs = [...root.querySelectorAll('[role="tab"],button')].filter(visible);
-      for (const tab of tabs) {
-        const icon = tab.querySelector("mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined,svg")?.textContent?.trim() || "";
-        const label = accessibleName(tab).replace(/\s+/g, " ").trim().toLowerCase();
-        const isUploadTab = ["upload", "file_upload", "upload_file", "cloud_upload"].includes(icon) ||
-          ["upload", "upload file", "tải lên", "tải tệp", "tải tệp lên", "tải lên tệp"].includes(label) || label.includes("upload") || label.includes("tải lên");
-        if (isUploadTab) {
-          const isSelected = tab.getAttribute("aria-selected") === "true" || tab.getAttribute("data-state") === "active";
-          if (!isSelected) {
-            clickFlowControl(tab);
-            await globalThis.FlowUiDeadline?.boundedWait(350, deadline, "switching Flow's upload category");
-          }
-          return true;
-        }
-      }
+    const tabs = [...new Set(roots.flatMap(root => [...root.querySelectorAll('[role="tab"],button')]))].filter(tab => {
+      if (!visible(tab) || tab.disabled || tab.getAttribute("aria-disabled") === "true") return false;
+      const icon = tab.querySelector("mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined,svg")?.textContent?.trim() || "";
+      const label = accessibleName(tab).replace(/\s+/g, " ").trim().toLowerCase();
+      return ["upload", "file_upload", "upload_file", "cloud_upload"].includes(icon) ||
+        ["upload", "upload file", "tải lên", "tải tệp", "tải tệp lên", "tải lên tệp", "tải ảnh lên", "tải hình ảnh lên"].includes(label);
+    });
+    const tab = resolveUniqueUploadTarget(tabs, "FLOW_UPLOAD_CATEGORY_AMBIGUOUS", "Upload category");
+    if (!tab) return false;
+    const isSelected = tab.getAttribute("aria-selected") === "true" || tab.getAttribute("data-state") === "active";
+    if (!isSelected) {
+      if (!clickFlowControl(tab)) throw flowError("FLOW_UPLOAD_CATEGORY_CLICK_FAILED", "Flow's Upload category could not be clicked. No file was selected.", true, false);
+      await globalThis.FlowUiDeadline?.boundedWait(350, deadline, "switching Flow's upload category");
     }
-    return false;
+    return true;
   };
 
   const findUploadItem = () => {
@@ -1423,26 +1832,25 @@ async function uploadStagedFlowMedia(file, kind, command, options = {}) {
     // Scope to the visible Flow add-media overlay. Never fall back to a page-wide
     // control search, which can select a hidden input/menu item from another surface.
     const roots = activeMenus;
-    for (const root of roots) {
-      const semantic = [...root.querySelectorAll('button,[role="button"],[role="menuitem"],a,[tabindex]')]
-        .filter(el => visible(el) && !el.disabled && el.getAttribute("aria-disabled") !== "true" && isUploadAction(el));
-      if (semantic.length) return semantic[0];
-    }
+    const semantic = [...new Set(roots.flatMap(root => [...root.querySelectorAll('button,[role="button"],[role="menuitem"],a,[tabindex]')]))]
+      .filter(el => visible(el) && !el.disabled && el.getAttribute("aria-disabled") !== "true" && isUploadAction(el));
+    const semanticTarget = resolveUniqueUploadTarget(semantic, "FLOW_UPLOAD_MENU_ITEM_AMBIGUOUS", "Upload action");
+    if (semanticTarget) return semanticTarget;
     // Some Flow builds render menu rows as clickable divs without ARIA roles.
+    const candidates = new Set();
     for (const root of roots) {
       const textLeaves = [...root.querySelectorAll("*")].filter(el => visible(el) && isUploadAction(el));
       for (const leaf of textLeaves) {
-        let candidate = leaf;
-        while (candidate && candidate !== root) {
+        for (let candidate = leaf; candidate && candidate !== root; candidate = candidate.parentElement) {
           if (visible(candidate) && !candidate.matches('[role="tab"]') && candidate.getAttribute("aria-selected") === null &&
-              (candidate.getAttribute("tabindex") === "0" || getComputedStyle(candidate).cursor === "pointer")) return candidate;
-          candidate = candidate.parentElement;
+              (candidate.matches('button,[role="button"],[role="menuitem"],a,[tabindex]') || candidate.getAttribute("tabindex") === "0" || getComputedStyle(candidate).cursor === "pointer")) {
+            candidates.add(candidate);
+            break;
+          }
         }
-        // Clicking the exact text leaf bubbles to Flow's delegated menu-row listener.
-        if (leaf !== root) return leaf;
       }
     }
-    return null;
+    return resolveUniqueUploadTarget([...candidates], "FLOW_UPLOAD_MENU_ITEM_AMBIGUOUS", "Upload action");
   };
   const clickFlowControl = element => {
     const rect = element.getBoundingClientRect();
@@ -1541,7 +1949,13 @@ async function confirmFlowVideoUploadIfPrompted(deadline = Date.now() + 10_000, 
     // Keep only the deepest matching surfaces, then require that surface to be unique.
     const specificDialogs = matchingDialogs.filter(dialog =>
       !matchingDialogs.some(other => other !== dialog && dialog.contains?.(other)));
-    if (!specificDialogs.length) return result;
+    if (!specificDialogs.length) {
+      // The video consent dialog may mount after Flow has accepted the file
+      // picker event. Match TobyFlow's bounded polling window instead of
+      // treating the first empty DOM snapshot as proof that no dialog will show.
+      await globalThis.FlowUiDeadline?.boundedWait(300, deadline, "waiting for Flow's video upload confirmation", true, signal);
+      continue;
+    }
     result.confirmationDialogSeen = true;
     if (specificDialogs.length !== 1) ambiguous("multiple visible dialogs", specificDialogs.length, 0);
     const dialog = specificDialogs[0];
@@ -1583,7 +1997,7 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
     const controlled = [...new Set(ids.map(id => document.getElementById(id)).filter(el => el?.getAttribute("role") === "listbox" && visible(el)))];
     if (controlled.length === 1) return controlled[0];
     if (controlled.length > 1) return null;
-    const lists = [...document.querySelectorAll('[role="listbox"]')].filter(visible);
+    const lists = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.listBox", document) : null) || document.querySelectorAll('[role="listbox"]'))].filter(visible);
     const newlyOpened = lists.filter(el => !priorLists.has(el));
     return newlyOpened.length === 1 ? newlyOpened[0] : null;
   };
@@ -1592,9 +2006,10 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
     let stableAt = 0;
     while (Date.now() < settleDeadline) {
       const list = listGetter();
-      const loading = [...document.querySelectorAll('[role="progressbar"],[aria-busy="true"]')].some(visible);
+      const loading = (typeof root.flowQueryVisible === "function" && Boolean(root.flowQueryVisible("common.loadingIndicator", document))) ||
+        [...document.querySelectorAll('[role="progressbar"],[aria-busy="true"]')].some(visible);
       if (list && !loading) {
-        const options = [...list.querySelectorAll('[role="option"]')].filter(visible);
+        const options = listOptions(list);
         if (options.length || /no (?:assets|items) found/i.test(list.innerText || "")) return list;
         if (!stableAt) stableAt = Date.now();
         if (Date.now() - stableAt >= 700) return list;
@@ -1607,7 +2022,9 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
   const findTab = name => {
     const norm = normalize(name);
     const synonyms = categorySynonyms[norm] || [norm];
-    return [...document.querySelectorAll('[role="tab"]')].find(tab => {
+    const tabs = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.categoryTabs", document) : null) ||
+      [...document.querySelectorAll('[role="tab"]')];
+    return tabs.find(tab => {
       if (!visible(tab)) return false;
       const label = normalize(accessibleName(tab)).replace(/^(?:accessibility_new|dashboard|face)\s*/, "");
       return synonyms.includes(label) || synonyms.some(syn => label.includes(syn));
@@ -1661,7 +2078,7 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
   const recordFramePickerDiagnostics = (phase, exactList, extra = {}) => {
     const opener = buttonForSlot();
     const slotContainer = opener?.parentElement?.parentElement || opener;
-    const options = exactList ? [...exactList.querySelectorAll('[role="option"]')].slice(0, 12) : [];
+    const options = exactList ? listOptions(exactList, false).slice(0, 12) : [];
     const previous = globalThis.__flowNativeFramePickerDiagnostics || {};
     const diagnostics = {
       ...previous,
@@ -1748,7 +2165,8 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
   let pageIndex = 0;
   let operationError;
   try {
-    let search = [...document.querySelectorAll('input,[role="textbox"]')].find(el => visible(el) && /(?:search assets|tìm kiếm)/i.test(accessibleName(el) || el.placeholder || ""));
+    let search = (typeof root.flowQueryVisible === "function" ? root.flowQueryVisible("components.searchInput", document) : null) ||
+      [...document.querySelectorAll('input,[role="textbox"]')].find(el => visible(el) && /(?:search assets|tìm kiếm)/i.test(accessibleName(el) || el.placeholder || ""));
     if (search) {
       setEditable(search, assetName);
       await boundedWait(650, `searching for "${assetName}" in Flow's ${slot} picker`);
@@ -1770,7 +2188,8 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
       }
       list = listGetter();
       if (!list) continue;
-      search = [...document.querySelectorAll('input,[role="textbox"]')].find(el => visible(el) && /(?:search assets|tìm kiếm)/i.test(accessibleName(el) || el.placeholder || ""));
+      search = (typeof root.flowQueryVisible === "function" ? root.flowQueryVisible("components.searchInput", document) : null) ||
+        [...document.querySelectorAll('input,[role="textbox"]')].find(el => visible(el) && /(?:search assets|tìm kiếm)/i.test(accessibleName(el) || el.placeholder || ""));
       if (search && String(search.value ?? "") !== assetName) {
         setEditable(search, assetName);
         await boundedWait(650, `searching for "${assetName}" in Flow's ${slot} picker`);
@@ -1783,7 +2202,7 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
       for (pageIndex = 0; pageIndex < (scroller ? 150 : 1) && Date.now() < deadline; pageIndex++) {
         list = await pickerSettled(listGetter, 15_000);
         if (!list) break;
-        const visibleOptions = [...list.querySelectorAll('[role="option"]')].filter(visible);
+        const visibleOptions = listOptions(list);
         visibleOptions.forEach((option, itemIndex) => {
           if (isExactOption(option)) matches.set(optionIdentity(option, pageIndex, itemIndex, scroller), option);
         });
@@ -1798,7 +2217,7 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
     }
     if (matches.size > 1) throw flowError("FLOW_AMBIGUOUS_ASSET", `More than one project image is titled "${assetName}"; no frame was selected.`, false, false);
     if (!matches.size) {
-      const visibleNames = [...(list?.querySelectorAll('[role="option"]') || [])].filter(visible).slice(0, 12).map(option => optionNames(option).slice(0, 3).join(" / ")).filter(Boolean);
+      const visibleNames = (list ? listOptions(list) : []).slice(0, 12).map(option => optionNames(option).slice(0, 3).join(" / ")).filter(Boolean);
       throw flowError("FLOW_ASSET_NOT_FOUND", `Flow's ${slot} frame picker has no exact asset titled "${assetName}". Visible entries: ${visibleNames.join("; ") || "none"}. Nothing was selected.`, true, false);
     }
     const option = [...matches.values()][0];
@@ -1806,8 +2225,11 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
     // Some Flow picker versions render the grid tile beside the role=option
     // wrapper instead of inside it. Match only one exact title in this picker
     // list (the reference-chip picker uses the same scoped fallback).
-    const optionTile = option.querySelector("flow-grid-tile-container");
-    const listTileMatches = optionTile ? [] : [...(list?.querySelectorAll("flow-grid-tile-container") || [])]
+    const optionTile = (typeof root.flowQuery === "function" ? root.flowQuery("tiles.container", option, { checkVisible: false }) : null) ||
+      option.querySelector("flow-grid-tile-container");
+    const listTiles = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", list, { checkVisible: false }) : null) ||
+      [...(list?.querySelectorAll("flow-grid-tile-container") || [])];
+    const listTileMatches = optionTile ? [] : listTiles
       .filter(tile => normalize(tile.getAttribute("aria-label")) === wanted);
     const selectedTile = optionTile || (listTileMatches.length === 1 ? listTileMatches[0] : null);
     const tileId = selectedTile && mediaId(selectedTile);
@@ -1924,4 +2346,4 @@ function inspectNativeFramePickerDiagnostics() {
   return diagnostics ? JSON.parse(JSON.stringify(diagnostics)) : null;
 }
 
-const FlowComponents = Object.freeze({ clearExistingIngredientChips: globalThis.clearExistingIngredientChips, uploadStagedFlowMedia, chooseNativePickerAsset, confirmVideoUploadIfPrompted: confirmFlowVideoUploadIfPrompted, selectNativeFlowVoice: globalThis.selectNativeFlowVoice, listNativeFlowVoiceOptions: globalThis.listNativeFlowVoiceOptions, resolveNativeMediaUuid: globalThis.resolveNativeMediaUuid, findAddMediaButton, ensureAddMediaButton, inspectUploadTrigger: inspectFlowUploadTrigger, inspectFramePickerDiagnostics: inspectNativeFramePickerDiagnostics, FlowReferenceActions: globalThis.FlowReferenceActions }); globalThis.FlowComponents = FlowComponents; globalThis.uploadStagedFlowMedia = uploadStagedFlowMedia; globalThis.chooseNativePickerAsset = chooseNativePickerAsset; globalThis.findAddMediaButton = findAddMediaButton; globalThis.ensureAddMediaButton = ensureAddMediaButton;
+const FlowComponents = Object.freeze({ clearExistingIngredientChips: globalThis.clearExistingIngredientChips, uploadStagedFlowMedia, chooseNativePickerAsset, confirmVideoUploadIfPrompted: confirmFlowVideoUploadIfPrompted, resolveUniqueUploadTarget, selectNativeFlowVoice: globalThis.selectNativeFlowVoice, listNativeFlowVoiceOptions: globalThis.listNativeFlowVoiceOptions, resolveNativeMediaUuid: globalThis.resolveNativeMediaUuid, findAddMediaButton, ensureAddMediaButton, inspectUploadTrigger: inspectFlowUploadTrigger, inspectFramePickerDiagnostics: inspectNativeFramePickerDiagnostics, FlowReferenceActions: globalThis.FlowReferenceActions }); globalThis.FlowComponents = FlowComponents; globalThis.uploadStagedFlowMedia = uploadStagedFlowMedia; globalThis.chooseNativePickerAsset = chooseNativePickerAsset; globalThis.findAddMediaButton = findAddMediaButton; globalThis.ensureAddMediaButton = ensureAddMediaButton;

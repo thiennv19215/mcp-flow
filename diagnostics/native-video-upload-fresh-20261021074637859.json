@@ -1,0 +1,38 @@
+{
+  "started": "2026-10-21T07:46:37.858Z",
+  "operation": "single fresh disposable video upload after supported extension reload",
+  "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+  "fixture": "C:\\Users\\nguye\\Documents\\flow-mcp-extension-native\\diagnostics\\flow-e2e-video-upload-fresh-20261021.mp4",
+  "preflight": {
+    "observer": {
+      "ready": true,
+      "activeAttempts": 0,
+      "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+      "extensionBuild": {
+        "status": "current",
+        "matchesWatcher": true,
+        "backgroundRevision": "0a08470ec772e85733d8fd8bdc702d13dace83e6ca73d0c18fee50a08409a84f",
+        "contentRevision": "0a08470ec772e85733d8fd8bdc702d13dace83e6ca73d0c18fee50a08409a84f",
+        "watcherRevision": "0a08470ec772e85733d8fd8bdc702d13dace83e6ca73d0c18fee50a08409a84f"
+      },
+      "generatedMarker": "0a08470ec772e85733d8fd8bdc702d13dace83e6ca73d0c18fee50a08409a84f"
+    },
+    "flow": {
+      "url": "https://flow.google.com/project/e4bf4bae-626d-4718-a66a-cbdb04c8e6fa?hl=en",
+      "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+      "prompt": {
+        "contentEditable": true,
+        "characterCount": 0,
+        "chipCount": 0
+      },
+      "pickerOpen": false,
+      "uploadControlAvailable": true,
+      "warnings": []
+    },
+    "busyJobs": []
+  },
+  "uploadStarted": "2026-10-21T07:46:44.152Z",
+  "error": "upload_media HTTP 400: Flow displayed a video upload confirmation dialog, but no recognized Upload, Continue, or Confirm control appeared. No further upload actions were started; inspect Flow before retrying.",
+  "outcome": "upload_outcome_ambiguous_no_retry",
+  "finished": "2026-10-21T07:46:52.355Z"
+}

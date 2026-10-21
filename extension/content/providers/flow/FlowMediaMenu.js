@@ -2,7 +2,9 @@
   "use strict";
 
   function flowTileOptionsButton(tile) {
-    return [...tile.querySelectorAll('button,[role="button"]')].find(el => {
+    const candidates = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("mediaMenu.triggerButton", tile, { checkVisible: false }) : null) ||
+      [...tile.querySelectorAll('button,[role="button"]')];
+    return candidates.find(el => {
       const label = (root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim().toLowerCase();
       const icon = (root.flowFindIcon ? root.flowFindIcon(el) : el.querySelector?.("mat-icon, .mat-icon, .google-symbols"))?.textContent?.trim().toLowerCase();
       return !el.disabled && el.getAttribute("aria-disabled") !== "true" &&
@@ -14,16 +16,19 @@
   }
 
   function flowMenuLabel(el) {
-    const label = el.querySelector(".label,.item-text");
+    const label = (typeof root.flowQuery === "function" ? root.flowQuery("mediaMenu.menuItemLabel", el, { checkVisible: false }) : null) ||
+      el.querySelector(".label,.item-text");
     if (label) return (label.innerText || label.textContent || "").replace(/\s+/g, " ").trim();
     const clone = el.cloneNode(true);
-    const removeIcons = root.FlowSelectors?.common?.icons?.selectors?.join(",") || "mat-icon,.mat-icon,.google-symbols,svg,[aria-hidden='true']";
+    const removeIcons = root.FlowSelectors?.mediaMenu?.removeIcons?.selectors?.join(",") || root.FlowSelectors?.common?.icons?.selectors?.join(",") || "mat-icon,.mat-icon,.google-symbols,svg,[aria-hidden='true']";
     clone.querySelectorAll(removeIcons).forEach(icon => icon.remove());
     return (clone.innerText || clone.textContent || root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim();
   }
 
   function flowMenuItems(container = document) {
-    return [...container.querySelectorAll('[role="menuitem"],button')].filter(el => root.visible?.(el));
+    const items = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("mediaMenu.menuItems", container) : null) ||
+      [...container.querySelectorAll('[role="menuitem"],button')];
+    return items.filter(el => root.visible?.(el));
   }
 
   function flowDownloadChoice(items, quality, kind) {
@@ -38,13 +43,15 @@
     const point = { bubbles: true, cancelable: true, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
     const pointer = { ...point, pointerId: 1, pointerType: "mouse", relatedTarget: parentMenu };
     const mouse = { ...point, relatedTarget: parentMenu };
-    const knownMenus = new Set(document.querySelectorAll('[role="menu"],mat-menu-panel'));
+    const knownMenus = new Set((typeof root.flowQueryAll === "function" ? root.flowQueryAll("mediaMenu.menuPanel", document, { checkVisible: false }) : null) || document.querySelectorAll('[role="menu"],mat-menu-panel'));
     const find = () => {
       for (const id of [trigger.getAttribute("aria-controls"), trigger.getAttribute("aria-owns")].filter(Boolean)) {
         const target = document.getElementById(id);
         if (target && target !== parentMenu && root.visible?.(target)) return target;
       }
-      const candidates = [...document.querySelectorAll('[role="menu"],mat-menu-panel')].filter(menu => menu !== parentMenu && root.visible?.(menu));
+      const menuCandidates = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("mediaMenu.menuPanel", document, { checkVisible: false }) : null) ||
+        [...document.querySelectorAll('[role="menu"],mat-menu-panel')];
+      const candidates = menuCandidates.filter(menu => menu !== parentMenu && root.visible?.(menu));
       return candidates.find(menu => flowDownloadChoice(flowMenuItems(menu), quality, kind)) || candidates.find(menu => !knownMenus.has(menu));
     };
     for (const event of ["pointerover", "pointerenter", "pointermove", "pointerdown", "pointerup"]) {
@@ -96,9 +103,10 @@
       if (!tile.isConnected) throw root.flowError("FLOW_ASSET_CHANGED", `The tile for "${title}" changed while preparing its download.`, true);
       const errorTile = (typeof root.flowQuery === "function" ? root.flowQuery("tiles.error", tile, { checkVisible: false }) : null) ||
         tile.querySelector("flow-error-tile");
-      const retryControl = [...tile.querySelectorAll('button,[role="button"]')].find(el =>
-        /^(?:retry|try again|thử lại)(?:\s+.*)?$/i.test(flowMenuLabel(el) || (root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim()) ||
-        /^(?:refresh|replay|retry)$/i.test((root.flowFindIcon ? root.flowFindIcon(el) : el.querySelector?.("mat-icon, .mat-icon, .google-symbols"))?.textContent?.trim() || ""));
+      const retryControl = (typeof root.flowFindSemantic === "function" ? root.flowFindSemantic("tiles.retryButton", tile, { checkVisible: false }) : null) ||
+        [...tile.querySelectorAll('button,[role="button"]')].find(el =>
+          /^(?:retry|try again|thử lại)(?:\s+.*)?$/i.test(flowMenuLabel(el) || (root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim()) ||
+          /^(?:refresh|replay|retry)$/i.test((root.flowFindIcon ? root.flowFindIcon(el) : el.querySelector?.("mat-icon, .mat-icon, .google-symbols"))?.textContent?.trim() || ""));
       if (errorTile || retryControl) {
         const reason = (errorTile?.innerText || errorTile?.textContent || flowMenuLabel(retryControl) || "").replace(/\s+/g, " ").trim();
         throw root.flowError("FLOW_GENERATION_FAILED", `Flow marked "${title}" as failed${reason ? `: ${reason}` : ""}.`, false, true);
@@ -109,7 +117,7 @@
 
       // Search for media elements in light DOM and shadow roots
       const media = [
-        ...tile.querySelectorAll("video,img,canvas,[role='img'],flow-video-tile,flow-image-tile"),
+        ...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.mediaElements", tile, { checkVisible: false }) : null) || tile.querySelectorAll("video,img,canvas,[role='img'],flow-video-tile,flow-image-tile")),
         ...(tile.shadowRoot ? [...tile.shadowRoot.querySelectorAll("video,img,canvas")] : []),
         ...([...tile.querySelectorAll("*")].flatMap(el => el.shadowRoot ? [...el.shadowRoot.querySelectorAll("video,img,canvas")] : []))
       ];
@@ -144,8 +152,9 @@
     }
 
     // Graceful fallback: If tile is connected and finished rendering (not failed, not busy), allow download
-    const finalError = tile.querySelector("flow-error-tile");
-    const finalBusy = Boolean(root.isTileBusy?.(tile) ?? tile.querySelector('flow-progress-tile,mat-progress-bar,[role="progressbar"]'));
+    const finalError = (typeof root.flowQuery === "function" ? root.flowQuery("tiles.error", tile, { checkVisible: false }) : null) ||
+      tile.querySelector("flow-error-tile");
+    const finalBusy = Boolean(root.isTileBusy?.(tile) ?? ((typeof root.flowQuery === "function" ? root.flowQuery("tiles.progressBar", tile, { checkVisible: false }) : null) || tile.querySelector('flow-progress-tile,mat-progress-bar,[role="progressbar"]')));
     if (tile.isConnected && !finalError && !finalBusy) {
       return tile;
     }
@@ -176,8 +185,8 @@
       }
       if (!tile) tile = await root.findFlowTile?.(title);
       if (!tile) throw root.flowError("FLOW_ASSET_NOT_FOUND", `Could not find "${title}" in the project library.`, true);
-      const scene = Boolean(tile.querySelector("flow-scene-tile"));
-      const kind = tile.querySelector("flow-video-tile") ? "video" : "image";
+      const scene = Boolean(typeof root.flowQuery === "function" ? root.flowQuery("tiles.scene", tile, { checkVisible: false }) : tile.querySelector("flow-scene-tile"));
+      const kind = (typeof root.flowQuery === "function" ? root.flowQuery("tiles.video", tile, { checkVisible: false }) : tile.querySelector("flow-video-tile")) ? "video" : "image";
       if (!scene) await waitForFlowTileMedia(tile, title);
       if (!tile.isConnected || mediaHandle && root.mediaId?.(tile) !== mediaHandle) {
         tile = mediaHandle
@@ -248,9 +257,10 @@
     const tileContainers = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", document, { checkVisible: false }) : null) ||
       [...document.querySelectorAll("flow-grid-tile-container")];
     return tileContainers.map(tile => {
-      const kind = (typeof root.flowQuery === "function" && root.flowQuery("tiles.video", tile, { checkVisible: false }))
-        ? (tile.querySelector("flow-scene-tile") ? "scene" : "video")
-        : (tile.querySelector("flow-scene-tile") ? "scene" : tile.querySelector("flow-video-tile") ? "video" : tile.querySelector("flow-image-tile") ? "image" : null);
+      const scene = Boolean(typeof root.flowQuery === "function" ? root.flowQuery("tiles.scene", tile, { checkVisible: false }) : tile.querySelector("flow-scene-tile"));
+      const video = (typeof root.flowQuery === "function" ? root.flowQuery("tiles.video", tile, { checkVisible: false }) : tile.querySelector("flow-video-tile"));
+      const image = (typeof root.flowQuery === "function" ? root.flowQuery("tiles.image", tile, { checkVisible: false }) : tile.querySelector("flow-image-tile"));
+      const kind = scene ? "scene" : video ? "video" : image ? "image" : null;
       const name = (tile.getAttribute("aria-label") || tile.getAttribute("title") || tile.getAttribute("data-tile-name") ||
         tile.querySelector("img")?.getAttribute("alt") || tile.querySelector("img")?.getAttribute("aria-label") || "").trim();
       const rawId = root.mediaId?.(tile);
@@ -258,7 +268,8 @@
       if ((!kind || !name) && (!includeIncomplete || !id)) return null;
       const busy = Boolean(root.FlowTiles?.isTileBusy?.(tile) ?? root.isTileBusy?.(tile));
       const ready = Boolean(root.FlowTiles?.isTileMediaReady?.(tile) ?? (!busy && root.isTileMediaReady?.(tile)));
-      return { ...(id ? { id } : {}), name, kind, busy, ...(includeIncomplete ? { ready, error: Boolean(tile.querySelector("flow-error-tile")) } : {}) };
+      const hasError = Boolean(typeof root.flowQuery === "function" ? root.flowQuery("tiles.error", tile, { checkVisible: false }) : tile.querySelector("flow-error-tile"));
+      return { ...(id ? { id } : {}), name, kind, busy, ...(includeIncomplete ? { ready, error: hasError } : {}) };
     }).filter(Boolean);
   }
 
@@ -420,7 +431,8 @@
   function characterLibrarySnapshot(container = root.scrollContainer?.()) {
     const pathname = location.pathname || "";
     const project = (root.ProviderRegistry || root.FlowDriverRegistry)?.describeUrl?.(location.href) || null;
-    const tiles = [...document.querySelectorAll("flow-character-tile")];
+    const tiles = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.characterTile", document, { checkVisible: false }) : null) ||
+      [...document.querySelectorAll("flow-character-tile")];
     const visibleTiles = tiles.filter(tile => root.visible?.(tile) !== false);
     const loadingCount = [...document.querySelectorAll('[role="progressbar"],[aria-busy="true"]')]
       .filter(el => root.visible?.(el) !== false).length;
@@ -689,7 +701,7 @@
 
   async function scanNativeProjects() {
     const homeUrl = location.href;
-    const projectLinks = () => [...document.querySelectorAll('a[href*="/project/"]')]
+    const projectLinks = () => [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("navigation.projectLinks", document, { checkVisible: false }) : null) || document.querySelectorAll('a[href*="/project/"]'))]
       .filter(link => {
         try { return new URL(link.href).origin === location.origin && /\/project\/[0-9a-f-]{36}(?:[/?#]|$)/i.test(new URL(link.href).pathname + new URL(link.href).search); }
         catch { return false; }

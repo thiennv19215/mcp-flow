@@ -64,6 +64,7 @@
         "https://flow.google.com/*"
       ],
       "js": [
+        "build-revision.js",
         "content/shared/I18n.js",
         "content/shared/dom-utils.js",
         "content/providers/flow/FlowSelectors.js",
@@ -83,7 +84,8 @@
         "content/providers/flow/FlowLibraryOperations.js",
         "content/providers/flow/FlowWorkflowOperations.js",
         "content/providers/flow/FlowDriver.js",
-        "content/dom-actions.js"
+        "content/dom-actions.js",
+        "content/floating-tracker-flow.js"
       ],
       "run_at": "document_idle"
     }
@@ -100,7 +102,6 @@
   },
   "action": {
     "default_title": "Flow MCP Native Automation",
-    "default_popup": "ui/popup.html",
     "default_icon": {
       "16": "icons/icon-16.png",
       "32": "icons/icon-32.png",

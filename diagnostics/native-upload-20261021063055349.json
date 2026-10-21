@@ -1,0 +1,27 @@
+{
+  "started": "2026-10-21T06:30:55.349Z",
+  "mode": "upload",
+  "api": "http://127.0.0.1:18897",
+  "probes": [
+    {
+      "name": "upload_media",
+      "status": "passed",
+      "seconds": 12.017,
+      "result": {
+        "name": "fm-a6f6c32f9203-upload.png",
+        "id": "b5d304ab-eeb8-4001-8110-86a225761c0f",
+        "kind": "image",
+        "uploaded": true,
+        "trustedGesture": false
+      }
+    }
+  ],
+  "upload": {
+    "name": "fm-a6f6c32f9203-upload.png",
+    "id": "b5d304ab-eeb8-4001-8110-86a225761c0f",
+    "kind": "image",
+    "uploaded": true,
+    "trustedGesture": false
+  },
+  "finished": "2026-10-21T06:31:07.367Z"
+}

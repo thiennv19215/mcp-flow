@@ -1,0 +1,378 @@
+{
+  "started": "2026-10-21T07:08:34.594Z",
+  "operation": "Vietnamese image-reference submit_only",
+  "asset": "fm-a6f6c32f9203-upload.png",
+  "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+  "steps": [],
+  "preflight": {
+    "health": {
+      "ready": true,
+      "activeAttempts": 0,
+      "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+      "build": {
+        "status": "mismatch",
+        "matchesWatcher": false,
+        "backgroundRevision": "b1c56554b1e23cabfffd384ba9d37e5e7fed5f7dbdc7a244f81acdc4abe50e54",
+        "contentRevision": "b1c56554b1e23cabfffd384ba9d37e5e7fed5f7dbdc7a244f81acdc4abe50e54",
+        "watcherRevision": "38cd3f6518897ecba30dae0934264a6d48bd66c03f73f7e112c7348147724752"
+      }
+    },
+    "generatedMarker": "b1c56554b1e23cabfffd384ba9d37e5e7fed5f7dbdc7a244f81acdc4abe50e54",
+    "loadedMarkers": {
+      "background": "b1c56554b1e23cabfffd384ba9d37e5e7fed5f7dbdc7a244f81acdc4abe50e54",
+      "content": "b1c56554b1e23cabfffd384ba9d37e5e7fed5f7dbdc7a244f81acdc4abe50e54"
+    },
+    "status": {
+      "url": "https://flow.google.com/project/e4bf4bae-626d-4718-a66a-cbdb04c8e6fa?hl=vi",
+      "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+      "promptCharacters": 0,
+      "chips": 0,
+      "pickerOpen": false,
+      "submitWarnings": [
+        "close An van nvthien11052001@gmail.com Chuyển đổi tài khoản movie_filter_auto 1.040 tín dụng Google Flow Nâng cấp Quản lý gói thuê bao Đăng xuất khỏi mọi tài khoản frame_spark Hình mờ có thể nhìn thấy Khu vực của bạn yêu cầu phải có hình mờ có thể nhìn thấy Quyền riêng tư · Điều khoản dịch vụ · Giấy phép Trang web này được bảo vệ bằng reCAPTCHA, đồng thời có áp dụng Chính sách quyền riêng tư và Điều khoản dịch vụ của Google."
+      ],
+      "activeAttempts": 0,
+      "jobStatuses": [
+        {
+          "id": "9b601c3c",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "c51e14ca",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "e4671d1c",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "65954cf9",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": true
+        },
+        {
+          "id": "8e969368",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "669cba96",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": true
+        },
+        {
+          "id": "b03ac078",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "c8681212",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "d0229fc7",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": true
+        },
+        {
+          "id": "45226d09",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "734ea0cc",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": true
+        },
+        {
+          "id": "39b4e628",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": true
+        },
+        {
+          "id": "0e01c55a",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "5d30a9ec",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "c174c8f5",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "aecb4aea",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "31429aee",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "8d3eecb7",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "ea11a1b2",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": true
+        },
+        {
+          "id": "30f5c749",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": true
+        },
+        {
+          "id": "a4e7c939",
+          "status": "submitted",
+          "dispatched": true,
+          "unknown": false
+        },
+        {
+          "id": "f8ecc0f8",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": true
+        },
+        {
+          "id": "d221a462",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "6a175e38",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "bf7cdefe",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "f0efa71f",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "b41693d7",
+          "status": "submitted",
+          "dispatched": true,
+          "unknown": false
+        },
+        {
+          "id": "e19adaf3",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "2891d147",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "ae85c866",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "0966c6fd",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": true
+        },
+        {
+          "id": "2f9a8c68",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "2b88225f",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": true
+        },
+        {
+          "id": "c086ece5",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "3de91884",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "ef818f23",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "3654a7a6",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": true
+        },
+        {
+          "id": "2ca70045",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": true
+        },
+        {
+          "id": "b10dd105",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "e7e6839c",
+          "status": "submitted",
+          "dispatched": true,
+          "unknown": false
+        },
+        {
+          "id": "93819e71",
+          "status": "submitted",
+          "dispatched": true,
+          "unknown": false
+        },
+        {
+          "id": "b8b50b1e",
+          "status": "submitted",
+          "dispatched": true,
+          "unknown": false
+        },
+        {
+          "id": "41d8526c",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": true
+        },
+        {
+          "id": "4c931fca",
+          "status": "submitted",
+          "dispatched": true,
+          "unknown": false
+        },
+        {
+          "id": "54f48a25",
+          "status": "submitted",
+          "dispatched": true,
+          "unknown": false
+        },
+        {
+          "id": "cc965619",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "8f412c3c",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "5d9b9c10",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "bd696fee",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "d6e59a6c",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "58dde85c",
+          "status": "submitted",
+          "dispatched": true,
+          "unknown": false
+        },
+        {
+          "id": "bb9476a3",
+          "status": "submitted",
+          "dispatched": true,
+          "unknown": false
+        },
+        {
+          "id": "b2af8370",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "26af42b9",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "1fb8486d",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        },
+        {
+          "id": "e916f6c1",
+          "status": "failed",
+          "dispatched": false,
+          "unknown": false
+        }
+      ],
+      "busyJobs": []
+    }
+  },
+  "stopped": "preflight did not satisfy all gates",
+  "finished": "2026-10-21T07:08:35.191Z"
+}

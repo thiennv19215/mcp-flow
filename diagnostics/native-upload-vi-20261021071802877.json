@@ -1,0 +1,97 @@
+{
+  "started": "2026-10-21T07:18:02.877Z",
+  "operation": "Vietnamese image upload only",
+  "fixture": "C:\\Users\\nguye\\Documents\\flow-mcp-extension-native\\diagnostics\\character-attach-proof.png",
+  "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+  "preflight": {
+    "health": {
+      "ready": true,
+      "activeAttempts": 0,
+      "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa"
+    },
+    "flow": {
+      "url": "https://flow.google.com/project/e4bf4bae-626d-4718-a66a-cbdb04c8e6fa?hl=vi",
+      "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+      "prompt": {
+        "contentEditable": true,
+        "characterCount": 0,
+        "chipCount": 0
+      },
+      "referenceActionDiagnostics": {
+        "action": "attach",
+        "phase": "failed",
+        "step": "picker closed",
+        "errorCode": "FLOW_ASSET_NOT_FOUND",
+        "cleanupErrorCode": null,
+        "pickerOpen": false,
+        "pickerRole": null,
+        "pickerOptionCount": 0,
+        "locale": "vi",
+        "searchLabelRecognized": false,
+        "searchLabel": null,
+        "searchResultsVerified": false,
+        "activeCategory": "all",
+        "categorySelected": true,
+        "pickerScanPages": 1,
+        "pickerScanEndReached": true,
+        "optionLabelHashes": [
+          "h-9c1c938d",
+          "h-2c2ef930",
+          "h-f32c2b43",
+          "h-f87ef7e0",
+          "h-eba34d86",
+          "h-e9561ea6",
+          "h-72eb99a6",
+          "h-d1a77521",
+          "h-6731e2ed"
+        ],
+        "exactTargetFound": false,
+        "scrollOwnerCount": 1,
+        "scrollOwnerDepth": 0,
+        "scrollClientHeight": 515,
+        "scrollHeight": 515,
+        "scrollTop": 0,
+        "visibleSurfaces": [
+          {
+            "role": "dialog",
+            "tag": "div",
+            "labelCount": 3
+          }
+        ],
+        "categoryTabs": [],
+        "chipCount": 0,
+        "chips": [],
+        "surfaceStatus": null,
+        "path": null,
+        "provenanceConfirmed": false,
+        "chipUuidConfirmed": false,
+        "menuRelatedToTile": false,
+        "menuNearTrigger": false,
+        "cleanup": null,
+        "updatedAt": "2026-10-21T07:18:02.937Z",
+        "lastResult": null
+      }
+    },
+    "busyJobs": []
+  },
+  "uploadStarted": "2026-10-21T07:18:03.477Z",
+  "uploadReceipt": {
+    "name": "fm-98f0bb2434d4-upload.png",
+    "id": "da35af20-420f-42e8-99c1-01b9f43e5e79",
+    "kind": "image",
+    "uploaded": true,
+    "trustedGesture": false
+  },
+  "listVerificationStarted": "2026-10-21T07:18:15.519Z",
+  "assetList": {
+    "count": 9,
+    "exactMatches": [
+      {
+        "name": "fm-98f0bb2434d4-upload.png",
+        "kind": "image"
+      }
+    ]
+  },
+  "outcome": "upload_and_list_confirmed",
+  "finished": "2026-10-21T07:18:16.938Z"
+}

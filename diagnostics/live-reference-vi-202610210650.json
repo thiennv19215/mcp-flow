@@ -1,0 +1,69 @@
+{
+  "output_dir": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-vi-20261021-0650",
+  "jobs": [
+    {
+      "id": "26af42b9",
+      "status": "running",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-vi-20261021-0650",
+      "scene": "scene-01",
+      "prompt": "A catalog-ready studio still of the same subject from the supplied reference, viewed from a slightly elevated three-quarter angle on a warm ivory backdrop, soft directional light and a short natural shadow, no lettering.",
+      "attempts": 1,
+      "credit_quote_verified": null,
+      "files": [],
+      "outcome_unknown": false,
+      "request_dispatched": false,
+      "server_acceptance_observed": false,
+      "request_diagnostics": null
+    }
+  ],
+  "assetListVerified": [
+    {
+      "name": "Show subject on white background",
+      "kind": "image"
+    },
+    {
+      "name": "fm-a6f6c32f9203-upload.png",
+      "kind": "image"
+    },
+    {
+      "name": "fm-415bc373e1e9-upload.png",
+      "kind": "image"
+    },
+    {
+      "name": "Display subject on white background",
+      "kind": "image"
+    },
+    {
+      "name": "fm-195a7ab985af-upload.png",
+      "kind": "image"
+    },
+    {
+      "name": "Photographing cobalt-blue teacup",
+      "kind": "image"
+    },
+    {
+      "name": "fm-b4ad4a4bd219-upload.png",
+      "kind": "image"
+    },
+    {
+      "name": "Cobalt-blue ceramic teacup on pl…",
+      "kind": "image"
+    }
+  ],
+  "postflight": {
+    "jobId": "26af42b9",
+    "status": "failed",
+    "progress": "Flow submit: selecting asset fm-a6f6c32f9203-upload.png",
+    "error": "No exact reference named \"fm-a6f6c32f9203-upload.png\" in the selected project. Nothing was attached.",
+    "error_category": "unknown",
+    "outcome_unknown": false,
+    "request_dispatched": false,
+    "server_acceptance_observed": false,
+    "credit_quote_verified": null,
+    "flowUrl": "https://flow.google.com/project/e4bf4bae-626d-4718-a66a-cbdb04c8e6fa?hl=vi",
+    "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "activeAttempts": 0,
+    "busyJobCount": 0,
+    "observerReady": true
+  }
+}

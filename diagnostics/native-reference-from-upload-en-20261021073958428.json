@@ -1,0 +1,1666 @@
+{
+  "started": "2026-10-21T07:39:58.427Z",
+  "operation": "single EN image-reference generation using fresh uploaded image",
+  "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+  "asset": "fm-d5e640bd8f97-upload.png",
+  "uploadEvidence": "diagnostics/native-upload-reference-en-20261021073917940.json",
+  "preflight": {
+    "observer": {
+      "ready": true,
+      "activeAttempts": 0,
+      "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+      "extensionBuild": {
+        "status": "mismatch",
+        "matchesWatcher": false,
+        "backgroundRevision": "a98d6fd5b9bbbee5ebbe07a8155cfe26fe4b76bf520dc6fe6f7ae022c48e8d3a",
+        "contentRevision": "a98d6fd5b9bbbee5ebbe07a8155cfe26fe4b76bf520dc6fe6f7ae022c48e8d3a",
+        "watcherRevision": "a5e8dcf14535f2466be464311fab24cd60e275c92f1f6ae4590838a2893aae16"
+      },
+      "generatedMarker": "a98d6fd5b9bbbee5ebbe07a8155cfe26fe4b76bf520dc6fe6f7ae022c48e8d3a"
+    },
+    "flow": {
+      "url": "https://flow.google.com/project/e4bf4bae-626d-4718-a66a-cbdb04c8e6fa?hl=en",
+      "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+      "prompt": {
+        "contentEditable": true,
+        "characterCount": 0,
+        "chipCount": 0
+      },
+      "pickerOpen": false,
+      "referenceDiagnostics": {
+        "action": "close",
+        "phase": "completed",
+        "step": "picker closed",
+        "errorCode": null,
+        "cleanupErrorCode": null,
+        "pickerOpen": false,
+        "pickerRole": null,
+        "pickerOptionCount": 0,
+        "locale": "en",
+        "searchLabelRecognized": false,
+        "searchLabel": null,
+        "searchResultsVerified": false,
+        "activeCategory": "unknown",
+        "categorySelected": false,
+        "pickerScanPages": 0,
+        "pickerScanEndReached": false,
+        "optionLabelHashes": [],
+        "exactTargetFound": false,
+        "scrollOwnerCount": 0,
+        "scrollOwnerDepth": null,
+        "scrollClientHeight": 0,
+        "scrollHeight": 0,
+        "scrollTop": 0,
+        "visibleSurfaces": [],
+        "categoryTabs": [],
+        "chipCount": 0,
+        "chips": [],
+        "surfaceStatus": null,
+        "path": null,
+        "provenanceConfirmed": false,
+        "chipUuidConfirmed": false,
+        "menuRelatedToTile": false,
+        "menuNearTrigger": false,
+        "cleanup": null,
+        "updatedAt": "2026-10-21T07:39:58.515Z",
+        "lastResult": null
+      },
+      "warnings": []
+    },
+    "assetList": {
+      "exactCount": 1,
+      "matches": [
+        {
+          "name": "fm-d5e640bd8f97-upload.png",
+          "kind": "image"
+        }
+      ]
+    },
+    "busyJobs": []
+  },
+  "submissionStarted": "2026-10-21T07:40:00.402Z",
+  "request": {
+    "project": "NativeE2E-reference-from-upload-en-1792568400402",
+    "scene": {
+      "type": "image",
+      "prompt": "A refined studio photograph of the uploaded cobalt glass vase on a pale travertine pedestal, soft warm side lighting, realistic reflections, neutral gallery backdrop, no text.",
+      "model": "latest",
+      "reference_images": [
+        "asset:fm-d5e640bd8f97-upload.png"
+      ],
+      "max_credits": 0,
+      "submit_only": true,
+      "retries": 0,
+      "variants": 1
+    }
+  },
+  "queueResponse": {
+    "output_dir": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-from-upload-en-1792568400402",
+    "jobs": [
+      {
+        "id": "ee7e61bf",
+        "status": "running",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-from-upload-en-1792568400402",
+        "scene": "scene-01",
+        "prompt": "A refined studio photograph of the uploaded cobalt glass vase on a pale travertine pedestal, soft warm side lighting, realistic reflections, neutral gallery backdrop, no text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "files": [],
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      }
+    ]
+  },
+  "jobId": "ee7e61bf",
+  "latestJob": {
+    "id": "ee7e61bf",
+    "status": "submitted",
+    "request_dispatched": true,
+    "server_acceptance_observed": false,
+    "credit_quote_verified": true,
+    "credits": 0,
+    "outcome_unknown": false,
+    "note": "Flow submit request was dispatched; rendering and downloads were not awaited.",
+    "request_diagnostics": null
+  },
+  "outcome": "dispatched_with_verified_zero_quote",
+  "postflight": {
+    "flow": {
+      "url": "https://flow.google.com/project/e4bf4bae-626d-4718-a66a-cbdb04c8e6fa?hl=en",
+      "signedIn": true,
+      "inProject": true,
+      "isProjectEditor": true,
+      "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+      "uploadControlDiagnostics": {
+        "bundle": "flow-components-upload-trigger-diag-20261021a",
+        "composer": {
+          "tag": "div",
+          "aria": "What do you want to create? add Agent 🍌 Nano Banana 2.1 crop_16_9 x1 arrow_forward",
+          "text": "What do you want to create? add Agent 🍌 Nano Banana 2.1 crop_16_9 x1 arrow_forward",
+          "icon": "",
+          "className": "base-prompt-box",
+          "disabled": false,
+          "connected": true
+        },
+        "containsEditor": true,
+        "containsSubmit": true,
+        "promptDiagnostics": {
+          "contentEditable": true,
+          "characterCount": 0,
+          "chipCount": 0
+        },
+        "directResolver": {
+          "tag": "button",
+          "aria": "Add ingredients to the prompt box",
+          "text": "add",
+          "icon": "add",
+          "className": "mdc-icon-button mat-mdc-icon-button mat-mdc-button-base mat-mdc-tooltip-trigger add-menu-trigger mat-unthemed",
+          "disabled": false,
+          "connected": true
+        },
+        "componentResolver": {
+          "tag": "button",
+          "aria": "Add ingredients to the prompt box",
+          "text": "add",
+          "icon": "add",
+          "className": "mdc-icon-button mat-mdc-icon-button mat-mdc-button-base mat-mdc-tooltip-trigger add-menu-trigger mat-unthemed",
+          "disabled": false,
+          "connected": true
+        },
+        "visibleComposerControls": [
+          {
+            "tag": "button",
+            "role": null,
+            "aria": "Add ingredients to the prompt box",
+            "title": "",
+            "text": "add",
+            "ariaPressed": null,
+            "ariaSelected": null,
+            "dataState": null,
+            "checked": null,
+            "disabled": false,
+            "icon": "add",
+            "className": "mdc-icon-button mat-mdc-icon-button mat-mdc-button-base mat-mdc-tooltip-trigger add-menu-trigger mat"
+          },
+          {
+            "tag": "button",
+            "role": null,
+            "aria": "Agent",
+            "title": "",
+            "text": "Agent",
+            "ariaPressed": "false",
+            "ariaSelected": null,
+            "dataState": null,
+            "checked": null,
+            "disabled": false,
+            "icon": "",
+            "className": "agent-mode-chip"
+          },
+          {
+            "tag": "button",
+            "role": null,
+            "aria": "Settings trigger",
+            "title": "",
+            "text": "🍌 Nano Banana 2.1 crop_16_9 x1",
+            "ariaPressed": null,
+            "ariaSelected": null,
+            "dataState": null,
+            "checked": null,
+            "disabled": false,
+            "icon": "crop_16_9",
+            "className": "mdc-button mat-mdc-button-base settings-trigger-button mdc-button--unelevated mat-mdc-unelevated-but"
+          },
+          {
+            "tag": "button",
+            "role": null,
+            "aria": "Start generation",
+            "title": "",
+            "text": "arrow_forward",
+            "ariaPressed": null,
+            "ariaSelected": null,
+            "dataState": null,
+            "checked": null,
+            "disabled": true,
+            "icon": "arrow_forward",
+            "className": "mdc-icon-button mat-mdc-icon-button mat-mdc-button-base generate-icon-button mat-unthemed flow-icon-"
+          }
+        ]
+      },
+      "framePickerDiagnostics": null,
+      "referenceClearDiagnostics": {
+        "composer": {
+          "tag": "flow-base-prompt-box",
+          "className": "",
+          "connected": true
+        },
+        "clearPromptButton": null,
+        "chipCount": 0,
+        "chips": [],
+        "helper": {
+          "phase": "returned",
+          "initialCount": 0,
+          "removedCount": 0,
+          "error": null,
+          "updatedAt": "2026-10-21T07:40:00.476Z",
+          "remainingCount": 0
+        }
+      },
+      "referenceActionDiagnostics": {
+        "action": "attach",
+        "phase": "completed",
+        "step": "picker closed",
+        "errorCode": null,
+        "cleanupErrorCode": null,
+        "pickerOpen": false,
+        "pickerRole": null,
+        "pickerOptionCount": 0,
+        "locale": "en",
+        "searchLabelRecognized": true,
+        "searchLabel": "search assets",
+        "searchResultsVerified": true,
+        "activeCategory": "all",
+        "categorySelected": true,
+        "pickerScanPages": 1,
+        "pickerScanEndReached": true,
+        "optionLabelHashes": [
+          "h-c05cb27b"
+        ],
+        "exactTargetFound": true,
+        "scrollOwnerCount": 1,
+        "scrollOwnerDepth": 0,
+        "scrollClientHeight": 515,
+        "scrollHeight": 515,
+        "scrollTop": 0,
+        "visibleSurfaces": [],
+        "categoryTabs": [],
+        "chipCount": 0,
+        "chips": [],
+        "surfaceStatus": null,
+        "path": null,
+        "provenanceConfirmed": false,
+        "chipUuidConfirmed": false,
+        "menuRelatedToTile": false,
+        "menuNearTrigger": false,
+        "cleanup": null,
+        "updatedAt": "2026-10-21T07:40:09.472Z",
+        "lastResult": {}
+      },
+      "characterNameDiagnostics": null,
+      "characterListDiagnostics": null,
+      "imageSettingsDiagnostics": {
+        "phase": "completed",
+        "step": "closing legacy settings",
+        "startedAt": "2026-10-21T07:40:00.476Z",
+        "updatedAt": "2026-10-21T07:40:04.156Z",
+        "lastResult": {
+          "creditQuote": 0,
+          "modernComposer": false
+        },
+        "error": null
+      },
+      "videoSettingsDiagnostics": {
+        "phase": "idle",
+        "step": "idle",
+        "startedAt": null,
+        "updatedAt": null,
+        "lastResult": null,
+        "error": null
+      },
+      "submitWarnings": [
+        "warning Failed We noticed some unusual activity. Note that browser extensions that modify the page may cause issues. Please visit the Help Center for more information. You have not been charged for this generation. refresh undo delete_forever",
+        "warning Failed We noticed some unusual activity. Note that browser extensions that modify the page may cause issues. Please visit the Help Center for more information. You have not been charged for this generation. refresh undo delete_forever",
+        "warning Failed We noticed some unusual activity. Note that browser extensions that modify the page may cause issues. Please visit the Help Center for more information. You have not been charged for this generation. refresh undo delete_forever"
+      ],
+      "composer": "🍌 Nano Banana 2.1 crop_16_9 x1",
+      "generation_credit_quote_candidates": [],
+      "credits_remaining": 1040,
+      "progress_diagnostics": {
+        "receiptId": 77,
+        "receivedAt": "2026-10-21T07:40:09.473Z",
+        "requestId": "42",
+        "tabId": 1784013709,
+        "flowUrl": true,
+        "isInteractive": false,
+        "isSelectedFlowTab": true,
+        "acceptedByWorker": true,
+        "progress": "Flow progress telemetry check",
+        "transport": "http-poll",
+        "backendState": "backend_matched_pending_command",
+        "backendMatchedRequest": true,
+        "httpStatus": 200,
+        "forwardedAt": "2026-10-21T07:40:09.477Z"
+      },
+      "correlation_observer_diagnostics": {
+        "pageProjectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+        "descriptor": {
+          "driverKey": "flow",
+          "origin": "https://flow.google.com",
+          "routePrefix": ""
+        },
+        "observer": {
+          "ready": true,
+          "version": 1,
+          "observerRevision": 24,
+          "structuredPromptVersion": 2,
+          "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+          "activeAttempts": 0,
+          "retiredCount": 7,
+          "retiredSaturated": false,
+          "requestDiagnostics": {
+            "version": 1,
+            "count": 1,
+            "events": [
+              {
+                "observedAt": 1792568407091,
+                "attemptId": "89c7f8e4-213e-499c-973e-273f591f277f",
+                "mediaType": "image",
+                "transport": "fetch",
+                "path": "/_/AiSandboxAngularFrontend/data/batchexecute",
+                "rpcId": "ogiZ0b",
+                "payloadVersion": "image_rows_v1",
+                "payloadShape": {
+                  "type": "array",
+                  "length": 5,
+                  "items": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "array",
+                      "length": 1,
+                      "items": [
+                        {
+                          "type": "array",
+                          "length": 14,
+                          "items": [
+                            {
+                              "type": "null"
+                            },
+                            {
+                              "type": "null"
+                            },
+                            {
+                              "type": "array",
+                              "length": 1,
+                              "items": [
+                                {
+                                  "type": "array",
+                                  "length": 5
+                                }
+                              ]
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "string",
+                              "length": 6
+                            },
+                            {
+                              "type": "null"
+                            },
+                            {
+                              "type": "array",
+                              "length": 11,
+                              "items": [
+                                {
+                                  "type": "null"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "null"
+                                },
+                                {
+                                  "type": "null"
+                                },
+                                {
+                                  "type": "null"
+                                },
+                                {
+                                  "type": "string",
+                                  "length": 36
+                                },
+                                {
+                                  "type": "null"
+                                },
+                                {
+                                  "type": "null"
+                                },
+                                {
+                                  "type": "null"
+                                },
+                                {
+                                  "type": "null"
+                                },
+                                {
+                                  "type": "array",
+                                  "length": 2
+                                }
+                              ]
+                            },
+                            {
+                              "type": "array",
+                              "length": 1,
+                              "items": [
+                                {
+                                  "type": "array",
+                                  "length": 1
+                                }
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            },
+                            {
+                              "type": "null"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "array",
+                      "length": 11,
+                      "items": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "length": 36
+                        },
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "array",
+                          "length": 2,
+                          "items": [
+                            {
+                              "type": "string",
+                              "length": 2702
+                            },
+                            {
+                              "type": "number"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "array",
+                      "length": 1,
+                      "items": [
+                        {
+                          "type": "string",
+                          "length": 36
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "pathRecognized": true,
+                "payloadMatched": true,
+                "fields": {
+                  "shape": true,
+                  "prompt": true,
+                  "model": null,
+                  "quantity": true,
+                  "referenceIds": true,
+                  "project": true
+                },
+                "reasons": []
+              }
+            ]
+          },
+          "xhrHookActive": true,
+          "fetchHookActive": true
+        },
+        "projectMatch": true,
+        "armPreflight": {
+          "result": "armed_and_disarmed",
+          "expected": {
+            "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+            "mediaType": "image",
+            "promptFingerprint": "id-c327a3a4"
+          },
+          "receipt": {
+            "schemaVersion": 1,
+            "nonce": "a6178da4-223d-4b2d-90a7-5412488d543e",
+            "attemptId": "0088dc66-a4e8-4f47-b42e-bf2d3b1f8722",
+            "stage": "armed",
+            "mediaType": "image",
+            "expectedQuantity": 1,
+            "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+            "observedAt": 1792568410005,
+            "structuredPromptVersion": 2,
+            "observerRevision": 24,
+            "xhrHookActive": true,
+            "fetchHookActive": true,
+            "reason": null
+          },
+          "reason": null
+        }
+      }
+    },
+    "pacing": null,
+    "output_root": "C:\\Users\\nguye\\flow-mcp-out",
+    "jobs": [
+      {
+        "id": "9b601c3c",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\LocalSubmitCheck",
+        "scene": "scene-01",
+        "prompt": "A clean studio photograph of one handmade orange ceramic vase on a matte pale blue surface, soft natural window light, centered square composition, crisp realistic detail, no text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "files": [],
+        "error": "Flow's Start generation button was not found; nothing was submitted.",
+        "error_category": "unknown",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "c51e14ca",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\LocalSubmitCheck",
+        "scene": "scene-02",
+        "prompt": "A clean studio photograph of one handmade orange ceramic vase on a matte pale blue surface, soft natural window light, centered square composition, crisp realistic detail, no text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "files": [],
+        "error": "Flow's settings panel did not open; no generation was submitted.",
+        "error_category": "unknown",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "e4671d1c",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\LocalSubmitCheck",
+        "scene": "scene-03",
+        "prompt": "A clean studio photograph of one handmade orange ceramic vase on a matte pale blue surface, soft natural window light, centered square composition, crisp realistic detail, no text.",
+        "attempts": 1,
+        "credits": 0,
+        "credit_quote_verified": null,
+        "progress": "Đang render (0%)",
+        "files": [],
+        "error": "Flow hiển thị thông báo lỗi: \"warning Không thành công Chúng tôi nhận thấy có hoạt động bất thường nào đó. Xin lưu ý rằng các tiện ích trình duyệt sửa đổi trang có thể gây ra vấn đề. Vui lòng truy cập vào Trung tâm trợ giúp để biết thêm thông tin. Bạn chưa bị tính phí cho lượt tạo này. refresh undo delete_forever\".",
+        "error_category": "generation",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "65954cf9",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\FlowMethodCheck",
+        "scene": "scene-01",
+        "prompt": "Test only: a red ceramic coffee mug on a sunlit wooden table, clean product photo.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Waiting for Flow to receive uploaded image fm-9a63cb665fb1-upload.png",
+        "files": [],
+        "note": "Uploading reference \"video-proof.png\" to Flow project...",
+        "error": "Flow did not confirm that image \"fm-9a63cb665fb1-upload.png\" finished uploading. Inspect Flow before retrying.",
+        "error_category": "unknown",
+        "outcome_unknown": true,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "8e969368",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\FlowMethodCheck",
+        "scene": "scene-02",
+        "prompt": "Test only: a red ceramic mug on a sunlit wooden table, clean product photo.",
+        "attempts": 1,
+        "credits": 0,
+        "credit_quote_verified": null,
+        "files": [],
+        "error": "Flow hiển thị thông báo lỗi: \"info Flow is currently experiencing high demand, affecting video generation. Requests may need to be retried at a later time. Flow credits will be refunded for any failed requests. Dismiss close\".",
+        "error_category": "quota",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "669cba96",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\FlowMethodCheck",
+        "scene": "scene-03",
+        "prompt": "Test only: a red ceramic mug on a wooden table, gentle steam rising, one steady cinematic shot.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "files": [],
+        "error": "Extension command flow.dom.execute timed out after 130000ms; its outcome may be unknown.",
+        "error_category": "extension",
+        "outcome_unknown": true,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "b03ac078",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\FlowDispatchProbe20261021",
+        "scene": "scene-01",
+        "prompt": "Dispatch probe image 2026-10-21 A: square studio photograph of the exact red ceramic mug from the reference, placed on a matte pale blue surface with soft window light, no text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "files": [],
+        "error": "options is not a function",
+        "error_category": "unknown",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "c8681212",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\FlowDispatchProbe20261021",
+        "scene": "scene-02",
+        "prompt": "Dispatch probe image 2026-10-21 B: square studio photograph preserving the exact red ceramic mug from the reference, on a matte pale blue surface in soft window light, no text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "files": [],
+        "error": "Flow's request observer could not be armed, so the submit cannot be safely confirmed. No generation request was sent.",
+        "error_category": "unknown",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "d0229fc7",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\FlowDispatchAudit20261021",
+        "scene": "scene-01",
+        "prompt": "Dispatch probe video 2026-10-21 C: one cobalt-blue paper boat drifts slowly across a still shallow pond at dawn, one steady wide shot, soft natural light, no text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "files": [],
+        "error": "Extension command flow.dom.execute timed out after 130000ms; its outcome may be unknown.",
+        "error_category": "extension",
+        "outcome_unknown": true,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "45226d09",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\FlowDispatchProbe20261021B",
+        "scene": "scene-01",
+        "prompt": "Unique dispatch-only audit 2026-10-21 T2V: one small cobalt paper sailboat glides across a glassy pond at sunrise, one steady wide shot, natural light, no text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "files": [],
+        "error": "Flow did not show a verifiable credit quote; nothing was submitted.",
+        "error_category": "quota",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "734ea0cc",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\FlowSubmitOnlyAudit-20261021-013644",
+        "scene": "scene-01",
+        "prompt": "Unique dispatch-only audit T2I 20261021-013644: one cobalt blue ceramic teapot on a pale linen table beside a single orange, soft morning light, clean editorial still-life, no lettering.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "files": [],
+        "error": "Extension command flow.dom.execute timed out after 130000ms; its outcome may be unknown.",
+        "error_category": "extension",
+        "outcome_unknown": true,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "39b4e628",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\FlowSubmitOnlyBaseline20261021B",
+        "scene": "scene-01",
+        "prompt": "Dispatch-only baseline 2026-10-21 02:22: Unique still-life of one violet glass bottle beside a yellow lemon on a matte cream table, soft morning window light, square editorial product photograph, no text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "files": [],
+        "error": "Extension command flow.dom.execute timed out after 130000ms; its outcome may be unknown.",
+        "error_category": "extension",
+        "outcome_unknown": true,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "0e01c55a",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\FlowAudit20261021",
+        "scene": "scene-01",
+        "prompt": "Reference dispatch check 20261021-1615: create a minimal clean studio photo inspired by the attached image, centered subject, neutral background, no text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow submit: clearing old reference chips",
+        "files": [],
+        "error": "Stopped waiting during Flow submit stage: clearing old reference chips. That page step may still be running; no later submit stage will start. Inspect Flow before retrying.",
+        "error_category": "generation",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "5d30a9ec",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\FlowAudit20261021",
+        "scene": "scene-02",
+        "prompt": "Reference dispatch check 20261021-1625: make one simple studio image based on the attached reference, centered subject, neutral background, no text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow submit: preparing image settings",
+        "files": [],
+        "error": "Stopped waiting during Flow submit stage: preparing image settings. That page step may still be running; no later submit stage will start. Inspect Flow before retrying.",
+        "error_category": "generation",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "c174c8f5",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\flow-submit-audit-20261021-024618",
+        "scene": "scene-01",
+        "prompt": "Audit reference dispatch 20261021-024618: a small red ceramic cube on a plain light-gray studio surface, centered and motionless.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow submit: preparing image settings",
+        "files": [],
+        "error": "Stopped waiting during Flow submit stage: preparing image settings. That page step may still be running; no later submit stage will start. Inspect Flow before retrying.",
+        "error_category": "generation",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "aecb4aea",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\flow-settings-diag-20261021-025015",
+        "scene": "scene-01",
+        "prompt": "Settings diagnostics reference dispatch 20261021-025015: a single blue glass sphere on a matte white plinth, centered in a plain studio.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow submit: selecting asset fm-fff737cedcc9-upload.png",
+        "files": [],
+        "error": "Timed out while closing the Flow reference picker; no further Flow actions were started.",
+        "error_category": "generation",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "31429aee",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\flow-picker-close-20261021-025443",
+        "scene": "scene-01",
+        "prompt": "Picker close regression 20261021-025443: a small yellow ceramic teapot on a plain wooden table, static catalog photo.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow submit: reading Flow's credit quote",
+        "files": [],
+        "error": "Timed out while reading Flow's credit quote; no further Flow actions were started.",
+        "error_category": "quota",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "8d3eecb7",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\FlowAudit-Reference-20261021-025737657",
+        "scene": "scene-01",
+        "prompt": "Reference dispatch-only audit 20261021-025737657: a single small cobalt-blue ceramic bowl on a matte white plinth, centered studio still life, soft window light, no text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow submit: arming the request observer",
+        "files": [],
+        "error": "Flow's request observer could not be armed, so the submit cannot be safely confirmed. No generation request was sent.",
+        "error_category": "unknown",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "ea11a1b2",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\FlowObserver-Verified-20261021-030122126",
+        "scene": "scene-01",
+        "prompt": "Correlation-arm verified dispatch-only test 20261021-030122126: a single glossy teal glass bottle on a pale stone surface, soft diffused window light, minimal still-life photograph, no text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "files": [],
+        "error": "Backend restarted while this job was running. Check the Flow project before retrying; its outcome is unknown.",
+        "error_category": "extension",
+        "outcome_unknown": true,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "30f5c749",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-20261020201226080",
+        "scene": "scene-01",
+        "prompt": "Show the same subject on a plain white background, no text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "files": [],
+        "error": "Backend restarted while this job was running. Check the Flow project before retrying; its outcome is unknown.",
+        "error_category": "extension",
+        "outcome_unknown": true,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "a4e7c939",
+        "status": "submitted",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-image-20261021011346998",
+        "scene": "scene-01",
+        "prompt": "A single red ceramic mug on a plain white background, studio product photo, no text.",
+        "attempts": 1,
+        "credits": 0,
+        "credit_quote_verified": true,
+        "files": [],
+        "note": "Flow submit request was dispatched; rendering and downloads were not awaited.",
+        "outcome_unknown": false,
+        "request_dispatched": true,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "f8ecc0f8",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-20261021012013330",
+        "scene": "scene-01",
+        "prompt": "Show the same subject on a plain white background, no text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Waiting for Flow to dispatch the generation request",
+        "files": [],
+        "error": "Flow did not emit a correlated generation request within the submit budget (click delivered: true). The outcome is unknown; inspect Flow before retrying.",
+        "error_category": "unknown",
+        "outcome_unknown": true,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "d221a462",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-video-20261021014413197",
+        "scene": "scene-01",
+        "prompt": "A red ceramic mug on a wooden table. Slow gentle camera push in, natural daylight. No text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow video settings: selecting Video mode",
+        "files": [],
+        "error": "Flow does not expose the requested video ratio (16:9). Nothing was submitted.",
+        "error_category": "unknown",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "6a175e38",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-video-20261021014515840",
+        "scene": "scene-01",
+        "prompt": "A red ceramic mug on a wooden table. Slow gentle camera push in, natural daylight. No text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow submit: reading Flow's credit quote",
+        "files": [],
+        "error": "Flow did not show a verifiable credit quote; nothing was submitted.",
+        "error_category": "quota",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "bf7cdefe",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-agent-20261021015040329",
+        "scene": "scene-01",
+        "prompt": "Agent batch: 1 images",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow Agent pass 1/3 for 1 remaining scene(s)",
+        "files": [],
+        "error": "Flow Agent confirmation settings are unavailable; nothing was submitted.",
+        "error_category": "unsupported",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "f0efa71f",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-frame-20261021021317940",
+        "scene": "scene-01",
+        "prompt": "A gentle slow camera push in from the supplied first frame.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow submit: selecting asset fm-9aa6f547c686-upload.png",
+        "files": [],
+        "error": "Flow selected the requested references, but their exact backend IDs could not be verified for submit correlation. No generation request was sent; inspect the composer before retrying.",
+        "error_category": "unknown",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "b41693d7",
+        "status": "submitted",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-image-20261021-0222-jade-bottle",
+        "scene": "scene-01",
+        "prompt": "A pear-shaped jade-green glass perfume bottle with a brushed brass cap on folded rust-colored linen, one small white blossom beside it, soft morning window light, premium editorial still-life product photograph, square composition, no words or lettering.",
+        "attempts": 1,
+        "credits": 0,
+        "credit_quote_verified": true,
+        "files": [],
+        "note": "Flow submit request was dispatched; rendering and downloads were not awaited.",
+        "outcome_unknown": false,
+        "request_dispatched": true,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "e19adaf3",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-frame-20261021-093205",
+        "scene": "scene-01",
+        "prompt": "A gentle camera push toward the product from the supplied opening frame, with subtle natural motion and no scene changes. E2E run 20261021-093205.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow submit: selecting asset fm-9aa6f547c686-upload.png",
+        "files": [],
+        "error": "Flow selected the requested references, but their exact backend IDs could not be verified for submit correlation. No generation request was sent; inspect the composer before retrying.",
+        "error_category": "unknown",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "2891d147",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-frame-20261021-093608",
+        "scene": "scene-01",
+        "prompt": "A gentle camera push toward the product from the supplied opening frame, with subtle natural motion and no scene changes. Fresh frame check 20261021-093608.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow submit: selecting asset fm-9aa6f547c686-upload.png",
+        "files": [],
+        "error": "Flow's start frame picker stayed open after selection. Inspect the composer before retrying.",
+        "error_category": "unknown",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "ae85c866",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-first-frame-20261021024129110",
+        "scene": "scene-01",
+        "prompt": "A gentle, slow camera push toward the existing product; preserve its shape and composition, with subtle natural motion and no text. First-frame dispatch verification 2026-10-21T02:41:29.111Z.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow submit: selecting asset fm-9aa6f547c686-upload.png",
+        "files": [],
+        "error": "Flow's start frame picker stayed open or became unidentifiable after the bounded close attempts. Inspect the composer before retrying.",
+        "error_category": "unknown",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "0966c6fd",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-20261021T024302397Z",
+        "scene": "scene-01",
+        "prompt": "Reference submit check 20261021T024302397Z: create one blue ceramic cup on a pale stone plinth, studio still life, soft daylight, no text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Waiting for Flow to dispatch the generation request",
+        "files": [],
+        "error": "Flow did not emit a correlated generation request within the submit budget (click delivered: true). The outcome is unknown; inspect Flow before retrying.",
+        "error_category": "unknown",
+        "outcome_unknown": true,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "2f9a8c68",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-agent-20261021025217806",
+        "scene": "scene-01",
+        "prompt": "Agent batch: 1 images",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow Agent pass 1/3 for 1 remaining scene(s)",
+        "files": [],
+        "error": "Could not switch Flow Agent mode on.",
+        "error_category": "unknown",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "2b88225f",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-image-ref-20261021-0310",
+        "scene": "scene-01",
+        "prompt": "Editorial still life of a translucent teal perfume atomizer beside folded ivory linen, soft side window light, crisp product detail. Native ref dispatch probe 2026-10-21-0310.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Waiting for Flow to dispatch the generation request",
+        "files": [],
+        "error": "Flow did not emit a correlated generation request within the submit budget (click delivered: true). The outcome is unknown; inspect Flow before retrying.",
+        "error_category": "unknown",
+        "outcome_unknown": true,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "c086ece5",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-image-ref-20261021-0321",
+        "scene": "scene-01",
+        "prompt": "A matte emerald desk lamp casting a soft pool of light over a cream notebook on a walnut side table, calm minimal product photograph, no lettering. Native image-reference matrix 2026-10-21-0321.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow submit: selecting asset fm-9aa6f547c686-upload.png",
+        "files": [],
+        "error": "Flow opened a menu before the reference listbox, but this surface has no source-verified transition; nothing was selected.",
+        "error_category": "unsupported",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "3de91884",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-video-text-20261021-0330",
+        "scene": "scene-01",
+        "prompt": "A small paper lantern drifting across a still blue pond at dawn, one steady wide shot with soft natural light and no text. Native video submit matrix 2026-10-21-0330.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow submit: reading Flow's credit quote",
+        "files": [],
+        "error": "Flow did not show a verifiable credit quote; nothing was submitted.",
+        "error_category": "quota",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "ef818f23",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-first-frame-20261021T031405Z",
+        "scene": "scene-01",
+        "prompt": "A slow, steady camera push toward the product from the supplied opening frame, preserving its shape and composition, subtle natural motion, no text. First-frame check 20261021T031405Z.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow submit: selecting asset fm-9aa6f547c686-upload.png",
+        "files": [],
+        "error": "Flow's start frame picker stayed open or became unidentifiable after the bounded close attempts. Diagnostics: {\"slot\":\"start\",\"assetName\":\"fm-9aa6f547c686-upload.png\",\"phase\":\"cleanup_check\",\"updatedAt\":\"2026-10-21T03:14:10.994Z\",\"opener\":{\"ariaLabel\":\"Start\",\"title\":null,\"ariaExpanded\":null,\"ariaControls\":null,\"ariaOwns\":null,\"disabled\":false,\"className\":\"empty-chip\"},\"slotContent\":[],\"exactFrameList\":{\"present\":false},\"slotSignature\":{\"label\":null,\"title\":null,\"text\":\"Start\",\"expanded\":null,\"media\":[],\"names\":[\"Swap first and last frames\"]},\"pickerState\":\"unknown\",\"stateSource\":\"no_exact_list_or_expanded_state\"}",
+        "error_category": "unknown",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "3654a7a6",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reangle-20261021T031459Z",
+        "scene": "scene-01",
+        "prompt": "Studio product photography of the exact item from the reference image, camera positioned slightly to the right of the subject, three-quarter front view from the right, at eye level with the subject, medium shot, waist up. Keep product geometry, materials, branding, labels and colors 100% identical. Premium commercial lighting with soft clean reflections.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Waiting for Flow to dispatch the generation request",
+        "files": [],
+        "error": "Flow did not emit a correlated generation request within the submit budget (click delivered: true). The outcome is unknown; inspect Flow before retrying.",
+        "error_category": "unknown",
+        "outcome_unknown": true,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "2ca70045",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-image-reference-20261021T033536Z",
+        "scene": "scene-01",
+        "prompt": "A premium editorial still life of the same uploaded teal perfume atomizer beside folded cream linen, soft window light and clean tabletop, realistic product photography, no lettering. Fresh reference check 20261021T033536Z.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Waiting for Flow to dispatch the generation request",
+        "files": [],
+        "error": "Flow did not emit a correlated generation request within the submit budget (click delivered: true). The outcome is unknown; inspect Flow before retrying.",
+        "error_category": "unknown",
+        "outcome_unknown": true,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "b10dd105",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-agent-20261021T034001Z",
+        "scene": "scene-01",
+        "prompt": "Agent batch: 1 images",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow Agent pass 1/3 for 1 remaining scene(s)",
+        "files": [],
+        "error": "Flow Agent confirmation settings are unavailable; nothing was submitted.",
+        "error_category": "unsupported",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "e7e6839c",
+        "status": "submitted",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-text-image-20261021T034555Z",
+        "scene": "scene-01",
+        "prompt": "A single hand-thrown cobalt-blue ceramic teacup on a pale limestone plinth, soft daylight from the left, quiet premium product photography, crisp glaze detail, no lettering. Fresh narrow E2E 20261021T034555Z.",
+        "attempts": 1,
+        "credits": 0,
+        "credit_quote_verified": true,
+        "files": [],
+        "note": "Flow submit request was dispatched; rendering and downloads were not awaited.",
+        "outcome_unknown": false,
+        "request_dispatched": true,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "93819e71",
+        "status": "submitted",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-20261021T035127Z",
+        "scene": "scene-01",
+        "prompt": "Create one close product photograph of the uploaded cobalt-blue teacup on a pale stone ledge, soft daylight, preserve its shape and glaze, uncluttered background, no lettering. Fresh reference E2E 20261021T035127Z.",
+        "attempts": 1,
+        "credits": 0,
+        "credit_quote_verified": true,
+        "files": [],
+        "note": "Flow submit request was dispatched; rendering and downloads were not awaited.",
+        "outcome_unknown": false,
+        "request_dispatched": true,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "b8b50b1e",
+        "status": "submitted",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-20261021040757985",
+        "scene": "scene-01",
+        "prompt": "Show the same subject on a plain white background, no text.",
+        "attempts": 1,
+        "credits": 0,
+        "credit_quote_verified": true,
+        "files": [],
+        "note": "Flow submit request was dispatched; rendering and downloads were not awaited.",
+        "outcome_unknown": false,
+        "request_dispatched": true,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "41d8526c",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-character-reference-20261021041105076",
+        "scene": "scene-01",
+        "prompt": "Create a clean product photo of this character on a plain white background, preserving the same identity and appearance. No text. CHARACTER LOCK — Untitled character must match the reference image exactly, as if copying it: same head shape and size, same face, same eyes, same hair, same skin, same build and proportions, same clothing items in the same colours, same hands, and the same rendering style and level of realism as the reference. Never redesign, restyle, re-proportion, re-age or re-colour them, and never swap an item for a similar one.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Waiting for Flow to dispatch the generation request",
+        "files": [],
+        "error": "Flow detected unusual activity or requires captcha verification: \"warning Failed We noticed some unusual activity. Note that browser extensions that modify the page may cause issues. Please visit the Help Center for more information. You have not been charged for this generation. refresh undo delete_forever\". Automatic retries halted to protect your account. Please complete verification directly on the Flow tab.",
+        "error_category": "extension",
+        "outcome_unknown": true,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "4c931fca",
+        "status": "submitted",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-20261021044937297",
+        "scene": "scene-01",
+        "prompt": "Show the same subject on a plain white background, no text.",
+        "attempts": 1,
+        "credits": 0,
+        "credit_quote_verified": true,
+        "files": [],
+        "note": "Flow submit request was dispatched; rendering and downloads were not awaited.",
+        "outcome_unknown": false,
+        "request_dispatched": true,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "54f48a25",
+        "status": "submitted",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-video-20261021045045754",
+        "scene": "scene-01",
+        "prompt": "A red ceramic mug on a wooden table. Slow gentle camera push in, natural daylight. No text.",
+        "attempts": 1,
+        "credits": 15,
+        "credit_quote_verified": true,
+        "files": [],
+        "note": "Flow submit request was dispatched; rendering and downloads were not awaited.",
+        "outcome_unknown": false,
+        "request_dispatched": true,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "cc965619",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-frame-20261021050519139",
+        "scene": "scene-01",
+        "prompt": "A gentle slow camera push in from the supplied first frame.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow submit: selecting asset fm-415bc373e1e9-upload.png",
+        "files": [],
+        "error": "Flow's exact frame option for \"fm-415bc373e1e9-upload.png\" did not expose a uniquely verifiable backend UUID. No frame was selected.",
+        "error_category": "unknown",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "8f412c3c",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-last-frame-20261021050831338",
+        "scene": "scene-01",
+        "prompt": "Continue into a gentle slow camera push ending on the supplied last frame.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow submit: selecting asset fm-415bc373e1e9-upload.png",
+        "files": [],
+        "error": "Flow's exact frame option for \"fm-415bc373e1e9-upload.png\" did not expose a uniquely verifiable backend UUID. No frame was selected.",
+        "error_category": "unknown",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "5d9b9c10",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-video-reference-20261021051003715",
+        "scene": "scene-01",
+        "prompt": "Create a slow camera push-in showing the subject from the supplied reference image.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow submit: selecting asset fm-415bc373e1e9-upload.png",
+        "files": [],
+        "error": "Flow opened a menu before the reference listbox, but this surface has no source-verified transition; nothing was selected.",
+        "error_category": "unsupported",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "bd696fee",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-image-20261021052710984",
+        "scene": "scene-01",
+        "prompt": "A single red ceramic mug on a plain white background, studio product photo, no text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow image settings: selecting output count",
+        "files": [],
+        "error": "Stopped waiting during Flow submit stage: preparing image settings. That page step may still be running; no later submit stage will start. Inspect Flow before retrying.",
+        "error_category": "generation",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "d6e59a6c",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-20261021061559831",
+        "scene": "scene-01",
+        "prompt": "Show the same subject on a plain white background, no text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow submit: selecting asset fm-415bc373e1e9-upload.png",
+        "files": [],
+        "error": "No exact reference named \"fm-415bc373e1e9-upload.png\" in the selected project. Nothing was attached.",
+        "error_category": "unknown",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "58dde85c",
+        "status": "submitted",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-20261021063142729",
+        "scene": "scene-01",
+        "prompt": "Show the same subject on a plain white background, no text.",
+        "attempts": 1,
+        "credits": 0,
+        "credit_quote_verified": true,
+        "files": [],
+        "note": "Flow submit request was dispatched; rendering and downloads were not awaited.",
+        "outcome_unknown": false,
+        "request_dispatched": true,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "bb9476a3",
+        "status": "submitted",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-video-reference-20261021063234432",
+        "scene": "scene-01",
+        "prompt": "Create a slow camera push-in showing the subject from the supplied reference image.",
+        "attempts": 1,
+        "credits": 15,
+        "credit_quote_verified": true,
+        "files": [],
+        "note": "Flow submit request was dispatched; rendering and downloads were not awaited.",
+        "outcome_unknown": false,
+        "request_dispatched": true,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "b2af8370",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-first-frame-20261021-0647",
+        "scene": "scene-01",
+        "prompt": "A handcrafted cobalt blue glass teapot on a pale stone table, gentle camera push in from the supplied opening frame, soft morning window light, realistic product film, no text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow submit: selecting asset fm-a6f6c32f9203-upload.png",
+        "files": [],
+        "error": "Flow's exact frame option for \"fm-a6f6c32f9203-upload.png\" did not expose a uniquely verifiable backend UUID. No frame was selected.",
+        "error_category": "unknown",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "26af42b9",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-vi-20261021-0650",
+        "scene": "scene-01",
+        "prompt": "A catalog-ready studio still of the same subject from the supplied reference, viewed from a slightly elevated three-quarter angle on a warm ivory backdrop, soft directional light and a short natural shadow, no lettering.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow submit: selecting asset fm-a6f6c32f9203-upload.png",
+        "files": [],
+        "error": "No exact reference named \"fm-a6f6c32f9203-upload.png\" in the selected project. Nothing was attached.",
+        "error_category": "unknown",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "1fb8486d",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-vi-retry2-20261021-0654",
+        "scene": "scene-01",
+        "prompt": "An editorial still life featuring the same subject from the supplied image, framed off-center against a muted terracotta backdrop, crisp studio detail with a soft side-lit highlight, no lettering.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow submit: selecting asset fm-a6f6c32f9203-upload.png",
+        "files": [],
+        "error": "Flow kept stale or unrelated options after the reference search; no reference was selected.",
+        "error_category": "unknown",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "e916f6c1",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-vi-retry3-20261021-0657",
+        "scene": "scene-01",
+        "prompt": "A premium design catalog photograph of the same subject from the reference, centered on a deep forest-green plinth with a pale sand backdrop, restrained highlights and clean realistic texture, no text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow submit: selecting asset fm-a6f6c32f9203-upload.png",
+        "files": [],
+        "error": "No exact reference named \"fm-a6f6c32f9203-upload.png\" in the selected project after a complete picker scan. Nothing was attached.",
+        "error_category": "unknown",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "9c6763a7",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-vi-1792566573618",
+        "scene": "scene-01",
+        "prompt": "A minimalist art-book photograph of the referenced subject on a dark plum display block against a pale limestone wall, soft upper-left light, realistic fine surface detail, generous negative space, no text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow submit: selecting asset fm-a6f6c32f9203-upload.png",
+        "files": [],
+        "error": "No exact reference named \"fm-a6f6c32f9203-upload.png\" in the selected project after a complete picker scan. Nothing was attached.",
+        "error_category": "unknown",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "f1614736",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-vi-restarted-1792566926794",
+        "scene": "scene-01",
+        "prompt": "An art-directed product still of the referenced subject on a warm ivory pedestal against a deep teal studio backdrop, restrained side lighting, realistic surface detail and soft shadow, no text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow submit: selecting asset fm-a6f6c32f9203-upload.png",
+        "files": [],
+        "error": "No exact reference named \"fm-a6f6c32f9203-upload.png\" in the selected project after a complete picker scan. Nothing was attached.",
+        "error_category": "unknown",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "fc8ddd4d",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-image-vi-clearpicker-1792567153205",
+        "scene": "scene-01",
+        "prompt": "A handmade amber glass carafe beside a folded linen napkin on a pale stone counter, gentle morning light, refined minimal product photography, no text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow submit: reading Flow's credit quote",
+        "files": [],
+        "error": "Flow did not show a verifiable credit quote; nothing was submitted.",
+        "error_category": "quota",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "7a04543e",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-image-vi-199-1792568182232",
+        "scene": "scene-01",
+        "prompt": "A bright coral enamel kettle on a simple cream shelf, soft diffuse daylight, clean catalog photograph with a faint natural shadow, no text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow submit: reading Flow's credit quote",
+        "files": [],
+        "error": "Flow did not show a verifiable credit quote; nothing was submitted.",
+        "error_category": "quota",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      },
+      {
+        "id": "ee7e61bf",
+        "status": "submitted",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-from-upload-en-1792568400402",
+        "scene": "scene-01",
+        "prompt": "A refined studio photograph of the uploaded cobalt glass vase on a pale travertine pedestal, soft warm side lighting, realistic reflections, neutral gallery backdrop, no text.",
+        "attempts": 1,
+        "credits": 0,
+        "credit_quote_verified": true,
+        "files": [],
+        "note": "Flow submit request was dispatched; rendering and downloads were not awaited.",
+        "outcome_unknown": false,
+        "request_dispatched": true,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      }
+    ]
+  },
+  "finished": "2026-10-21T07:40:10.000Z"
+}

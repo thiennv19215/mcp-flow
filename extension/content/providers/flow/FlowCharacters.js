@@ -2,6 +2,7 @@
 (() => {
   "use strict";
 
+  const root = typeof globalThis !== "undefined" ? globalThis : (typeof window !== "undefined" ? window : self);
   const characterRoute = path => /\/character(?:\/|$)/i.test(path || "");
   const newCharacterRoute = path => /\/character\/?$/i.test(path || "");
   const characterEditorRoute = path => /\/character\/[0-9a-f-]{36}(?:\/|$)/i.test(path || "");
@@ -14,7 +15,8 @@
   function characterNameSnapshot(input, stage, requested) {
     const value = input?.value ?? input?.innerText ?? input?.textContent ?? "";
     const form = input?.closest?.("form") || null;
-    const headings = typeof document === "undefined" ? [] : [...document.querySelectorAll("h1,h2,[role=heading]")]
+    const headingElements = typeof document === "undefined" ? [] : ((typeof root.flowQueryAll === "function" ? root.flowQueryAll("common.headings", document, { checkVisible: false }) : null) || [...document.querySelectorAll("h1,h2,[role=heading]")]);
+    const headings = headingElements
       .filter(el => visible(el)).map(el => normalize(el.innerText || el.textContent)).filter(Boolean).slice(0, 4);
     return {
       stage,
@@ -116,7 +118,11 @@
     }
     return true;
   }
-  const visibleOptions = list => [...(list?.querySelectorAll('[role="option"]') || [])].filter(visible);
+  const visibleOptions = list => {
+    const options = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.optionItem", list) : null) ||
+      [...(list?.querySelectorAll('[role="option"]') || [])];
+    return options.filter(visible);
+  };
   function clickFlowControl(element) {
     const rect = element?.getBoundingClientRect();
     if (!rect?.width || !rect.height) return false;
@@ -134,9 +140,10 @@
     let stableAt = 0;
     while (Date.now() < deadline) {
       const list = listGetter();
-      const loading = [...document.querySelectorAll('[role="progressbar"],[aria-busy="true"]')].some(visible);
+      const loading = (typeof root.flowQueryVisible === "function" && Boolean(root.flowQueryVisible("common.loadingIndicator", document))) ||
+        [...document.querySelectorAll('[role="progressbar"],[aria-busy="true"]')].some(visible);
       if (list && !loading) {
-        if (visibleOptions(list).length || /no (?:assets|voices) found|không tìm thấy (?:tài sản|nội dung|giọng nói|giọng|kết quả)/i.test(list.innerText || "")) return list;
+        if (visibleOptions(list).length || /no (?:assets|voices) found|(?:không tìm thấy|không có) (?:tài sản|nội dung|giọng nói|giọng|kết quả)(?: nào)?/i.test(list.innerText || "")) return list;
         if (!stableAt) stableAt = Date.now();
         if (Date.now() - stableAt >= 700) return list;
       } else stableAt = 0;
@@ -149,9 +156,13 @@
     const deadline = Date.now() + timeoutMs;
     const enabled = el => visible(el) && !el.disabled && el.getAttribute("aria-disabled") !== "true";
     const semanticCreateButton = () => {
-      for (const tile of document.querySelectorAll("flow-custom-tile")) {
+      const customTiles = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("characters.createTile", document, { checkVisible: false }) : null) ||
+        document.querySelectorAll("flow-custom-tile");
+      for (const tile of customTiles) {
         if (!visible(tile)) continue;
-        const hasAddIcon = [...tile.querySelectorAll("mat-icon")].some(icon => normalize(icon.innerText || icon.textContent) === "add");
+        const icons = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("common.icons", tile, { checkVisible: false }) : null) ||
+          [...tile.querySelectorAll("mat-icon")];
+        const hasAddIcon = icons.some(icon => normalize(icon.innerText || icon.textContent) === "add");
         const tileText = normalize(cleanCharacterName(tile.innerText || tile.textContent || ""));
         if (!hasAddIcon || !/(?:new character|nhân vật mới|tạo nhân vật)/i.test(tileText)) continue;
         const button = [...tile.querySelectorAll('button,[role="button"],a[href]')].find(enabled);
@@ -192,8 +203,9 @@
 
   async function findPickerMatches(listGetter, title, label, match = value => normalize(value) === normalize(title)) {
     let list = await waitForPicker(listGetter, label);
-    const search = [...document.querySelectorAll('input,[role="textbox"]')]
-      .find(el => visible(el) && /search (?:assets|voices)|tìm kiếm/i.test(accessibleName(el) || el.placeholder || ""));
+    const search = (typeof root.flowQueryVisible === "function" ? root.flowQueryVisible("characters.searchInput", document) : null) ||
+      [...document.querySelectorAll('input,[role="textbox"]')]
+        .find(el => visible(el) && /search (?:assets|voices)|tìm kiếm/i.test(accessibleName(el) || el.placeholder || ""));
     if (search) {
       setEditable(search, title);
       await wait(550);
@@ -287,8 +299,10 @@
     let librarySettled = false;
     try {
       while (Date.now() < readyDeadline) {
-        const loading = [...document.querySelectorAll('[role="progressbar"],[aria-busy="true"]')].some(visible);
-        const hasTiles = [...document.querySelectorAll("flow-character-tile")].some(visible);
+        const loading = (typeof root.flowQueryVisible === "function" && Boolean(root.flowQueryVisible("common.loadingIndicator", document))) ||
+          [...document.querySelectorAll('[role="progressbar"],[aria-busy="true"]')].some(visible);
+        const hasTiles = (typeof root.flowQueryVisible === "function" && Boolean(root.flowQueryVisible("characters.characterTile", document))) ||
+          [...document.querySelectorAll("flow-character-tile")].some(visible);
         if (hasTiles && !loading) { librarySettled = true; break; }
         if (!loading && !hasTiles) {
           if (!stableAt) stableAt = Date.now();
@@ -298,7 +312,9 @@
       }
       if (!librarySettled) throw flowError("FLOW_CHARACTER_LIBRARY_LOADING", "Flow's Characters library did not settle before the lookup deadline; no character was selected.", true);
       for (let page = 0; page < 120 && Date.now() < deadline; page++) {
-        for (const tile of document.querySelectorAll("flow-character-tile")) {
+        const characterTiles = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("characters.characterTile", document, { checkVisible: false }) : null) ||
+          document.querySelectorAll("flow-character-tile");
+        for (const tile of characterTiles) {
           if (!visible(tile)) continue;
           const actual = normalize(cleanCharacterName((tile.innerText || "").split("\n")[0] || tile.getAttribute("aria-label") || ""));
           if (actual === wanted) found.set(tile.getAttribute("data-id") || tile.id || actual + "|" + (tile.querySelector("img")?.src || ""), tile);
@@ -332,6 +348,7 @@
 
   globalThis.FlowCharacterActions = Object.freeze({
     commitName: commitCharacterName,
+    waitForPicker,
     inspectNameDiagnostics: () => lastCharacterNameDiagnostics ? redactCharacterNameDiagnostics(lastCharacterNameDiagnostics) : null,
     verifyNameLibrary: characterNameLibraryEvidence,
     recordNameSaveResponse: recordCharacterNameSaveResponse,
@@ -365,13 +382,14 @@
       if (!c.image) {
         await ensureFlowLibrarySection("All media");
         newPageReady = false;
-        if (!document.querySelector(".ProseMirror")) throw flowError("NATIVE_CAPABILITY_UNSUPPORTED", "Flow's image composer is unavailable for description-based character creation.", true);
+        const editorBox = (typeof root.flowQuery === "function" ? root.flowQuery("editor", document) : null) || document.querySelector(".ProseMirror");
+        if (!editorBox) throw flowError("NATIVE_CAPABILITY_UNSUPPORTED", "Flow's image composer is unavailable for description-based character creation.", true);
         if (scrollContainer()) scrollContainer().scrollTop = 0;
         const before = collectNativeMedia().map(item => item.id || `title:${item.title}`);
         const variants = Math.max(1, Math.min(4, Number(c.variants || 1)));
         const clear = flowButton("Clear prompt"); if (clear) clear.click();
         await globalThis.FlowImageActions.prepareCharacterPortrait(c, variants);
-        const box = document.querySelector(".ProseMirror");
+        const box = (typeof root.flowQuery === "function" ? root.flowQuery("editor", document) : null) || document.querySelector(".ProseMirror");
         if (!box || !(await insertNativeFlowPrompt(box, String(c.describe)))) throw flowError("FLOW_PROMPT_INPUT_UNCONFIRMED", "Flow's portrait prompt was not accepted. Nothing was submitted.", true);
         const start = await waitForGenerationSubmitButton(String(c.describe), 8000);
         if (!start) throw flowError("FLOW_SUBMIT_DISABLED", "Flow's portrait generation button did not become ready within 8 seconds; nothing was submitted.", true);
@@ -414,12 +432,13 @@
           const add = await waitForEnabledFlowButton("Add from project", 15_000);
           if (!add) throw flowError("FLOW_CHARACTER_CREATE_MISSING", "Flow's New character page is not ready.", true);
           add.click();
-          const listGetter = () => [...document.querySelectorAll('[role="listbox"]')].find(visible);
+          const listGetter = () => (typeof root.flowQueryVisible === "function" ? root.flowQueryVisible("components.listBox", document) : null) || [...document.querySelectorAll('[role="listbox"]')].find(visible);
           let list = await waitForPicker(listGetter, "project asset");
           const exactTitle = value => normalize(value) === normalize(sourceTitle);
           let matches = await findPickerMatches(listGetter, sourceTitle, "project asset", exactTitle);
           if (!matches.length) {
-            const uploads = [...document.querySelectorAll('[role="tab"]')].find(el => visible(el) && /^(?:uploads|tải lên|nội dung tải lên)$/i.test(normalize(accessibleName(el))));
+            const tabs = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.categoryTabs", document, { checkVisible: false }) : null) || [...document.querySelectorAll('[role="tab"]')];
+            const uploads = tabs.find(el => visible(el) && /^(?:uploads|tải lên|nội dung tải lên)$/i.test(normalize(accessibleName(el))));
             if (uploads) {
               uploads.click();
               list = await waitForPicker(listGetter, "uploaded asset");
@@ -437,13 +456,15 @@
         enteredEditor = true;
         characterUrl = location.href;
 
-        const nameInput = [...document.querySelectorAll('input,[role="textbox"]')].find(el => visible(el) && /(?:Character name|Tên nhân vật)/i.test(accessibleName(el) || el.placeholder || ""));
+        const nameInput = (typeof root.flowFindSemantic === "function" ? root.flowFindSemantic("characters.nameInput", document) : null) ||
+          [...document.querySelectorAll('input,[role="textbox"]')].find(el => visible(el) && /(?:Character name|Tên nhân vật)/i.test(accessibleName(el) || el.placeholder || ""));
         if (!nameInput) throw flowError("FLOW_CHARACTER_FORM_MISSING", "Flow's character name field is not visible; the character may be partially created.", false, true);
         const initialCharacterName = String(nameInput.value ?? nameInput.innerText ?? nameInput.textContent ?? "").replace(/\s+/g, " ").trim();
         await commitCharacterName(nameInput, characterName);
 
         if (c.personality) {
-          const personality = [...document.querySelectorAll('textarea,input,[role="textbox"]')].find(el => visible(el) && /(?:Character personality|Tính cách nhân vật|Mô tả nhân vật)/i.test(accessibleName(el) || el.placeholder || ""));
+          const personality = (typeof root.flowFindSemantic === "function" ? root.flowFindSemantic("characters.personalityInput", document) : null) ||
+            [...document.querySelectorAll('textarea,input,[role="textbox"]')].find(el => visible(el) && /(?:Character personality|Tính cách nhân vật|Mô tả nhân vật)/i.test(accessibleName(el) || el.placeholder || ""));
           if (!personality) throw flowError("FLOW_CHARACTER_PERSONALITY_MISSING", "Flow's character personality field is unavailable; the character may be partially created.", false, true);
           setEditable(personality, c.personality);
           const deadline = Date.now() + 5000;
@@ -455,7 +476,7 @@
           const selectVoice = flowButton("Select a voice") || flowButton("Chọn giọng nói") || flowButton("Giọng nói");
           if (!selectVoice) throw flowError("FLOW_VOICE_SELECTOR_MISSING", "The character editor does not show Select a voice; the character may be partially created.", false, true);
           selectVoice.click();
-          const voicesGetter = () => [...document.querySelectorAll('[role="listbox"]')].find(visible);
+          const voicesGetter = () => (typeof root.flowQueryVisible === "function" ? root.flowQueryVisible("components.listBox", document) : null) || [...document.querySelectorAll('[role="listbox"]')].find(visible);
           await waitForPicker(voicesGetter, "voice");
           const voiceMatch = value => {
             const actual = normalize(value), wanted = normalize(c.voice);
@@ -551,14 +572,16 @@
       await wait(500);
       let completedResult;
       try {
-        let portrait = document.querySelector('img[aria-label="Generated character image"], img[aria-label="Ảnh nhân vật đã tạo"], img[aria-label*="nhân vật"]');
+        let portrait = (typeof root.flowQuery === "function" ? root.flowQuery("characters.portrait", document) : null) ||
+          document.querySelector('img[aria-label="Generated character image"], img[aria-label="Ảnh nhân vật đã tạo"], img[aria-label*="nhân vật"]');
         if (renameTo) {
-          const nameInput = [...document.querySelectorAll('input,[role="textbox"]')].find(el => visible(el) && /(?:Character name|Tên nhân vật)/i.test(accessibleName(el) || el.placeholder || ""));
+          const nameInput = (typeof root.flowFindSemantic === "function" ? root.flowFindSemantic("characters.nameInput", document) : null) ||
+            [...document.querySelectorAll('input,[role="textbox"]')].find(el => visible(el) && /(?:Character name|Tên nhân vật)/i.test(accessibleName(el) || el.placeholder || ""));
           if (!nameInput) throw flowError("FLOW_CHARACTER_FORM_MISSING", "Flow's character name field is not visible; the character name was not changed.", true, false);
           await commitCharacterName(nameInput, renameTo);
         }
         if (payload.change) {
-          const box = [...document.querySelectorAll(".ProseMirror")].at(-1);
+          const box = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("editor", document) : null) || document.querySelectorAll(".ProseMirror"))].at(-1);
           if (!box) throw flowError("FLOW_CHARACTER_EDITOR_MISSING", "Character editor prompt is not visible.", true);
           const beforeSrc = portrait?.getAttribute("src");
           const change = String(payload.change).replace(/\s*\n+\s*/g, " ").trim().replace(/[.\s]*$/, ".");
@@ -569,7 +592,8 @@
           await activateFlowSubmitButton(start, prompt);
           const deadline = Date.now() + Number(payload.timeoutMs || 4 * 60_000);
           while (Date.now() < deadline) {
-            await wait(2500); portrait = document.querySelector('img[aria-label="Generated character image"], img[aria-label="Ảnh nhân vật đã tạo"], img[aria-label*="nhân vật"]');
+            await wait(2500); portrait = (typeof root.flowQuery === "function" ? root.flowQuery("characters.portrait", document) : null) ||
+              document.querySelector('img[aria-label="Generated character image"], img[aria-label="Ảnh nhân vật đã tạo"], img[aria-label*="nhân vật"]');
             const pct = (document.querySelector("main")?.innerText || "").match(/\d+%/)?.[0];
             emitFlowProgress(command, pct || "Waiting for character portrait");
             if (portrait?.getAttribute("src") && portrait.getAttribute("src") !== beforeSrc && !pct) break;
@@ -577,7 +601,8 @@
           if (!portrait?.getAttribute("src") || portrait.getAttribute("src") === beforeSrc) throw flowError("FLOW_CHARACTER_EDIT_TIMEOUT", "Timed out waiting for Flow to redraw the character. Check Flow before retrying.", false, true);
         }
         let downloadTriggered = false;
-        const picture = document.querySelector('img[aria-label="Generated character image"], img[aria-label="Ảnh nhân vật đã tạo"], img[aria-label*="nhân vật"]');
+        const picture = (typeof root.flowQuery === "function" ? root.flowQuery("characters.portrait", document) : null) ||
+          document.querySelector('img[aria-label="Generated character image"], img[aria-label="Ảnh nhân vật đã tạo"], img[aria-label*="nhân vật"]');
         if (picture && !renameTo) {
           picture.scrollIntoView({ block: "center" });
           const rect = picture.getBoundingClientRect();
@@ -595,7 +620,8 @@
         if (renameTo) {
           lastCharacterNameDiagnostics = {
             ...lastCharacterNameDiagnostics,
-            pre_save: characterNameSnapshot([...document.querySelectorAll('input,[role="textbox"]')].find(el => visible(el) && /(?:Character name|Tên nhân vật)/i.test(accessibleName(el) || el.placeholder || "")), "pre_save", renameTo),
+            pre_save: characterNameSnapshot((typeof root.flowFindSemantic === "function" ? root.flowFindSemantic("characters.nameInput", document) : null) ||
+              [...document.querySelectorAll('input,[role="textbox"]')].find(el => visible(el) && /(?:Character name|Tên nhân vật)/i.test(accessibleName(el) || el.placeholder || "")), "pre_save", renameTo),
             save_control: {
               label: String(accessibleName(done) || done.innerText || done.textContent || "").replace(/\s+/g, " ").trim().slice(0, 80),
               disabled: Boolean(done.disabled || done.getAttribute("aria-disabled") === "true"),

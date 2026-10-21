@@ -1,0 +1,50 @@
+{
+  "output_dir": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-vi-retry2-20261021-0654",
+  "jobs": [
+    {
+      "id": "1fb8486d",
+      "status": "running",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-vi-retry2-20261021-0654",
+      "scene": "scene-01",
+      "prompt": "An editorial still life featuring the same subject from the supplied image, framed off-center against a muted terracotta backdrop, crisp studio detail with a soft side-lit highlight, no lettering.",
+      "attempts": 1,
+      "credit_quote_verified": null,
+      "files": [],
+      "outcome_unknown": false,
+      "request_dispatched": false,
+      "server_acceptance_observed": false,
+      "request_diagnostics": null
+    }
+  ],
+  "preflight": {
+    "flowUrl": "https://flow.google.com/project/e4bf4bae-626d-4718-a66a-cbdb04c8e6fa?hl=vi",
+    "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "observerReady": true,
+    "projectMatch": true,
+    "activeAttempts": 0,
+    "busyJobCount": 0,
+    "promptCharacterCount": 0,
+    "chipCount": 0,
+    "pickerOpen": false,
+    "loadedBackgroundRevision": "863f8f495ef824548f733b1276bc0ad3c1676e3f0cc2829061714da684972feb",
+    "loadedContentRevision": "863f8f495ef824548f733b1276bc0ad3c1676e3f0cc2829061714da684972feb",
+    "generatedBuildRevision": "863f8f495ef824548f733b1276bc0ad3c1676e3f0cc2829061714da684972feb",
+    "watcherRevision": "1e3bc7459f91f3e5f9ead2f200429f29a6d4105bd2f1461e39e20cc2b6a2b4d1"
+  },
+  "postflight": {
+    "jobId": "1fb8486d",
+    "status": "failed",
+    "progress": "Flow submit: selecting asset fm-a6f6c32f9203-upload.png",
+    "error": "Flow kept stale or unrelated options after the reference search; no reference was selected.",
+    "error_category": "unknown",
+    "outcome_unknown": false,
+    "request_dispatched": false,
+    "server_acceptance_observed": false,
+    "credit_quote_verified": null,
+    "flowUrl": "https://flow.google.com/project/e4bf4bae-626d-4718-a66a-cbdb04c8e6fa?hl=vi",
+    "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "activeAttempts": 0,
+    "busyJobCount": 0,
+    "observerReady": true
+  }
+}

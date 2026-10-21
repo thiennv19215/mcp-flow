@@ -1,7 +1,7 @@
 {
   "version": 2,
   "description": "Google Flow Complete Dynamic Selectors Configuration (TobyFlow Compatible)",
-  "updatedAt": "2026-10-20T18:35:00Z",
+  "updatedAt": "2026-10-21T09:00:00Z",
   "editor": {
     "selectors": [
       ".ProseMirror[contenteditable='true']",
@@ -90,6 +90,27 @@
         "flow-scene-tile"
       ]
     },
+    "scene": {
+      "selectors": [
+        "flow-scene-tile"
+      ]
+    },
+    "image": {
+      "selectors": [
+        "flow-image-tile",
+        "img"
+      ]
+    },
+    "mediaElements": {
+      "selectors": [
+        "video",
+        "img",
+        "canvas",
+        "[role='img']",
+        "flow-video-tile",
+        "flow-image-tile"
+      ]
+    },
     "retryButton": {
       "selectors": ["button", "[role='button']"],
       "textRegex": "^(?:retry|try again|thử lại)(?:\\s+.*)?$",
@@ -101,11 +122,51 @@
       "selectors": ["button", "[role='button']"],
       "icon": "tune"
     },
+    "panel": {
+      "selectors": [
+        "[role='dialog']",
+        "[role='menu']",
+        "mat-dialog-container",
+        "flow-dialog",
+        ".cdk-overlay-pane",
+        "mat-menu-panel"
+      ]
+    },
     "options": {
       "selectors": [
         "[role='radio']",
         "mat-radio-button",
         "[role='tab']"
+      ]
+    },
+    "optionCandidates": {
+      "selectors": [
+        "[role='radio']",
+        "mat-radio-button",
+        "[role='tab']",
+        "[role='option']",
+        "button",
+        "[role='button']"
+      ]
+    },
+    "dropdownItems": {
+      "selectors": [
+        "[role='menuitem']",
+        "[role='menuitemradio']",
+        "mat-option",
+        "[role='option']"
+      ]
+    },
+    "activeMenu": {
+      "selectors": [
+        "[role='menu']:last-of-type",
+        "[data-radix-popper-content-wrapper]:last-of-type",
+        ".cdk-overlay-pane:last-of-type"
+      ]
+    },
+    "durationTrigger": {
+      "selectors": [
+        "button[id*='-trigger-']"
       ]
     }
   },
@@ -114,6 +175,8 @@
       "selectors": [
         "[contenteditable=\"false\"]",
         "button[aria-label=\"Ingredient\"]",
+        "button[aria-label=\"Thành phần\"]",
+        "button[aria-label=\"Nguyên liệu\"]",
         "[class*=\"ingredient-chip\"]"
       ]
     },
@@ -133,6 +196,121 @@
         "[role=\"option\"]",
         "mat-option"
       ]
+    },
+    "voiceChip": {
+      "selectors": [
+        "[data-ingredient-type=\"voice\"]",
+        "[data-kind=\"voice\"]",
+        "[class*=\"voice-chip\" i]",
+        "button[aria-label*=\"voice\" i]",
+        "button[aria-label*=\"giọng\" i]"
+      ]
+    },
+    "voiceRemoveButton": {
+      "selectors": [
+        "button[aria-label*=\"remove\" i]",
+        "button[aria-label*=\"delete\" i]",
+        "button[aria-label*=\"xóa\" i]",
+        "[role=\"button\"][aria-label*=\"remove\" i]"
+      ]
+    },
+    "categoryTabs": {
+      "selectors": [
+        "[role=\"tab\"]",
+        "button"
+      ]
+    },
+    "searchInput": {
+      "selectors": [
+        "input",
+        "[role=\"textbox\"]"
+      ],
+      "textRegex": "(?:search assets|tìm kiếm|search)"
+    },
+    "dialog": {
+      "selectors": [
+        "[role=\"dialog\"]",
+        "mat-dialog-container",
+        "flow-dialog"
+      ]
+    },
+    "actionMenus": {
+      "selectors": [
+        "[role=\"menu\"]",
+        "mat-menu-panel",
+        ".cdk-overlay-pane"
+      ]
+    },
+    "actionMenuItems": {
+      "selectors": [
+        "[role=\"menuitem\"]",
+        "button",
+        "[role=\"button\"]"
+      ]
+    },
+    "chips": {
+      "selectors": [
+        "button[aria-label=\"Ingredient\"]",
+        "button[aria-label=\"Thành phần\"]",
+        "button[aria-label=\"Nguyên liệu\"]",
+        "button",
+        "[role=\"button\"]"
+      ]
+    }
+  },
+  "characters": {
+    "createTile": {
+      "selectors": ["flow-custom-tile"]
+    },
+    "characterTile": {
+      "selectors": ["flow-character-tile"]
+    },
+    "portrait": {
+      "selectors": [
+        "img[aria-label='Generated character image']",
+        "img[aria-label='Ảnh nhân vật đã tạo']",
+        "img[aria-label*='nhân vật']",
+        "img[aria-label*='character']"
+      ]
+    },
+    "nameInput": {
+      "selectors": [
+        "input",
+        "[role=\"textbox\"]"
+      ],
+      "textRegex": "(?:Character name|Tên nhân vật)"
+    },
+    "personalityInput": {
+      "selectors": [
+        "textarea",
+        "input",
+        "[role=\"textbox\"]"
+      ],
+      "textRegex": "(?:Character personality|Tính cách nhân vật|Mô tả nhân vật)"
+    },
+    "searchInput": {
+      "selectors": [
+        "input",
+        "[role=\"textbox\"]"
+      ]
+    }
+  },
+  "mediaMenu": {
+    "triggerButton": {
+      "selectors": ["button", "[role='button']"],
+      "icons": ["more_vert", "more_horiz", "more"]
+    },
+    "menuPanel": {
+      "selectors": ["[role='menu']", "mat-menu-panel"]
+    },
+    "menuItems": {
+      "selectors": ["[role='menuitem']", "button", "[role='button']"]
+    },
+    "menuItemLabel": {
+      "selectors": [".label", ".item-text"]
+    },
+    "removeIcons": {
+      "selectors": ["mat-icon", ".mat-icon", "svg", ".google-symbols"]
     }
   },
   "navigation": {
@@ -147,6 +325,32 @@
         "main",
         ".flow-scroll-container",
         "flow-app"
+      ]
+    },
+    "navContainer": {
+      "selectors": [
+        "nav",
+        "[role='navigation']",
+        "mat-sidenav"
+      ]
+    },
+    "backButton": {
+      "selectors": ["button", "[role='button']"],
+      "icons": ["arrow_back", "arrow-back", "back"]
+    },
+    "dialogCloseButton": {
+      "selectors": ["button", "[role='button']"],
+      "icons": ["close", "clear"]
+    },
+    "overlayBackdrop": {
+      "selectors": [
+        ".cdk-overlay-backdrop.cdk-overlay-backdrop-showing",
+        ".cdk-overlay-backdrop"
+      ]
+    },
+    "projectLinks": {
+      "selectors": [
+        "a[href*='/project/']"
       ]
     }
   },
@@ -185,22 +389,6 @@
       "textRegex": "^(?:Done|Xong|Hoàn tất)$"
     }
   },
-  "characters": {
-    "createTile": {
-      "selectors": ["flow-custom-tile"]
-    },
-    "characterTile": {
-      "selectors": ["flow-character-tile"]
-    },
-    "portrait": {
-      "selectors": [
-        "img[aria-label='Generated character image']",
-        "img[aria-label='Ảnh nhân vật đã tạo']",
-        "img[aria-label*='nhân vật']",
-        "img[aria-label*='character']"
-      ]
-    }
-  },
   "common": {
     "icons": {
       "selectors": [
@@ -210,6 +398,48 @@
         ".material-symbols-outlined",
         "i",
         "svg"
+      ]
+    },
+    "buttons": {
+      "selectors": [
+        "button",
+        "[role='button']",
+        "a[role='button']"
+      ]
+    },
+    "loadingIndicator": {
+      "selectors": [
+        "[role='progressbar']",
+        "[aria-busy='true']"
+      ]
+    },
+    "headings": {
+      "selectors": [
+        "h1",
+        "h2",
+        "[role='heading']"
+      ]
+    },
+    "textboxes": {
+      "selectors": [
+        "input",
+        "textarea",
+        "[role='textbox']"
+      ]
+    },
+    "dialogs": {
+      "selectors": [
+        "[role='dialog']",
+        "mat-dialog-container",
+        "flow-dialog",
+        "[aria-modal='true']"
+      ]
+    },
+    "menus": {
+      "selectors": [
+        "[role='menu']",
+        "mat-menu-panel",
+        ".cdk-overlay-pane"
       ]
     }
   }

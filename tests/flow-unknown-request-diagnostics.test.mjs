@@ -40,7 +40,8 @@ test('unknown-submit observer diagnostics serialize with event evidence and omit
   assert.equal(parsed.diagnostics.requestDiagnostics.events[0].fields.mediaIdPresent, true);
 });
 
-test('the background command result preserves sanitized failure diagnostics for the native client', () => {
+test('the background command result preserves page-side diagnostics for server-side allowlisting', () => {
   const source = readFileSync(new URL('../extension/background/service-worker.js', import.meta.url), 'utf8');
   assert.match(source, /error\?\.diagnostics \? \{ diagnostics: error\.diagnostics \} : \{\}/);
+  assert.match(source, /if \(response\?\.error\?\.diagnostics && typeof response\.error\.diagnostics === "object"\)\s*\{\s*error\.diagnostics = response\.error\.diagnostics;\s*\}/);
 });

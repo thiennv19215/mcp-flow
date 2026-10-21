@@ -1,12 +1,16 @@
 import { readFlowDownloadChunk } from "./flow-download-relay.js";
 import { ensureCorrelationObserver } from "./flow-observer-health.js";
+import { inspectExtensionBuild } from "./flow-build-info.js";
+import { decideDevExtensionReload } from "./dev-extension-reload.js";
+import { flowDocumentMatchesLocale, flowProjectUrl, forceEnglishFlowUrl } from "./flow-locale.js";
+import "../build-revision.js";
 
 const LOCAL_BRIDGE = "http://127.0.0.1:18897";
 const defaults = { bridge: "https://mcp.shopcongngheso5.io.vn" };
 const flowUrl = url => /^https:\/\/flow\.google\.com\//.test(url || "");
 const nativeFlowOperations = new Set([
   "flow.context", "flow.state", "flow.projects.list", "flow.project.create", "flow.project.open", "flow.assets.list", "flow.characters.list",
-  "flow.generation.submit", "flow.generation.observe", "flow.references.attach", "flow.references.clear", "flow.voices.options",
+  "flow.generation.submit", "flow.generation.observe", "flow.references.attach", "flow.references.clear", "flow.prompt.clear", "flow.voices.options",
   "flow.generation.observer.health",
   "flow.generation.upload.preflight",
   "flow.file.upload.begin", "flow.file.upload.chunk", "flow.file.upload.finish", "flow.file.upload.abort", "flow.media.upload",
@@ -69,18 +73,19 @@ async function checkDevExtensionReload() {
       return;
     }
     if (!response.ok) return;
-    const { revision } = await response.json();
-    if (typeof revision !== "string" || !revision) return;
-
-    const previousRevision = stored.flowMcpDevReloadRevision;
-    if (!previousRevision) {
-      await chrome.storage.local.set({ flowMcpDevReloadRevision: revision });
+    const decision = decideDevExtensionReload({
+      ...await response.json(),
+      previousRevision: stored.flowMcpDevReloadRevision,
+      activeOperations: activeTabOperations.size,
+    });
+    if (decision.action === "initialize" || decision.action === "migrate") {
+      await chrome.storage.local.set({ flowMcpDevReloadRevision: decision.reloadKey });
       return;
     }
-    if (revision === previousRevision || activeTabOperations.size > 0) return;
+    if (decision.action !== "reload") return;
 
     await chrome.storage.local.set({
-      flowMcpDevReloadRevision: revision,
+      flowMcpDevReloadRevision: decision.reloadKey,
       flowMcpDevReloadRefreshPending: true,
     });
     chrome.runtime.reload();
@@ -298,29 +303,55 @@ async function createFlowProject() {
     if (temporaryTab) await chrome.tabs.remove(temporaryTab.id).catch(() => {});
   }
 }
-async function openFlowProject(projectId) {
+async function readFlowDocumentLanguage(tabId) {
+  return chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => String(document.documentElement?.lang || ""),
+  }).then(results => String(results?.[0]?.result || "")).catch(() => "");
+}
+async function verifyFlowDocumentLocale(tabId, locale, timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
+  let actual = "";
+  do {
+    actual = await readFlowDocumentLanguage(tabId);
+    if (flowDocumentMatchesLocale(actual, locale)) return actual;
+    await new Promise(resolve => setTimeout(resolve, 250));
+  } while (Date.now() < deadline);
+  const error = new Error(`Flow did not render the requested ${locale} interface (document language: ${actual || "unavailable"}). The page locale could not be verified.`);
+  error.code = "FLOW_LOCALE_MISMATCH";
+  error.retryable = true;
+  error.outcome_unknown = false;
+  error.expectedLocale = locale;
+  error.actualLocale = actual || null;
+  throw error;
+}
+async function openFlowProject(projectId, requestedLanguage = "en") {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(projectId || ""))) {
     throw new Error("Invalid Flow project id.");
   }
-  const url = `https://flow.google.com/project/${projectId}?hl=en`;
+  if (requestedLanguage !== "en") throw new Error("Flow automation supports English only (language: en).");
+  const language = "en";
+  const url = flowProjectUrl(projectId, language);
   await chrome.tabs.update(selectedTabId, { url });
   await waitForTabComplete(selectedTabId);
-  return { opened: true, id: projectId, url };
+  await verifyFlowDocumentLocale(selectedTabId, language);
+  return { opened: true, id: projectId, url, language };
 }
-async function ensureEnglishFlowTab(tabId) {
+async function ensureFlowTabLocale(tabId) {
   if (tabOperationActive(tabId)) return;
   const tab = await chrome.tabs.get(tabId).catch(() => null);
   if (!tab || !flowUrl(tab.url)) return;
-  const url = new URL(tab.url);
-  if (url.searchParams.get("hl") === "en") return;
-  // SPA routes may drop hl even though the interface is already English.
-  // Rewriting that URL reloads the page and destroys in-flight content commands.
-  const language = await chrome.scripting.executeScript({ target: { tabId }, func: () => document.documentElement.lang })
-    .then(results => String(results?.[0]?.result || "")).catch(() => "");
-  if (/^en\b/i.test(language) || tab.status === "loading") return;
-  url.searchParams.set("hl", "en");
-  await chrome.tabs.update(tabId, { url: url.href });
-  await waitForTabComplete(tabId).catch(() => {});
+  if (tab.status === "loading") await waitForTabComplete(tabId);
+  const loadedTab = await chrome.tabs.get(tabId).catch(() => tab);
+  const currentUrl = loadedTab.url || tab.url;
+  const locale = "en";
+  const documentLanguage = await readFlowDocumentLanguage(tabId);
+  const englishUrl = forceEnglishFlowUrl(currentUrl);
+  if (englishUrl !== currentUrl || !flowDocumentMatchesLocale(documentLanguage, locale)) {
+    await chrome.tabs.update(tabId, { url: englishUrl });
+    await waitForTabComplete(tabId);
+  }
+  await verifyFlowDocumentLocale(tabId, locale);
 }
 async function prepareFlowTab(tabId) {
   if (tabOperationActive(tabId)) return;
@@ -328,7 +359,7 @@ async function prepareFlowTab(tabId) {
   if (existing) return existing;
   const preparation = (async () => {
     if (tabOperationActive(tabId)) return;
-    await ensureEnglishFlowTab(tabId);
+    await ensureFlowTabLocale(tabId);
     if (tabOperationActive(tabId)) return;
     await clearStaleFlowSubmitBridge(tabId);
     if (tabOperationActive(tabId)) return;
@@ -484,7 +515,11 @@ async function execute(_ws, method, args = []) {
         });
       }
       enterTabOperation(tabId);
-      try { return await ensureCorrelationObserver(tabId); }
+      try {
+        const health = await ensureCorrelationObserver(tabId);
+        const extensionBuild = await inspectExtensionBuild(tabId);
+        return { ...health, extensionBuild };
+      }
       finally { leaveTabOperation(tabId); }
     }
     if (operation === "flow.projects.list") return listFlowProjects();
@@ -505,7 +540,7 @@ async function execute(_ws, method, args = []) {
         });
       }
       enterTabOperation(tabId);
-      try { return await openFlowProject(command.payload?.projectId); }
+      try { return await openFlowProject(command.payload?.projectId, command.payload?.language ?? "en"); }
       finally { leaveTabOperation(tabId); }
     }
     if (correlationRequiredOperations.has(operation)) await ensureCorrelationObserver(tabId);
@@ -541,6 +576,11 @@ async function execute(_ws, method, args = []) {
       error.code = response?.error?.code || "FLOW_DOM_FAILED";
       error.retryable = Boolean(response?.error?.retryable);
       error.outcome_unknown = Boolean(response?.error?.outcome_unknown);
+      // Preserve page-side diagnostics through the extension relay. The native
+      // queue applies its own narrow allowlist before storing any receipt.
+      if (response?.error?.diagnostics && typeof response.error.diagnostics === "object") {
+        error.diagnostics = response.error.diagnostics;
+      }
       throw error;
     }
     if (operation === "flow.context" && response.value && typeof response.value === "object") {
@@ -785,8 +825,11 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     return;
   }
   if (flowUrl(tab.url) && (tab.active || selectedTabId === undefined)) {
-    // Selection can follow SPA navigation without preparing/reloading that document.
-    void adoptFlowTab(tab, false).catch(error => { lastError = String(error?.message || error); });
+    // A Flow URL change may switch hl to a non-English locale. Prepare it at
+    // once; prepareFlowTab/ensureFlowTabLocale guard active operations so an
+    // in-flight submit is never interrupted. A later API call also prepares
+    // the tab before acting if this update arrived during an operation.
+    void adoptFlowTab(tab, Boolean(changeInfo.url)).catch(error => { lastError = String(error?.message || error); });
   }
 });
 chrome.tabs.onCreated.addListener(tab => {
@@ -921,6 +964,28 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
     return true;
   }
 });
+// Tự động mở Sidebar khi click vào action icon trên toolbar
+if (chrome.sidePanel?.setPanelBehavior) {
+  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(err => {
+    console.warn("[SidePanel] setPanelBehavior failed, falling back to onClicked:", err);
+  });
+}
+if (chrome.action?.onClicked) {
+  chrome.action.onClicked.addListener(async (tab) => {
+    if (chrome.sidePanel?.open && tab?.id) {
+      try {
+        await chrome.sidePanel.open({ tabId: tab.id });
+      } catch (_) {
+        try {
+          await chrome.sidePanel.open({ windowId: tab.windowId });
+        } catch (e) {
+          console.error("[SidePanel] Failed to open side panel:", e);
+        }
+      }
+    }
+  });
+}
+
 void chrome.alarms.create("flow-mcp-connect", { periodInMinutes: 0.5 });
 void connect();
 void checkDevExtensionReload();

@@ -1,6 +1,12 @@
 import { z } from "zod";
 import { validateFlowSceneCapabilities } from "./flow-capabilities.js";
 
+const frameAssetSchema = z.object({
+  asset: z.string().trim().min(1).describe("Exact image title in the open Flow project."),
+  id: z.string().uuid().describe("Stable Flow media UUID from the upload or asset receipt; must match the selected tile."),
+}).strict();
+const frameInputSchema = z.union([z.string(), frameAssetSchema]);
+
 export const sceneSchema = z.object({
   prompt: z.string().min(1).describe("Full English prompt for one clip: action, shot and camera move, location, style, light, sound."),
   type: z.enum(["video", "image"]).default("video"),
@@ -14,8 +20,8 @@ export const sceneSchema = z.object({
   max_credits: z.number().int().min(0).default(25).describe("Video safety cap: the scene is skipped (nothing spent) if Flow quotes more credits than this. Image generation does not check a credit quote."),
   submit_only: z.boolean().optional().describe("Return when Flow's correlated generation request is dispatched; do not wait for rendering or download results. The default waits for finished media."),
   variants: z.number().int().min(1).max(4).optional().describe("Outputs per prompt (each one spends credits). Default 1."),
-  first_frame: z.string().optional().describe("First frame: absolute image path, or 'asset:<title>' for an image already in the Flow project."),
-  last_frame: z.string().optional().describe("Last frame: absolute image path, or 'asset:<title>'."),
+  first_frame: frameInputSchema.optional().describe("First frame: absolute image path, 'asset:<title>', or {asset:<exact title>, id:<Flow media UUID>} for an identity-verified project image."),
+  last_frame: frameInputSchema.optional().describe("Last frame: absolute image path, 'asset:<title>', or {asset:<exact title>, id:<Flow media UUID>} for an identity-verified project image."),
   video_reference: z.object({
     asset: z.string().trim().min(1).describe("Exact video asset title from flow_assets."),
     start_frame_index: z.number().int().min(0),
@@ -52,12 +58,19 @@ export const sceneSchema = z.object({
   if (scene.video_reference && scene.type !== "video") {
     context.addIssue({ code: "custom", path: ["video_reference"], message: "Video-reference editing is only supported for video scenes." });
   }
+  if (scene.first_frame && typeof scene.first_frame === "object" && scene.last_frame && typeof scene.last_frame === "object" &&
+      scene.first_frame.id.toLowerCase() === scene.last_frame.id.toLowerCase()) {
+    context.addIssue({ code: "custom", path: ["last_frame"], message: "First and last frame assets must have distinct media UUIDs." });
+  }
 });
 
 // Raw shapes double as MCP input schemas and, wrapped in z.object, as HTTP body validators.
 export const shapes = {
   status: { detailed: z.boolean().default(true).describe("false skips the plan/credits readout, which briefly opens Flow's account panel.") },
   observer_health: {},
+  clear_prompt: {
+    expected_prompt: z.string().min(1).max(20_000).describe("Exact text currently shown in Flow's prompt editor. The operation clears only if the active project and prompt still match."),
+  },
   generate: {
     project: z.string().min(1).describe("Folder name for the downloaded clips, e.g. 'HotelPromo'."),
     scenes: z.array(sceneSchema).min(1).max(100),
@@ -78,7 +91,10 @@ export const shapes = {
   projects: {},
   voice_options: {},
   create_project: {},
-  open_project: { project_id: z.string().uuid() },
+  open_project: {
+    project_id: z.string().uuid(),
+    language: z.enum(["en"]).default("en").describe("Flow automation interface language. English is required."),
+  },
   download: {
     project: z.string().min(1).describe("Local folder name under the output root."),
     assets: z.array(z.string().min(1)).min(1).max(30).describe("Titles (or title prefixes) from flow_assets, in the order they should be numbered."),

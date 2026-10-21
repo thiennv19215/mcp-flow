@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { assemble } from "./assemble.js";
 import { extractLastFrame } from "./chain.js";
-import { characterLook, createCharacter, createFlowProject, downloadAsset, renameAsset, trashAsset, editCharacter, getCorrelationObserverHealth, getFlowState, listAssets, listCharacters, listFlowProjects, listFlowVoiceOptions, openFlowProject, rememberCharacter, runAgentBatch, runContinue, runEdit, runGeneration, uploadFlowMediaToProject } from "./flow.js";
+import { characterLook, clearFlowPrompt, createCharacter, createFlowProject, downloadAsset, renameAsset, trashAsset, editCharacter, getCorrelationObserverHealth, getFlowState, listAssets, listCharacters, listFlowProjects, listFlowVoiceOptions, openFlowProject, rememberCharacter, runAgentBatch, runContinue, runEdit, runGeneration, uploadFlowMediaToProject } from "./flow.js";
 import { JobQueue, type Job } from "./queue.js";
 import { attachReferences, clearFlowReferences } from "./flow.js";
 import { BIN, COMPUTER, IS_MAC, IS_WIN, moveToBin } from "./platform.js";
@@ -11,14 +11,14 @@ import { OUTPUT_ROOT, outputRootForContext, projectDir } from "./paths.js";
 import { shapes, type Args } from "./schemas.js";
 import { extensionConnected } from "./extension.js";
 import { validateFlowSceneCapabilities } from "./flow-capabilities.js";
-import { sanitizeUnknownSubmitDiagnostics } from "./flow-request-diagnostics.js";
+import { sanitizeFlowOperationDiagnostics, sanitizeUnknownSubmitDiagnostics } from "./flow-request-diagnostics.js";
 
 export { OUTPUT_ROOT, projectDir };
 export { shapes, type Args };
 
 const words = (s: string) => s.split(/[^a-z0-9]+/i).filter((w) => w.length > 3).map((w) => w.toLowerCase());
 
-export const jobView = ({ id, status, params, files, attempts, credits, progress, note, error, errorCategory, retryAfterAt, failed_scenes, outcomeUnknown, requestDispatched, serverAcceptanceObserved, creditQuoteVerified, requestDiagnostics }: Job) => ({
+export const jobView = ({ id, status, params, files, attempts, credits, progress, note, error, errorCategory, retryAfterAt, failed_scenes, outcomeUnknown, requestDispatched, serverAcceptanceObserved, creditQuoteVerified, requestDiagnostics, operationDiagnostics }: Job) => ({
   id,
   status,
   project: params.output_dir,
@@ -38,12 +38,14 @@ export const jobView = ({ id, status, params, files, attempts, credits, progress
   request_dispatched: requestDispatched ?? false,
   server_acceptance_observed: serverAcceptanceObserved ?? false,
   request_diagnostics: outcomeUnknown ? sanitizeUnknownSubmitDiagnostics(requestDiagnostics) ?? null : null,
+  operation_diagnostics: !outcomeUnknown && !requestDispatched ? sanitizeFlowOperationDiagnostics(operationDiagnostics) ?? null : null,
 });
 
 // One implementation runs in whichever process owns the Flow tab; the other process talks to it over HTTP (remote.ts).
 export interface Core {
   status(a: Args<"status">): Promise<unknown>;
   observer_health(a: Args<"observer_health">): Promise<unknown>;
+  clear_prompt(a: Args<"clear_prompt">): Promise<unknown>;
   generate(a: Args<"generate">): Promise<unknown>;
   wait(a: Args<"wait">): Promise<unknown>;
   cancel(a: Args<"cancel">): Promise<unknown>;
@@ -136,6 +138,13 @@ export class LocalCore implements Core {
   async observer_health(_args: Args<"observer_health">) {
     if (this.mediaUploadActive || this.queue.busy) throw new Error("Flow is processing another operation. Check observer health after it finishes.");
     return getCorrelationObserverHealth();
+  }
+
+  async clear_prompt({ expected_prompt }: Args<"clear_prompt">) {
+    if (this.mediaUploadActive || this.queue.list().some(job => job.status === "queued" || job.status === "running")) throw new Error(BUSY);
+    this.mediaUploadActive = true;
+    try { return await clearFlowPrompt(expected_prompt); }
+    finally { this.mediaUploadActive = false; }
   }
 
   suspendDevice(): void {
@@ -295,10 +304,10 @@ export class LocalCore implements Core {
     return createFlowProject();
   }
 
-  async open_project({ project_id }: Args<"open_project">) {
+  async open_project({ project_id, language = "en" }: Args<"open_project">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     if (this.queue.busy) throw new Error(BUSY);
-    return openFlowProject(project_id);
+    return openFlowProject(project_id, language);
   }
 
   async download({ project, assets, quality }: Args<"download">) {

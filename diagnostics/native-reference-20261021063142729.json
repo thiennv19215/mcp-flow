@@ -1,0 +1,39 @@
+{
+  "started": "2026-10-21T06:31:42.730Z",
+  "mode": "reference",
+  "api": "http://127.0.0.1:18897",
+  "probes": [
+    {
+      "name": "image.reference.submit_only",
+      "status": "queued",
+      "job_id": "58dde85c"
+    },
+    {
+      "name": "image.reference.submit_only",
+      "status": "submitted",
+      "evidence": {
+        "job_id": "58dde85c",
+        "status": "submitted",
+        "request_dispatched": true,
+        "server_acceptance_observed": false,
+        "credits": 0,
+        "credit_quote_verified": true,
+        "note": "Flow submit request was dispatched; rendering and downloads were not awaited.",
+        "request_diagnostics": null
+      }
+    }
+  ],
+  "job_id": "58dde85c",
+  "latest_job": {
+    "status": "submitted",
+    "attempts": 1,
+    "credits": 0,
+    "credit_quote_verified": true,
+    "error_category": null,
+    "outcome_unknown": false,
+    "request_dispatched": true,
+    "server_acceptance_observed": false,
+    "request_diagnostics": null
+  },
+  "finished": "2026-10-21T06:31:55.926Z"
+}

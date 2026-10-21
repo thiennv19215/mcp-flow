@@ -1,0 +1,103 @@
+{
+  "started": "2026-10-21T07:44:51.155Z",
+  "operation": "single fresh disposable video upload, no generation",
+  "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+  "fixture": "C:\\Users\\nguye\\Documents\\flow-mcp-extension-native\\diagnostics\\flow-e2e-video-upload-fresh-20261021.mp4",
+  "priorVideoReceipts": [
+    {
+      "file": "diagnostics/native-upload-20261021045258029.json",
+      "outcome": "timeout waiting for video upload; no retry"
+    },
+    {
+      "file": "diagnostics/native-upload-20261021050326673.json",
+      "outcome": "picker selection confirmed but exact title absent after 3 complete scans; ambiguous"
+    }
+  ],
+  "preflight": {
+    "health": {
+      "ready": true,
+      "activeAttempts": 0,
+      "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+      "extensionBuild": {
+        "status": "mismatch",
+        "matchesWatcher": false,
+        "backgroundRevision": "155baedda442aa22b405c5bd36c45da696806b78874c0485867cf241341f005a",
+        "contentRevision": "155baedda442aa22b405c5bd36c45da696806b78874c0485867cf241341f005a",
+        "watcherRevision": "77162037216dfe186601002b217f57bc1240abb56b83de359283db8f6f9b6843"
+      },
+      "generatedMarker": "0a08470ec772e85733d8fd8bdc702d13dace83e6ca73d0c18fee50a08409a84f"
+    },
+    "flow": {
+      "url": "https://flow.google.com/project/e4bf4bae-626d-4718-a66a-cbdb04c8e6fa?hl=en",
+      "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+      "prompt": {
+        "contentEditable": true,
+        "characterCount": 0,
+        "chipCount": 0
+      },
+      "pickerOpen": false,
+      "uploadControls": [
+        {
+          "tag": "button",
+          "role": null,
+          "aria": "Add ingredients to the prompt box",
+          "title": "",
+          "text": "add",
+          "ariaPressed": null,
+          "ariaSelected": null,
+          "dataState": null,
+          "checked": null,
+          "disabled": false,
+          "icon": "add",
+          "className": "mdc-icon-button mat-mdc-icon-button mat-mdc-button-base mat-mdc-tooltip-trigger add-menu-trigger mat"
+        },
+        {
+          "tag": "button",
+          "role": null,
+          "aria": "Agent",
+          "title": "",
+          "text": "Agent",
+          "ariaPressed": "false",
+          "ariaSelected": null,
+          "dataState": null,
+          "checked": null,
+          "disabled": false,
+          "icon": "",
+          "className": "agent-mode-chip"
+        },
+        {
+          "tag": "button",
+          "role": null,
+          "aria": "Settings trigger",
+          "title": "",
+          "text": "🍌 Nano Banana 2.1 crop_16_9 x1",
+          "ariaPressed": null,
+          "ariaSelected": null,
+          "dataState": null,
+          "checked": null,
+          "disabled": false,
+          "icon": "crop_16_9",
+          "className": "mdc-button mat-mdc-button-base settings-trigger-button mdc-button--unelevated mat-mdc-unelevated-but"
+        },
+        {
+          "tag": "button",
+          "role": null,
+          "aria": "Start generation",
+          "title": "",
+          "text": "arrow_forward",
+          "ariaPressed": null,
+          "ariaSelected": null,
+          "dataState": null,
+          "checked": null,
+          "disabled": true,
+          "icon": "arrow_forward",
+          "className": "mdc-icon-button mat-mdc-icon-button mat-mdc-button-base generate-icon-button mat-mdc-button-disabled"
+        }
+      ],
+      "warnings": []
+    },
+    "busyJobs": []
+  },
+  "stopped": "local API/Flow preflight not usable; no upload attempted",
+  "finished": "2026-10-21T07:44:51.792Z"
+}

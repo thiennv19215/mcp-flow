@@ -84,6 +84,11 @@ export class RemoteCore implements Core {
     return this.stageLocalPath(value);
   }
 
+  private async stageFrameReference(value: string | { asset: string; id: string }): Promise<string | { asset: string; id: string }> {
+    if (typeof value === "object") return value;
+    return this.stageReference(value);
+  }
+
   private localOutputRoot(): string {
     if (!this.session) return OUTPUT_ROOT;
     return this.deviceId ? join(OUTPUT_ROOT, "remote", this.deviceId) : join(OUTPUT_ROOT, "remote");
@@ -153,8 +158,8 @@ export class RemoteCore implements Core {
     if (method === "generate") {
       const scenes = await Promise.all((args.scenes ?? []).map(async (scene: Record<string, any>) => ({
         ...scene,
-        ...(scene.first_frame ? { first_frame: await this.stageReference(scene.first_frame) } : {}),
-        ...(scene.last_frame ? { last_frame: await this.stageReference(scene.last_frame) } : {}),
+        ...(scene.first_frame ? { first_frame: await this.stageFrameReference(scene.first_frame) } : {}),
+        ...(scene.last_frame ? { last_frame: await this.stageFrameReference(scene.last_frame) } : {}),
         ...(scene.reference_images ? { reference_images: await Promise.all(scene.reference_images.map((value: string) => this.stageReference(value))) } : {}),
       })));
       return this.request(method, { ...args, scenes });
@@ -193,6 +198,7 @@ export class RemoteCore implements Core {
     return this.session ? { ...mapped, output_root: this.localOutputRoot() } : mapped;
   }
   observer_health = (a: Parameters<Core["observer_health"]>[0]) => this.request("observer_health", a);
+  clear_prompt = (a: Parameters<Core["clear_prompt"]>[0]) => this.request("clear_prompt", a);
   async generate(a: Parameters<Core["generate"]>[0]): Promise<unknown> { return this.mapRemotePaths(await this.stagedRequest("generate", a)); }
   cancel = async (a: Parameters<Core["cancel"]>[0]) => this.mapRemotePaths(await this.request("cancel", a));
   retry = async (a: Parameters<Core["retry"]>[0]) => this.mapRemotePaths(await this.request("retry", a));
@@ -255,6 +261,7 @@ export class ForwardingCore implements Core {
     return { ...(result as object), studio: this.remoteBaseUrl };
   }
   observer_health = (a: Parameters<Core["observer_health"]>[0]) => this.active().observer_health(a);
+  clear_prompt = (a: Parameters<Core["clear_prompt"]>[0]) => this.active().clear_prompt(a);
   generate = (a: Parameters<Core["generate"]>[0]) => this.active().generate(a);
   wait = (a: Parameters<Core["wait"]>[0]) => this.active().wait(a);
   cancel = (a: Parameters<Core["cancel"]>[0]) => this.active().cancel(a);

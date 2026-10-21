@@ -1,0 +1,112 @@
+{
+  "started": "2026-10-21T07:53:16.584155Z",
+  "mode": "vi-image-reference-uuidbound",
+  "api": "http://127.0.0.1:18897",
+  "build": {
+    "status": "current",
+    "matchesWatcher": true,
+    "backgroundRevision": "0a08470ec772e85733d8fd8bdc702d13dace83e6ca73d0c18fee50a08409a84f",
+    "contentRevision": "0a08470ec772e85733d8fd8bdc702d13dace83e6ca73d0c18fee50a08409a84f",
+    "watcherRevision": "0a08470ec772e85733d8fd8bdc702d13dace83e6ca73d0c18fee50a08409a84f"
+  },
+  "preflight": {
+    "url": "https://flow.google.com/project/e4bf4bae-626d-4718-a66a-cbdb04c8e6fa?hl=vi",
+    "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "observerReady": true,
+    "activeAttempts": 0,
+    "promptChars": 0,
+    "chipCount": 0,
+    "pickerOpen": false,
+    "busyJobs": 0,
+    "warnings": null
+  },
+  "assetListMatch": [
+    {
+      "name": "fm-a6f6c32f9203-upload.png",
+      "kind": "image"
+    }
+  ],
+  "uploadReceipt": {
+    "name": "fm-a6f6c32f9203-upload.png",
+    "id": "b5d304ab-eeb8-4001-8110-86a225761c0f",
+    "kind": "image",
+    "uploaded": true
+  },
+  "request": {
+    "project": "NativeE2E-reference-vi-uuidbound-20261021",
+    "scenes": [
+      {
+        "type": "image",
+        "variants": 1,
+        "retries": 0,
+        "prompt": "A refined studio still of the uploaded cobalt glass vase on a pale limestone plinth, soft amber side light, deep blue backdrop, natural reflections, no text.",
+        "max_credits": 0,
+        "submit_only": true,
+        "reference_images": [
+          "asset:fm-a6f6c32f9203-upload.png"
+        ]
+      }
+    ]
+  },
+  "response": {
+    "output_dir": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-vi-uuidbound-20261021",
+    "jobs": [
+      {
+        "id": "f9946244",
+        "status": "running",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-vi-uuidbound-20261021",
+        "scene": "scene-01",
+        "prompt": "A refined studio still of the uploaded cobalt glass vase on a pale limestone plinth, soft amber side light, deep blue backdrop, natural reflections, no text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "files": [],
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      }
+    ]
+  },
+  "finished": "2026-10-21T07:53:16.6084751Z",
+  "postflight": {
+    "observedAt": "2026-10-21T07:53:37.4812166Z",
+    "observerReady": true,
+    "activeAttempts": 0,
+    "extensionBuild": {
+      "status": "current",
+      "matchesWatcher": true,
+      "backgroundRevision": "0a08470ec772e85733d8fd8bdc702d13dace83e6ca73d0c18fee50a08409a84f",
+      "contentRevision": "0a08470ec772e85733d8fd8bdc702d13dace83e6ca73d0c18fee50a08409a84f",
+      "watcherRevision": "0a08470ec772e85733d8fd8bdc702d13dace83e6ca73d0c18fee50a08409a84f"
+    },
+    "url": "https://flow.google.com/project/e4bf4bae-626d-4718-a66a-cbdb04c8e6fa?hl=vi",
+    "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "promptChars": 0,
+    "chipCount": 0,
+    "pickerOpen": false,
+    "visibleSurfaces": [],
+    "busyJobs": 0,
+    "job": [
+      {
+        "id": "f9946244",
+        "status": "failed",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-vi-uuidbound-20261021",
+        "scene": "scene-01",
+        "prompt": "A refined studio still of the uploaded cobalt glass vase on a pale limestone plinth, soft amber side light, deep blue backdrop, natural reflections, no text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "progress": "Flow submit: selecting asset fm-a6f6c32f9203-upload.png",
+        "files": [],
+        "error": "Flow's reference picker did not render a verifiably different page after scrolling; no reference was selected.",
+        "error_category": "unknown",
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      }
+    ],
+    "warnings": null
+  }
+}

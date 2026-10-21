@@ -52,7 +52,7 @@
       phase,
       updatedAt: now,
       ...(phase === "completed" ? { lastResult: details.result ?? null, error: null } : {}),
-      ...(phase === "failed" ? { lastResult: null, error: details.error ?? "Unknown settings error" } : {}),
+      ...(phase === "failed" ? { lastResult: null, error: details.error ?? "Unknown settings error", quoteDiagnostics: details.quoteDiagnostics ?? null } : {}),
     };
   }
   function inspectImagePreparationDiagnostics() {
@@ -88,7 +88,6 @@
     }
     if (!candidates.length) reasonCodes.add("no_candidate");
     return {
-      quote: Number.isFinite(inspection.quote) ? inspection.quote : null,
       candidateCount: candidates.length,
       reasonCodes: [...reasonCodes],
     };
@@ -128,6 +127,7 @@
       document.querySelector(".ProseMirror[contenteditable='true']");
     return editor?.closest("flow-base-prompt-box, .flow-composer, form, [class*='composer']") ||
       (typeof root.flowQuery === "function" ? root.flowQuery("composerRoot") : null) ||
+      (typeof root.flowQueryVisible === "function" ? root.flowQueryVisible("composerRoot", document) : null) ||
       [...document.querySelectorAll("flow-base-prompt-box, .flow-composer, [class*='composer']")].find(el => root.visible?.(el)) || null;
   }
 
@@ -146,33 +146,38 @@
     const variantMatch = wanted.match(/^x([1-4])$/);
     const variantNum = variantMatch ? variantMatch[1] : null;
 
-    const findIn = rootEl => [...rootEl.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"]')].find(el => {
-      if (!root.visible?.(el) || isNavControl(el)) return false;
-      const label = foldLabel(root.accessibleName?.(el));
-      const inner = foldLabel(el.innerText || el.textContent || "");
+    const findIn = rootEl => {
+      const candidates = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.options", rootEl, { checkVisible: false }) : null) ||
+        [...rootEl.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"]')];
+      return candidates.find(el => {
+        if (!root.visible?.(el) || isNavControl(el)) return false;
+        const label = foldLabel(root.accessibleName?.(el));
+        const inner = foldLabel(el.innerText || el.textContent || "");
 
-      if (aliases.some(alias => {
-        const a = foldLabel(alias);
-        return [label, inner].some(value => value === a || value.endsWith(` ${a}`) || value.startsWith(`${a} `));
-      })) return true;
-      if (normalizedWanted && (label === normalizedWanted || inner === normalizedWanted || label.includes(normalizedWanted) || inner.includes(normalizedWanted))) return true;
+        if (aliases.some(alias => {
+          const a = foldLabel(alias);
+          return [label, inner].some(value => value === a || value.endsWith(` ${a}`) || value.startsWith(`${a} `));
+        })) return true;
+        if (normalizedWanted && (label === normalizedWanted || inner === normalizedWanted || label.includes(normalizedWanted) || inner.includes(normalizedWanted))) return true;
 
-      if (variantNum) {
-        if (label === `x${variantNum}` || inner === `x${variantNum}` || label === variantNum || inner === variantNum) return true;
-        if (label.includes(`${variantNum} ket qua`) || inner.includes(`${variantNum} ket qua`)) return true;
-        if (label.includes(`${variantNum} bien the`) || inner.includes(`${variantNum} bien the`)) return true;
-        if (label.includes(`${variantNum} anh`) || inner.includes(`${variantNum} anh`)) return true;
-        if (label.includes(`${variantNum} hinh anh`) || inner.includes(`${variantNum} hinh anh`)) return true;
-        if (label.includes(`${variantNum} video`) || inner.includes(`${variantNum} video`)) return true;
-      }
+        if (variantNum) {
+          if (label === `x${variantNum}` || inner === `x${variantNum}` || label === variantNum || inner === variantNum) return true;
+          if (label.includes(`${variantNum} ket qua`) || inner.includes(`${variantNum} ket qua`)) return true;
+          if (label.includes(`${variantNum} bien the`) || inner.includes(`${variantNum} bien the`)) return true;
+          if (label.includes(`${variantNum} anh`) || inner.includes(`${variantNum} anh`)) return true;
+          if (label.includes(`${variantNum} hinh anh`) || inner.includes(`${variantNum} hinh anh`)) return true;
+          if (label.includes(`${variantNum} video`) || inner.includes(`${variantNum} video`)) return true;
+        }
 
-      return root.matchesName?.(label, name, null, true) || root.matchesName?.(inner, name, null, true);
-    });
+        return root.matchesName?.(label, name, null, true) || root.matchesName?.(inner, name, null, true);
+      });
+    };
 
     if (scope) return findIn(scope);
 
     // Prioritize settings panel / dialog overlay / composer container
-    const panel = document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane, mat-menu-panel');
+    const panel = (typeof root.flowQuery === "function" ? root.flowQuery("settings.panel", document, { checkVisible: false }) : null) ||
+      document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane, mat-menu-panel');
     const composer = flowComposerRoot();
     if (panel) {
       const match = findIn(panel);
@@ -194,32 +199,37 @@
     const variantMatch = expected.match(/^x([1-4])$/);
     const variantNum = variantMatch ? variantMatch[1] : null;
 
-    const findIn = rootEl => [...rootEl.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')].find(el => {
-      const label = foldLabel(root.accessibleName?.(el));
-      const inner = foldLabel(el.innerText || el.textContent || "");
-      if (!root.visible?.(el) || el === settingsTrigger || isNavControl(el)) return false;
+    const findIn = rootEl => {
+      const candidates = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", rootEl, { checkVisible: false }) : null) ||
+        [...rootEl.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')];
+      return candidates.find(el => {
+        const label = foldLabel(root.accessibleName?.(el));
+        const inner = foldLabel(el.innerText || el.textContent || "");
+        if (!root.visible?.(el) || el === settingsTrigger || isNavControl(el)) return false;
 
-      if (aliases.some(alias => {
-        const a = foldLabel(alias);
-        return [label, inner].some(value => value === a || value.endsWith(` ${a}`) || value.startsWith(`${a} `));
-      })) return true;
-      if (normalizedExpected && (label === normalizedExpected || inner === normalizedExpected || label.includes(normalizedExpected) || inner.includes(normalizedExpected))) return true;
+        if (aliases.some(alias => {
+          const a = foldLabel(alias);
+          return [label, inner].some(value => value === a || value.endsWith(` ${a}`) || value.startsWith(`${a} `));
+        })) return true;
+        if (normalizedExpected && (label === normalizedExpected || inner === normalizedExpected || label.includes(normalizedExpected) || inner.includes(normalizedExpected))) return true;
 
-      if (variantNum) {
-        if (label === `x${variantNum}` || inner === `x${variantNum}` || label === variantNum || inner === variantNum) return true;
-        if (label.includes(`${variantNum} ket qua`) || inner.includes(`${variantNum} ket qua`)) return true;
-        if (label.includes(`${variantNum} bien the`) || inner.includes(`${variantNum} bien the`)) return true;
-        if (label.includes(`${variantNum} anh`) || inner.includes(`${variantNum} anh`)) return true;
-        if (label.includes(`${variantNum} hinh anh`) || inner.includes(`${variantNum} hinh anh`)) return true;
-        if (label.includes(`${variantNum} video`) || inner.includes(`${variantNum} video`)) return true;
-      }
+        if (variantNum) {
+          if (label === `x${variantNum}` || inner === `x${variantNum}` || label === variantNum || inner === variantNum) return true;
+          if (label.includes(`${variantNum} ket qua`) || inner.includes(`${variantNum} ket qua`)) return true;
+          if (label.includes(`${variantNum} bien the`) || inner.includes(`${variantNum} bien the`)) return true;
+          if (label.includes(`${variantNum} anh`) || inner.includes(`${variantNum} anh`)) return true;
+          if (label.includes(`${variantNum} hinh anh`) || inner.includes(`${variantNum} hinh anh`)) return true;
+          if (label.includes(`${variantNum} video`) || inner.includes(`${variantNum} video`)) return true;
+        }
 
-      return false;
-    });
+        return false;
+      });
+    };
 
     if (scope) return findIn(scope);
 
-    const panel = document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane, mat-menu-panel');
+    const panel = (typeof root.flowQuery === "function" ? root.flowQuery("settings.panel", document, { checkVisible: false }) : null) ||
+      document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane, mat-menu-panel');
     const composer = flowComposerRoot();
     if (panel) {
       const match = findIn(panel);
@@ -250,11 +260,14 @@
   function getVisibleFlowSettingsPanel() {
     // A Flow project-navigation overlay can also contain “Image” and “Video”.
     // Inspect each overlay and require settings-specific controls before treating it as open.
-    const openPanels = [...document.querySelectorAll('[role="dialog"], [role="menu"], mat-dialog-container, flow-dialog, .cdk-overlay-pane')]
+    const panelCandidates = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.panel", document, { checkVisible: false }) : null) ||
+      [...document.querySelectorAll('[role="dialog"], [role="menu"], mat-dialog-container, flow-dialog, .cdk-overlay-pane')];
+    const openPanels = panelCandidates
       .filter(el => root.visible?.(el) && !isNavControl(el) &&
         el.querySelector?.('[role="radio"], mat-radio-button, button[id*="-trigger-"]'));
     for (const openPanel of openPanels) {
-      const controls = [...openPanel.querySelectorAll('[role="radio"], mat-radio-button, [role="tab"], button')];
+      const controls = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", openPanel, { checkVisible: false }) : null) ||
+        [...openPanel.querySelectorAll('[role="radio"], mat-radio-button, [role="tab"], button')];
       const names = controls.filter(r => root.visible?.(r)).map(r => {
         const name = root.accessibleName?.(r) || r.innerText || r.textContent || "";
         return foldLabel(String(name).replace(/\b(accessibility_new|person|movie|image|videocam|mic|dashboard)\b/gi, " "));
@@ -343,7 +356,7 @@
     const str = `${num}s`;
 
     await openFlowSettings(options);
-    const panel = flowSettingsPanelVisible() ? (document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane') || document) : document;
+    const panel = flowSettingsPanelVisible() ? ((typeof root.flowQuery === "function" ? root.flowQuery("settings.panel", document, { checkVisible: false }) : null) || document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane') || document) : document;
 
     const tryClickDuration = () => {
       const idBtn = panel.querySelector(`button[id$="-trigger-${num}"]`);
@@ -353,7 +366,7 @@
         }
         return true;
       }
-      const candidates = [...panel.querySelectorAll('button[role="tab"], [role="radio"], mat-radio-button, button')].filter(el => root.visible?.(el) && !isNavControl(el));
+      const candidates = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", panel, { checkVisible: false }) : null) || panel.querySelectorAll('button[role="tab"], [role="radio"], mat-radio-button, button'))].filter(el => root.visible?.(el) && !isNavControl(el));
       const match = candidates.find(el => {
         const txt = foldLabel(el.innerText || el.textContent || "");
         const aria = foldLabel(root.accessibleName?.(el));
@@ -384,9 +397,9 @@
     if (!aspectRatio) return;
     const normalized = root.normalizeAspectRatio?.(aspectRatio) || String(aspectRatio).trim();
     await openFlowSettings(options);
-    const panel = flowSettingsPanelVisible() ? (document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane') || document) : document;
+    const panel = flowSettingsPanelVisible() ? ((typeof root.flowQuery === "function" ? root.flowQuery("settings.panel", document, { checkVisible: false }) : null) || document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane') || document) : document;
 
-    const candidates = [...panel.querySelectorAll('[role="radio"], mat-radio-button, [role="tab"], [role="option"], button, [role="button"]')].filter(el => root.visible?.(el) && !isNavControl(el));
+    const candidates = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", panel, { checkVisible: false }) : null) || panel.querySelectorAll('[role="radio"], mat-radio-button, [role="tab"], [role="option"], button, [role="button"]'))].filter(el => root.visible?.(el) && !isNavControl(el));
     const match = candidates.find(el => {
       const label = foldLabel(root.accessibleName?.(el));
       const txt = foldLabel(el.innerText || el.textContent || "");
@@ -414,9 +427,9 @@
     if (!resolution) return;
     const wanted = String(resolution).trim().toLowerCase().replace(/\s+/g, "");
     await openFlowSettings(options);
-    const panel = flowSettingsPanelVisible() ? (document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog') || document) : document;
+    const panel = flowSettingsPanelVisible() ? ((typeof root.flowQuery === "function" ? root.flowQuery("settings.panel", document, { checkVisible: false }) : null) || document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog') || document) : document;
 
-    const candidates = [...panel.querySelectorAll('button[role="tab"], [role="radio"], mat-radio-button, button')].filter(el => root.visible?.(el) && !isNavControl(el));
+    const candidates = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", panel, { checkVisible: false }) : null) || panel.querySelectorAll('button[role="tab"], [role="radio"], mat-radio-button, button'))].filter(el => root.visible?.(el) && !isNavControl(el));
     const match = candidates.find(el => {
       const txt = (el.innerText || el.textContent || "").trim().toLowerCase().replace(/\s+/g, "");
       return txt === wanted || txt === `${wanted}p` || `${txt}p` === wanted;
@@ -457,7 +470,9 @@
       // the settings panel). Only search the panel whose controls prove that it
       // is Flow's settings panel; never let an earlier global overlay mask it.
       const panel = getVisibleFlowSettingsPanel() || document;
-      return [...panel.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')]
+      const candidates = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", panel, { checkVisible: false }) : null) ||
+        [...panel.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')];
+      return candidates
         .find(element => root.visible?.(element) && !isNavControl(element) && matches(element)) || null;
     };
     const codePrefix = kind === "duration" ? "DURATION" : kind === "resolution" ? "RESOLUTION" : "ASPECT_RATIO";
@@ -501,7 +516,9 @@
       while (Date.now() < Math.min(openedBy, Number.isFinite(options.deadline) ? options.deadline : Infinity) && !radio) { await waitPreparation(options, 100, `finding Flow ${name} mode`); radio = findOption(); }
     }
     if (!radio) {
-      const options = [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')]
+      const optionElements = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", document, { checkVisible: false }) : null) ||
+        [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')];
+      const options = optionElements
         .filter(el => root.visible?.(el)).map(el => (root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim()).filter(Boolean);
       throw root.flowError("FLOW_OPTION_NOT_FOUND", `Flow has no visible "${name}" option for the current settings. Visible options: ${[...new Set(options)].slice(0, 30).join(", ") || "none"}.`);
     }
@@ -539,7 +556,9 @@
       const currentName = normalizeModelLabel(modelButton?.innerText || modelButton?.textContent || root.accessibleName?.(modelButton) || "");
       const currentCount = currentName.match(/(?:^|\s)x([1-4])(?:\s|$)/)?.[1];
       if (currentCount === String(variants)) return variants;
-      const countControl = [...composer.querySelectorAll('[role="radio"],[role="option"],[role="tab"],button,[role="button"]')]
+      const composerCandidates = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", composer, { checkVisible: false }) : null) ||
+        [...composer.querySelectorAll('[role="radio"],[role="option"],[role="tab"],button,[role="button"]')];
+      const countControl = composerCandidates
         .find(el => root.visible?.(el) && !isNavControl(el) &&
           new RegExp(`^(?:x${variants}|${variants}|${variants}\\s+(?:anh|hinh anh|video|ket qua))$`, "i")
             .test(normalizeModelLabel(root.accessibleName?.(el) || el.innerText || el.textContent || "")));
@@ -696,9 +715,9 @@
     if (button) return button;
 
     const panel = scope === document && flowSettingsPanelVisible()
-      ? (document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane') || document)
+      ? ((typeof root.flowQuery === "function" ? root.flowQuery("settings.panel", document, { checkVisible: false }) : null) || document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane') || document)
       : scope;
-    const candidates = [...panel.querySelectorAll('button, [role="button"], [role="combobox"]')].filter(el => root.visible?.(el) && !isNavControl(el));
+    const candidates = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("common.buttons", panel, { checkVisible: false }) : null) || panel.querySelectorAll('button, [role="button"], [role="combobox"]'))].filter(el => root.visible?.(el) && !isNavControl(el));
 
     const isExcluded = el => {
       const txt = (el.innerText || el.textContent || "").trim().toLowerCase();
@@ -755,10 +774,11 @@
     const menuDeadline = Math.min(Date.now() + 4000, Number.isFinite(options.deadline) ? options.deadline : Infinity);
     while (Date.now() < menuDeadline) {
       checkPreparation(options, "loading Flow model choices");
-      items = [...document.querySelectorAll('[role="menuitem"], [role="menuitemradio"], mat-option, [role="option"]')].filter(el => root.visible?.(el));
+      items = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.dropdownItems", document, { checkVisible: false }) : null) || document.querySelectorAll('[role="menuitem"], [role="menuitemradio"], mat-option, [role="option"]'))].filter(el => root.visible?.(el));
       if (!items.length) {
-        const activeMenu = document.querySelector('[role="menu"]:last-of-type, [data-radix-popper-content-wrapper]:last-of-type, .cdk-overlay-pane:last-of-type');
-        if (activeMenu) items = [...activeMenu.querySelectorAll('button, [role="menuitem"], [role="menuitemradio"]')].filter(el => root.visible?.(el));
+        const activeMenu = (typeof root.flowQuery === "function" ? root.flowQuery("settings.activeMenu", document, { checkVisible: false }) : null) ||
+          document.querySelector('[role="menu"]:last-of-type, [data-radix-popper-content-wrapper]:last-of-type, .cdk-overlay-pane:last-of-type');
+        if (activeMenu) items = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("common.buttons", activeMenu, { checkVisible: false }) : null) || activeMenu.querySelectorAll('button, [role="menuitem"], [role="menuitemradio"]'))].filter(el => root.visible?.(el));
       }
       if (items.length) break;
       await waitPreparation(options, 100, "loading Flow model choices");
@@ -821,9 +841,12 @@
 
   async function restoreNativeFramesMode(options = {}) {
     await openFlowSettings(options);
-    const findFrames = () => [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')]
-      .find(el => root.visible?.(el) && !isNavControl(el) &&
+    const findFrames = () => {
+      const candidates = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", document, { checkVisible: false }) : null) ||
+        [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')];
+      return candidates.find(el => root.visible?.(el) && !isNavControl(el) &&
         /^(?:frames|khung hinh|khung|khung anh)$/.test(foldLabel((root.accessibleName?.(el) || "").replace(/^(?:accessibility_new|dashboard|face)\s*/i, ""))));
+    };
     let frames = findFrames();
     if (!frames) throw root.flowError("FLOW_FRAMES_MODE_UNAVAILABLE", "Flow does not show a Frames mode control after local frame upload. Nothing was submitted.", true, false);
     if (!nativeRadioSelected(frames) && frames.getAttribute("aria-selected") !== "true") frames.click();
@@ -888,7 +911,7 @@
     finishImagePreparationDiagnostics("completed", { result: { modernComposer } });
     return undefined;
     } catch (error) {
-      finishImagePreparationDiagnostics("failed", { error: `${error?.code || "FLOW_SETTINGS_ERROR"}: ${error?.message || String(error)}` });
+      finishImagePreparationDiagnostics("failed", { error: `${error?.code || "FLOW_SETTINGS_ERROR"}: ${error?.message || String(error)}`, quoteDiagnostics: safeCreditQuoteDiagnostics() });
       throw error;
     }
   }
@@ -901,7 +924,9 @@
   function exactModeControl(name) {
     const rawWanted = foldLabel(name);
     const aliases = (MODE_ALIASES[rawWanted] || [rawWanted]).map(foldLabel);
-    return [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')]
+    const candidates = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", document, { checkVisible: false }) : null) ||
+      [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')];
+    return candidates
       .find(element => {
         if (!root.visible?.(element) || isNavControl(element)) return false;
         const cName = foldLabel(String(root.accessibleName?.(element) || "").replace(/^(?:accessibility_new|dashboard|face)\s*/i, ""));

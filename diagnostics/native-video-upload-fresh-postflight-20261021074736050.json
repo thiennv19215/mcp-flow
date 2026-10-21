@@ -1,0 +1,145 @@
+{
+  "updated": "2026-10-21T07:47:33.404Z",
+  "priorUploadReceipt": "diagnostics/native-video-upload-fresh-20261021074637859.json",
+  "failedUploadError": "Flow displayed a video upload confirmation dialog, but no recognized Upload, Continue, or Confirm control appeared. No further upload actions were started; inspect Flow before retrying.",
+  "preCleanup": {
+    "url": "https://flow.google.com/project/e4bf4bae-626d-4718-a66a-cbdb04c8e6fa?hl=en",
+    "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "prompt": {
+      "contentEditable": true,
+      "characterCount": 0,
+      "chipCount": 0
+    },
+    "pickerOpen": true,
+    "chipCount": 0,
+    "activeAttempts": 0,
+    "busyJobs": [],
+    "warnings": []
+  },
+  "clearReferences": {
+    "cleared": 0,
+    "remaining": 0,
+    "confirmed": true,
+    "picker_closed": true,
+    "prompt_preserved": true,
+    "prompt_text": ""
+  },
+  "postCleanup": {
+    "url": "https://flow.google.com/project/e4bf4bae-626d-4718-a66a-cbdb04c8e6fa?hl=en",
+    "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "prompt": {
+      "contentEditable": true,
+      "characterCount": 0,
+      "chipCount": 0
+    },
+    "pickerOpen": false,
+    "chipCount": 0,
+    "referenceDiagnostics": {
+      "action": "close",
+      "phase": "completed",
+      "step": "picker closed",
+      "errorCode": null,
+      "cleanupErrorCode": null,
+      "pickerOpen": false,
+      "pickerRole": null,
+      "pickerOptionCount": 0,
+      "locale": "en",
+      "searchLabelRecognized": false,
+      "searchLabel": null,
+      "searchResultsVerified": false,
+      "activeCategory": "unknown",
+      "categorySelected": false,
+      "pickerScanPages": 0,
+      "pickerScanEndReached": false,
+      "optionLabelHashes": [],
+      "exactTargetFound": false,
+      "scrollOwnerCount": 0,
+      "scrollOwnerDepth": null,
+      "scrollClientHeight": 0,
+      "scrollHeight": 0,
+      "scrollTop": 0,
+      "visibleSurfaces": [
+        {
+          "role": "dialog",
+          "tag": "mat-dialog-container",
+          "labelCount": 3
+        }
+      ],
+      "categoryTabs": [],
+      "chipCount": 0,
+      "chips": [],
+      "surfaceStatus": null,
+      "path": null,
+      "provenanceConfirmed": false,
+      "chipUuidConfirmed": false,
+      "menuRelatedToTile": false,
+      "menuNearTrigger": false,
+      "cleanup": null,
+      "updatedAt": "2026-10-21T07:47:34.155Z",
+      "lastResult": null
+    },
+    "uploadControls": [
+      {
+        "tag": "button",
+        "role": null,
+        "aria": "Add ingredients to the prompt box",
+        "title": "",
+        "text": "add",
+        "ariaPressed": null,
+        "ariaSelected": null,
+        "dataState": null,
+        "checked": null,
+        "disabled": false,
+        "icon": "add",
+        "className": "mdc-icon-button mat-mdc-icon-button mat-mdc-button-base mat-mdc-tooltip-trigger add-menu-trigger mat"
+      },
+      {
+        "tag": "button",
+        "role": null,
+        "aria": "Agent",
+        "title": "",
+        "text": "Agent",
+        "ariaPressed": "false",
+        "ariaSelected": null,
+        "dataState": null,
+        "checked": null,
+        "disabled": false,
+        "icon": "",
+        "className": "agent-mode-chip"
+      },
+      {
+        "tag": "button",
+        "role": null,
+        "aria": "Settings trigger",
+        "title": "",
+        "text": "🍌 Nano Banana 2.1 crop_16_9 x1",
+        "ariaPressed": null,
+        "ariaSelected": null,
+        "dataState": null,
+        "checked": null,
+        "disabled": false,
+        "icon": "crop_16_9",
+        "className": "mdc-button mat-mdc-button-base settings-trigger-button mdc-button--unelevated mat-mdc-unelevated-but"
+      },
+      {
+        "tag": "button",
+        "role": null,
+        "aria": "Start generation",
+        "title": "",
+        "text": "arrow_forward",
+        "ariaPressed": null,
+        "ariaSelected": null,
+        "dataState": null,
+        "checked": null,
+        "disabled": true,
+        "icon": "arrow_forward",
+        "className": "mdc-icon-button mat-mdc-icon-button mat-mdc-button-base generate-icon-button mat-mdc-button-disabled"
+      }
+    ],
+    "activeAttempts": 0,
+    "busyJobs": [],
+    "videoAssets": [],
+    "assetCount": 10
+  },
+  "finished": "2026-10-21T07:47:36.050Z"
+}

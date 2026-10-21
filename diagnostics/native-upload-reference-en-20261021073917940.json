@@ -1,0 +1,138 @@
+{
+  "started": "2026-10-21T07:39:17.940Z",
+  "operation": "EN fresh image upload plus one image-reference dispatch",
+  "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+  "fixture": "C:\\Users\\nguye\\Documents\\flow-mcp-extension-native\\diagnostics\\character-attach-proof.png",
+  "build": {
+    "extensionBuild": {
+      "status": "mismatch",
+      "matchesWatcher": false,
+      "backgroundRevision": "a98d6fd5b9bbbee5ebbe07a8155cfe26fe4b76bf520dc6fe6f7ae022c48e8d3a",
+      "contentRevision": "a98d6fd5b9bbbee5ebbe07a8155cfe26fe4b76bf520dc6fe6f7ae022c48e8d3a",
+      "watcherRevision": "a5e8dcf14535f2466be464311fab24cd60e275c92f1f6ae4590838a2893aae16"
+    },
+    "generatedMarker": "a98d6fd5b9bbbee5ebbe07a8155cfe26fe4b76bf520dc6fe6f7ae022c48e8d3a"
+  },
+  "preUpload": {
+    "observer": {
+      "ready": true,
+      "activeAttempts": 0,
+      "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa"
+    },
+    "flow": {
+      "url": "https://flow.google.com/project/e4bf4bae-626d-4718-a66a-cbdb04c8e6fa?hl=en",
+      "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+      "prompt": {
+        "contentEditable": true,
+        "characterCount": 0,
+        "chipCount": 0
+      },
+      "pickerOpen": false,
+      "activeAttempts": 0,
+      "warnings": []
+    },
+    "busyJobs": []
+  },
+  "uploadStarted": "2026-10-21T07:39:18.535Z",
+  "uploadReceipt": {
+    "name": "fm-d5e640bd8f97-upload.png",
+    "id": "9f43a48c-c092-4ff1-9181-3612b200d1d0",
+    "kind": "image",
+    "uploaded": true,
+    "trustedGesture": false
+  },
+  "assetList": {
+    "count": 10,
+    "exactMatches": [
+      {
+        "name": "fm-d5e640bd8f97-upload.png",
+        "kind": "image"
+      }
+    ]
+  },
+  "preSubmit": {
+    "observer": {
+      "ready": true,
+      "activeAttempts": 0,
+      "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa"
+    },
+    "flow": {
+      "url": "https://flow.google.com/project/e4bf4bae-626d-4718-a66a-cbdb04c8e6fa?hl=en",
+      "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+      "prompt": {
+        "contentEditable": true,
+        "characterCount": 0,
+        "chipCount": 0
+      },
+      "pickerOpen": true,
+      "activeAttempts": 0,
+      "referenceDiagnostics": {
+        "action": "idle",
+        "phase": "idle",
+        "step": "idle",
+        "errorCode": null,
+        "cleanupErrorCode": null,
+        "pickerOpen": true,
+        "pickerRole": "listbox",
+        "pickerOptionCount": 11,
+        "locale": "en",
+        "searchLabelRecognized": false,
+        "searchLabel": null,
+        "searchResultsVerified": false,
+        "activeCategory": "unknown",
+        "categorySelected": false,
+        "pickerScanPages": 0,
+        "pickerScanEndReached": false,
+        "optionLabelHashes": [],
+        "exactTargetFound": false,
+        "scrollOwnerCount": 0,
+        "scrollOwnerDepth": null,
+        "scrollClientHeight": 0,
+        "scrollHeight": 0,
+        "scrollTop": 0,
+        "visibleSurfaces": [
+          {
+            "role": "listbox",
+            "tag": "cdk-virtual-scroll-viewport",
+            "labelCount": 11
+          }
+        ],
+        "categoryTabs": [
+          {
+            "selected": true
+          },
+          {
+            "selected": false
+          },
+          {
+            "selected": false
+          },
+          {
+            "selected": false
+          },
+          {
+            "selected": false
+          },
+          {
+            "selected": false
+          }
+        ],
+        "chipCount": 0,
+        "chips": [],
+        "surfaceStatus": null,
+        "path": null,
+        "provenanceConfirmed": false,
+        "chipUuidConfirmed": false,
+        "menuRelatedToTile": false,
+        "menuNearTrigger": false,
+        "cleanup": null,
+        "updatedAt": "2026-10-21T07:39:30.237Z",
+        "lastResult": null
+      },
+      "warnings": []
+    },
+    "busyJobs": []
+  },
+  "stopped": "post-upload pre-submit state not clean; no generation",
+  "finished": "2026-10-21T07:39:30.816Z"
+}

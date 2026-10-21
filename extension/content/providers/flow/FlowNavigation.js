@@ -42,7 +42,7 @@
     )]))];
     const wanted = normalize(label);
     const synonyms = (root.I18n?.getPatterns?.(wanted)?.length ? root.I18n.getPatterns(wanted) : NAV_SYNONYMS[wanted]) || [wanted];
-    return candidates.find(el => {
+    const matches = candidates.filter(el => {
       if (!root.visible?.(el) || el.disabled || el.getAttribute?.("aria-disabled") === "true") return false;
       const text = normalize(el.innerText || el.textContent || root.accessibleName?.(el));
       const iconNames = [...(el.querySelectorAll?.("mat-icon") || [])].map(icon => normalize(icon.innerText || icon.textContent));
@@ -62,6 +62,7 @@
         return false;
       });
     });
+    return matches.length === 1 ? matches[0] : null;
   }
 
   function clickFlowNavigation(label) {

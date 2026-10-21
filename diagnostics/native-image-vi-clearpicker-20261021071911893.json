@@ -1,0 +1,341 @@
+{
+  "started": "2026-10-21T07:19:11.893Z",
+  "operation": "close empty picker then Vietnamese text-to-image submit_only",
+  "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+  "preClear": {
+    "observer": {
+      "ready": true,
+      "activeAttempts": 0,
+      "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa"
+    },
+    "status": {
+      "url": "https://flow.google.com/project/e4bf4bae-626d-4718-a66a-cbdb04c8e6fa?hl=vi",
+      "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+      "prompt": {
+        "contentEditable": true,
+        "characterCount": 0,
+        "chipCount": 0
+      },
+      "referenceActionDiagnostics": {
+        "action": "attach",
+        "phase": "failed",
+        "step": "picker closed",
+        "errorCode": "FLOW_ASSET_NOT_FOUND",
+        "cleanupErrorCode": null,
+        "pickerOpen": true,
+        "pickerRole": "listbox",
+        "pickerOptionCount": 10,
+        "locale": "vi",
+        "searchLabelRecognized": false,
+        "searchLabel": null,
+        "searchResultsVerified": false,
+        "activeCategory": "all",
+        "categorySelected": true,
+        "pickerScanPages": 1,
+        "pickerScanEndReached": true,
+        "optionLabelHashes": [
+          "h-9c1c938d",
+          "h-2c2ef930",
+          "h-f32c2b43",
+          "h-f87ef7e0",
+          "h-eba34d86",
+          "h-e9561ea6",
+          "h-72eb99a6",
+          "h-d1a77521",
+          "h-6731e2ed"
+        ],
+        "exactTargetFound": false,
+        "scrollOwnerCount": 1,
+        "scrollOwnerDepth": 0,
+        "scrollClientHeight": 515,
+        "scrollHeight": 515,
+        "scrollTop": 0,
+        "visibleSurfaces": [
+          {
+            "role": "dialog",
+            "tag": "div",
+            "labelCount": 3
+          },
+          {
+            "role": "listbox",
+            "tag": "cdk-virtual-scroll-viewport",
+            "labelCount": 10
+          }
+        ],
+        "categoryTabs": [
+          {
+            "selected": true
+          },
+          {
+            "selected": false
+          },
+          {
+            "selected": false
+          },
+          {
+            "selected": false
+          },
+          {
+            "selected": false
+          },
+          {
+            "selected": false
+          }
+        ],
+        "chipCount": 0,
+        "chips": [],
+        "surfaceStatus": null,
+        "path": null,
+        "provenanceConfirmed": false,
+        "chipUuidConfirmed": false,
+        "menuRelatedToTile": false,
+        "menuNearTrigger": false,
+        "cleanup": null,
+        "updatedAt": "2026-10-21T07:19:11.954Z",
+        "lastResult": null
+      },
+      "observer": {
+        "ready": true,
+        "version": 1,
+        "observerRevision": 24,
+        "structuredPromptVersion": 2,
+        "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+        "activeAttempts": 0,
+        "retiredCount": 7,
+        "retiredSaturated": false,
+        "requestDiagnostics": {
+          "version": 1,
+          "count": 0,
+          "events": []
+        },
+        "xhrHookActive": true,
+        "fetchHookActive": true
+      },
+      "warnings": [
+        "close An van nvthien11052001@gmail.com Chuyển đổi tài khoản movie_filter_auto 1.040 tín dụng Google Flow Nâng cấp Quản lý gói thuê bao Đăng xuất khỏi mọi tài khoản frame_spark Hình mờ có thể nhìn thấy Khu vực của bạn yêu cầu phải có hình mờ có thể nhìn thấy Quyền riêng tư · Điều khoản dịch vụ · Giấy phép Trang web này được bảo vệ bằng reCAPTCHA, đồng thời có áp dụng Chính sách quyền riêng tư và Điều khoản dịch vụ của Google."
+      ],
+      "busyJobs": []
+    }
+  },
+  "clearResult": {
+    "cleared": 0,
+    "remaining": 0,
+    "confirmed": true,
+    "picker_closed": true,
+    "prompt_preserved": true,
+    "prompt_text": ""
+  },
+  "postClear": {
+    "observer": {
+      "ready": true,
+      "activeAttempts": 0,
+      "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa"
+    },
+    "status": {
+      "url": "https://flow.google.com/project/e4bf4bae-626d-4718-a66a-cbdb04c8e6fa?hl=vi",
+      "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+      "prompt": {
+        "contentEditable": true,
+        "characterCount": 0,
+        "chipCount": 0
+      },
+      "referenceActionDiagnostics": {
+        "action": "close",
+        "phase": "completed",
+        "step": "picker closed",
+        "errorCode": null,
+        "cleanupErrorCode": null,
+        "pickerOpen": false,
+        "pickerRole": null,
+        "pickerOptionCount": 0,
+        "locale": "vi",
+        "searchLabelRecognized": false,
+        "searchLabel": null,
+        "searchResultsVerified": false,
+        "activeCategory": "all",
+        "categorySelected": true,
+        "pickerScanPages": 1,
+        "pickerScanEndReached": true,
+        "optionLabelHashes": [
+          "h-9c1c938d",
+          "h-2c2ef930",
+          "h-f32c2b43",
+          "h-f87ef7e0",
+          "h-eba34d86",
+          "h-e9561ea6",
+          "h-72eb99a6",
+          "h-d1a77521",
+          "h-6731e2ed"
+        ],
+        "exactTargetFound": false,
+        "scrollOwnerCount": 1,
+        "scrollOwnerDepth": 0,
+        "scrollClientHeight": 515,
+        "scrollHeight": 515,
+        "scrollTop": 0,
+        "visibleSurfaces": [
+          {
+            "role": "dialog",
+            "tag": "div",
+            "labelCount": 3
+          }
+        ],
+        "categoryTabs": [],
+        "chipCount": 0,
+        "chips": [],
+        "surfaceStatus": null,
+        "path": null,
+        "provenanceConfirmed": false,
+        "chipUuidConfirmed": false,
+        "menuRelatedToTile": false,
+        "menuNearTrigger": false,
+        "cleanup": null,
+        "updatedAt": "2026-10-21T07:19:12.680Z",
+        "lastResult": null
+      },
+      "observer": {
+        "ready": true,
+        "version": 1,
+        "observerRevision": 24,
+        "structuredPromptVersion": 2,
+        "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+        "activeAttempts": 0,
+        "retiredCount": 8,
+        "retiredSaturated": false,
+        "requestDiagnostics": {
+          "version": 1,
+          "count": 0,
+          "events": []
+        },
+        "xhrHookActive": true,
+        "fetchHookActive": true
+      },
+      "warnings": [
+        "close An van nvthien11052001@gmail.com Chuyển đổi tài khoản movie_filter_auto 1.040 tín dụng Google Flow Nâng cấp Quản lý gói thuê bao Đăng xuất khỏi mọi tài khoản frame_spark Hình mờ có thể nhìn thấy Khu vực của bạn yêu cầu phải có hình mờ có thể nhìn thấy Quyền riêng tư · Điều khoản dịch vụ · Giấy phép Trang web này được bảo vệ bằng reCAPTCHA, đồng thời có áp dụng Chính sách quyền riêng tư và Điều khoản dịch vụ của Google."
+      ],
+      "busyJobs": []
+    }
+  },
+  "submissionStarted": "2026-10-21T07:19:13.205Z",
+  "request": {
+    "project": "NativeE2E-image-vi-clearpicker-1792567153205",
+    "scene": {
+      "type": "image",
+      "prompt": "A handmade amber glass carafe beside a folded linen napkin on a pale stone counter, gentle morning light, refined minimal product photography, no text.",
+      "model": "latest",
+      "max_credits": 15,
+      "submit_only": true,
+      "retries": 0,
+      "variants": 1
+    }
+  },
+  "queueResponse": {
+    "output_dir": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-image-vi-clearpicker-1792567153205",
+    "jobs": [
+      {
+        "id": "fc8ddd4d",
+        "status": "running",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-image-vi-clearpicker-1792567153205",
+        "scene": "scene-01",
+        "prompt": "A handmade amber glass carafe beside a folded linen napkin on a pale stone counter, gentle morning light, refined minimal product photography, no text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "files": [],
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      }
+    ]
+  },
+  "jobId": "fc8ddd4d",
+  "latestJob": {
+    "id": "fc8ddd4d",
+    "status": "failed",
+    "request_dispatched": false,
+    "server_acceptance_observed": false,
+    "credit_quote_verified": null,
+    "outcome_unknown": false,
+    "error": "Flow did not show a verifiable credit quote; nothing was submitted.",
+    "request_diagnostics": null
+  },
+  "outcome": "failed_before_dispatch",
+  "postflight": {
+    "url": "https://flow.google.com/project/e4bf4bae-626d-4718-a66a-cbdb04c8e6fa?hl=vi",
+    "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "prompt": {
+      "contentEditable": true,
+      "characterCount": 151,
+      "chipCount": 0
+    },
+    "referenceActionDiagnostics": {
+      "action": "close",
+      "phase": "completed",
+      "step": "picker closed",
+      "errorCode": null,
+      "cleanupErrorCode": null,
+      "pickerOpen": false,
+      "pickerRole": null,
+      "pickerOptionCount": 0,
+      "locale": "vi",
+      "searchLabelRecognized": false,
+      "searchLabel": null,
+      "searchResultsVerified": false,
+      "activeCategory": "all",
+      "categorySelected": true,
+      "pickerScanPages": 1,
+      "pickerScanEndReached": true,
+      "optionLabelHashes": [
+        "h-9c1c938d",
+        "h-2c2ef930",
+        "h-f32c2b43",
+        "h-f87ef7e0",
+        "h-eba34d86",
+        "h-e9561ea6",
+        "h-72eb99a6",
+        "h-d1a77521",
+        "h-6731e2ed"
+      ],
+      "exactTargetFound": false,
+      "scrollOwnerCount": 1,
+      "scrollOwnerDepth": 0,
+      "scrollClientHeight": 515,
+      "scrollHeight": 515,
+      "scrollTop": 0,
+      "visibleSurfaces": [],
+      "categoryTabs": [],
+      "chipCount": 0,
+      "chips": [],
+      "surfaceStatus": null,
+      "path": null,
+      "provenanceConfirmed": false,
+      "chipUuidConfirmed": false,
+      "menuRelatedToTile": false,
+      "menuNearTrigger": false,
+      "cleanup": null,
+      "updatedAt": "2026-10-21T07:19:25.307Z",
+      "lastResult": null
+    },
+    "observer": {
+      "ready": true,
+      "version": 1,
+      "observerRevision": 24,
+      "structuredPromptVersion": 2,
+      "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+      "activeAttempts": 0,
+      "retiredCount": 9,
+      "retiredSaturated": false,
+      "requestDiagnostics": {
+        "version": 1,
+        "count": 0,
+        "events": []
+      },
+      "xhrHookActive": true,
+      "fetchHookActive": true
+    },
+    "warnings": [],
+    "busyJobs": []
+  },
+  "finished": "2026-10-21T07:19:25.842Z"
+}

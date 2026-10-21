@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { loadJobs, saveJob } from "./users.js";
 import { classifyFlowFailure, type FlowErrorCategory } from "./flow-error-policy.js";
-import { sanitizeUnknownSubmitDiagnostics, type SafeUnknownSubmitDiagnostics } from "./flow-request-diagnostics.js";
+import { sanitizeFlowOperationDiagnostics, sanitizeUnknownSubmitDiagnostics, type SafeFlowOperationDiagnostics, type SafeUnknownSubmitDiagnostics } from "./flow-request-diagnostics.js";
 
 export type JobStatus = "queued" | "running" | "submitted" | "done" | "failed" | "cancelled";
+
+export type FrameAssetInput = string | { asset: string; id: string };
 
 export interface SceneParams {
   prompt: string;
@@ -15,8 +17,8 @@ export interface SceneParams {
   model?: string;
   aspect_ratio?: "16:9" | "9:16" | "1:1" | "4:3" | "3:4";
   variants?: number;
-  first_frame?: string;
-  last_frame?: string;
+  first_frame?: FrameAssetInput;
+  last_frame?: FrameAssetInput;
   voice?: string;
   reference_images?: string[];
   video_reference?: { asset: string; start_frame_index: number; end_frame_index: number };
@@ -55,6 +57,7 @@ export interface Job {
   serverAcceptanceObserved?: boolean;
   creditQuoteVerified?: boolean;
   requestDiagnostics?: SafeUnknownSubmitDiagnostics;
+  operationDiagnostics?: SafeFlowOperationDiagnostics;
   // Queue-owned synchronous durability hook. Functions are omitted by JSON.stringify.
   persistNow?: () => void;
   // Scene numbers a batch still could not make after all its own retries; flow_retry redoes just these.
@@ -158,6 +161,7 @@ export class JobQueue {
       job.error = undefined;
       job.errorCategory = undefined;
       job.retryAfterAt = undefined;
+      job.operationDiagnostics = undefined;
       job.finishedAt = undefined;
       this.persist(job);
       void this.work();
@@ -206,6 +210,7 @@ export class JobQueue {
         if (job.status !== "queued") continue;
         job.retryAfterAt = undefined;
         job.status = "running";
+        job.operationDiagnostics = undefined;
         job.attempts++;
         this.persist(job);
         try {
@@ -223,6 +228,9 @@ export class JobQueue {
           job.outcomeUnknown = policy.outcomeUnknown || job.requestDispatched === true;
           job.requestDiagnostics = job.outcomeUnknown
             ? sanitizeUnknownSubmitDiagnostics((err as { diagnostics?: unknown } | null)?.diagnostics)
+            : undefined;
+          job.operationDiagnostics = !job.outcomeUnknown && job.requestDispatched !== true
+            ? sanitizeFlowOperationDiagnostics((err as { diagnostics?: unknown } | null)?.diagnostics)
             : undefined;
           job.errorCategory = policy.category;
           const canAutoRetry = policy.autoRetry && policy.retryable && !job.outcomeUnknown && job.attempts <= (job.params.retries ?? 1);

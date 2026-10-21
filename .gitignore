@@ -1,6 +1,7 @@
 node_modules
 dist
 .env
+.flow-extension-reload-epoch
 _metadata
 */_metadata
 *.log

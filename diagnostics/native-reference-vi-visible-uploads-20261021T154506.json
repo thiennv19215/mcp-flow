@@ -1,0 +1,272 @@
+{
+  "started": "2026-10-21T08:43:38.2674981Z",
+  "mode": "image-reference-vi-visible-uploads-fallback",
+  "preflight": {
+    "project": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "url": "https://flow.google.com/project/e4bf4bae-626d-4718-a66a-cbdb04c8e6fa?hl=vi",
+    "locale": "vi",
+    "promptDiagnostics": null,
+    "composer": {
+      "tag": "flow-base-prompt-box",
+      "className": "",
+      "connected": true
+    },
+    "chips": 0,
+    "pickerOpen": false,
+    "visibleSurfaces": [],
+    "busyJobs": 0,
+    "activeAttempts": 0,
+    "observerReady": true,
+    "extensionBuild": {
+      "status": "current",
+      "matchesWatcher": true,
+      "backgroundRevision": "47fe27a1d922b78185cb446e2dd7a3b9720af09c285d3f74e33a94d120b2cbaf",
+      "contentRevision": "47fe27a1d922b78185cb446e2dd7a3b9720af09c285d3f74e33a94d120b2cbaf",
+      "watcherRevision": "47fe27a1d922b78185cb446e2dd7a3b9720af09c285d3f74e33a94d120b2cbaf"
+    },
+    "watcher": {
+      "revision": "710cf5449bffec5a49c172142106ed810c5e1d3f0de0243d69b68e1a14ffee5f",
+      "buildRevision": "47fe27a1d922b78185cb446e2dd7a3b9720af09c285d3f74e33a94d120b2cbaf",
+      "reloadEpoch": 3,
+      "reloadKey": "710cf5449bffec5a49c172142106ed810c5e1d3f0de0243d69b68e1a14ffee5f"
+    },
+    "assetTitle": "fm-a6f6c32f9203-upload.png",
+    "assetKind": "image",
+    "receiptUuid": "b5d304ab-eeb8-4001-8110-86a225761c0f",
+    "clean": true
+  },
+  "submission": {
+    "output_dir": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-vi-visible-uploads-20261021",
+    "jobs": [
+      {
+        "id": "fd8a2ecd",
+        "status": "running",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-vi-visible-uploads-20261021",
+        "scene": "scene-01",
+        "prompt": "Unique Vietnamese reference picker fallback audit 2026-10-21: a polished still life of the same cobalt glass vase on a pale coral stone block, deep navy gallery wall, soft upper-left light, accurate reflections, no text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "files": [],
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      }
+    ]
+  },
+  "job_id": "fd8a2ecd",
+  "polls": [
+    {
+      "at": "2026-10-21T08:43:44.4548812Z",
+      "status": "running",
+      "dispatched": false,
+      "unknown": false,
+      "error": null,
+      "operation_diagnostics": null,
+      "credits": null,
+      "quote_verified": null
+    },
+    {
+      "at": "2026-10-21T08:43:52.5574519Z",
+      "status": "running",
+      "dispatched": false,
+      "unknown": false,
+      "error": null,
+      "operation_diagnostics": null,
+      "credits": null,
+      "quote_verified": null
+    },
+    {
+      "at": "2026-10-21T08:44:00.5875616Z",
+      "status": "running",
+      "dispatched": false,
+      "unknown": false,
+      "error": null,
+      "operation_diagnostics": null,
+      "credits": null,
+      "quote_verified": null
+    },
+    {
+      "at": "2026-10-21T08:44:08.6208098Z",
+      "status": "running",
+      "dispatched": false,
+      "unknown": false,
+      "error": null,
+      "operation_diagnostics": null,
+      "credits": null,
+      "quote_verified": null
+    },
+    {
+      "at": "2026-10-21T08:44:16.6468906Z",
+      "status": "running",
+      "dispatched": false,
+      "unknown": false,
+      "error": null,
+      "operation_diagnostics": null,
+      "credits": null,
+      "quote_verified": null
+    },
+    {
+      "at": "2026-10-21T08:44:24.6685124Z",
+      "status": "running",
+      "dispatched": false,
+      "unknown": false,
+      "error": null,
+      "operation_diagnostics": null,
+      "credits": null,
+      "quote_verified": null
+    },
+    {
+      "at": "2026-10-21T08:44:32.6949061Z",
+      "status": "running",
+      "dispatched": false,
+      "unknown": false,
+      "error": null,
+      "operation_diagnostics": null,
+      "credits": null,
+      "quote_verified": null
+    },
+    {
+      "at": "2026-10-21T08:44:40.7312397Z",
+      "status": "running",
+      "dispatched": false,
+      "unknown": false,
+      "error": null,
+      "operation_diagnostics": null,
+      "credits": null,
+      "quote_verified": null
+    },
+    {
+      "at": "2026-10-21T08:44:48.7533688Z",
+      "status": "running",
+      "dispatched": false,
+      "unknown": false,
+      "error": null,
+      "operation_diagnostics": null,
+      "credits": null,
+      "quote_verified": null
+    },
+    {
+      "at": "2026-10-21T08:44:56.7885863Z",
+      "status": "running",
+      "dispatched": false,
+      "unknown": false,
+      "error": null,
+      "operation_diagnostics": null,
+      "credits": null,
+      "quote_verified": null
+    },
+    {
+      "at": "2026-10-21T08:45:04.8270014Z",
+      "status": "running",
+      "dispatched": false,
+      "unknown": false,
+      "error": null,
+      "operation_diagnostics": null,
+      "credits": null,
+      "quote_verified": null
+    },
+    {
+      "at": "2026-10-21T08:45:06.8446187Z",
+      "status": "failed",
+      "dispatched": false,
+      "unknown": false,
+      "error": "No exact reference named \"fm-a6f6c32f9203-upload.png\" in the scanned project categories after complete picker scans. Nothing was attached.",
+      "operation_diagnostics": {
+        "locale": "vi",
+        "activeCategory": "all",
+        "categorySelected": true,
+        "searchLabelRecognized": false,
+        "searchLabel": null,
+        "searchResultsVerified": false,
+        "optionCount": 11,
+        "pages": 1,
+        "endReached": true,
+        "optionLabelHashes": [
+          "h-79bc4213",
+          "h-22190779",
+          "h-9c1c938d",
+          "h-2c2ef930",
+          "h-f32c2b43",
+          "h-f87ef7e0",
+          "h-eba34d86",
+          "h-e9561ea6",
+          "h-72eb99a6",
+          "h-d1a77521",
+          "h-6731e2ed"
+        ],
+        "exactTargetFound": false,
+        "scrollOwnerCount": 1,
+        "scrollOwnerDepth": 0,
+        "scrollClientHeight": 515,
+        "scrollHeight": 528,
+        "scrollTop": 0,
+        "errorCode": "FLOW_ASSET_NOT_FOUND"
+      },
+      "credits": null,
+      "quote_verified": null
+    }
+  ],
+  "latest_job": {
+    "id": "fd8a2ecd",
+    "status": "failed",
+    "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-vi-visible-uploads-20261021",
+    "scene": "scene-01",
+    "prompt": "Unique Vietnamese reference picker fallback audit 2026-10-21: a polished still life of the same cobalt glass vase on a pale coral stone block, deep navy gallery wall, soft upper-left light, accurate reflections, no text.",
+    "attempts": 1,
+    "credit_quote_verified": null,
+    "progress": "Flow submit: selecting asset fm-a6f6c32f9203-upload.png",
+    "files": [],
+    "error": "No exact reference named \"fm-a6f6c32f9203-upload.png\" in the scanned project categories after complete picker scans. Nothing was attached.",
+    "error_category": "unknown",
+    "outcome_unknown": false,
+    "request_dispatched": false,
+    "server_acceptance_observed": false,
+    "request_diagnostics": null,
+    "operation_diagnostics": {
+      "locale": "vi",
+      "activeCategory": "all",
+      "categorySelected": true,
+      "searchLabelRecognized": false,
+      "searchLabel": null,
+      "searchResultsVerified": false,
+      "optionCount": 11,
+      "pages": 1,
+      "endReached": true,
+      "optionLabelHashes": [
+        "h-79bc4213",
+        "h-22190779",
+        "h-9c1c938d",
+        "h-2c2ef930",
+        "h-f32c2b43",
+        "h-f87ef7e0",
+        "h-eba34d86",
+        "h-e9561ea6",
+        "h-72eb99a6",
+        "h-d1a77521",
+        "h-6731e2ed"
+      ],
+      "exactTargetFound": false,
+      "scrollOwnerCount": 1,
+      "scrollOwnerDepth": 0,
+      "scrollClientHeight": 515,
+      "scrollHeight": 528,
+      "scrollTop": 0,
+      "errorCode": "FLOW_ASSET_NOT_FOUND"
+    }
+  },
+  "outcome": "terminal_before_dispatch",
+  "postflight": {
+    "project": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "locale": "vi",
+    "promptDiagnostics": null,
+    "chips": 0,
+    "pickerOpen": false,
+    "visibleSurfaces": [],
+    "activeAttempts": 0,
+    "observerReady": true,
+    "busyJobs": []
+  },
+  "finished": "2026-10-21T08:45:06.8900445Z"
+}

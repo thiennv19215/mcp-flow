@@ -1,6 +1,6 @@
 import { copyFileSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
-import type { Job } from "./queue.js";
+import type { FrameAssetInput, Job } from "./queue.js";
 import { executeFlowDom, extensionSupportsCapability } from "./extension.js";
 import { nativeDownloadIds, waitForNativeDownload, downloadNativeResults, extensionOf, materializeNativeDownload, unpackTakes } from "./native-downloads.js";
 import { uploadFlowMediaToProject, getCachedProjectMedia, cacheProjectMedia } from "./flow-transfer.js";
@@ -11,9 +11,54 @@ export type { FlowState, FlowAsset, FlowProject, FlowCharacter, DownloadQuality,
 export { characterLook, rememberCharacter, createCharacter, editCharacter } from "./characters.js";
 export { uploadFlowMediaToProject } from "./flow-transfer.js";
 
+export function mapFlowFrameInput(
+  value: FrameAssetInput | undefined,
+  slot: "start" | "end",
+  uploadedAssetByPath: Map<string, string> = new Map(),
+): { assetName: string; slot?: "start" | "end"; expectedId?: string } | undefined {
+  if (!value) return undefined;
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (typeof value === "object") {
+    if (!value.asset.trim() || !uuidPattern.test(value.id)) {
+      throw Object.assign(new Error("Frame asset inputs require an exact title and a valid Flow media UUID."), {
+        code: "FLOW_FRAME_ID_INVALID", retryable: false, outcome_unknown: false,
+      });
+    }
+    return { assetName: value.asset.trim(), expectedId: value.id.toLowerCase() };
+  }
+  if (/^asset:/i.test(value)) return { assetName: value.slice(ASSET_PREFIX.length).trim() };
+  const assetName = uploadedAssetByPath.get(value);
+  if (!assetName) throw new Error(`No staged Flow asset was recorded for local frame input: ${basename(value)}`);
+  return { assetName, slot };
+}
+
 const IMAGE_TIMEOUT_MS = 3 * 60_000;
 const VIDEO_TIMEOUT_MS = 12 * 60_000;
 const ASSET_PREFIX = "asset:";
+const flowMediaUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** Bind named asset references to the exact UUID returned by Flow's library read. */
+export function bindFlowReferenceIds(references: string[], assets: FlowAsset[]): Array<string | { assetName: string; expectedId: string }> {
+  return references.map(value => {
+    if (/^character:/i.test(value) || !/^asset:/i.test(value)) return value;
+    const name = value.slice(ASSET_PREFIX.length).trim();
+    const matches = assets.filter(asset => asset.kind === "image" && asset.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase());
+    if (matches.length !== 1) {
+      throw Object.assign(new Error(matches.length
+        ? `The exact image asset title "${name}" is duplicated in the Flow library; no reference was selected.`
+        : `No exact image asset titled "${name}" was returned by Flow's library read; no reference was selected.`), {
+        code: matches.length ? "FLOW_ASSET_AMBIGUOUS" : "FLOW_ASSET_NOT_FOUND", retryable: false, outcome_unknown: false,
+      });
+    }
+    const id = matches[0].id;
+    if (!id || !flowMediaUuid.test(id)) {
+      throw Object.assign(new Error(`Flow did not return a stable UUID for image asset "${name}"; no reference was selected.`), {
+        code: "FLOW_ASSET_ID_UNAVAILABLE", retryable: false, outcome_unknown: false,
+      });
+    }
+    return { assetName: name, expectedId: id.toLowerCase() };
+  });
+}
 const nativeJobTargets = new WeakMap<object, NativeFlowTarget>();
 type NativeFlowTarget = { driverKey: string; origin: string; projectId: string | null; routePrefix: string; isProjectEditor: boolean; tabId: number };
 
@@ -77,6 +122,13 @@ export async function getCorrelationObserverHealth(): Promise<{
   activeAttempts?: number;
   xhrHookActive?: boolean;
   fetchHookActive?: boolean;
+  extensionBuild?: {
+    status: "current" | "mismatch" | "unavailable";
+    matchesWatcher: boolean;
+    backgroundRevision: string | null;
+    contentRevision: string | null;
+    watcherRevision: string | null;
+  };
 }> {
   return executeFlowDom({
     op: "flowOperation",
@@ -105,9 +157,9 @@ export async function createFlowProject(): Promise<FlowProject> {
   return result.project;
 }
 
-export async function openFlowProject(projectId: string): Promise<{ opened: boolean; id: string; url: string }> {
+export async function openFlowProject(projectId: string, language: "en" = "en"): Promise<{ opened: boolean; id: string; url: string; language: "en" }> {
   return executeFlowDom({
-    op: "flowOperation", name: "flow.project.open", payload: { projectId }, capability: "flow.native.project.open", timeoutMs: 60_000,
+    op: "flowOperation", name: "flow.project.open", payload: { projectId, language }, capability: "flow.native.project.open", timeoutMs: 60_000,
   }, { timeoutMs: 65_000 });
 }
 
@@ -123,7 +175,7 @@ export async function runGeneration(job: Job): Promise<string[]> {
   // Frames and references are mutually exclusive in Flow. When frames are present,
   // keep the frame inputs and ignore references before validating or uploading them.
   const activeRefs = framesMode ? [] : refs;
-  const isAssetReference = (value: string) => /^asset:/i.test(value);
+  const isAssetReference = (value: string) => typeof value === "string" && /^asset:/i.test(value);
   const isCharacterReference = (value: string) => /^character:/i.test(value);
   const localFileSupported = (file?: string) => {
     if (!file || isAssetReference(file) || isCharacterReference(file)) return true;
@@ -132,7 +184,9 @@ export async function runGeneration(job: Job): Promise<string[]> {
       return [".png", ".jpg", ".jpeg", ".webp", ".gif", ".heic", ".heif", ".avif"].includes(extname(file).toLowerCase()) && info.isFile() && info.size > 0 && info.size <= 25 * 1024 * 1024;
     } catch { return false; }
   };
-  const frameInputSupported = (file?: string) => !file || (!isCharacterReference(file) && localFileSupported(file));
+  const frameInputSupported = (file?: FrameAssetInput) => !file || (typeof file === "object"
+    ? Boolean(file.asset.trim() && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(file.id))
+    : !isCharacterReference(file) && localFileSupported(file));
   if ((!framesMode && (refs.length > 3 || !activeRefs.every(localFileSupported))) || !frameInputSupported(s.first_frame) || !frameInputSupported(s.last_frame)) {
     throw Object.assign(new Error("Generation accepts up to three references and PNG/JPG/JPEG/WebP/GIF/HEIC/HEIF/AVIF local inputs up to 25 MiB each."), { code: "NATIVE_CAPABILITY_UNSUPPORTED", retryable: true });
   }
@@ -141,8 +195,8 @@ export async function runGeneration(job: Job): Promise<string[]> {
   );
   if (activeRefs.length) requireCapabilities("flow.native.references.attach");
   const localInputs = [
-    ...(s.first_frame && !isAssetReference(s.first_frame) ? [{ path: s.first_frame, slot: "start" }] : []),
-    ...(s.last_frame && !isAssetReference(s.last_frame) ? [{ path: s.last_frame, slot: "end" }] : []),
+    ...(typeof s.first_frame === "string" && !isAssetReference(s.first_frame) ? [{ path: s.first_frame, slot: "start" }] : []),
+    ...(typeof s.last_frame === "string" && !isAssetReference(s.last_frame) ? [{ path: s.last_frame, slot: "end" }] : []),
     ...activeRefs.flatMap((file, index) => isAssetReference(file) || isCharacterReference(file) ? [] : [{ path: file, slot: `ref${index + 1}` }]),
   ];
   if (localInputs.length) requireCapabilities("flow.native.generation.upload.preflight");
@@ -167,11 +221,14 @@ export async function runGeneration(job: Job): Promise<string[]> {
     }
   }
 
-  const frame = (value?: string, slot?: string) => !value ? undefined : isAssetReference(value)
-    ? { assetName: value.slice(ASSET_PREFIX.length).trim() }
-    : { assetName: uploadedAssetByPath.get(value)!, slot };
+  const frame = (value?: FrameAssetInput, slot: "start" | "end" = "start") => mapFlowFrameInput(value, slot, uploadedAssetByPath);
 
-  const attachments = activeRefs.map((value, index) => isCharacterReference(value) ? { assetName: value }
+  let boundAssetReferences: Array<string | { assetName: string; expectedId: string }> = activeRefs;
+  if (activeRefs.some(isAssetReference)) {
+    const assets = await nativeOperation<FlowAsset[]>("flow.assets.list", {}, "flow.native.assets.list", job, 90_000);
+    boundAssetReferences = bindFlowReferenceIds(activeRefs, assets);
+  }
+  const attachments = boundAssetReferences.map((value, index) => typeof value !== "string" ? value : isCharacterReference(value) ? { assetName: value }
     : isAssetReference(value)
     ? { assetName: value.slice(ASSET_PREFIX.length).trim() }
     : { assetName: uploadedAssetByPath.get(value)!, slot: `ref${index + 1}` });
@@ -266,6 +323,17 @@ export async function clearFlowReferences(): Promise<{ cleared: number; remainin
     "flow.references.clear",
     {},
     "flow.native.references.clear",
+    undefined,
+    30_000,
+  );
+}
+
+export async function clearFlowPrompt(expectedPrompt: string): Promise<{ cleared: true; confirmed: true; references_preserved: true; picker_state_preserved: true }> {
+  requireCapabilities("flow.native.prompt.clear");
+  return nativeOperation(
+    "flow.prompt.clear",
+    { expectedPrompt },
+    "flow.native.prompt.clear",
     undefined,
     30_000,
   );

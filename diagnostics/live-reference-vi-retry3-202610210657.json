@@ -1,0 +1,50 @@
+{
+  "output_dir": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-vi-retry3-20261021-0657",
+  "jobs": [
+    {
+      "id": "e916f6c1",
+      "status": "running",
+      "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-vi-retry3-20261021-0657",
+      "scene": "scene-01",
+      "prompt": "A premium design catalog photograph of the same subject from the reference, centered on a deep forest-green plinth with a pale sand backdrop, restrained highlights and clean realistic texture, no text.",
+      "attempts": 1,
+      "credit_quote_verified": null,
+      "files": [],
+      "outcome_unknown": false,
+      "request_dispatched": false,
+      "server_acceptance_observed": false,
+      "request_diagnostics": null
+    }
+  ],
+  "preflight": {
+    "flowUrl": "https://flow.google.com/project/e4bf4bae-626d-4718-a66a-cbdb04c8e6fa?hl=vi",
+    "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "observerReady": true,
+    "projectMatch": true,
+    "activeAttempts": 0,
+    "busyJobCount": 0,
+    "promptCharacterCount": 0,
+    "chipCount": 0,
+    "pickerOpen": false,
+    "warnings": [],
+    "loadedBackgroundRevision": "cabbdeb462dc2c9827740bead4547c0a6a1cecb464bcb71019303084f4503bf1",
+    "loadedContentRevision": "cabbdeb462dc2c9827740bead4547c0a6a1cecb464bcb71019303084f4503bf1",
+    "generatedBuildRevision": "cabbdeb462dc2c9827740bead4547c0a6a1cecb464bcb71019303084f4503bf1"
+  },
+  "postflight": {
+    "jobId": "e916f6c1",
+    "status": "failed",
+    "progress": "Flow submit: selecting asset fm-a6f6c32f9203-upload.png",
+    "error": "No exact reference named \"fm-a6f6c32f9203-upload.png\" in the selected project after a complete picker scan. Nothing was attached.",
+    "error_category": "unknown",
+    "outcome_unknown": false,
+    "request_dispatched": false,
+    "server_acceptance_observed": false,
+    "credit_quote_verified": null,
+    "flowUrl": "https://flow.google.com/project/e4bf4bae-626d-4718-a66a-cbdb04c8e6fa?hl=vi",
+    "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "activeAttempts": 0,
+    "busyJobCount": 0,
+    "observerReady": true
+  }
+}

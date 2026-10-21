@@ -42,7 +42,7 @@ test('video option lookup skips an unrelated earlier overlay and uses the settin
   assert.equal(ratio.checked, true);
 });
 
-test('video quote diagnostics expose only fixed reason codes, never nearby prompt text', () => {
+test('quote diagnostics expose only fixed reason codes, never nearby prompt text or quote values', () => {
   const secret = 'secret-prompt-7f4d2a';
   const context = vm.createContext({
     Date, Map, Promise, Set, Object, Math, String, Number, Boolean, Array, Error,
@@ -54,11 +54,40 @@ test('video quote diagnostics expose only fixed reason codes, never nearby promp
   vm.runInContext(settingsSource, context);
   const serialized = JSON.stringify(context.FlowSettings.safeCreditQuoteDiagnostics());
   assert.deepEqual(JSON.parse(serialized), {
-    quote: null,
     candidateCount: 1,
     reasonCodes: ['unrecognized_credit_text'],
   });
   assert.equal(serialized.includes(secret), false);
+});
+
+test('image quote diagnostics distinguish no candidate without exposing account balance', () => {
+  const context = vm.createContext({
+    Date, Map, Promise, Set, Object, Math, String, Number, Boolean, Array, Error,
+    document: { querySelectorAll: () => [], querySelector: () => null },
+    FlowEditor: { inspectGenerationCreditQuote: () => ({ quote: undefined, candidates: [] }) },
+    visible: () => false,
+    normalizeFlowUiText: value => String(value || '').toLowerCase().trim(),
+  });
+  vm.runInContext(settingsSource, context);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.FlowSettings.safeCreditQuoteDiagnostics())), {
+    candidateCount: 0,
+    reasonCodes: ['no_candidate'],
+  });
+});
+
+test('image quote diagnostics distinguish unrecognized visible quote text', () => {
+  const context = vm.createContext({
+    Date, Map, Promise, Set, Object, Math, String, Number, Boolean, Array, Error,
+    document: { querySelectorAll: () => [], querySelector: () => null },
+    FlowEditor: { inspectGenerationCreditQuote: () => ({ quote: undefined, candidates: ['Quote this generation: 12 credits'] }) },
+    visible: () => false,
+    normalizeFlowUiText: value => String(value || '').toLowerCase().trim(),
+  });
+  vm.runInContext(settingsSource, context);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.FlowSettings.safeCreditQuoteDiagnostics())), {
+    candidateCount: 1,
+    reasonCodes: ['unrecognized_credit_text'],
+  });
 });
 
 test('quote failure cleanup closes only a settings surface opened by video preparation', async () => {

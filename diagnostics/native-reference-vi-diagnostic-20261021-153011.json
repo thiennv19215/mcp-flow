@@ -1,0 +1,131 @@
+{
+  "started": "2026-10-21T08:30:11.0676295Z",
+  "mode": "vi-image-reference-diagnostics",
+  "api": "http://127.0.0.1:18897",
+  "preflight": {
+    "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "locale": "vi",
+    "build": "554ca35533183b32fb1f1f5853f5c0e508017e94c20ee12f0f9520556b951fbc",
+    "observerReady": true,
+    "activeAttempts": 0,
+    "promptChars": 0,
+    "chipCount": 0,
+    "pickerOpen": false,
+    "visibleSurfaces": [],
+    "busyJobs": [],
+    "warnings": null,
+    "pacing": null,
+    "listedAsset": {
+      "name": "fm-a6f6c32f9203-upload.png",
+      "kind": "image"
+    },
+    "uploadReceipt": {
+      "name": "fm-a6f6c32f9203-upload.png",
+      "id": "b5d304ab-eeb8-4001-8110-86a225761c0f",
+      "kind": "image",
+      "uploaded": true,
+      "trustedGesture": false
+    }
+  },
+  "request": {
+    "project": "NativeE2E-reference-vi-diag-20261021",
+    "scenes": [
+      {
+        "prompt": "A minimalist studio photograph of the uploaded cobalt glass vase centered on a warm ivory plinth, crisp blue reflections, soft side lighting, no text.",
+        "variants": 1,
+        "reference_images": [
+          "asset:fm-a6f6c32f9203-upload.png"
+        ],
+        "retries": 0,
+        "submit_only": true,
+        "type": "image",
+        "max_credits": 0
+      }
+    ]
+  },
+  "response": {
+    "output_dir": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-vi-diag-20261021",
+    "jobs": [
+      {
+        "id": "fe59b972",
+        "status": "running",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-vi-diag-20261021",
+        "scene": "scene-01",
+        "prompt": "A minimalist studio photograph of the uploaded cobalt glass vase centered on a warm ivory plinth, crisp blue reflections, soft side lighting, no text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "files": [],
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      }
+    ]
+  },
+  "apiError": null,
+  "finished": "2026-10-21T08:30:11.075208Z",
+  "operationDiagnostics": {
+    "locale": "vi",
+    "activeCategory": "all",
+    "categorySelected": true,
+    "searchLabelRecognized": false,
+    "searchLabel": null,
+    "searchResultsVerified": false,
+    "optionCount": 11,
+    "pages": 1,
+    "endReached": false,
+    "optionLabelHashes": [
+      "h-79bc4213",
+      "h-22190779",
+      "h-9c1c938d",
+      "h-2c2ef930",
+      "h-f32c2b43",
+      "h-f87ef7e0",
+      "h-eba34d86",
+      "h-e9561ea6",
+      "h-72eb99a6",
+      "h-d1a77521",
+      "h-6731e2ed"
+    ],
+    "exactTargetFound": false,
+    "scrollOwnerCount": 1,
+    "scrollOwnerDepth": 0,
+    "scrollClientHeight": 515,
+    "scrollHeight": 528,
+    "scrollTop": 0,
+    "errorCode": "FLOW_REFERENCE_SCAN_INCOMPLETE",
+    "chipUuidConfirmed": false,
+    "provenanceConfirmed": false
+  },
+  "dispatchOutcome": {
+    "jobId": "fe59b972",
+    "status": "failed",
+    "creditQuoteVerified": false,
+    "credits": null,
+    "requestDispatched": false,
+    "serverAcceptanceObserved": false,
+    "outcomeUnknown": false,
+    "error": "Picker did not render a verifiably different page after scrolling; no reference was selected."
+  },
+  "cleanupAttempt": {
+    "endpoint": "/api/clear_references",
+    "result": "error",
+    "message": "Navigating back to project root editor. Please retry.",
+    "retried": false
+  },
+  "postflight": {
+    "observerReady": true,
+    "activeAttempts": 0,
+    "build": "554ca35533183b32fb1f1f5853f5c0e508017e94c20ee12f0f9520556b951fbc",
+    "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "locale": "vi",
+    "promptChars": 0,
+    "chipCount": 0,
+    "pickerOpen": false,
+    "visibleSurfaces": [],
+    "busyJobs": [],
+    "warnings": null,
+    "pacing": null
+  }
+}

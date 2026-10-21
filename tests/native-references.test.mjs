@@ -13,11 +13,30 @@ import { materializeNativeDownload } from '../dist/native-downloads.js';
 import { readFlowDownloadChunk } from '../extension/background/flow-download-relay.js';
 
 const source = readFileSync(new URL('../extension/content/providers/flow/FlowComponents.js', import.meta.url), 'utf8');
+const charactersSource = readFileSync(new URL('../extension/content/providers/flow/FlowCharacters.js', import.meta.url), 'utf8');
 const mediaMenuSource = readFileSync(new URL('../extension/content/providers/flow/FlowMediaMenu.js', import.meta.url), 'utf8');
 const libraryOperationsSource = readFileSync(new URL('../extension/content/providers/flow/FlowLibraryOperations.js', import.meta.url), 'utf8');
+const generationOperationsSource = readFileSync(new URL('../extension/content/providers/flow/FlowGenerationOperations.js', import.meta.url), 'utf8');
 const nativeFileTransferSource = readFileSync(new URL('../extension/content/shared/native-file-transfer.js', import.meta.url), 'utf8');
-function harness({ names = ['MCP Test Mug'], addedKind = 'character', hideAttached = false, openInitially = true, afterOpenSurface = 'listbox', ambiguousSurface = false, menuTransitionMs = 0, characterUuid = '22222222-2222-4222-8222-222222222222' } = {}) {
+
+test('generation frame routing passes its explicit UUID through to the picker', async () => {
+  const context = vm.createContext({ Object, String, RegExp });
+  vm.runInContext(generationOperationsSource, context);
+  const operations = new context.FlowGenerationOperations({});
+  const uuid = 'b5d304ab-eeb8-4001-8110-86a225761c0f';
+  const frame = operations.frameValue({ assetName: 'fm-a6f6c32f9203-upload.png', expectedId: uuid });
+  assert.deepEqual(JSON.parse(JSON.stringify(frame)), { assetName: 'fm-a6f6c32f9203-upload.png', expectedId: uuid });
+
+  let selected;
+  await operations.selectFrameAsset({ chooseNativePickerAsset: async (name, slot, options) => { selected = { name, slot, options }; } }, frame, 'start', { deadline: 1000 });
+  assert.equal(selected.name, 'fm-a6f6c32f9203-upload.png');
+  assert.equal(selected.slot, 'start');
+  assert.equal(selected.options.expectedId, uuid);
+  assert.equal(operations.frameValue({ assetName: 'still.png', expectedId: 'bad-id' }), null);
+});
+function harness({ names = ['MCP Test Mug'], addedKind = 'character', hideAttached = false, openInitially = true, afterOpenSurface = 'listbox', ambiguousSurface = false, menuTransitionMs = 0, closeDelayMs = 0, characterUuid = '22222222-2222-4222-8222-222222222222' } = {}) {
   let open = openInitially, ticks = 0;
+  let pendingCloseAt = null;
   const attached = [];
   let clicks = 0;
   let addToPromptClicks = 0;
@@ -32,14 +51,17 @@ function harness({ names = ['MCP Test Mug'], addedKind = 'character', hideAttach
     }
   } });
   const entries = names.map(option);
-  const list = { getAttribute: name => name === 'role' ? 'listbox' : null, querySelectorAll: selector => selector === '[role="option"]' ? entries : [], closest: () => null };
+  const list = { clientHeight: 100, scrollHeight: 100, scrollTop: 0, getAttribute: name => name === 'role' ? 'listbox' : null, querySelectorAll: selector => selector === '[role="option"]' ? entries : [], closest: () => null };
   const surfaceState = { value: openInitially ? 'listbox' : 'closed' };
   const menuItem = { name: 'Characters', getAttribute: key => key === 'role' ? 'menuitem' : null, querySelectorAll: () => [], innerText: 'Characters' };
   const menu = { tagName: 'DIV', getAttribute: key => key === 'role' ? 'menu' : null, querySelectorAll: selector => selector === 'button,[role="button"],[role="menuitem"],[role="option"],mat-option' ? [menuItem] : [], innerText: 'Characters' };
   const dialog = { tagName: 'DIV', getAttribute: key => key === 'role' ? 'dialog' : null, querySelectorAll: () => [], innerText: 'Choose a character' };
   const tab = { name: 'Characters', getAttribute: () => 'true' };
   const tile = { getAttribute: key => key === 'aria-label' ? 'MCP Test Mug' : key === 'data-character-id' ? characterUuid : null, querySelector: selector => selector === 'flow-character-tile' ? (addedKind === 'character' ? {} : null) : image('https://flow-content.google/image/different-thumbnail') };
-  const opener = { getAttribute: () => open ? 'true' : 'false', click: () => { open = !open; surfaceState.value = open ? afterOpenSurface : 'closed'; } };
+  const opener = { getAttribute: () => open ? 'true' : 'false', click: () => {
+    if (open && closeDelayMs > 0) pendingCloseAt = ticks + closeDelayMs;
+    else { open = !open; surfaceState.value = open ? afterOpenSurface : 'closed'; }
+  } };
   const submit = {};
   const editor = { isContentEditable: true, parentElement: null };
   const composer = { tagName: 'DIV', className: 'flow-composer', contains: node => node === editor || node === submit || node === opener,
@@ -65,14 +87,283 @@ function harness({ names = ['MCP Test Mug'], addedKind = 'character', hideAttach
     mediaId: () => '33333333-3333-4333-8333-333333333333',
     FlowEditor: { getFlowSubmitButton: () => submit },
     accessibleName: el => el.name || '', flowButton: name => name === 'Add ingredients to the prompt box' ? opener : name === 'Add to prompt' && addedKind === 'image' ? { disabled: false, click() { addToPromptClicks++; open = false; attachChip(); } } : null,
-    wait: async ms => { ticks += ms; if (open && surfaceState.value === 'menu' && menuTransitionMs > 0 && ticks >= menuTransitionMs) surfaceState.value = 'listbox'; }, flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
+    wait: async ms => {
+      ticks += ms;
+      if (pendingCloseAt !== null && ticks >= pendingCloseAt) { open = false; surfaceState.value = 'closed'; pendingCloseAt = null; }
+      if (open && surfaceState.value === 'menu' && menuTransitionMs > 0 && ticks >= menuTransitionMs) surfaceState.value = 'listbox';
+    }, flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
   });
   vm.runInContext(source, context);
   return { api: context.FlowReferenceActions, clicks: () => clicks, addToPromptClicks: () => addToPromptClicks,
     attachedCount: () => attached.length, pickerOpen: () => open };
 }
 
-function uploadedTileMenuHarness({ preexistingMenu = false, multipleNewMenus = false, chipIdentity = 'matching', leaveOwnedMenuOpen = false, openUnrelatedAfterAction = false, relation = true, farMenu = false, farMenuClose = false } = {}) {
+function referencePickerHarness({ pages = [['Old asset']], uploadsPages = null, mediaIds = {}, locale = 'vi', searchPlaceholder = '', searchUpdates = true, stuck = false, decoySearch = false, parentScroll = false, ambiguousScroll = false, outsideScroller = false, viewportHeight = 100, scrollHeightOverride = null } = {}) {
+  let tick = 0, scrollTop = 0, pickerOpen = true, clicks = 0, activeCategory = 'all';
+  const activePages = () => activeCategory === 'uploads' && uploadsPages ? uploadsPages : pages;
+  let searchText = '';
+  const attached = [];
+  const makeOption = (name, position) => {
+    const tile = { getAttribute: key => key === 'aria-label' ? name : null, querySelector: () => null };
+    return {
+      name,
+      id: `option-${position}`,
+      getAttribute: key => key === 'aria-posinset' ? String(position) : key === 'aria-label' ? name : null,
+      querySelector: selector => selector === 'flow-grid-tile-container' ? tile : null,
+      querySelectorAll: () => [],
+      click() { clicks++; },
+    };
+  };
+  const visiblePage = () => {
+    const current = activePages();
+    const page = Math.min(current.length - 1, Math.ceil(scrollTop / 80));
+    return current[page].map((name, index) => makeOption(name, page * 10 + index + 1));
+  };
+  const scroller = {
+    style: { overflowY: 'auto' },
+    clientHeight: viewportHeight,
+    get scrollHeight() {
+      if (searchText && searchUpdates && tick >= 500) return 100;
+      return scrollHeightOverride ?? Math.max(viewportHeight, activePages().length * 100);
+    },
+    get scrollTop() { return scrollTop; },
+    set scrollTop(value) { if (!stuck) scrollTop = value; },
+  };
+  const list = {
+    clientHeight: viewportHeight,
+    scrollTop: 0,
+    get scrollHeight() { return parentScroll ? viewportHeight : scroller.scrollHeight; },
+    getAttribute: key => key === 'role' ? 'listbox' : null,
+    querySelectorAll(selector) {
+      if (selector === '[role="option"]') {
+        if (searchText && searchUpdates && tick >= 500) {
+          const all = activePages().flat();
+          const filtered = all.filter(name => name.toLowerCase().includes(searchText.toLowerCase()));
+          return filtered.map((name, index) => makeOption(name, index + 1));
+        }
+        return visiblePage();
+      }
+      if (selector === '*') return outsideScroller ? [] : parentScroll ? (ambiguousScroll ? [scroller] : []) : [scroller];
+      return [];
+    },
+    closest: () => null,
+  };
+  const input = searchPlaceholder ? {
+    placeholder: searchPlaceholder,
+    isContentEditable: true,
+    focus() {},
+    set textContent(value) { searchText = String(value); },
+    get textContent() { return searchText; },
+    get innerText() { return searchText; },
+    dispatchEvent() {},
+  } : null;
+  const tab = { name: 'Tất cả', getAttribute: key => key === 'aria-selected' ? String(activeCategory === 'all') : null };
+  const uploadsTab = uploadsPages ? { name: 'Tải lên', getAttribute: key => key === 'aria-selected' ? String(activeCategory === 'uploads') : null,
+    click() { activeCategory = 'uploads'; scrollTop = 0; } } : null;
+  tab.click = () => { activeCategory = 'all'; scrollTop = 0; };
+  const owner = { parentElement: null,
+    style: { overflowY: parentScroll ? 'auto' : '' },
+    get clientHeight() { return parentScroll ? viewportHeight : 0; },
+    get scrollHeight() { return parentScroll ? (scrollHeightOverride ?? Math.max(viewportHeight, pages.length * 100)) : 0; },
+    get scrollTop() { return parentScroll ? scrollTop : undefined; },
+    set scrollTop(value) { if (parentScroll && !stuck) scrollTop = value; },
+    querySelectorAll(selector) { return selector === 'input,[role="textbox"]' ? (input ? [input] : []) : []; } };
+  list.parentElement = owner;
+  const decoy = decoySearch ? { placeholder: 'Search assets', isContentEditable: true, textContent: '', innerText: '', dispatchEvent() {} } : null;
+  const document = {
+    documentElement: { lang: locale },
+    body: { innerText: '' },
+    querySelectorAll(selector) {
+      if (selector === '[role="listbox"]') return pickerOpen ? [list] : [];
+      if (selector === '[role="tab"]') return [tab, uploadsTab].filter(Boolean);
+      if (selector === '[role="progressbar"],[aria-busy="true"]') return [];
+      if (selector === 'button[aria-label="Ingredient"]') return attached;
+      if (selector === 'flow-grid-tile-container') return [];
+      if (selector === 'input,[role="textbox"]') return [input, decoy].filter(Boolean);
+      if (selector === '[role="dialog"],[role="menu"],[role="listbox"],mat-menu,mat-select-panel') return pickerOpen ? [list] : [];
+      if (selector === '*') return outsideScroller ? [scroller] : [];
+      return [];
+    },
+  };
+  const context = vm.createContext({
+    document,
+    location: { href: `https://flow.google.com/project/test?hl=${locale}`, pathname: '/project/test' },
+    Date: class MockDate extends Date { static now() { return tick; } },
+    visible: () => true,
+    setEditable: (element, value) => { element.textContent = value; },
+    mediaId: tile => tile?.getAttribute?.('aria-label') ?
+      (mediaIds[`${activeCategory}:${tile.getAttribute('aria-label')}`] || mediaIds[tile.getAttribute('aria-label')] || '22222222-2222-4222-8222-222222222222') : undefined,
+    accessibleName: el => el.name || el.getAttribute?.('aria-label') || '',
+    flowButton: name => name === 'Add to prompt' ? { disabled: false, click() {
+      pickerOpen = false;
+      attached.push({ getAttribute: key => key === 'aria-label' ? 'Ingredient' : null, querySelector: () => ({ alt: 'Image ingredient image', getAttribute: () => 'https://flow.google.com/asb/image' }), closest: () => null });
+    } } : null,
+    wait: async ms => { tick += ms; },
+    flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
+  });
+  vm.runInContext(source, context);
+  return { api: context.FlowReferenceActions, clicks: () => clicks, diagnostics: () => context.FlowReferenceActions.inspectDiagnostics() };
+}
+
+test('Vietnamese reference picker finds an exact asset after bounded scrolling without a recognized search control', async () => {
+  const name = 'fm-a6f6c32f9203-upload.png';
+  const fixture = referencePickerHarness({ pages: [['Earlier image'], [name]], locale: 'vi' });
+  const result = await fixture.api.attach(name);
+  assert.equal(result.confirmed, true);
+  assert.equal(fixture.clicks(), 1);
+  const diagnostics = fixture.diagnostics();
+  assert.equal(diagnostics.locale, 'vi');
+  assert.equal(diagnostics.searchLabelRecognized, false);
+  assert.equal(diagnostics.pickerScanEndReached, true);
+  assert.equal(diagnostics.activeCategory, 'all');
+  assert.equal(diagnostics.categorySelected, true);
+  assert.equal(diagnostics.exactTargetFound, true);
+  assert.ok(diagnostics.optionLabelHashes.length > 0);
+  assert.ok(diagnostics.pickerScanPages >= 2);
+});
+
+test('UUID-bound image reference scans the discoverable Uploads category after All misses', async () => {
+  const name = 'uploaded-only.png';
+  const expectedId = 'b5d304ab-eeb8-4001-8110-86a225761c0f';
+  const fixture = referencePickerHarness({ pages: [[name]], uploadsPages: [[name]], mediaIds: {
+    [`all:${name}`]: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', [`uploads:${name}`]: expectedId,
+  } });
+  const result = await fixture.api.attach({ assetName: name, kind: 'image' }, undefined, { expectedId });
+  assert.equal(result.confirmed, true);
+  assert.equal(result.id, expectedId);
+  assert.equal(fixture.clicks(), 1);
+  const diagnostics = fixture.diagnostics();
+  assert.equal(diagnostics.activeCategory, 'uploads');
+  assert.deepEqual(Array.from(diagnostics.categoriesScanned), ['all', 'uploads']);
+  assert.equal(diagnostics.exactTargetFound, true);
+  assert.equal(diagnostics.pickerScanEndReached, true);
+});
+
+test('UUID-bound image reference fails closed after complete scans of discoverable categories miss', async () => {
+  const expectedId = 'b5d304ab-eeb8-4001-8110-86a225761c0f';
+  const fixture = referencePickerHarness({ pages: [['Other image']], uploadsPages: [['Another image']] });
+  await assert.rejects(fixture.api.attach({ assetName: 'Missing image', kind: 'image' }, undefined, { expectedId }), error =>
+    error.code === 'FLOW_ASSET_NOT_FOUND' && error.diagnostics?.endReached === true &&
+      JSON.stringify(error.diagnostics?.categoriesScanned) === JSON.stringify(['all', 'uploads']));
+  assert.equal(fixture.clicks(), 0);
+});
+
+test('UUID-bound image reference does not assume an Uploads category when no matching visible tab exists', async () => {
+  const expectedId = 'b5d304ab-eeb8-4001-8110-86a225761c0f';
+  const fixture = referencePickerHarness({ pages: [['Other image']] });
+  await assert.rejects(fixture.api.attach({ assetName: 'Missing image', kind: 'image' }, undefined, { expectedId }), error =>
+    error.code === 'FLOW_ASSET_NOT_FOUND' && error.diagnostics?.endReached === true &&
+      JSON.stringify(error.diagnostics?.categoriesScanned) === JSON.stringify(['all']));
+  assert.equal(fixture.clicks(), 0);
+});
+
+test('reference search recognizes a Vietnamese search label and waits for matching results', async () => {
+  const name = 'fm-a6f6c32f9203-upload.png';
+  const fixture = referencePickerHarness({ pages: [['Earlier image'], [name]], locale: 'vi', searchPlaceholder: 'Tìm kiếm nội dung nghe nhìn' });
+  const result = await fixture.api.attach(name);
+  assert.equal(result.confirmed, true);
+  assert.equal(fixture.diagnostics().searchLabelRecognized, true);
+  assert.equal(fixture.diagnostics().searchLabel, 'tìm kiếm nội dung nghe nhìn');
+});
+
+test('reference search never types into a recognized global decoy outside the picker', async () => {
+  const name = 'Requested image';
+  const fixture = referencePickerHarness({ pages: [['Earlier image'], [name]], decoySearch: true });
+  const result = await fixture.api.attach(name);
+  assert.equal(result.confirmed, true);
+  assert.equal(fixture.clicks(), 1);
+  assert.equal(fixture.diagnostics().searchLabelRecognized, false);
+  assert.equal(fixture.diagnostics().pickerScanEndReached, true);
+});
+
+test('reference picker clears verified stale search results and scans the full list before selecting', async () => {
+  const name = 'Requested image';
+  const fixture = referencePickerHarness({ pages: [['Old result'], [name]], searchPlaceholder: 'Search assets', searchUpdates: false });
+  const result = await fixture.api.attach(name);
+  assert.equal(result.confirmed, true);
+  assert.equal(fixture.clicks(), 1);
+  assert.equal(fixture.diagnostics().searchLabelRecognized, true);
+  assert.equal(fixture.diagnostics().searchResultsVerified, false);
+  assert.equal(fixture.diagnostics().pickerScanEndReached, true);
+  assert.ok(fixture.diagnostics().pickerScanPages >= 2);
+});
+
+test('reference picker rejects duplicate exact titles found on separate pages', async () => {
+  const name = 'Duplicate image';
+  const fixture = referencePickerHarness({ pages: [[name], [name]], searchUpdates: false });
+  await assert.rejects(fixture.api.attach(name), error => error.code === 'FLOW_ASSET_AMBIGUOUS' && error.diagnostics?.endReached === true);
+  assert.equal(fixture.clicks(), 0);
+});
+
+test('reference picker fails closed when its virtualized list cannot advance to a proven end', async () => {
+  const fixture = referencePickerHarness({ pages: [['Visible image'], ['Target image']], stuck: true, searchUpdates: false, parentScroll: true });
+  await assert.rejects(fixture.api.attach('Target image'), error =>
+    error.code === 'FLOW_REFERENCE_SCAN_INCOMPLETE' && error.diagnostics?.endReached === false && error.diagnostics?.pages === 1 &&
+      error.diagnostics?.activeCategory === 'all' && error.diagnostics?.categorySelected === true &&
+      error.diagnostics?.searchLabelRecognized === false && error.diagnostics?.searchResultsVerified === false &&
+      error.diagnostics?.scrollOwnerCount === 1 && error.diagnostics?.scrollOwnerDepth === -1 &&
+      error.diagnostics?.scrollClientHeight === 100 && error.diagnostics?.scrollHeight === 200 && error.diagnostics?.scrollTop === 0);
+  assert.equal(fixture.clicks(), 0);
+});
+
+test('reference scanner accepts a verified 13px final scroll to bottom when visible options do not change', async () => {
+  const fixture = referencePickerHarness({
+    pages: [['Exact target']], viewportHeight: 515, scrollHeightOverride: 528, searchUpdates: false,
+  });
+  const result = await fixture.api.attach('Exact target');
+  assert.equal(result.confirmed, true);
+  assert.equal(fixture.clicks(), 1);
+  const diagnostics = fixture.diagnostics();
+  assert.equal(diagnostics.scrollOwnerCount, 1);
+  assert.equal(diagnostics.scrollOwnerDepth, 1);
+  assert.equal(diagnostics.scrollClientHeight, 515);
+  assert.equal(diagnostics.scrollHeight, 528);
+  assert.equal(diagnostics.scrollTop, 13);
+  assert.equal(diagnostics.pickerScanPages, 1);
+  assert.equal(diagnostics.pickerScanEndReached, true);
+});
+
+test('reference scanner still fails closed when the selected owner cannot move to its bottom', async () => {
+  const fixture = referencePickerHarness({
+    pages: [['Exact target'], ['Hidden target']], viewportHeight: 515, scrollHeightOverride: 528,
+    searchUpdates: false, stuck: true,
+  });
+  await assert.rejects(fixture.api.attach('Hidden target'), error =>
+    error.code === 'FLOW_REFERENCE_SCAN_INCOMPLETE' && error.diagnostics?.endReached === false &&
+      error.diagnostics?.scrollOwnerCount === 1 && error.diagnostics?.scrollClientHeight === 515 &&
+      error.diagnostics?.scrollHeight === 528 && error.diagnostics?.scrollTop === 0);
+  assert.equal(fixture.clicks(), 0);
+});
+
+test('reference scanner uses the unique scroll owner in a parent wrapper', async () => {
+  const name = 'Parent viewport target';
+  const fixture = referencePickerHarness({ pages: [['Earlier image'], [name]], parentScroll: true });
+  const result = await fixture.api.attach(name);
+  assert.equal(result.confirmed, true);
+  const diagnostics = fixture.diagnostics();
+  assert.equal(diagnostics.activeCategory, 'all');
+  assert.equal(diagnostics.scrollOwnerCount, 1);
+  assert.equal(diagnostics.scrollOwnerDepth, -1);
+  assert.equal(diagnostics.scrollClientHeight, 100);
+  assert.equal(diagnostics.scrollHeight, 200);
+  assert.equal(diagnostics.exactTargetFound, true);
+});
+
+test('reference scanner rejects multiple plausible scroll owners', async () => {
+  const fixture = referencePickerHarness({ pages: [['Earlier image'], ['Target image']], parentScroll: true, ambiguousScroll: true });
+  await assert.rejects(fixture.api.attach('Target image'), error =>
+    error.code === 'FLOW_REFERENCE_SCAN_SCROLL_OWNER_AMBIGUOUS' && error.diagnostics?.scrollOwnerCount === 2);
+  assert.equal(fixture.clicks(), 0);
+});
+
+test('reference scanner ignores a global-only scroll decoy and fails closed without a picker owner', async () => {
+  const fixture = referencePickerHarness({ pages: [['Earlier image'], ['Target image']], outsideScroller: true });
+  await assert.rejects(fixture.api.attach('Target image'), error =>
+    error.code === 'FLOW_REFERENCE_SCAN_SCROLL_OWNER_MISSING' && error.diagnostics?.scrollOwnerCount === 0);
+  assert.equal(fixture.clicks(), 0);
+});
+
+function uploadedTileMenuHarness({ preexistingMenu = false, multipleNewMenus = false, noNewMenu = false, chipIdentity = 'matching', leaveOwnedMenuOpen = false, openUnrelatedAfterAction = false, relation = true, farMenu = false, farMenuClose = false } = {}) {
   const mediaUuid = '22222222-2222-4222-8222-222222222222';
   const chips = [];
   const menuStates = [];
@@ -80,6 +371,7 @@ function uploadedTileMenuHarness({ preexistingMenu = false, multipleNewMenus = f
   const target = { id: 'media-trigger', getBoundingClientRect: () => ({ left: 100, top: 100, width: 20, height: 20 }), dispatchEvent(event) {
     if (event.type !== 'contextmenu') return;
     contextEvents++;
+    if (noNewMenu) return;
     const count = multipleNewMenus ? 2 : 1;
     for (let index = 0; index < count; index++) menuStates.push({ open: true, owned: true });
   } };
@@ -208,6 +500,16 @@ test('uploaded image attachment leaves an unrelated pre-existing menu untouched'
   assert.equal(fixture.unrelatedKeyEvents(), 0);
 });
 
+test('missing project-tile menu retains tile-attempt evidence when the picker fallback is unavailable', async () => {
+  const fixture = uploadedTileMenuHarness({ noNewMenu: true });
+  await assert.rejects(fixture.api.attach('Uploaded exact.png', undefined, { expectedId: fixture.mediaUuid, deadline: Date.now() + 5000 }), error =>
+    error.code === 'FLOW_ASSET_PICKER_MISSING' && error.diagnostics?.tileActionAttempted === true &&
+      error.diagnostics?.tileActionStep === 'menu_missing' && error.diagnostics?.tileActionMenuObserved === false);
+  assert.equal(fixture.contextEvents(), 1);
+  assert.equal(fixture.actionClicks(), 0);
+  assert.equal(fixture.chipCount(), 0);
+});
+
 test('uploaded image attachment rejects multiple newly opened menus', async () => {
   const fixture = uploadedTileMenuHarness({ multipleNewMenus: true });
   await assert.rejects(fixture.api.attach('Uploaded exact.png', undefined, { expectedId: fixture.mediaUuid, deadline: Date.now() + 1000 }), error => error.code === 'FLOW_REFERENCE_CONTEXT_MENU_AMBIGUOUS');
@@ -264,6 +566,16 @@ test('uploaded image context actions serialize concurrent requests and reuse the
   ]);
   assert.equal(fixture.actionClicks(), 1);
   assert.equal(results.filter(result => result.reused).length, 1);
+});
+
+test('cancelled reference attachment gets a bounded picker cleanup window after its signal aborts', async () => {
+  const fixture = harness({ openInitially: true, closeDelayMs: 200 });
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(fixture.api.attach('character:MCP Test Mug', undefined, { signal: controller.signal }), error =>
+    error.code === 'FLOW_OPERATION_TIMEOUT');
+  assert.equal(fixture.pickerOpen(), false, 'the opened reference picker is dismissed and verified even after the operation signal aborts');
+  assert.equal(fixture.api.inspectDiagnostics().cleanupErrorCode, null, 'successful cleanup does not inherit the operation cancellation');
 });
 
 test('reference picker waits for a bounded menu-to-listbox transition without clicking menu items', async () => {
@@ -359,7 +671,7 @@ test('first-frame selection is confirmed by the chosen asset appearing in the St
     wait: async ms => { clock += ms; },
   });
   vm.runInContext(source, context);
-  const result = await context.chooseNativePickerAsset('MCP Test Mug', 'start');
+  const result = await context.chooseNativePickerAsset('MCP Test Mug', 'start', { expectedId: mediaUuid });
   assert.equal(optionClicks, 1);
   assert.equal(result.confirmed, true);
   assert.equal(result.slot, 'start');
@@ -379,7 +691,7 @@ test('first-frame selection is confirmed by the chosen asset appearing in the St
   assert.doesNotMatch(exportedFrameDiagnostics, /private-test|fragment|\?token|#/i, 'frame diagnostics omit URL query strings and fragments');
   slotAsset = '';
   frameListPresent = true;
-  await assert.rejects(context.chooseNativePickerAsset('MCP Test Mug', 'start', { expectedId: 'different-upload-id' }), error =>
+  await assert.rejects(context.chooseNativePickerAsset('MCP Test Mug', 'start', { expectedId: conflictingMediaUuid }), error =>
     error.code === 'FLOW_ASSET_ID_MISMATCH' && error.outcome_unknown === false);
   assert.equal(optionClicks, 1, 'a mismatched expected ID is rejected before clicking the option');
   provideAlias = false;
@@ -1285,6 +1597,39 @@ test('video upload confirmation accepts one exact Vietnamese action and rejects 
   const ambiguous = makeContext(['Tải lên', 'Xác nhận']);
   await assert.rejects(ambiguous.api.confirmVideoUploadIfPrompted(Date.now() + 1000), error => error.code === 'FLOW_UPLOAD_CONFIRMATION_AMBIGUOUS');
   assert.equal(ambiguous.clicks(), 0);
+});
+
+test('Vietnamese empty asset and voice picker messages settle without waiting for options', async () => {
+  const context = vm.createContext({ document: { querySelectorAll: () => [] }, visible: () => true, wait: async () => {},
+    flowError: (code, message) => Object.assign(new Error(message), { code }) });
+  vm.runInContext(charactersSource, context);
+  for (const [label, text] of [['asset', 'Không tìm thấy tài sản nào'], ['voice', 'Không có giọng nói nào']]) {
+    const list = { innerText: text, querySelectorAll: () => [] };
+    assert.equal(await context.FlowCharacterActions.waitForPicker(() => list, label, 100), list);
+  }
+});
+
+test('duplicate Vietnamese upload category and action targets fail closed', () => {
+  const context = vm.createContext({ window: {}, flowError: (code, message) => Object.assign(new Error(message), { code }) });
+  vm.runInContext(source, context);
+  const api = context.FlowComponents;
+  assert.throws(() => api.resolveUniqueUploadTarget([{ label: 'Tải lên' }, { label: 'Tải lên' }], 'FLOW_UPLOAD_CATEGORY_AMBIGUOUS', 'Upload category'),
+    error => error.code === 'FLOW_UPLOAD_CATEGORY_AMBIGUOUS');
+  assert.throws(() => api.resolveUniqueUploadTarget([{ label: 'Tải tệp lên' }, { label: 'Tải tệp lên' }], 'FLOW_UPLOAD_MENU_ITEM_AMBIGUOUS', 'Upload action'),
+    error => error.code === 'FLOW_UPLOAD_MENU_ITEM_AMBIGUOUS');
+});
+
+test('All media navigation refuses duplicate exact Vietnamese targets', () => {
+  const navigationSource = readFileSync(new URL('../extension/content/providers/flow/FlowNavigation.js', import.meta.url), 'utf8');
+  const items = ['Tất cả nội dung nghe nhìn', 'Tất cả nội dung nghe nhìn'].map(text => ({ innerText: text, textContent: text,
+    disabled: false, getAttribute: () => null, querySelectorAll: () => [], closest: () => ({}) }));
+  const navigation = { getAttribute: () => 'Điều hướng dự án', querySelector: () => null,
+    querySelectorAll: selector => selector.includes('a,button') ? items : [] };
+  const context = vm.createContext({ document: { body: {}, querySelectorAll: selector => selector === 'nav,[role="navigation"],mat-sidenav' ? [navigation] : [],
+    querySelector: () => navigation }, visible: () => true, accessibleName: () => 'Điều hướng dự án' });
+  vm.runInContext(navigationSource, context);
+  assert.equal(context.FlowNavigation.flowNavigationItem('All media'), null);
+  assert.equal(context.FlowNavigation.clickFlowNavigation('All media'), false);
 });
 
 test('asset rename and trash actions match exact Vietnamese menu labels', async () => {

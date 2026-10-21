@@ -43,8 +43,8 @@ export function validateFlowSceneCapabilities(scene: {
   aspect_ratio?: string;
   duration?: number;
   resolution?: string;
-  first_frame?: string;
-  last_frame?: string;
+  first_frame?: string | { asset: string; id: string };
+  last_frame?: string | { asset: string; id: string };
   reference_images?: string[];
   video_reference?: { asset: string; start_frame_index: number; end_frame_index: number };
   voice?: string;

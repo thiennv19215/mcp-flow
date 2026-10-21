@@ -135,6 +135,31 @@ test('video upload confirmation reports and clicks a recognized control', async 
   assert.equal(clicks, 1);
 });
 
+test('video upload confirmation waits briefly for a dialog that mounts after file selection', async () => {
+  let ticks = 1;
+  let polls = 0;
+  let clicks = 0;
+  const dialog = { innerText: 'Upload video?', textContent: 'Upload video?', querySelectorAll: () => [{ label: 'Continue', getAttribute: () => null, click: () => { clicks++; } }] };
+  const context = vm.createContext({
+    document: { querySelectorAll: selector => {
+      if (!selector.includes('dialog')) return [];
+      polls++;
+      return polls < 4 ? [] : [dialog];
+    } },
+    Date: { now: () => ticks },
+    visible: () => true,
+    accessibleName: element => element.label,
+    wait: async ms => { ticks += ms; },
+    flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
+  });
+  vm.runInContext(source, context);
+  const result = await context.confirmFlowVideoUploadIfPrompted(Date.now() + 5000);
+  assert.equal(result.confirmationButtonClicked, true);
+  assert.equal(result.confirmationDialogUnrecognized, false);
+  assert.equal(polls, 4, 'the helper must keep polling after the first empty snapshot');
+  assert.equal(clicks, 1);
+});
+
 test('video upload confirmation fails safely on an unrecognized dialog and redacts its text', async () => {
   let ticks = 1;
   const secretText = 'Upload video for customer-secret@example.test';

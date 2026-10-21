@@ -220,13 +220,35 @@
     ) || null;
   }
 
-  function disarmNativeFlowCorrelation(attemptId) {
+  function releaseSubmitOnlyCorrelation(attemptId, requestDispatched) {
+    if (requestDispatched !== true) return null;
+    const entry = nativeFlowCorrelationMap().get(String(attemptId || ""));
+    if (!entry?.requestSeen) return null;
+    const receipt = [...entry.receipts].reverse().find(item => item?.stage === "request_seen");
+    if (!receipt) return null;
+    const dispatchReceipt = {
+      stage: "request_seen",
+      attemptId: entry.attemptId,
+      requestOrdinal: Number.isInteger(receipt.requestOrdinal) ? receipt.requestOrdinal : null,
+      requestCardinality: Number.isInteger(receipt.requestCardinality) ? receipt.requestCardinality : null,
+      matchKind: typeof receipt.matchKind === "string" ? receipt.matchKind : null,
+    };
+    disarmNativeFlowCorrelation(attemptId, { completedDispatch: true });
+    return dispatchReceipt;
+  }
+
+  function disarmNativeFlowCorrelation(attemptId, options = {}) {
     const entry = nativeFlowCorrelationMap().get(String(attemptId || ""));
     if (!entry) return;
     window.removeEventListener(FLOW_CORRELATION_RECEIPT_EVENT, entry.listener);
     window.removeEventListener("TOBY_FLOW_V2_CORRELATION_RECEIPT", entry.listener);
     window.dispatchEvent(new CustomEvent(FLOW_CORRELATION_DISARM_EVENT, {
-      detail: { nonce: entry.nonce, attemptId: entry.attemptId, dispatched: true },
+      detail: {
+        nonce: entry.nonce,
+        attemptId: entry.attemptId,
+        dispatched: true,
+        ...(options.completedDispatch === true ? { completedDispatch: true } : {}),
+      },
     }));
     nativeFlowCorrelationMap().delete(entry.attemptId);
   }
@@ -266,12 +288,18 @@
   }
 
   function hasTileProgressBar(tile) {
-    if (typeof root.flowQuery === "function" && root.flowQuery("tiles.progressBar", tile, { checkVisible: false })) return true;
+    if (typeof root.flowQuery === "function") {
+      const found = root.flowQuery("tiles.progressBar", tile, { checkVisible: false });
+      if (found) return true;
+    }
     return Boolean(tile.querySelector('flow-progress-tile, mat-progress-bar, [role="progressbar"], [class*="progress-bar"], [class*="progressbar"]'));
   }
 
   function hasTileSpinner(tile) {
-    if (typeof root.flowQuery === "function" && root.flowQuery("tiles.spinner", tile, { checkVisible: false })) return true;
+    if (typeof root.flowQuery === "function") {
+      const found = root.flowQuery("tiles.spinner", tile, { checkVisible: false });
+      if (found) return true;
+    }
     return Boolean(tile.querySelector('mat-spinner, mat-progress-spinner, [class*="spinner"], [class*="loading"], [class*="loader"], [class*="shimmer"], [class*="skeleton"], svg[class*="spin"]'));
   }
 
@@ -289,12 +317,14 @@
 
   function hasRenderedMedia(tile) {
     // 1. Check for valid, loaded image
-    const imgs = [...tile.querySelectorAll("img")].filter(img => {
+    const imgs = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.image", tile, { checkVisible: false }) : null) ||
+      [...tile.querySelectorAll("img")];
+    const validImgs = imgs.filter(img => {
       const src = img.currentSrc || img.getAttribute("src") || "";
       if (!src || src.startsWith("data:image/svg") || src.includes("placeholder") || src.includes("loading") || src.includes("spinner")) return false;
       return img.complete && (img.naturalWidth > 1 || img.width > 20);
     });
-    if (imgs.length > 0) return true;
+    if (validImgs.length > 0) return true;
 
     // 2. Check for canvas with content
     const canvases = [...tile.querySelectorAll("canvas")].filter(c => c.width > 20 && c.height > 20);
@@ -311,7 +341,8 @@
     const videoTile = (typeof root.flowQuery === "function" ? root.flowQuery("tiles.video", tile, { checkVisible: false }) : null) ||
       tile.querySelector("flow-video-tile, flow-scene-tile");
     if (videoTile) {
-      const poster = videoTile.querySelector("img");
+      const poster = (typeof root.flowQuery === "function" ? root.flowQuery("tiles.image", videoTile, { checkVisible: false }) : null) ||
+        videoTile.querySelector("img");
       if (poster && poster.complete && poster.naturalWidth > 1) return true;
     }
 
@@ -324,16 +355,17 @@
       tile.querySelector("flow-error-tile, [class*='error-tile'], [class*='error'], [class*='failed'], [class*='warning-tile'], [role='alert']");
     if (explicit) return explicit;
 
-    const errorIcon = [...tile.querySelectorAll("mat-icon, .mat-icon, .google-symbols")].find(i => {
+    const errorIcon = [...(typeof root.flowQueryAll === "function" ? root.flowQueryAll("common.icons", tile, { checkVisible: false }) : tile.querySelectorAll("mat-icon, .mat-icon, .google-symbols"))].find(i => {
       const txt = (i.getAttribute?.("fonticon") || i.getAttribute?.("data-mat-icon-name") || i.getAttribute?.("aria-label") || i.textContent || "").trim().toLowerCase();
       return /^(?:error|error_outline|warning|report|report_problem|refresh)$/i.test(txt);
     });
     if (errorIcon) return errorIcon.closest('button, [role="button"], div, p') || errorIcon;
 
-    const retryBtn = [...tile.querySelectorAll('button, [role="button"]')].find(b => {
-      const label = (b.getAttribute("aria-label") || b.innerText || b.textContent || "").trim();
-      return /^(?:retry|try again|thử lại|tạo lại)$/i.test(label);
-    });
+    const retryBtn = (typeof root.flowFindSemantic === "function" ? root.flowFindSemantic("tiles.retryButton", tile, { checkVisible: false }) : null) ||
+      [...tile.querySelectorAll('button, [role="button"]')].find(b => {
+        const label = (b.getAttribute("aria-label") || b.innerText || b.textContent || "").trim();
+        return /^(?:retry|try again|thử lại|tạo lại)$/i.test(label);
+      });
     if (retryBtn) return retryBtn;
 
     const tileText = (tile.innerText || tile.textContent || "").toLowerCase();
@@ -376,9 +408,9 @@
       const failed = Boolean(error);
       const busy = !failed && isTileBusy(tile);
       const mediaReady = !failed && isTileMediaReady(tile);
-      const kind = (typeof root.flowQuery === "function" && root.flowQuery("tiles.video", tile, { checkVisible: false }))
-        ? (tile.querySelector("flow-scene-tile") ? "scene" : "video")
-        : (tile.querySelector("flow-scene-tile") ? "scene" : tile.querySelector("flow-video-tile") ? "video" : "image");
+      const hasScene = typeof root.flowQuery === "function" ? root.flowQuery("tiles.scene", tile, { checkVisible: false }) : tile.querySelector("flow-scene-tile");
+      const hasVideo = typeof root.flowQuery === "function" ? root.flowQuery("tiles.video", tile, { checkVisible: false }) : tile.querySelector("flow-video-tile");
+      const kind = hasScene ? "scene" : hasVideo ? "video" : "image";
       const id = root.mediaId?.(tile);
       const title = (tile.getAttribute("aria-label") || tile.getAttribute("title") || "").trim();
       const failureReason = error ? (error.innerText || error.textContent || (typeof error.getAttribute === "function" ? error.getAttribute("aria-label") : "") || "Flow generation failed").replace(/\s+/g, " ").trim() : undefined;
@@ -461,12 +493,13 @@
     const retryBtnConfig = root.FlowSelectors?.tiles?.retryButton;
     const labelRegex = retryBtnConfig?.textRegex || /^(?:retry|try again|thử lại)(?:\s+.*)?$/i;
     const iconRegex = retryBtnConfig?.iconRegex || /refresh|replay|retry/i;
-    const retry = [...tile.querySelectorAll("button,[role=button]")].find(el => {
-      if (!root.visible?.(el) || el.disabled || el.getAttribute("aria-disabled") === "true") return false;
-      const label = (root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim().toLowerCase();
-      const icon = (root.flowFindIcon ? root.flowFindIcon(el) : el.querySelector("mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined,svg"))?.textContent?.trim() || "";
-      return root.matchesFlowUiRegex?.(label, labelRegex) || labelRegex.test(label) || iconRegex.test(icon);
-    });
+    const retry = (typeof root.flowFindSemantic === "function" ? root.flowFindSemantic("tiles.retryButton", tile) : null) ||
+      [...tile.querySelectorAll("button,[role=button]")].find(el => {
+        if (!root.visible?.(el) || el.disabled || el.getAttribute("aria-disabled") === "true") return false;
+        const label = (root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim().toLowerCase();
+        const icon = (root.flowFindIcon ? root.flowFindIcon(el) : el.querySelector("mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined,svg"))?.textContent?.trim() || "";
+        return root.matchesFlowUiRegex?.(label, labelRegex) || labelRegex.test(label) || iconRegex.test(icon);
+      });
     if (!retry) return false;
     const retryRect = retry.getBoundingClientRect();
     const rx = retryRect.left + retryRect.width / 2;
@@ -595,6 +628,7 @@
     armNativeFlowCorrelation,
     disarmNativeFlowCorrelation,
     nativeFlowCorrelationReceipt,
+    releaseSubmitOnlyCorrelation,
     nativeFlowCorrelationMap,
     inspectNativeFlowCorrelationObserver,
     readNativeFlowCorrelationHealth,

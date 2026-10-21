@@ -1,7 +1,7 @@
 (function () {
   "use strict";
   const VERSION = 1;
-  const OBSERVER_REVISION = 23;
+  const OBSERVER_REVISION = 24;
   const ARM = "TOBY_FLOW_CORRELATION_ARM";
   const ARM_V2 = "TOBY_FLOW_V2_CORRELATION_ARM";
   const DISARM = "TOBY_FLOW_CORRELATION_DISARM";
@@ -27,6 +27,7 @@
   }
   const retired = old?.retired || { entries: [], saturated: false };
   retired.requestSignatures || (retired.requestSignatures = []);
+  retired.completedDispatches || (retired.completedDispatches = []);
   for (const entry of retired.entries || []) {
     if (
       entry?.mediaType === "image" &&
@@ -90,7 +91,7 @@
     "payload_unparsed", "payload_shape_mismatch", "quantity_mismatch", "prompt_mismatch",
     "model_mismatch", "reference_ids_mismatch", "project_mismatch", "request_path_unrecognized",
     "payload_match_failed", "retired_request_signature", "attempt_interfered",
-    "request_cardinality_exhausted", "rpc_payload_unparsed",
+    "request_cardinality_exhausted", "rpc_payload_unparsed", "completed_dispatch_replay",
   ]);
   const ownData = (value, key) => {
     if (!value || typeof value !== "object") return undefined;
@@ -381,6 +382,19 @@
       hash = Math.imul(hash, 16777619);
     }
     return `id-${(hash >>> 0).toString(16).padStart(8, "0")}`;
+  };
+  const requestPayloadFingerprint = (payload) => {
+    let serialized;
+    try { serialized = JSON.stringify(payload); } catch (_) { return null; }
+    if (typeof serialized !== "string") return null;
+    let hashA = 2166136261;
+    let hashB = 2246822519;
+    for (let i = 0; i < serialized.length; i++) {
+      const code = serialized.charCodeAt(i);
+      hashA = Math.imul(hashA ^ code, 16777619);
+      hashB = Math.imul(hashB ^ code, 3266489917);
+    }
+    return `request-v2:${serialized.length}:${(hashA >>> 0).toString(16)}:${(hashB >>> 0).toString(16)}`;
   };
   const normalizePrompt = (value) =>
     String(value || "")
@@ -1568,6 +1582,19 @@
       return null;
     }
     const now = Date.now();
+    retired.completedDispatches = retired.completedDispatches.filter(entry => entry.expiresAt > now);
+    const payloadFingerprint = requestPayloadFingerprint(call.payload);
+    const staleDispatch = payloadFingerprint && retired.completedDispatches.some(entry =>
+      entry.projectId === projectId() && entry.payloadFingerprint === payloadFingerprint);
+    if (staleDispatch) {
+      for (const attempt of attempts.values()) {
+        if (!attemptMatchesPayload(call.payload, attempt)) continue;
+        attempt.interfered = true;
+        recordRequestDiagnostic(attempt, call, call.transport, call.requestPath, ["completed_dispatch_replay"]);
+        emit(attempt, "acceptance_unknown", { reason: "completed_dispatch_replay" });
+      }
+      return null;
+    }
     const candidates = [];
     for (const [id, attempt] of attempts) {
       if (now > attempt.expiresAt || attempt.projectId !== projectId()) {
@@ -1666,6 +1693,7 @@
   };
   const beginObservedRequest = (attempt, call) => {
     const requestOrdinal = attempt.requestCount++;
+    attempt.completedRequestFingerprint = requestPayloadFingerprint(call.payload);
     const requestMachine = collectMachineData(call.payload);
     const inputDiagnostic =
       attempt.mediaType === "image"
@@ -1971,7 +1999,18 @@
     const d = event.detail || {};
     const attempt = attempts.get(d.attemptId);
     if (attempt && attempt.nonce === d.nonce) {
-      if (d.discardOnStop !== true && (d.dispatched !== false || attempt.requestCount > 0))
+      const completedDispatch = d.completedDispatch === true &&
+        attempt.requestCount >= attempt.requestCardinality;
+      if (completedDispatch && attempt.completedRequestFingerprint) {
+        const now = Date.now();
+        retired.completedDispatches = (retired.completedDispatches || []).filter(entry => entry.expiresAt > now);
+        if (retired.completedDispatches.length >= 128) retired.completedDispatches.shift();
+        retired.completedDispatches.push({
+          projectId: attempt.projectId,
+          payloadFingerprint: attempt.completedRequestFingerprint,
+          expiresAt: now + 15 * 60_000,
+        });
+      } else if (!completedDispatch && d.discardOnStop !== true && (d.dispatched !== false || attempt.requestCount > 0))
         retireUnbound(attempt);
       attempts.delete(d.attemptId);
     }

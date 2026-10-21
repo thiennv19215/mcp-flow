@@ -162,6 +162,81 @@ test('recognizes the current video RPC fixture and records exact per-field resul
   assert.ok(!JSON.stringify(entry).includes(prompt));
 });
 
+test('completed submit-only dispatch permits the same asset UUID on a new prompt and rejects a delayed old request', async () => {
+  const { window } = observerHarness();
+  const receipts = [];
+  window.addEventListener('TOBY_FLOW_V2_CORRELATION_RECEIPT', event => receipts.push(event.detail));
+  const assetId = '11111111-2222-4333-8444-555555555555';
+  const promptOne = 'A kite over a grassy meadow';
+  const promptTwo = 'A lantern on a snowy porch';
+  const firstAttemptId = '00000000-0000-4000-8000-000000000021';
+  const secondAttemptId = '00000000-0000-4000-8000-000000000022';
+  arm(window, { attemptId: firstAttemptId, prompt: promptOne, expectedReferenceIds: [assetId] });
+  const makePayload = prompt => {
+    const row = [[null, null, [[[prompt]]]], 'veo-3', 1, [null, assetId], [null, null, null, null, assetId, 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee']];
+    return [[row]];
+  };
+  const send = async (prompt, rpcId) => {
+    const payload = makePayload(prompt);
+    const fReq = JSON.stringify([[[rpcId, JSON.stringify(payload), null]]]);
+    await window.fetch('https://labs.google/u/0/_/AiSandboxAngularFrontend/data/batchexecute', {
+      method: 'POST', body: new URLSearchParams({ 'f.req': fReq }).toString(),
+    });
+    await new Promise(resolve => setTimeout(resolve, 0));
+  };
+
+  await send(promptOne, 'rpc.firstSubmitOnly');
+  assert.ok(window.__tobyFlowCorrelationObserver.health().requestDiagnostics.events.some(event =>
+    event.attemptId === firstAttemptId && event.payloadMatched === true));
+  window.dispatchEvent(new window.CustomEvent('TOBY_FLOW_V2_CORRELATION_DISARM', {
+    detail: { nonce: 'test-nonce-12345678', attemptId: firstAttemptId, dispatched: true, completedDispatch: true },
+  }));
+  assert.equal(window.__tobyFlowCorrelationObserver.health().activeAttempts, 0);
+
+  arm(window, { attemptId: secondAttemptId, prompt: promptTwo, expectedReferenceIds: [assetId] });
+  await send(promptOne, 'rpc.delayedOldSubmit');
+  await send(promptTwo, 'rpc.nextSubmitSameAsset');
+  const events = window.__tobyFlowCorrelationObserver.health().requestDiagnostics.events;
+  const next = events.find(event => event.rpcId === 'rpc.nextSubmitSameAsset');
+  assert.equal(next.attemptId, secondAttemptId);
+  assert.equal(next.payloadMatched, true);
+  assert.ok(!receipts.some(receipt => receipt.attemptId === secondAttemptId && receipt.stage === 'request_seen' && receipt.rpcId === 'rpc.delayedOldSubmit'));
+  assert.ok(!JSON.stringify(events).includes(assetId));
+});
+
+test('completed submit-only dispatch marks an identical replay unknown instead of attributing it to a new attempt', async () => {
+  const { window } = observerHarness();
+  const assetId = '11111111-2222-4333-8444-555555555555';
+  const prompt = 'A lighthouse beside a stormy sea';
+  const firstAttemptId = '00000000-0000-4000-8000-000000000031';
+  const secondAttemptId = '00000000-0000-4000-8000-000000000032';
+  const receipts = [];
+  window.addEventListener('TOBY_FLOW_V2_CORRELATION_RECEIPT', event => receipts.push(event.detail));
+  arm(window, { attemptId: firstAttemptId, prompt, expectedReferenceIds: [assetId] });
+  const row = [[null, null, [[[prompt]]]], 'veo-3', 1, [null, assetId], [null, null, null, null, assetId, 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee']];
+  const body = new URLSearchParams({ 'f.req': JSON.stringify([[[
+    'rpc.identicalSubmit', JSON.stringify([[row]]), null,
+  ]]]) }).toString();
+  const send = async () => {
+    await window.fetch('https://labs.google/u/0/_/AiSandboxAngularFrontend/data/batchexecute', { method: 'POST', body });
+    await new Promise(resolve => setTimeout(resolve, 0));
+  };
+
+  await send();
+  assert.ok(receipts.some(receipt => receipt.attemptId === firstAttemptId && receipt.stage === 'request_seen'));
+  window.dispatchEvent(new window.CustomEvent('TOBY_FLOW_V2_CORRELATION_DISARM', {
+    detail: { nonce: 'test-nonce-12345678', attemptId: firstAttemptId, dispatched: true, completedDispatch: true },
+  }));
+  arm(window, { attemptId: secondAttemptId, prompt, expectedReferenceIds: [assetId] });
+
+  await send();
+
+  assert.ok(receipts.some(receipt => receipt.attemptId === secondAttemptId && receipt.stage === 'acceptance_unknown' && receipt.reason === 'completed_dispatch_replay'), JSON.stringify(receipts.filter(receipt => receipt.attemptId === secondAttemptId)));
+  assert.ok(!receipts.some(receipt => receipt.attemptId === secondAttemptId && receipt.stage === 'request_seen'));
+  const diagnostic = window.__tobyFlowCorrelationObserver.health().requestDiagnostics.events.find(event => event.attemptId === secondAttemptId);
+  assert.ok(diagnostic.reasons.includes('completed_dispatch_replay'), JSON.stringify(diagnostic));
+});
+
 test('recognizes an image reference RPC only when the exact media UUID matches', async () => {
   const { window } = observerHarness();
   const prompt = 'Keep the exact blue ceramic cup';

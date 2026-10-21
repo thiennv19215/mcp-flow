@@ -1,0 +1,108 @@
+{
+  "started": "2026-10-21T08:17:06.8138448Z",
+  "mode": "vi-image-reference-uuidbound",
+  "api": "http://127.0.0.1:18897",
+  "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+  "locale": "vi",
+  "uploadReceipt": {
+    "name": "fm-a6f6c32f9203-upload.png",
+    "id": "b5d304ab-eeb8-4001-8110-86a225761c0f",
+    "kind": "image",
+    "uploaded": true,
+    "trustedGesture": false
+  },
+  "request": {
+    "scenes": [
+      {
+        "variants": 1,
+        "max_credits": 0,
+        "retries": 0,
+        "type": "image",
+        "prompt": "A catalog photograph of the uploaded cobalt glass vase on a pale limestone shelf, soft directional afternoon light, subtle blue reflections, calm neutral studio, no text.",
+        "reference_images": [
+          "asset:fm-a6f6c32f9203-upload.png"
+        ],
+        "submit_only": true
+      }
+    ],
+    "project": "NativeE2E-reference-vi-uuidbound-retry-20261021"
+  },
+  "response": {
+    "output_dir": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-vi-uuidbound-retry-20261021",
+    "jobs": [
+      {
+        "id": "49514d91",
+        "status": "running",
+        "project": "C:\\Users\\nguye\\flow-mcp-out\\NativeE2E-reference-vi-uuidbound-retry-20261021",
+        "scene": "scene-01",
+        "prompt": "A catalog photograph of the uploaded cobalt glass vase on a pale limestone shelf, soft directional afternoon light, subtle blue reflections, calm neutral studio, no text.",
+        "attempts": 1,
+        "credit_quote_verified": null,
+        "files": [],
+        "outcome_unknown": false,
+        "request_dispatched": false,
+        "server_acceptance_observed": false,
+        "request_diagnostics": null,
+        "operation_diagnostics": null
+      }
+    ]
+  },
+  "apiError": null,
+  "finished": "2026-10-21T08:17:06.8217248Z",
+  "preflight": {
+    "loadedBuild": "6d52749dabc9fa896fe802eee1a7e273350e8d9224eff6be8e1bc1a550fa1f1c",
+    "observerReady": true,
+    "activeAttempts": 0,
+    "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "locale": "vi",
+    "promptChars": 0,
+    "chipCount": 0,
+    "pickerOpen": false,
+    "visibleSurfaces": [],
+    "busyJobs": [],
+    "warnings": null,
+    "pacing": null,
+    "listedAsset": {
+      "kind": "image",
+      "name": "fm-a6f6c32f9203-upload.png"
+    },
+    "uploadReceipt": {
+      "name": "fm-a6f6c32f9203-upload.png",
+      "id": "b5d304ab-eeb8-4001-8110-86a225761c0f",
+      "kind": "image",
+      "uploaded": true,
+      "trustedGesture": false
+    }
+  },
+  "dispatchEvidence": {
+    "jobId": "49514d91",
+    "status": "failed",
+    "creditQuoteVerified": false,
+    "verifiedCredits": null,
+    "requestDispatched": false,
+    "serverAcceptanceObserved": false,
+    "outcomeUnknown": false,
+    "errorCode": "FLOW_REFERENCE_SCAN_INCOMPLETE",
+    "exactTargetFound": false,
+    "pickerScanPages": 1,
+    "pickerScanEndReached": false,
+    "searchLabelRecognized": false,
+    "searchResultsVerified": false,
+    "error": "Picker did not render a verifiably different page after scrolling; no reference was selected."
+  },
+  "postflight": {
+    "observedAt": "2026-10-21T08:17:45.7979146Z",
+    "observerReady": true,
+    "activeAttempts": 0,
+    "extensionBuild": "6d52749dabc9fa896fe802eee1a7e273350e8d9224eff6be8e1bc1a550fa1f1c",
+    "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "locale": "vi",
+    "promptChars": 0,
+    "chipCount": 0,
+    "pickerOpen": false,
+    "visibleSurfaces": [],
+    "busyJobs": [],
+    "warnings": null,
+    "pacing": null
+  }
+}

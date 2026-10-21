@@ -100,6 +100,17 @@ server.registerTool(
 );
 
 server.registerTool(
+  "flow_clear_prompt",
+  {
+    title: "Clear the exact Flow prompt",
+    description: "Clear the prompt editor only when the active Flow project is verified, exactly one visible prompt control matches expected_prompt, and the local job queue is idle. References and picker state are preserved and verified.",
+    inputSchema: shapes.clear_prompt,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  },
+  (args) => reply(patient("flow_clear_prompt", core.clear_prompt(args))),
+);
+
+server.registerTool(
   "flow_projects",
   {
     title: "List Flow projects",
@@ -125,11 +136,11 @@ server.registerTool(
   "flow_open_project",
   {
     title: "Open a Flow project",
-    description: "Open the specified existing Flow project by UUID in the connected Flow tab. Use flow_projects to find project IDs.",
+    description: "Open the specified existing Flow project by UUID in the connected Flow tab using the English interface (hl=en). The call confirms that Flow rendered English. Use flow_projects to find project IDs.",
     inputSchema: shapes.open_project,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   },
-  (args) => reply(patient("flow_open_project", core.open_project(args))),
+  (args) => reply(patient("flow_open_project", core.open_project({ ...args, language: args.language ?? "en" }))),
 );
 
 server.registerTool(

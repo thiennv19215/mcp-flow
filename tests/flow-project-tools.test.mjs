@@ -14,7 +14,7 @@ test('registers Flow project list and open MCP tools and forwards to existing Co
     },
     open_project: async args => {
       calls.push(['open_project', args]);
-      return { opened: true, id: args.project_id, url: `https://flow.google.com/project/${args.project_id}` };
+      return { opened: true, id: args.project_id, url: `https://flow.google.com/project/${args.project_id}?hl=${args.language}`, language: args.language };
     },
   });
 
@@ -24,6 +24,8 @@ test('registers Flow project list and open MCP tools and forwards to existing Co
   assert.equal(tools.flow_projects.annotations.readOnlyHint, true);
   assert.equal(tools.flow_open_project.annotations.readOnlyHint, false);
   assert.equal(tools.flow_open_project.inputSchema.safeParse({ project_id: 'not-a-uuid' }).success, false);
+  assert.equal(tools.flow_open_project.inputSchema.safeParse({ project_id: '01234567-89ab-4cde-8f01-23456789abcd', language: 'fr' }).success, false);
+  assert.equal(tools.flow_open_project.inputSchema.safeParse({ project_id: '01234567-89ab-4cde-8f01-23456789abcd', language: 'vi' }).success, false);
 
   const projects = await tools.flow_projects.handler({});
   assert.deepEqual(JSON.parse(projects.content[0].text), [
@@ -34,11 +36,12 @@ test('registers Flow project list and open MCP tools and forwards to existing Co
   assert.deepEqual(JSON.parse(opened.content[0].text), {
     opened: true,
     id: '01234567-89ab-4cde-8f01-23456789abcd',
-    url: 'https://flow.google.com/project/01234567-89ab-4cde-8f01-23456789abcd',
+    url: 'https://flow.google.com/project/01234567-89ab-4cde-8f01-23456789abcd?hl=en',
+    language: 'en',
   });
   assert.deepEqual(calls, [
     ['projects'],
-    ['open_project', { project_id: '01234567-89ab-4cde-8f01-23456789abcd' }],
+    ['open_project', { project_id: '01234567-89ab-4cde-8f01-23456789abcd', language: 'en' }],
   ]);
 });
 
@@ -59,12 +62,12 @@ test('RemoteCore routes project listing and opening to the existing local API en
 
   const remote = new RemoteCore({ baseUrl: `http://127.0.0.1:${server.address().port}`, deviceToken: 'test-device-token' });
   const projects = await remote.projects();
-  const opened = await remote.open_project({ project_id: '01234567-89ab-4cde-8f01-23456789abcd' });
+  const opened = await remote.open_project({ project_id: '01234567-89ab-4cde-8f01-23456789abcd', language: 'en' });
 
   assert.equal(projects[0].name, 'Project A');
   assert.equal(opened.opened, true);
   assert.deepEqual(calls, [
     { method: 'POST', url: '/api/projects', body: {} },
-    { method: 'POST', url: '/api/open_project', body: { project_id: '01234567-89ab-4cde-8f01-23456789abcd' } },
+    { method: 'POST', url: '/api/open_project', body: { project_id: '01234567-89ab-4cde-8f01-23456789abcd', language: 'en' } },
   ]);
 });
