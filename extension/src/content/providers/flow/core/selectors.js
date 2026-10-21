@@ -255,6 +255,11 @@
           '[role="button"]'
         ]
       },
+      addToPromptMenuItem: {
+        selectors: ['[role="menuitem"]', "mat-menu-item", "button", '[role="button"]'],
+        textMatch: ["Add to prompt", "Add To Prompt", "Thêm vào câu lệnh", "Thêm vào lời nhắc", "Thêm vào lời nhắc văn bản", "Thêm vào prompt"],
+        iconText: ["add"]
+      },
       chips: {
         selectors: [
           'button[aria-label="Ingredient"]',
@@ -268,6 +273,16 @@
 
     // 5. Navigation & Layout
     navigation: {
+      allMediaButton: {
+        selectors: ["nav a", "nav button", "[role='navigation'] a", "[role='navigation'] button", "mat-sidenav a", "mat-sidenav button", "[role='navigation'] [role='button']", "mat-sidenav [role='button']"],
+        textRegex: /^(?:all media|all content|tất cả nội dung nghe nhìn|tất cả nội dung|nội dung nghe nhìn|tất cả phương tiện|tất cả media|thư viện|tất cả tệp)$/i,
+        icons: ["dashboard", "perm_media", "movie", "video_library", "photo_library", "grid_view", "auto_awesome_motion", "folder", "collections"]
+      },
+      charactersButton: {
+        selectors: ["nav a", "nav button", "[role='navigation'] a", "[role='navigation'] button", "mat-sidenav a", "mat-sidenav button", "[role='navigation'] [role='button']", "mat-sidenav [role='button']"],
+        textRegex: /^(?:characters|nhân vật|nhan vat)$/i,
+        icons: ["accessibility_new", "person", "face"]
+      },
       newProjectButton: {
         selectors: ["button", "a[role='button']"],
         icons: ["add", "create", "new"],

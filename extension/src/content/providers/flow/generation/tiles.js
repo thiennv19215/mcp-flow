@@ -446,6 +446,60 @@
     return null;
   }
 
+  function flowMediaGridScrollContainer() {
+    const tiles = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", document, { checkVisible: false }) : null) ||
+      [...document.querySelectorAll("flow-grid-tile-container")];
+    for (const tile of tiles) {
+      for (let parent = tile?.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
+        if (parent.matches?.("nav,[role='navigation'],aside,mat-sidenav,[class*='sidebar'],[class*='drawer']")) continue;
+        if (parent.clientHeight > 100 && parent.scrollHeight > parent.clientHeight + 8) return parent;
+      }
+    }
+    return root.scrollContainer?.() || null;
+  }
+
+  async function findFlowTileByMediaId(mediaId, options = {}) {
+    const wanted = String(mediaId || "").trim();
+    if (!wanted || wanted.startsWith("title:")) return null;
+    const sameId = value => {
+      const current = String(value || "").trim();
+      return /^[0-9a-f-]{36}$/i.test(current) && /^[0-9a-f-]{36}$/i.test(wanted)
+        ? current.toLowerCase() === wanted.toLowerCase()
+        : current === wanted;
+    };
+    const deadline = Number.isFinite(options.deadline) ? options.deadline : Date.now() + 15_000;
+    const maxSteps = Math.max(1, Math.min(100, Number(options.maxSteps) || 60));
+    const scroller = flowMediaGridScrollContainer();
+    const originalTop = scroller?.scrollTop || 0;
+    let found = null;
+    try {
+      for (let step = 0; step < maxSteps && Date.now() < deadline; step++) {
+        if (options.signal?.aborted) throw root.flowError("FLOW_OPERATION_TIMEOUT", "Timed out while locating the exact Flow media tile; no reference was selected.", false, false);
+        const tiles = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", document, { checkVisible: false }) : null) ||
+          [...document.querySelectorAll("flow-grid-tile-container")];
+        const matches = tiles.filter(tile => sameId(root.mediaId?.(tile)));
+        if (matches.length === 1) {
+          found = matches[0];
+          found.scrollIntoView?.({ behavior: "instant", block: "center" });
+          return found;
+        }
+        if (matches.length > 1) return null;
+        if (!scroller) break;
+        const top = scroller.scrollTop;
+        const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+        if (top >= max - 2) break;
+        scroller.scrollTop = Math.min(max, top + Math.max(240, scroller.clientHeight * 0.78));
+        const pause = Math.min(180, Math.max(0, deadline - Date.now()));
+        if (pause <= 0) break;
+        if (root.FlowUiDeadline?.boundedWait) await root.FlowUiDeadline.boundedWait(pause, deadline, "scanning Flow media for the requested image", false, options.signal);
+        else await root.wait?.(pause);
+      }
+      return null;
+    } finally {
+      if (!found && scroller) scroller.scrollTop = originalTop;
+    }
+  }
+
   async function countFlowTitleAcrossGrid(title) {
     const norm = s => String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
     const wanted = norm(title);
@@ -623,6 +677,7 @@
     isTileMediaReady,
     hasRenderedMedia,
     findFlowTile,
+    findFlowTileByMediaId,
     countFlowTitleAcrossGrid,
     retryNativeErrorTile,
     waitForProgressResult,
@@ -644,6 +699,7 @@
   root.isTileMediaReady = isTileMediaReady;
   root.hasRenderedMedia = hasRenderedMedia;
   root.findFlowTile = findFlowTile;
+  root.findFlowTileByMediaId = findFlowTileByMediaId;
   root.countFlowTitleAcrossGrid = countFlowTitleAcrossGrid;
   root.waitForProgressResult = waitForProgressResult;
   root.waitForNativeEditorCompletion = waitForNativeEditorCompletion;

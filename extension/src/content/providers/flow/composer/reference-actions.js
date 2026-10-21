@@ -454,6 +454,16 @@
       (typeof root.flowQuery === "function" ? root.flowQuery("components.listBox") : null) ||
       [...document.querySelectorAll('[role="listbox"]')].find(visible);
   }
+  function isReferencePickerSurface(list = picker()) {
+    if (!list || !visible(list)) return false;
+    const surface = list.closest?.('[role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane, [class*="picker"], [class*="surface"]') || list;
+    const hasReferenceCategory = ["all", "uploads", "characters"].some(name => pickerCategoryTabs(name).length > 0);
+    const hasReferenceSearch = Boolean(referenceSearchControl()?.element);
+    const hasMediaTiles = Boolean(list.querySelector?.("flow-grid-tile-container, flow-image-tile, flow-video-tile"));
+    const label = normalize(`${surface.getAttribute?.("aria-label") || ""} ${surface.innerText || surface.textContent || ""}`);
+    const hasAssetBrowserLabel = /search assets|all media|tìm kiếm nội dung|tất cả nội dung/.test(label);
+    return hasReferenceCategory || hasReferenceSearch || hasMediaTiles || hasAssetBrowserLabel;
+  }
   function visiblePickerSurfaces() {
     const selectors = '[role="dialog"],[role="menu"],[role="listbox"],mat-menu,mat-select-panel';
     const clean = value => String(value || "").replace(/\s+/g, " ").trim().slice(0, 120);
@@ -584,6 +594,13 @@
           hasName: chip.hasName === true,
         })),
       } : null,
+      pickerAddActionScan: snapshot.pickerAddActionScan ? {
+        candidateCount: Number(snapshot.pickerAddActionScan.candidateCount) || 0,
+        enabledCount: Number(snapshot.pickerAddActionScan.enabledCount) || 0,
+        disabled: snapshot.pickerAddActionScan.disabled === true,
+        method: snapshot.pickerAddActionScan.method || null,
+        labels: (snapshot.pickerAddActionScan.labels || []).slice(0, 5),
+      } : null,
       surfaceStatus: snapshot.surfaceStatus || null,
       path: snapshot.path || null,
       provenanceConfirmed: snapshot.provenanceConfirmed === true,
@@ -645,7 +662,7 @@
       .map(value => normalize(value)).filter(Boolean).slice(0, 20);
   }
   function addToPromptActionMatch(item) {
-    const config = root.flowGetConfig?.("components.actionMenuItems") || root.FlowSelectors?.components?.actionMenuItems || {};
+    const config = root.flowGetConfig?.("components.addToPromptMenuItem") || root.FlowSelectors?.components?.addToPromptMenuItem || {};
     let localizedAliases = [];
     try { localizedAliases = root.I18n?.getPatterns?.("add_to_prompt") || []; } catch {}
     const textAliases = [...new Set([
@@ -735,7 +752,8 @@
   };
   function contextMenuItems(menu) {
     const configured = typeof root.flowQueryAll === "function"
-      ? root.flowQueryAll("components.actionMenuItems", menu, { checkVisible: false })
+      ? [...root.flowQueryAll("components.addToPromptMenuItem", menu, { checkVisible: false }),
+        ...root.flowQueryAll("components.actionMenuItems", menu, { checkVisible: false })]
       : [];
     const candidates = [...(configured || [])];
     const selectors = [
@@ -780,7 +798,20 @@
     };
     const semanticMenus = candidates.filter(isSemantic);
     if (semanticMenus.length) return semanticMenus;
-    return candidates.filter(menu => contextMenuItems(menu).length > 0);
+    // `components.actionMenus` also includes generic CDK overlay panes in some
+    // Flow selector profiles. Those panes host the asset picker and dialogs,
+    // so treating every pane with buttons as a context menu makes an uploaded
+    // reference fail with FLOW_REFERENCE_CONTEXT_MENU_BUSY while the picker is
+    // visibly waiting for Add to prompt. Accept only overlays with explicit
+    // menu semantics; generic dialog/listbox surfaces are never menus.
+    return candidates.filter(menu => {
+      const isOverlayPane = menu.matches?.(".cdk-overlay-pane") || String(menu.className || "").split(/\s+/).includes("cdk-overlay-pane");
+      if (!isOverlayPane) return contextMenuItems(menu).length > 0;
+      if (menu.querySelector?.('[role="dialog"],mat-dialog-container,flow-dialog,[role="listbox"],[role="tab"],input,[role="textbox"]')) return false;
+      const explicitItems = menu.querySelector?.('[role="menuitem"],[role="menuitemcheckbox"],[role="menuitemradio"],mat-menu-item,[data-radix-collection-item]');
+      const menuClass = /(?:^|\s)(?:mat-mdc-menu-panel|mat-menu-panel|flow-context-menu)(?:\s|$)/i.test(String(menu.className || ""));
+      return Boolean(explicitItems || menuClass);
+    });
   }
   function contextMenuItemLabel(item) {
     const sources = contextMenuItemTextSources(item);
@@ -808,6 +839,70 @@
     const dx = Math.max(rect.left - point.x, 0, point.x - right);
     const dy = Math.max(rect.top - point.y, 0, point.y - bottom);
     return Math.hypot(dx, dy) <= 240;
+  }
+  function isFlowActionDisabled(item) {
+    return Boolean(item?.disabled || item?.getAttribute?.("aria-disabled") === "true" ||
+      item?.getAttribute?.("disabled") !== null && item?.getAttribute?.("disabled") !== undefined ||
+      item?.getAttribute?.("data-disabled") === "true");
+  }
+  function dispatchPrimaryClick(target) {
+    if (!target) return false;
+    const rect = target.getBoundingClientRect?.();
+    if (!rect || !(rect.width > 0 && rect.height > 0)) {
+      target.click?.();
+      return true;
+    }
+    const point = { bubbles: true, cancelable: true, composed: true, button: 0,
+      clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
+    try { if (typeof PointerEvent === "function") target.dispatchEvent(new PointerEvent("pointerdown", { ...point, pointerId: 1, pointerType: "mouse", buttons: 1 })); } catch {}
+    try { if (typeof MouseEvent === "function") target.dispatchEvent(new MouseEvent("mousedown", { ...point, buttons: 1 })); } catch {}
+    try { if (typeof PointerEvent === "function") target.dispatchEvent(new PointerEvent("pointerup", { ...point, pointerId: 1, pointerType: "mouse", buttons: 0 })); } catch {}
+    try { if (typeof MouseEvent === "function") target.dispatchEvent(new MouseEvent("mouseup", { ...point, buttons: 0 })); } catch {}
+    try {
+      if (typeof MouseEvent === "function") target.dispatchEvent(new MouseEvent("click", { ...point, buttons: 0 }));
+      else target.click?.();
+    } catch { target.click?.(); }
+    return true;
+  }
+  function findPickerAddToPromptButton() {
+    const list = picker();
+    if (!list) return null;
+    const surface = pickerSurface();
+    const scope = surface && typeof surface.querySelectorAll === "function" ? surface : list;
+    const matchedCandidates = [...new Set(scope.querySelectorAll('button,[role="button"],mat-button,[tabindex="0"]'))]
+      .filter(item => visible(item) && addToPromptActionMatch(item).matched);
+    const candidates = matchedCandidates.filter(item => !isFlowActionDisabled(item));
+    // Prefer the innermost actual control when Flow wraps one button with an
+    // additional role=button container. This keeps one visible action from
+    // being reported twice while still refusing genuinely ambiguous actions.
+    const uniqueControls = candidates.filter(item => !candidates.some(other => other !== item && other.contains?.(item) &&
+      (String(other.tagName || "").toLowerCase() === "button" || other.getAttribute?.("role") === "button")));
+    const scan = { candidateCount: matchedCandidates.length, enabledCount: uniqueControls.length,
+      disabled: matchedCandidates.length > 0 && candidates.length === 0,
+      method: uniqueControls.length === 1 ? "semantic_scan" : uniqueControls.length > 1 ? "ambiguous" : "not_found",
+      labels: matchedCandidates.slice(0, 5).map(item => String(item.innerText || item.textContent || "").replace(/\s+/g, " ").trim().slice(0, 80)) };
+    const signature = JSON.stringify(scan);
+    if (findPickerAddToPromptButton.lastScanSignature !== signature) {
+      findPickerAddToPromptButton.lastScanSignature = signature;
+      updateReferenceActionDiagnostics({ pickerAddActionScan: scan });
+    }
+    if (uniqueControls.length === 1) return uniqueControls[0];
+    if (uniqueControls.length === 0 && scope === document) {
+      // Keep compatibility with Flow selector adapters that provide a
+      // semantic button resolver while the test/runtime DOM wrapper omits
+      // querySelectorAll results. In the live DOM the scan above takes priority.
+      const resolved = root.flowButton?.("Add to prompt", scope);
+      if (resolved && visible(resolved) && !isFlowActionDisabled(resolved)) {
+        const resolvedScan = { candidateCount: 1, enabledCount: 1, disabled: false, method: "configured_resolver", labels: [String(resolved.innerText || resolved.textContent || "Add to prompt").replace(/\s+/g, " ").trim().slice(0, 80)] };
+        const resolvedSignature = JSON.stringify(resolvedScan);
+        if (findPickerAddToPromptButton.lastScanSignature !== resolvedSignature) {
+          findPickerAddToPromptButton.lastScanSignature = resolvedSignature;
+          updateReferenceActionDiagnostics({ pickerAddActionScan: resolvedScan });
+        }
+        return resolved;
+      }
+    }
+    return null;
   }
   function chipMediaUuids(chip) {
     const attrs = ["data-media-id", "data-asset-id", "data-file-id"];
@@ -872,6 +967,14 @@
       updateReferenceActionDiagnostics(diagnostic);
       const expectedIdentity = await resolveImageReferenceIdentity(expectedId);
       if (!expectedIdentity) throw flowError("FLOW_ASSET_ID_UNAVAILABLE", "The uploaded image has no verified Flow media identity for tile attachment. No reference was selected.", false, false);
+      // Upload can leave Flow's own asset browser open with the new image
+      // selected and its bottom Add to prompt action visible. Reuse that picker
+      // through the normal exact-ID picker path below instead of treating the
+      // picker overlay as a pre-existing image context menu.
+      if (isReferencePickerSurface()) {
+        updateReferenceActionDiagnostics({ ...diagnostic, step: "reusing_open_reference_picker", tileActionStep: "picker_reused", surfaceStatus: "reference_picker_already_open" });
+        return null;
+      }
       const attached = chips().find(chip => normalize(chip.name) === normalize(ref.name) && chip.kind === "image");
       if (attached) {
         const attachedRawIdentity = attached.mediaId || chipMediaUuids(attached)[0];
@@ -884,9 +987,11 @@
       }
       const alreadyOpen = contextMenus(document, true);
       if (alreadyOpen.length) throw flowError("FLOW_REFERENCE_CONTEXT_MENU_BUSY", "Flow already has a menu open; no reference menu action was attempted.", false, false);
-      const tile = await root.findFlowTile?.(ref.name);
-      if (!tile || !exactTileTitle(tile, ref.name)) {
-        updateReferenceActionDiagnostics({ ...diagnostic, step: "tile_missing_picker_fallback", tileActionStep: "menu_missing", surfaceStatus: "tile_missing" });
+      const tileById = await root.findFlowTileByMediaId?.(expectedIdentity, { deadline, signal });
+      const tile = tileById || await root.findFlowTile?.(ref.name);
+      if (!tile || (!tileById && !exactTileTitle(tile, ref.name))) {
+        const state = tile ? "tile_title_mismatch" : "tile_missing";
+        updateReferenceActionDiagnostics({ ...diagnostic, step: tile ? "tile_title_not_exact_picker_fallback" : "tile_missing_picker_fallback", tileActionStep: "menu_missing", surfaceStatus: state });
         return null;
       }
       const verifyTile = async () => {
@@ -895,11 +1000,15 @@
           ? currentRaw
           : await resolveImageReferenceIdentity(currentRaw);
         const hasVideo = typeof root.flowQuery === "function" ? root.flowQuery("tiles.video", tile, { checkVisible: false }) : tile.querySelector("flow-video-tile,flow-scene-tile");
-        return tile.isConnected && exactTileTitle(tile, ref.name) && sameImageReferenceIdentity(current, expectedIdentity) && !hasVideo;
+        return tile.isConnected && (tileById || exactTileTitle(tile, ref.name)) && sameImageReferenceIdentity(current, expectedIdentity) && !hasVideo;
       };
       if (!(await verifyTile())) throw flowError("FLOW_ASSET_ID_MISMATCH", "The exact image tile does not match the completed upload UUID and image type. No reference was selected.", false, false);
-      const sameTitle = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", document, { checkVisible: false }) : null) || document.querySelectorAll("flow-grid-tile-container"))].filter(candidate => exactTileTitle(candidate, ref.name));
-      if (sameTitle.length !== 1 || sameTitle[0] !== tile) throw flowError("FLOW_ASSET_AMBIGUOUS", "Flow does not expose one unique exact-title image tile. No reference was selected.", false, false);
+      const sameIdentity = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", document, { checkVisible: false }) : null) || document.querySelectorAll("flow-grid-tile-container"))]
+        .filter(candidate => sameImageReferenceIdentity(mediaId(candidate), expectedIdentity));
+      const sameTitle = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", document, { checkVisible: false }) : null) || document.querySelectorAll("flow-grid-tile-container"))]
+        .filter(candidate => exactTileTitle(candidate, ref.name));
+      const uniqueTarget = tileById ? sameIdentity.length === 1 && sameIdentity[0] === tile : sameTitle.length === 1 && sameTitle[0] === tile;
+      if (!uniqueTarget) throw flowError("FLOW_ASSET_AMBIGUOUS", "Flow does not expose one unique tile for the requested image identity. No reference was selected.", false, false);
       tile.scrollIntoView?.({ behavior: "instant", block: "center" });
       await boundedWait(100, deadline, "settling the exact uploaded image tile", false, signal);
       if (!(await verifyTile())) throw flowError("FLOW_ASSET_CHANGED", "The uploaded image tile changed before its context menu opened. No reference was selected.", false, false);
@@ -1053,8 +1162,9 @@
       const scan = chipAttachEvidence(before, current, added, "attachment_unconfirmed");
       updateReferenceActionDiagnostics({ ...diagnostic, step: "reference_chip_unconfirmed", tileActionStep: "action_clicked", surfaceStatus: "chip_delta_unconfirmed", chipAttachScan: scan });
       const error = flowError("FLOW_REFERENCE_ATTACH_UNCONFIRMED", `Flow did not confirm one added image chip (before ${before.length}, after ${current.length}, delta ${current.length - before.length}). Inspect the composer before retrying.`, false, true);
-      error.diagnostics = { chipAttachScan: scan };
-      console.error("[FlowReferenceAction] image reference chip confirmation timed out", JSON.stringify(scan));
+      const pickerAddActionScan = lastReferenceActionDiagnostics.pickerAddActionScan || { candidateCount: 0, enabledCount: 0, disabled: false, method: "not_found", labels: [] };
+      error.diagnostics = { chipAttachScan: scan, pickerAddActionScan };
+      console.error("[FlowReferenceAction] image reference chip confirmation timed out", JSON.stringify({ chipAttachScan: scan, pickerAddActionScan }));
       throw error;
     } finally {
       if (ownedMenu && visible(ownedMenu)) {
@@ -1124,6 +1234,9 @@
     requireTime(deadline, "opening the reference picker");
     const existing = picker();
     if (existing) {
+      if (!isReferencePickerSurface(existing)) {
+        throw flowError("FLOW_REFERENCE_PICKER_BUSY", "Flow has another listbox open, not the reference asset picker. It was left untouched; no image was selected.", false, false);
+      }
       await settled(deadline, signal);
       return;
     }
@@ -1494,7 +1607,8 @@
     const deadline = config.deadline || makeDeadline(config.command, 45_000, 10_000);
     updateReferenceActionDiagnostics({ action: "attach", phase: "running", step: "preparing reference", error: null, cleanupError: null, lastResult: null,
       searchLabelRecognized: false, searchLabel: null, searchResultsVerified: false, pickerScanPages: 0, pickerScanEndReached: false,
-      categoriesScanned: [], chipAttachScan: null });
+      categoriesScanned: [], chipAttachScan: null, pickerAddActionScan: null });
+    findPickerAddToPromptButton.lastScanSignature = null;
     let operationError;
     try {
       requireTime(deadline, "attaching a Flow reference", false, config.signal);
@@ -1604,9 +1718,11 @@
         return result;
       }
       updateReferenceActionDiagnostics({ step: "selecting exact reference" });
-      option.click();
+      dispatchPrimaryClick(option);
       // Character options attach immediately; images may require Add to prompt.
       let confirmedClick = false;
+      let addActionClickAt = 0;
+      let addActionRetryUsed = false;
       const attachDeadline = Math.min(Date.now() + 10000, deadline);
       while (Date.now() < attachDeadline) {
         const added = addedReferenceChips(before, chips());
@@ -1622,8 +1738,21 @@
           updateReferenceActionDiagnostics({ phase: "completed", step: "frame slot confirmed", lastResult: { name: result.name, slot } });
           return result;
         }
-        const add = (picker() && flowButton("Add to prompt", picker().closest('[role="dialog"]') || picker())) || flowButton("Add to prompt");
-        if (!confirmedClick && add && !add.disabled && picker()) { add.click(); confirmedClick = true; }
+        const add = findPickerAddToPromptButton();
+        if (!confirmedClick && add && !isFlowActionDisabled(add) && picker()) {
+          dispatchPrimaryClick(add);
+          confirmedClick = true;
+          addActionClickAt = Date.now();
+          updateReferenceActionDiagnostics({ step: "clicked_picker_add_to_prompt", pickerAddActionScan: { candidateCount: 1, disabled: false, method: "pointer_sequence" } });
+        } else if (confirmedClick && !addActionRetryUsed && add && !isFlowActionDisabled(add) && picker() && chips().length === before.length && Date.now() - addActionClickAt >= 1800) {
+          // A few Flow builds ignore HTMLElement.click()/synthetic pointer
+          // activation on the dialog's footer until the control is activated
+          // through its normal click handler. Retry once only while the exact
+          // picker remains open and the composer still has the original count.
+          add.click();
+          addActionRetryUsed = true;
+          updateReferenceActionDiagnostics({ step: "retried_picker_add_to_prompt", pickerAddActionScan: { candidateCount: 1, disabled: false, method: "element_click_retry" } });
+        }
         await boundedWait(150, attachDeadline, `confirming reference "${ref.name}"`, true, config.signal);
       }
       requireTime(deadline, `confirming reference "${ref.name}"`);

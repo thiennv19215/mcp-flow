@@ -75,7 +75,19 @@
         if (!file || file.name !== assetName) throw this.error("FLOW_TRANSFER_UNKNOWN", "The staged media file is missing or its name does not match.", true);
         const deadline = root.FlowUiDeadline?.makeDeadline(command, 75_000, 15_000) || Date.now() + 60_000;
         const receipt = await components.uploadStagedFlowMedia(file, kind, command, { deadline });
-        return { ...receipt, uploaded: true, name: assetName, kind, trustedGesture: false };
+        // Upload can leave Flow's asset picker or upload menu mounted while
+        // the media tile finishes rendering. Close and verify it before the
+        // caller starts image/video generation or another DOM operation.
+        const popupState = await nav.prepareFlowOperation({ deadline: Date.now() + 4_000, signal: command?.signal });
+        return {
+          ...receipt,
+          uploaded: true,
+          name: assetName,
+          kind,
+          popupClear: popupState.ready === true,
+          popupDismissed: popupState.popupDismissed === true,
+          trustedGesture: false,
+        };
       }
 
       return undefined;

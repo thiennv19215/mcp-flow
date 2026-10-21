@@ -528,6 +528,77 @@ test('uploaded image attachment leaves an unrelated pre-existing menu untouched'
   assert.equal(fixture.unrelatedKeyEvents(), 0);
 });
 
+test('uploaded image reuses Flow\'s open asset picker and confirms Add to prompt instead of treating its overlay as a menu', async () => {
+  const mediaUuid = '22222222-2222-4222-8222-222222222222';
+  const attached = [];
+  let pickerOpen = true;
+  let contextMenuEvents = 0;
+  let optionClicks = 0;
+  let addClicks = 0;
+  let selected = false;
+  const image = { alt: 'Image ingredient image', getAttribute: key => key === 'data-media-id' ? mediaUuid : key === 'src' ? 'https://flow.google.com/asb/uploaded-image' : null };
+  const chipOwner = { tagName: 'DIV', getAttribute: key => key === 'data-kind' ? 'image' : null,
+    querySelectorAll: selector => /img|role='img'/.test(selector) ? [image] : [] };
+  const chip = { tagName: 'BUTTON', innerText: 'Ingredient', textContent: 'Ingredient',
+    getAttribute: key => key === 'aria-label' ? 'Ingredient' : key === 'role' ? 'button' : null,
+    querySelector: selector => /img/.test(selector) ? image : null,
+    querySelectorAll: () => [], closest: selector => selector.includes("[data-kind='image']") ? chipOwner : null };
+  const addButton = { tagName: 'BUTTON', innerText: 'Add to prompt', textContent: 'Add to prompt', disabled: false,
+    getAttribute: key => key === 'role' ? 'button' : key === 'aria-label' ? 'Add to prompt' : null,
+    querySelectorAll: () => [], getBoundingClientRect: () => ({ left: 10, top: 10, width: 100, height: 30 }),
+    click() { addClicks++; pickerOpen = false; attached.push(chip); } };
+  const allTab = { tagName: 'DIV', name: 'All', innerText: 'All', getAttribute: key => key === 'role' ? 'tab' : key === 'aria-label' ? 'All' : key === 'aria-selected' ? 'true' : null };
+  const tile = { getAttribute: key => key === 'aria-label' ? 'Uploaded exact.png' : key === 'data-media-id' ? mediaUuid : null,
+    querySelector: () => null, querySelectorAll: () => [], dispatchEvent(event) { if (event.type === 'contextmenu') contextMenuEvents++; } };
+  const option = { id: 'uploaded-option', tagName: 'DIV', innerText: 'Uploaded exact.png', textContent: 'Uploaded exact.png',
+    getAttribute: key => key === 'role' ? 'option' : key === 'aria-label' ? 'Uploaded exact.png' : key === 'aria-posinset' ? '1' : key === 'aria-selected' ? String(selected) : null,
+    querySelector: selector => selector === 'flow-grid-tile-container' ? tile : null, querySelectorAll: () => [],
+    click() { optionClicks++; selected = true; } };
+  const dialog = { tagName: 'DIV', className: 'cdk-overlay-pane', innerText: 'Images Search assets Add to prompt',
+    getAttribute: key => key === 'role' ? 'dialog' : null,
+    querySelectorAll(selector) {
+      if (selector.includes('button') || selector.includes('[role="button"]') || selector.includes('[role="tab"]')) return [allTab, addButton];
+      if (selector === 'input,[role="textbox"]') return [];
+      if (selector.includes('flow-grid-tile-container')) return [tile];
+      return [];
+    } };
+  const list = { tagName: 'DIV', clientHeight: 100, scrollHeight: 100, scrollTop: 0, style: { overflowY: 'auto' },
+    getAttribute: key => key === 'role' ? 'listbox' : null,
+    querySelector: selector => selector.includes('flow-grid-tile-container') ? tile : null,
+    querySelectorAll(selector) { return selector === '[role="option"]' ? [option] : []; },
+    closest: selector => selector.includes('[role="dialog"]') ? dialog : null };
+  const document = { documentElement: { lang: 'en' }, body: { innerText: '' },
+    querySelector(selector) { return selector === '[role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane' && pickerOpen ? dialog : null; },
+    querySelectorAll(selector) {
+      if (selector === '[role="listbox"]') return pickerOpen ? [list] : [];
+      if (selector === '[role="tab"]') return pickerOpen ? [allTab] : [];
+      if (selector === '[role="dialog"],[role="menu"],[role="listbox"],mat-menu,mat-select-panel') return pickerOpen ? [dialog, list] : [];
+      if (selector === '[role="progressbar"],[aria-busy="true"]') return [];
+      if (selector === 'flow-grid-tile-container') return pickerOpen ? [tile] : [];
+      if (selector === 'button[aria-label="Ingredient"]') return attached;
+      if (selector === 'button,[role="button"]') return [...attached, ...(pickerOpen ? [addButton] : [])];
+      if (selector === '[role="menu"],mat-menu-panel') return [];
+      if (selector === '.cdk-overlay-pane') return pickerOpen ? [dialog] : [];
+      return [];
+    } };
+  const context = vm.createContext({ document, location: { href: 'https://flow.google.com/project/test', pathname: '/project/test' }, Date,
+    visible: el => Boolean(el && (el === list || el === dialog || el === option || el === tile || el === allTab || el === addButton || attached.includes(el))),
+    mediaId: item => item?.getAttribute?.('data-media-id') || mediaUuid,
+    accessibleName: el => el?.getAttribute?.('aria-label') || el?.innerText || el?.name || '',
+    findFlowTile: async () => tile,
+    flowButton: name => name === 'Add to prompt' ? addButton : null,
+    wait: async () => {},
+    MouseEvent: class { constructor(type, options) { this.type = type; Object.assign(this, options); } },
+    flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }) });
+  vm.runInContext(source, context);
+  const result = await context.FlowReferenceActions.attach('Uploaded exact.png', undefined, { expectedId: mediaUuid, deadline: Date.now() + 5000 });
+  assert.equal(result.confirmed, true);
+  assert.equal(result.id, mediaUuid);
+  assert.equal(contextMenuEvents, 0, 'the open asset picker does not enter the tile context-menu path');
+  assert.equal(optionClicks, 1, 'the exact uploaded image option is selected once');
+  assert.equal(addClicks, 1, 'the picker footer Add to prompt action is activated once');
+});
+
 test('missing project-tile menu retries three times and retains tile-attempt evidence when picker fallback is unavailable', async () => {
   const fixture = uploadedTileMenuHarness({ noNewMenu: true });
   await assert.rejects(fixture.api.attach('Uploaded exact.png', undefined, { expectedId: fixture.mediaUuid, deadline: Date.now() + 5000 }), error =>
@@ -1371,6 +1442,7 @@ test('clearEditorTextPreservingChips wipes user text without removing reference 
 test('dismissBlockingOverlays clicks close buttons or dispatches Escape for open dialogs', async () => {
   const domUtilsSource = readFileSync(new URL('../extension/src/content/shared/dom-utils.js', import.meta.url), 'utf8');
   let closeClicked = false;
+  let dialogOpen = true;
   let escapeCount = 0;
 
   const closeButton = {
@@ -1380,7 +1452,7 @@ test('dismissBlockingOverlays clicks close buttons or dispatches Escape for open
     getAttribute: (attr) => attr === 'aria-label' ? 'Close dialog' : null,
     querySelectorAll: () => [],
     getBoundingClientRect: () => ({ width: 40, height: 40 }),
-    click: () => { closeClicked = true; },
+    click: () => { closeClicked = true; dialogOpen = false; },
   };
 
   const modalDialog = {
@@ -1398,7 +1470,7 @@ test('dismissBlockingOverlays clicks close buttons or dispatches Escape for open
     clearTimeout: () => {},
     document: {
       querySelectorAll: selector => {
-        if (selector.includes('[role="dialog"]')) return [modalDialog];
+        if (selector.includes('[role="dialog"]')) return dialogOpen ? [modalDialog] : [];
         if (selector.includes('cdk-overlay-backdrop')) return [];
         return [];
       },
@@ -1414,6 +1486,38 @@ test('dismissBlockingOverlays clicks close buttons or dispatches Escape for open
   const result = await dismissBlockingOverlays();
   assert.equal(result, true);
   assert.equal(closeClicked, true);
+  assert.equal(dialogOpen, false, 'the blocking dialog is verified closed before returning');
+});
+
+test('prepareFlowOperation closes and verifies an already-open Flow reference picker before continuing', async () => {
+  const navigationSource = readFileSync(new URL('../extension/src/content/providers/flow/core/navigation.js', import.meta.url), 'utf8');
+  const domUtilsSource = readFileSync(new URL('../extension/src/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  let pickerOpen = true;
+  let closeCalls = 0;
+  const context = vm.createContext({
+    window: {},
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+    setTimeout: (fn) => fn(),
+    clearTimeout: () => {},
+    document: {
+      querySelectorAll: selector => selector.includes('[role="dialog"]') || selector.includes('.cdk-overlay-pane') ? [] : [],
+      dispatchEvent: () => {},
+    },
+    KeyboardEvent: class KeyboardEvent { constructor(type, init) { this.type = type; this.key = init?.key; } },
+    FlowReferenceActions: {
+      inspectDiagnostics: () => ({ pickerOpen }),
+      closePicker: async () => { closeCalls++; pickerOpen = false; return { closed: true }; },
+    },
+    flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
+    location: { href: 'https://flow.google.com' },
+  });
+  vm.runInContext(domUtilsSource, context);
+  vm.runInContext(navigationSource, context);
+
+  const result = await context.FlowNavigation.prepareFlowOperation();
+  assert.equal(closeCalls, 1);
+  assert.equal(result.ready, true);
+  assert.equal(result.popupDismissed, true);
 });
 
 test('FlowDriverRegistry correctly flags sub-routes like /character as not project editor', () => {

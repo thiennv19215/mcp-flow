@@ -1,6 +1,6 @@
 {
   "name": "flow-mcp-native",
-  "version": "0.1.8",
+  "version": "0.1.15",
   "description": "Google Flow MCP with browser-side Chrome extension automation",
   "main": "index.js",
   "scripts": {

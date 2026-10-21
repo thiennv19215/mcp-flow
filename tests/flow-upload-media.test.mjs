@@ -31,8 +31,124 @@ function uploadHarness({ tileKind, name = 'same-name.png' }) {
     flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
   });
   runInContext(context);
-  return { components: context.FlowComponents, mediaId };
+  return { components: context.FlowComponents, uploader: context.FlowUploader, mediaId };
 }
+
+function mediaTile(id, name, kind = 'image') {
+  const image = { getAttribute: attribute => attribute === 'alt' ? name : null };
+  return {
+    id,
+    getAttribute: attribute => attribute === 'aria-label' ? name : null,
+    get innerText() { return name; },
+    get textContent() { return name; },
+    querySelector(selector) {
+      if (selector === 'flow-error-tile') return null;
+      if (selector === 'flow-scene-tile') return kind === 'scene' ? {} : null;
+      if (selector === 'flow-video-tile,video') return kind === 'video' ? {} : null;
+      if (selector === 'flow-image-tile,img' || selector === 'img') return kind === 'image' ? image : null;
+      return null;
+    },
+  };
+}
+
+test('Flow upload menu discovery keeps visible popups even before an Upload label is mounted', () => {
+  const { uploader } = uploadHarness({ tileKind: 'image' });
+  const unlabelledPicker = { isConnected: true };
+  const hiddenPopup = { isConnected: true };
+  const doc = { querySelectorAll: selector => {
+    assert.match(selector, /component-picker/);
+    return [unlabelledPicker, hiddenPopup];
+  } };
+
+  const roots = uploader.findVisibleUploadMenuRoots(doc, element => element === unlabelledPicker);
+  assert.equal(roots.length, 1);
+  assert.equal(roots[0], unlabelledPicker);
+});
+
+test('Flow upload menu recognizes common English and Vietnamese upload controls', () => {
+  const { uploader } = uploadHarness({ tileKind: 'image' });
+
+  for (const label of ['Upload media', 'Upload from device', 'Tải ảnh lên', 'Tải tệp từ máy tính', 'Chọn ảnh để tải lên']) {
+    assert.equal(uploader.matchesUploadAction([label]), true, `expected upload action: ${label}`);
+  }
+  assert.equal(uploader.matchesUploadAction([], 'file_upload'), true);
+  assert.equal(uploader.matchesUploadAction(['Upload'], '', 'tab'), false);
+  assert.equal(uploader.matchesUploadAction(['Upload'], '', 'button', 'false'), false);
+  assert.equal(uploader.matchesUploadAction(['Uploads']), false, 'the library category is not a file-upload action');
+});
+
+test('Flow category switching requires explicit tab semantics so Upload is never pre-clicked as a file action', () => {
+  const { uploader } = uploadHarness({ tileKind: 'image' });
+
+  assert.equal(uploader.matchesUploadCategoryTab({ label: 'Upload', role: 'tab' }), true);
+  assert.equal(uploader.matchesUploadCategoryTab({ label: 'Upload media', role: 'button' }), false);
+  assert.equal(uploader.matchesUploadCategoryTab({ label: 'Uploads', role: 'button' }), false);
+});
+
+test('upload confirmation selects the single new media ID when old Flow tiles share the filename', async () => {
+  const name = 'same-name.png';
+  const oldIds = ['old-media-1', 'old-media-2'];
+  const newId = 'new-media-3';
+  const tiles = [...oldIds.map(id => mediaTile(id, name)), mediaTile(newId, name)];
+  const context = vm.createContext({
+    document: { querySelectorAll: selector => selector === 'flow-grid-tile-container' ? tiles : [] },
+    FlowTiles: { isTileMediaReady: () => true },
+    mediaId: tile => tile.id,
+    FlowUiDeadline: { boundedWait: async () => {} },
+    flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
+  });
+  runInContext(context);
+
+  const result = await context.waitForNativeMediaTile(name, {}, 'image', {
+    deadline: Date.now() + 2000,
+    baselineIds: oldIds,
+    requireNewOwner: true,
+    maxLibraryScans: 0,
+  });
+  assert.equal(result.id, newId);
+  assert.equal(result.name, name);
+});
+
+test('upload confirmation rejects multiple new Flow media IDs with the same filename', async () => {
+  const name = 'same-name.png';
+  const tiles = [mediaTile('new-media-1', name), mediaTile('new-media-2', name)];
+  const context = vm.createContext({
+    document: { querySelectorAll: selector => selector === 'flow-grid-tile-container' ? tiles : [] },
+    FlowTiles: { isTileMediaReady: () => true },
+    mediaId: tile => tile.id,
+    flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
+  });
+  runInContext(context);
+
+  await assert.rejects(context.waitForNativeMediaTile(name, {}, 'image', {
+    deadline: Date.now() + 2000,
+    baselineIds: [],
+    requireNewOwner: true,
+    maxLibraryScans: 0,
+  }), error => error.code === 'FLOW_UPLOAD_TILE_AMBIGUOUS' && error.outcome_unknown === true);
+});
+
+test('multiple existing Flow tiles with the same filename reuse an exact ready asset instead of uploading again', async () => {
+  const name = 'same-name.png';
+  const existingIds = ['existing-media-1', 'existing-media-2'];
+  const tiles = existingIds.map(id => mediaTile(id, name));
+  let progress = '';
+  const context = vm.createContext({
+    document: { querySelectorAll: selector => selector === 'flow-grid-tile-container' ? tiles : [] },
+    FlowTiles: { isTileMediaReady: () => true },
+    mediaId: tile => tile.id,
+    scrollContainer: () => null,
+    emitFlowProgress: (_command, message) => { progress = message; },
+    flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
+  });
+  runInContext(context);
+
+  const result = await context.FlowUploader.upload({ name }, 'image', {});
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    uploaded: true, name, kind: 'image', id: existingIds[0], reused: true,
+  });
+  assert.match(progress, /skipped upload/i);
+});
 
 test('reusing an exact-name tile rejects a ready tile of the wrong media kind', async () => {
   const { components } = uploadHarness({ tileKind: 'video' });

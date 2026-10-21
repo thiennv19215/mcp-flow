@@ -333,108 +333,7 @@
     }
   }
 
-  // Setup Reference Image Upload for Image & Video
-  let refFilesImage = [];
-  let refFilesVideo = [];
-
-  function setupRefUpload(type) {
-    const isImage = type === "image";
-    const uploadSlot = document.querySelector(isImage ? "#refUploadSlotImage" : "#refUploadSlotVideo");
-    const fileInput = document.querySelector(isImage ? "#refFileInputImage" : "#refFileInputVideo");
-    const dropzoneHint = document.querySelector(isImage ? "#refDropzoneHintImage" : "#refDropzoneHintVideo");
-    const cardsList = document.querySelector(isImage ? "#refCardsListImage" : "#refCardsListVideo");
-    const countBadge = document.querySelector(isImage ? "#refImageCountImage" : "#refImageCountVideo");
-
-    if (!uploadSlot || !fileInput) return;
-
-    uploadSlot.onclick = () => fileInput.click();
-    if (dropzoneHint) dropzoneHint.onclick = () => fileInput.click();
-
-    fileInput.onchange = (e) => {
-      const files = Array.from(e.target.files || []);
-      addFiles(files);
-      fileInput.value = "";
-    };
-
-    const dropTarget = cardsList?.parentElement;
-    if (dropTarget) {
-      dropTarget.ondragover = (e) => {
-        e.preventDefault();
-        dropTarget.style.borderColor = "var(--primary)";
-      };
-      dropTarget.ondragleave = () => {
-        dropTarget.style.borderColor = "";
-      };
-      dropTarget.ondrop = (e) => {
-        e.preventDefault();
-        dropTarget.style.borderColor = "";
-        const files = Array.from(e.dataTransfer?.files || []).filter(f => f.type.startsWith("image/"));
-        addFiles(files);
-      };
-    }
-
-    function addFiles(files) {
-      const list = isImage ? refFilesImage : refFilesVideo;
-      for (const f of files) {
-        if (list.length >= 3) break;
-        list.push(f);
-      }
-      renderCards();
-    }
-
-    function renderCards() {
-      const list = isImage ? refFilesImage : refFilesVideo;
-      if (countBadge) countBadge.textContent = `${list.length}/3 ảnh`;
-
-      cardsList.querySelectorAll(".ref-card").forEach(el => el.remove());
-
-      list.forEach((file, idx) => {
-        const card = document.createElement("div");
-        card.className = "ref-card";
-
-        const img = document.createElement("img");
-        img.src = URL.createObjectURL(file);
-
-        const badge = document.createElement("div");
-        badge.className = "ref-badge";
-        badge.textContent = String(idx + 1);
-
-        const tag = document.createElement("div");
-        tag.className = "ref-tag";
-        tag.textContent = file.name || "Chờ upload";
-        tag.title = file.name || "Chờ upload";
-
-        const rmBtn = document.createElement("button");
-        rmBtn.className = "ref-remove-btn";
-        rmBtn.title = "Xóa ảnh này";
-        rmBtn.innerHTML = `
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <line x1="18" y1="6" x2="6" y2="18"></line>
-            <line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-        `;
-        rmBtn.onclick = (e) => {
-          e.stopPropagation();
-          list.splice(idx, 1);
-          renderCards();
-        };
-
-        card.appendChild(img);
-        card.appendChild(badge);
-        card.appendChild(tag);
-        card.appendChild(rmBtn);
-
-        cardsList.insertBefore(card, uploadSlot);
-      });
-
-      if (uploadSlot) {
-        uploadSlot.style.display = list.length >= 3 ? "none" : "flex";
-      }
-    }
-  }
-
-  setupRefUpload("image");
-  setupRefUpload("video");
+  const referencePicker = window.createFlowReferencePicker({ dispatchFlowOperation, setFeedback });
 
   async function uploadReferenceImage(file, onProgress) {
     if (window.FlowUploadClient) {
@@ -452,6 +351,7 @@
 
   // SUBMIT TẠO ẢNH (GENERATE IMAGE)
   document.querySelector("#btnSubmitImage").onclick = async () => {
+    const refFilesImage = referencePicker.getReferences("image");
     const btn = document.querySelector("#btnSubmitImage");
     const btnTextEl = document.querySelector("#txtBtnSubmitImage");
     const prompt = document.querySelector("#inputPromptImage").value.trim();
@@ -471,20 +371,25 @@
 
     try {
       if (btn) btn.disabled = true;
-      // Upload các ảnh tham chiếu nếu có
-      if (refFilesImage.length > 0) {
+      // Reuse selected Flow media IDs; only newly chosen local files are uploaded.
+      const localImageReferences = refFilesImage.filter(reference => reference.source === "local");
+      if (localImageReferences.length > 0) {
         try { await assertQueueIdleForReferenceUpload(); }
         catch (error) { setFeedback(error.message, false); return; }
-        for (let i = 0; i < refFilesImage.length; i++) {
-          setFeedback(`Đang tải ảnh tham chiếu ${i + 1}/${refFilesImage.length} lên Flow...`, true);
-          const uploaded = await uploadReferenceImage(refFilesImage[i]);
-          const uploadedName = typeof uploaded === "string" ? uploaded : (uploaded?.name || uploaded?.title || String(uploaded));
-          const uploadedId = typeof uploaded === "object" ? (uploaded?.id || uploaded?.mediaId) : undefined;
-          attachments.push({
-            assetName: `asset:${uploadedName}`,
-            ...(uploadedId ? { expectedId: uploadedId } : {})
-          });
+      }
+      let uploadedImageCount = 0;
+      for (let i = 0; i < refFilesImage.length; i++) {
+        const reference = refFilesImage[i];
+        if (reference.source === "flow") {
+          attachments.push({ assetName: reference.assetName, expectedId: reference.expectedId });
+          continue;
         }
+        uploadedImageCount++;
+        setFeedback(`Đang tải ảnh tham chiếu ${uploadedImageCount}/${localImageReferences.length} lên Flow...`, true);
+        const uploaded = await uploadReferenceImage(reference.file);
+        const uploadedName = typeof uploaded === "string" ? uploaded : (uploaded?.name || uploaded?.title || String(uploaded));
+        const uploadedId = typeof uploaded === "object" ? (uploaded?.id || uploaded?.mediaId) : undefined;
+        attachments.push({ assetName: `asset:${uploadedName}`, ...(uploadedId ? { expectedId: uploadedId } : {}) });
       }
 
       await executeGenerationTask({
@@ -508,6 +413,7 @@
 
   // SUBMIT TẠO VIDEO (GENERATE VIDEO)
   document.querySelector("#btnSubmitVideo").onclick = async () => {
+    const refFilesVideo = referencePicker.getReferences("video");
     const btn = document.querySelector("#btnSubmitVideo");
     const btnTextEl = document.querySelector("#txtBtnSubmitVideo");
     const prompt = document.querySelector("#inputPromptVideo").value.trim();
@@ -529,20 +435,25 @@
 
     try {
       if (btn) btn.disabled = true;
-      // Upload các ảnh tham chiếu nếu có
-      if (refFilesVideo.length > 0) {
+      // Reuse selected Flow media IDs; only newly chosen local files are uploaded.
+      const localVideoReferences = refFilesVideo.filter(reference => reference.source === "local");
+      if (localVideoReferences.length > 0) {
         try { await assertQueueIdleForReferenceUpload(); }
         catch (error) { setFeedback(error.message, false); return; }
-        for (let i = 0; i < refFilesVideo.length; i++) {
-          setFeedback(`Đang tải ảnh tham chiếu ${i + 1}/${refFilesVideo.length} lên Flow...`, true);
-          const uploaded = await uploadReferenceImage(refFilesVideo[i]);
-          const uploadedName = typeof uploaded === "string" ? uploaded : (uploaded?.name || uploaded?.title || String(uploaded));
-          const uploadedId = typeof uploaded === "object" ? (uploaded?.id || uploaded?.mediaId) : undefined;
-          attachments.push({
-            assetName: `asset:${uploadedName}`,
-            ...(uploadedId ? { expectedId: uploadedId } : {})
-          });
+      }
+      let uploadedVideoCount = 0;
+      for (let i = 0; i < refFilesVideo.length; i++) {
+        const reference = refFilesVideo[i];
+        if (reference.source === "flow") {
+          attachments.push({ assetName: reference.assetName, expectedId: reference.expectedId });
+          continue;
         }
+        uploadedVideoCount++;
+        setFeedback(`Đang tải ảnh tham chiếu ${uploadedVideoCount}/${localVideoReferences.length} lên Flow...`, true);
+        const uploaded = await uploadReferenceImage(reference.file);
+        const uploadedName = typeof uploaded === "string" ? uploaded : (uploaded?.name || uploaded?.title || String(uploaded));
+        const uploadedId = typeof uploaded === "object" ? (uploaded?.id || uploaded?.mediaId) : undefined;
+        attachments.push({ assetName: `asset:${uploadedName}`, ...(uploadedId ? { expectedId: uploadedId } : {}) });
       }
 
       await executeGenerationTask({

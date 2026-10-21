@@ -263,13 +263,19 @@
       const kind = scene ? "scene" : video ? "video" : image ? "image" : null;
       const name = (tile.getAttribute("aria-label") || tile.getAttribute("title") || tile.getAttribute("data-tile-name") ||
         tile.querySelector("img")?.getAttribute("alt") || tile.querySelector("img")?.getAttribute("aria-label") || "").trim();
+      const imageElement = tile.querySelector("img");
+      let thumbnailUrl = imageElement?.currentSrc || imageElement?.getAttribute("src") || "";
+      try {
+        const parsedThumbnail = new URL(thumbnailUrl, location.href);
+        thumbnailUrl = parsedThumbnail.protocol === "https:" ? parsedThumbnail.href : "";
+      } catch { thumbnailUrl = ""; }
       const rawId = root.mediaId?.(tile);
       const id = rawId && !rawId.startsWith("title:") ? rawId : undefined;
       if ((!kind || !name) && (!includeIncomplete || !id)) return null;
       const busy = Boolean(root.FlowTiles?.isTileBusy?.(tile) ?? root.isTileBusy?.(tile));
       const ready = Boolean(root.FlowTiles?.isTileMediaReady?.(tile) ?? (!busy && root.isTileMediaReady?.(tile)));
       const hasError = Boolean(typeof root.flowQuery === "function" ? root.flowQuery("tiles.error", tile, { checkVisible: false }) : tile.querySelector("flow-error-tile"));
-      return { ...(id ? { id } : {}), name, kind, busy, ...(includeIncomplete ? { ready, error: hasError } : {}) };
+      return { ...(id ? { id } : {}), name, kind, ...(thumbnailUrl ? { thumbnailUrl } : {}), busy, ...(includeIncomplete ? { ready, error: hasError } : {}) };
     }).filter(Boolean);
   }
 

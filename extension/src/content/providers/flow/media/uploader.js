@@ -73,6 +73,61 @@
     return candidates[0] || null;
   }
 
+  const FLOW_UPLOAD_MENU_ROOT_SELECTOR = [
+    '[role="menu"]', '[role="dialog"]', '[role="listbox"]', '[aria-modal="true"]',
+    'mat-menu-panel', '.mat-mdc-menu-panel', '.cdk-overlay-pane', '[data-state="open"]',
+    'flow-component-picker', '[data-testid*="component-picker"]', '[data-testid*="add-component"]',
+    '[class*="component-picker"]',
+  ].join(",");
+
+  function visibleFlowUploadMenuRoots(doc = document, isVisible = el => Boolean(el && el.isConnected)) {
+    try {
+      return [...new Set(doc.querySelectorAll(FLOW_UPLOAD_MENU_ROOT_SELECTOR))].filter(isVisible);
+    } catch {
+      return [];
+    }
+  }
+
+  function normalizeFlowUploadActionLabel(value) {
+    return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[đĐ]/g, "d")
+      .toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " ");
+  }
+
+  function flowUploadActionMatches(labels, icon = "", role = "", ariaSelected = null) {
+    if (String(role || "").toLowerCase() === "tab" || ariaSelected !== null) return false;
+    if (["upload", "file_upload", "upload_file", "cloud_upload", "drive_folder_upload"].includes(String(icon || "").trim().toLowerCase())) return true;
+    const exactLabels = new Set([
+      "upload", "upload media", "upload file", "upload files", "upload image", "upload images",
+      "upload from computer", "upload from device", "upload from this device", "upload media from computer",
+      "upload media from device", "upload image from computer", "upload image from device", "browse files",
+      "browse images", "choose file", "choose files", "choose image", "choose images", "select file",
+      "select files", "select image", "select images", "add file from computer", "add image from computer",
+      "tai len", "tai anh", "tai anh len", "tai hinh anh", "tai hinh anh len", "tai tep", "tai tep len",
+      "tai noi dung len", "tai noi dung nghe nhin len", "tai phuong tien len", "tai phuong tien",
+      "tai len tu may tinh", "tai len tu thiet bi", "tai tu may tinh", "tai tu thiet bi",
+      "chon tep", "chon tep de tai len", "chon anh", "chon anh de tai len", "chon hinh anh",
+      "chon hinh anh de tai len",
+    ]);
+    return (Array.isArray(labels) ? labels : [labels]).some(raw => {
+      const label = normalizeFlowUploadActionLabel(raw);
+      if (!label) return false;
+      if (exactLabels.has(label)) return true;
+      return /^(?:upload|browse|choose|select|add) (?:media|files?|images?) (?:from|on) (?:this )?(?:computer|device)$/.test(label) ||
+        /^(?:upload|browse|choose|select) (?:a )?(?:file|files|image|images) (?:to upload|for upload)$/.test(label) ||
+        /^(?:tai|tai len) (?:anh|hinh anh|tep|noi dung|phuong tien) (?:len )?tu (?:may tinh|thiet bi)$/.test(label) ||
+        /^(?:tai|tai len) (?:anh|hinh anh|tep|noi dung|phuong tien)(?: len)?$/.test(label) ||
+        /^chon (?:tep|anh|hinh anh)(?: de tai len| tai len)?$/.test(label);
+    });
+  }
+
+  function flowUploadCategoryTabMatches({ label = "", icon = "", role = "", ariaSelected = null, tagName = "" } = {}) {
+    const explicitTab = String(role || "").toLowerCase() === "tab" || ariaSelected !== null ||
+      /^(?:mat-tab|mat-tab-header)$/.test(String(tagName || "").toLowerCase());
+    if (!explicitTab) return false;
+    const folded = normalizeFlowUploadActionLabel(label);
+    return ["upload", "uploads", "upload files", "upload media", "tai len", "tep tai len", "noi dung tai len", "cac tep tai len"].includes(folded);
+  }
+
   function assertReusableFlowUploadKind(tile, assetName, expectedKind) {
     const actualKind = flowUploadTileKind(tile);
     if (actualKind && !flowUploadKindMatches(expectedKind, actualKind)) {
@@ -287,6 +342,7 @@
     const maxLibraryScans = Number.isInteger(options.maxLibraryScans) ? Math.max(0, options.maxLibraryScans) : 3;
     const baselineIds = new Set((options.baselineIds || []).map(String));
     const requireNewOwner = options.requireNewOwner === true;
+    const expectedId = options.expectedId ? String(options.expectedId) : null;
     let ownerId = options.ownerId ? String(options.ownerId) : null;
     let exactTileObserved = false;
     let lastScan = null;
@@ -294,13 +350,23 @@
     const getMediaId = root.mediaId || (el => el.getAttribute("data-media-id") || el.getAttribute("id") || "");
 
     while (Date.now() < deadline) {
-      const exactMatches = [...document.querySelectorAll("flow-grid-tile-container")]
+      const exactNameMatches = [...document.querySelectorAll("flow-grid-tile-container")]
         .filter(item => matchesFlowTile(item, assetName));
-      if (exactMatches.length) exactTileObserved = true;
-      if (exactMatches.length > 1) {
+      if (exactNameMatches.length) exactTileObserved = true;
+      const exactMatches = expectedId && !requireNewOwner
+        ? exactNameMatches.filter(item => String(getMediaId(item)) === expectedId)
+        : exactNameMatches;
+      if (exactMatches.length > 1 && !requireNewOwner) {
         throw fn("FLOW_UPLOAD_TILE_AMBIGUOUS", `More than one Flow tile exactly matches uploaded ${kind} "${assetName}". Inspect the library before retrying.`, false, true);
       }
-      const tile = exactMatches[0] || null;
+      const newExactMatches = requireNewOwner ? exactMatches.filter(item => {
+        const identity = getMediaId(item);
+        return identity && !String(identity).startsWith("title:") && !baselineIds.has(String(identity));
+      }) : exactMatches;
+      if (newExactMatches.length > 1) {
+        throw fn("FLOW_UPLOAD_TILE_AMBIGUOUS", `More than one new Flow tile exactly matches uploaded ${kind} "${assetName}". Inspect the library before retrying.`, false, true);
+      }
+      const tile = newExactMatches[0] || null;
       if (tile) {
         if (tile.querySelector("flow-error-tile")) {
           throw fn("FLOW_UPLOAD_REJECTED", `Flow rejected uploaded ${kind} "${assetName}".`, false, true);
@@ -331,7 +397,7 @@
           const assets = await root.FlowMediaMenu.scanNativeAssets({
             deadline: Math.min(deadline, Date.now() + 8_000),
             maxDurationMs: 8_000,
-            exactName: assetName,
+            ...(expectedId ? {} : { exactName: assetName }),
             kind,
             includeIncomplete: true,
             ...(requireNewOwner ? { baselineIds: [...baselineIds], ownerKind: kind } : {}),
@@ -342,7 +408,12 @@
               root.emitFlowProgress?.(command, `Upload confirmation scan ${libraryScans}: ${lastScan.uniqueTiles} unique tiles across ${lastScan.steps} pages; baseline ${baselineIds.size}, owner ${ownerId || "not latched"}`);
             },
           });
-          const confirmedAssets = assets.filter(asset => flowUploadNameMatches(asset?.name, assetName) && asset?.id);
+          const exactAssets = assets.filter(asset => asset?.id && (expectedId
+            ? String(asset.id) === expectedId && flowUploadNameMatches(asset?.name, assetName)
+            : flowUploadNameMatches(asset?.name, assetName)));
+          const confirmedAssets = requireNewOwner
+            ? exactAssets.filter(asset => asset?.newSinceBaseline === true && !baselineIds.has(String(asset.id)))
+            : exactAssets;
           if (confirmedAssets.length > 1) throw fn("FLOW_UPLOAD_TILE_AMBIGUOUS", `More than one Flow library tile exactly matches uploaded ${kind} "${assetName}". Inspect the library before retrying.`, false, true);
           if (confirmedAssets.length === 1) {
             const asset = confirmedAssets[0];
@@ -403,21 +474,47 @@
     }
 
     const existingTiles = [...document.querySelectorAll("flow-grid-tile-container")].filter(item => matchesFlowTile(item, file.name));
-    if (existingTiles.length > 1) {
-      throw fn("FLOW_UPLOAD_TILE_AMBIGUOUS", `More than one Flow tile exactly matches "${file.name}". Inspect the library before retrying.`, false, true);
+    const namedTileDetails = existingTiles.map(tile => {
+      const id = typeof root.mediaId === "function" ? root.mediaId(tile) : "";
+      const actualKind = flowUploadTileKind(tile);
+      const ready = root.FlowTiles?.isTileMediaReady?.(tile) ?? !root.isTileBusy?.(tile);
+      return { tile, id: id && !String(id).startsWith("title:") ? String(id) : null, actualKind, ready,
+        error: Boolean(tile.querySelector("flow-error-tile")) };
+    }).filter(Boolean);
+    const matchingKindTiles = namedTileDetails.filter(item => !item.error && (!item.actualKind || flowUploadKindMatches(kind, item.actualKind)));
+    const reusableTiles = matchingKindTiles.filter(item => item.id);
+    if (reusableTiles.length) {
+      // Use the first exact-title, matching-kind asset in Flow's current grid order and carry its UUID into the picker selection.
+      const chosen = reusableTiles.find(item => item.actualKind && item.ready) || reusableTiles[0];
+      if (chosen.actualKind && chosen.ready) {
+        root.emitFlowProgress?.(command, `Reusing existing Flow ${kind} media ID ${chosen.id} for "${file.name}"; skipped upload.`);
+        return { uploaded: true, name: file.name, kind, id: chosen.id, reused: true };
+      }
+      const confirmed = await waitForNativeMediaTile(file.name, command, kind, { deadline, signal: options.signal, expectedId: chosen.id });
+      root.emitFlowProgress?.(command, `Reusing existing Flow ${kind} media ID ${confirmed.id} for "${file.name}" after readiness confirmation; skipped upload.`);
+      return { ...confirmed, uploaded: true, name: file.name, kind, reused: true };
     }
     if (existingTiles.length === 1) {
       if (existingTiles[0].querySelector("flow-error-tile")) {
         throw fn("FLOW_UPLOAD_REJECTED", `Flow already has an error tile for "${file.name}". Inspect it before retrying.`, false, true);
       }
-      const id = typeof root.mediaId === "function" ? root.mediaId(existingTiles[0]) : "";
-      const ready = root.FlowTiles?.isTileMediaReady?.(existingTiles[0]) ?? !root.isTileBusy?.(existingTiles[0]);
       const actualKind = assertReusableFlowUploadKind(existingTiles[0], file.name, kind);
-      if (ready && id && !id.startsWith("title:") && flowUploadKindMatches(kind, actualKind)) {
-        return { uploaded: true, name: file.name, kind, id, reused: true };
-      }
+      if (actualKind && !flowUploadKindMatches(kind, actualKind)) throw fn("FLOW_UPLOAD_KIND_MISMATCH", `Flow already has a ${actualKind} tile named "${file.name}", not the requested ${kind}. No upload was started.`, false, false);
       const confirmed = await waitForNativeMediaTile(file.name, command, kind, { deadline, signal: options.signal });
       return { uploaded: true, name: file.name, kind, id: confirmed.id, reused: true };
+    }
+    if (existingTiles.length > 1) {
+      const knownKinds = existingTiles.map(flowUploadTileKind).filter(Boolean);
+      if (knownKinds.length === existingTiles.length && !knownKinds.some(actualKind => flowUploadKindMatches(kind, actualKind))) {
+        throw fn("FLOW_UPLOAD_KIND_MISMATCH", `Flow has tiles named "${file.name}", but none are ${kind} media. No upload was started.`, false, false);
+      }
+      if (matchingKindTiles.length) {
+        throw fn("FLOW_UPLOAD_ID_UNAVAILABLE", `Flow already has media tiles named "${file.name}", but none exposes a stable ID that can be selected safely. No duplicate upload was started.`, true, false);
+      }
+      if (namedTileDetails.every(item => item.error)) {
+        throw fn("FLOW_UPLOAD_REJECTED", `All Flow tiles named "${file.name}" are in an error state. No duplicate upload was started.`, false, true);
+      }
+      throw fn("FLOW_UPLOAD_ID_UNAVAILABLE", `Flow has multiple tiles named "${file.name}", but their media IDs or types are not sufficient to choose an existing ${kind} asset safely. No duplicate upload was started.`, true, false);
     }
 
     const baselineAssets = root.FlowMediaMenu?.collectAssets?.({ includeIncomplete: true });
@@ -431,15 +528,6 @@
     const isVisible = root.visible || (el => Boolean(el && el.isConnected));
     const getAria = root.accessibleName || (el => el.getAttribute("aria-label") || "");
 
-    const uploadNames = new Set([
-      "upload", "upload media", "upload file", "upload from computer", "upload from device", "uploads",
-      "tải lên", "tải tệp", "tải tệp lên", "tải lên tệp", "tải ảnh lên", "tải hình ảnh lên",
-      "tải nội dung nghe nhìn lên", "tải phương tiện lên", "nội dung tải lên", "tệp tải lên",
-      "tải lên từ máy tính", "tải lên từ thiết bị", "tải tệp từ thiết bị", "chọn tệp để tải lên",
-      "tải nội dung lên", "tải phương tiện",
-    ]);
-    const normUploadNames = new Set([...uploadNames].map(name => typeof root.normalizeFlowUiText === "function" ? root.normalizeFlowUiText(name) : name));
-
     const labelOf = el => {
       const labels = [getAria(el), el.getAttribute("aria-label"), el.getAttribute("title"), el.innerText, el.textContent];
       try {
@@ -450,40 +538,39 @@
       return labels.map(normalize);
     };
 
-    const isUploadLabel = el => {
-      const icon = el.querySelector("mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined,svg")?.textContent?.trim() || "";
-      if (["upload", "file_upload", "upload_file", "cloud_upload"].includes(icon)) return true;
-      return labelOf(el).some(label => {
-        if (uploadNames.has(label)) return true;
-        const stripped = label.replace(/^(?:upload|upload_file|file_upload|arrow_upward)\s+/, "");
-        if (uploadNames.has(stripped)) return true;
-        const folded = typeof root.normalizeFlowUiText === "function" ? root.normalizeFlowUiText(label) : label;
-        return normUploadNames.has(folded);
-      });
+    const iconOf = el => el.querySelector("mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined,svg")?.textContent?.trim() ||
+      el.getAttribute("data-icon") || el.getAttribute("aria-hidden-icon") || "";
+    const isUploadAction = el => flowUploadActionMatches(labelOf(el), iconOf(el), el.getAttribute("role"), el.getAttribute("aria-selected"));
+    const menuRoots = () => visibleFlowUploadMenuRoots(document, isVisible);
+    const menuControlSelector = '[role="tab"],button,[role="button"],[role="menuitem"],a,[tabindex],mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined';
+    const controlsIn = (scope, selector = menuControlSelector) => {
+      const descendants = [...scope.querySelectorAll(selector)];
+      if (scope.matches?.(selector)) descendants.unshift(scope);
+      return descendants;
     };
 
-    const isUploadAction = el => {
-      if (el.matches('[role="tab"]') || el.getAttribute("aria-selected") !== null) return false;
-      const icon = el.querySelector("mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined,svg")?.textContent?.trim() || "";
-      if (["file_upload", "upload_file", "cloud_upload", "upload"].includes(icon)) return true;
-      const actionNames = new Set([
-        "upload", "upload media", "upload file", "upload from computer", "upload from device",
-        "tải lên", "tải tệp", "tải tệp lên", "tải lên tệp", "tải ảnh lên", "tải hình ảnh lên",
-        "tải nội dung nghe nhìn lên", "tải phương tiện lên", "tải lên từ máy tính", "tải lên từ thiết bị",
-        "tải tệp từ thiết bị", "chọn tệp để tải lên", "tải nội dung lên",
-      ]);
-      const normActionNames = new Set([...actionNames].map(a => typeof root.normalizeFlowUiText === "function" ? root.normalizeFlowUiText(a) : a));
-      return labelOf(el).some(label => {
-        if (actionNames.has(label)) return true;
-        const folded = typeof root.normalizeFlowUiText === "function" ? root.normalizeFlowUiText(label) : label;
-        if (normActionNames.has(folded)) return true;
-        return folded.includes("tai len") || folded.includes("tai tep") || folded.includes("tai noi dung") ||
-          label.includes("upload media") || label.includes("upload file") || label.includes("upload from");
+    const uploadMenuDiagnostics = () => {
+      const roots = menuRoots();
+      const controls = [...new Set(roots.flatMap(scope => controlsIn(scope, 'button,[role="button"],[role="menuitem"],a,[tabindex],[role="tab"]')))]
+        .filter(el => isVisible(el));
+      const summarize = el => ({
+        tag: String(el.tagName || "unknown").toLowerCase(),
+        role: el.getAttribute("role") || null,
+        aria: String(getAria(el) || el.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim().slice(0, 70),
+        title: String(el.getAttribute("title") || "").replace(/\s+/g, " ").trim().slice(0, 70),
+        text: String(el.innerText || el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 70),
+        icon: iconOf(el).slice(0, 30),
+        disabled: Boolean(el.disabled || el.getAttribute("aria-disabled") === "true"),
       });
+      return {
+        visiblePopupRootCount: roots.length,
+        popupRoots: roots.slice(0, 8).map(el => ({ tag: String(el.tagName || "unknown").toLowerCase(), role: el.getAttribute("role") || null,
+          className: String(el.className?.baseVal || el.className || "").replace(/\s+/g, " ").trim().slice(0, 90) })),
+        visibleControlCount: controls.length,
+        uploadActionCandidates: controls.filter(isUploadAction).slice(0, 8).map(summarize),
+        controls: controls.slice(0, 12).map(summarize),
+      };
     };
-
-    const menuRoots = () => [...document.querySelectorAll('[role="menu"],mat-menu-panel,[role="dialog"],.cdk-overlay-pane,[data-state="open"]')]
-      .filter(mRoot => isVisible(mRoot) && [...mRoot.querySelectorAll('[role="tab"],button,[role="button"],[role="menuitem"],a,[tabindex],mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined')].some(isUploadLabel));
 
     const clickFlowControl = element => {
       const rect = element.getBoundingClientRect();
@@ -497,37 +584,38 @@
       return true;
     };
 
+    const lastUploadTabClickAt = new WeakMap();
     const switchUploadCategoryTab = async roots => {
-      const allRoleTabs = roots.flatMap(mRoot => [...mRoot.querySelectorAll('[role="tab"]')]);
-      const tabCandidates = allRoleTabs.length > 0 ? allRoleTabs : roots.flatMap(mRoot => [...mRoot.querySelectorAll('button')]);
-      const validTabs = [...new Set(tabCandidates)].filter(tab => {
+      const tabs = [...new Set(roots.flatMap(scope => controlsIn(scope, '[role="tab"],[aria-selected],mat-tab,mat-tab-header button')))].filter(tab => {
         if (!isVisible(tab) || tab.disabled || tab.getAttribute("aria-disabled") === "true") return false;
-        const icon = tab.querySelector("mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined,svg")?.textContent?.trim() || "";
-        const label = getAria(tab).replace(/\s+/g, " ").trim().toLowerCase();
-        const folded = typeof root.normalizeFlowUiText === "function" ? root.normalizeFlowUiText(label) : label;
-        return ["upload", "file_upload", "upload_file", "cloud_upload"].includes(icon) ||
-          ["upload", "uploads", "upload file", "tải lên", "nội dung tải lên", "tệp tải lên", "các tệp tải lên", "tải tệp", "tải tệp lên", "tải lên tệp", "tải ảnh lên", "tải hình ảnh lên"].includes(label) ||
-          ["upload", "uploads", "tai len", "noi dung tai len", "tep tai len", "cac tep tai len", "tai tep", "tai tep len", "tai len tep"].includes(folded);
+        return flowUploadCategoryTabMatches({ label: labelOf(tab)[0] || "", icon: iconOf(tab), role: tab.getAttribute("role"),
+          ariaSelected: tab.getAttribute("aria-selected"), tagName: tab.tagName });
       });
+      const validTabs = tabs;
       const tab = resolveUniqueUploadTarget(validTabs, "FLOW_UPLOAD_CATEGORY_AMBIGUOUS", "Upload category");
       if (!tab) return false;
-      const isSelected = tab.getAttribute("aria-selected") === "true" || tab.getAttribute("data-state") === "active";
+      const isSelected = tab.getAttribute("aria-selected") === "true" || tab.getAttribute("aria-checked") === "true" ||
+        tab.getAttribute("data-state") === "active";
       if (!isSelected) {
-        if (!clickFlowControl(tab)) throw fn("FLOW_UPLOAD_CATEGORY_CLICK_FAILED", "Flow's Upload category could not be clicked. No file was selected.", true, false);
-        await root.FlowUiDeadline?.boundedWait(350, deadline, "switching Flow's upload category");
+        const lastClick = lastUploadTabClickAt.get(tab) || 0;
+        if (Date.now() - lastClick >= 500) {
+          if (!clickFlowControl(tab)) throw fn("FLOW_UPLOAD_CATEGORY_CLICK_FAILED", "Flow's Upload category could not be clicked. No file was selected.", true, false);
+          lastUploadTabClickAt.set(tab, Date.now());
+          await root.FlowUiDeadline?.boundedWait(250, deadline, "switching Flow's upload category");
+        }
       }
       return true;
     };
 
     const findUploadItem = () => {
       const roots = menuRoots();
-      const semantic = [...new Set(roots.flatMap(mRoot => [...mRoot.querySelectorAll('button,[role="button"],[role="menuitem"],a,[tabindex]')]))]
+      const semantic = [...new Set(roots.flatMap(mRoot => controlsIn(mRoot, 'button,[role="button"],[role="menuitem"],a,[tabindex]')))]
         .filter(el => isVisible(el) && !el.disabled && el.getAttribute("aria-disabled") !== "true" && isUploadAction(el));
       const semanticTarget = resolveUniqueUploadTarget(semantic, "FLOW_UPLOAD_MENU_ITEM_AMBIGUOUS", "Upload action");
       if (semanticTarget) return semanticTarget;
       const candidates = new Set();
       for (const mRoot of roots) {
-        const textLeaves = [...mRoot.querySelectorAll("*")].filter(el => isVisible(el) && isUploadAction(el));
+        const textLeaves = controlsIn(mRoot, "*").filter(el => isVisible(el) && isUploadAction(el));
         for (const leaf of textLeaves) {
           for (let candidate = leaf; candidate && candidate !== mRoot; candidate = candidate.parentElement) {
             if (isVisible(candidate) && !candidate.matches('[role="tab"]') && candidate.getAttribute("aria-selected") === null &&
@@ -553,20 +641,28 @@
     } else {
       if (!clickFlowControl(uploadButton)) throw fn("FLOW_UPLOAD_CONTROL_CLICK_FAILED", "Flow's project Upload control could not be clicked. No file was selected.", true, false);
       root.emitFlowProgress?.(command, "Opening Flow's scoped Upload menu and arming its file picker");
-      const menuDeadline = Math.min(Date.now() + 2500, deadline);
+      const menuDeadline = Math.min(Date.now() + 5000, deadline);
       let uploadItem = null;
       while (Date.now() < menuDeadline && !uploadItem) {
         checkTime("opening Flow's upload menu");
         const activeMenus = menuRoots();
-        if (activeMenus.length) {
+        // Prefer Toby's direct upload action when it is present. Only switch a
+        // category tab after confirming it has explicit tab semantics; a plain
+        // Upload button must never be clicked before the picker trap is armed.
+        uploadItem = findUploadItem();
+        if (!uploadItem && activeMenus.length) {
           await switchUploadCategoryTab(activeMenus);
           checkTime("selecting the upload category");
+          uploadItem = findUploadItem();
         }
-        uploadItem = findUploadItem();
         if (!uploadItem) await root.FlowUiDeadline?.boundedWait(100, deadline, "waiting for Flow's upload menu", false, options.signal);
       }
       if (!uploadItem) {
-        throw fn("FLOW_UPLOAD_MENU_ITEM_MISSING", "Flow's visible Upload menu item did not appear. No file was selected.", true, false);
+        const diagnostics = uploadMenuDiagnostics();
+        root.emitFlowProgress?.(command, `Flow upload action not found after menu scan: ${JSON.stringify(diagnostics).slice(0, 3000)}`);
+        const error = fn("FLOW_UPLOAD_MENU_ITEM_MISSING", "Flow did not expose a recognized Upload action after the add-media menu was opened. No file was selected. Inspect popup roots and visible controls in the upload diagnostics.", true, false);
+        error.diagnostics = diagnostics;
+        throw error;
       } else {
         try {
           const pickerReceipt = await root.FlowNativeFileTransfer.selectFileThroughPicker(file, async () => {
@@ -625,6 +721,15 @@
     }
     static inspectUiState() {
       return inspectFlowUploadUiState();
+    }
+    static findVisibleUploadMenuRoots(doc, isVisible) {
+      return visibleFlowUploadMenuRoots(doc, isVisible);
+    }
+    static matchesUploadAction(labels, icon, role, ariaSelected) {
+      return flowUploadActionMatches(labels, icon, role, ariaSelected);
+    }
+    static matchesUploadCategoryTab(descriptor) {
+      return flowUploadCategoryTabMatches(descriptor);
     }
   }
 

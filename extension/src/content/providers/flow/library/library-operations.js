@@ -124,7 +124,7 @@
         return state;
       }
 
-      if (name === "flow.assets.list") return menu.scanNativeAssets();
+      if (name === "flow.assets.list") return menu.scanNativeAssets({ includeIncomplete: payload.includeIncomplete === true });
       if (name === "flow.characters.list") {
         if (typeof menu?.scanNativeCharacters !== "function") {
           throw this.error("NATIVE_CAPABILITY_UNSUPPORTED", "Flow's character library scanner is unavailable in this extension context. Reload the extension and Flow tab, then retry.", true);

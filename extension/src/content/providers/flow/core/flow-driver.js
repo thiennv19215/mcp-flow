@@ -59,7 +59,7 @@
       return { success: true, ...this.context };
     }
 
-    executeOperation(operation, payload = {}, command = {}) {
+    async executeOperation(operation, payload = {}, command = {}) {
       const group = this.operationGroups.find((candidate) =>
         candidate.supports(operation),
       );
@@ -69,6 +69,26 @@
           `Native Flow operation "${operation}" is not implemented.`,
           true,
         );
+      }
+
+      // Flow can leave the media/reference picker mounted after an upload or
+      // an interrupted reference action. Resolve and verify those transient
+      // surfaces before every DOM operation; transfer chunks and the passive
+      // generation observer do not interact with the page UI.
+      const pageUiOperation = ![
+        "flow.file.upload.begin",
+        "flow.file.upload.chunk",
+        "flow.file.upload.finish",
+        "flow.file.upload.abort",
+        "flow.generation.observe",
+      ].includes(operation);
+      if (pageUiOperation) {
+        const nav = root.FlowNavigation;
+        if (typeof nav?.prepareFlowOperation !== "function") {
+          throw this.error("FLOW_OPERATION_PREFLIGHT_UNAVAILABLE", "Flow popup detection is unavailable. The requested operation was not started.", true, false);
+        }
+        const deadline = root.FlowUiDeadline?.makeDeadline(command, 12_000, 3_000) || Date.now() + 10_000;
+        await nav.prepareFlowOperation({ deadline, signal: command?.signal });
       }
       return group.execute(operation, payload, command);
     }

@@ -28,8 +28,41 @@
   };
 
   const ALL_MEDIA_ICONS = ["dashboard", "perm_media", "movie", "video_library", "photo_library", "grid_view", "auto_awesome_motion", "folder", "collections", "video_settings"];
+  let projectNavigationPending = null;
+
+  function configuredNavigationItem(label) {
+    const key = normalizeNavigationLabel(label) === "all media" ? "allMediaButton" :
+      normalizeNavigationLabel(label) === "characters" ? "charactersButton" : null;
+    if (!key) return undefined;
+    const path = `navigation.${key}`;
+    const config = root.flowGetConfig?.(path) || root.FlowSelectors?.navigation?.[key];
+    const candidates = (typeof root.flowQueryAll === "function" ? root.flowQueryAll(path, document) : null) || [];
+    // Without a live configured selector result there is no backend semantic
+    // contract to enforce. Let the existing bounded DOM fallback inspect the
+    // mounted sidebar instead of treating the missing adapter as ambiguity.
+    if (!config || !candidates.length) return undefined;
+    let regex = config?.textRegex instanceof RegExp ? config.textRegex : null;
+    if (!regex && config?.textRegex) {
+      try { regex = new RegExp(config.textRegex, "i"); } catch {}
+    }
+    const matches = candidates.filter(el => {
+      if (!root.visible?.(el) || el.disabled || el.getAttribute?.("aria-disabled") === "true" || !isFlowProjectNavigationControl(el)) return false;
+      const text = root.semanticActionText?.(el) || root.accessibleName?.(el) || el.innerText || el.textContent || "";
+      if (regex) return regex.test(String(text).replace(/\s+/g, " ").trim());
+      const normalized = String(text).replace(/\s+/g, " ").trim().toLowerCase();
+      return (NAV_SYNONYMS[normalizeNavigationLabel(label)] || []).includes(normalized);
+    });
+    // Refuse ambiguous sidebars. Toby's route fallback handles a missing All media control.
+    return matches.length === 1 ? matches[0] : null;
+  }
+
+  function normalizeNavigationLabel(label) {
+    return String(label || "").replace(/\s+/g, " ").trim().toLowerCase();
+  }
 
   function flowNavigationItem(label) {
+    const configured = configuredNavigationItem(label);
+    if (configured !== undefined) return configured;
     const normalize = value => cleanCharacterName(String(value || "").replace(/\s+/g, " ").trim()).toLowerCase();
     const navigation = [...document.querySelectorAll('nav,[role="navigation"],mat-sidenav')].find(el =>
       /project navigation|điều hướng dự án|dự án/i.test(root.accessibleName?.(el) || "") ||
@@ -148,41 +181,122 @@
       return radios.some(r => /image|video|9:16|16:9/i.test(root.accessibleName?.(r) || ""));
     };
 
-    const dialogs = [...document.querySelectorAll('[role="dialog"], mat-dialog-container, flow-dialog, [aria-modal="true"]')].filter(el => root.visible?.(el));
-    for (const dialog of dialogs) {
-      checkTime("checking Flow blocking dialogs");
-      if (isSettingsDialog(dialog)) continue;
-
-      const closeBtn = [...dialog.querySelectorAll('button, [role="button"]')].find(btn => {
-        if (!root.visible?.(btn)) return false;
-        const label = (root.accessibleName?.(btn) || btn.innerText || btn.textContent || "").trim().toLowerCase();
-        const hasCloseIcon = [...btn.querySelectorAll('mat-icon')].some(icon => /close|clear/i.test((icon.innerText || icon.textContent || "").trim()));
-        return hasCloseIcon || /^(?:close|đóng|dismiss|got it|cancel|hủy)$/i.test(label) || label.includes("close") || label.includes("đóng");
+    const visible = el => Boolean(el && root.visible?.(el));
+    const normalize = value => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/[đĐ]/g, "d").toLowerCase().replace(/\s+/g, " ").trim();
+    const overlaySelector = [
+      '[role="dialog"]', 'mat-dialog-container', 'flow-dialog', '[aria-modal="true"]',
+      '[role="menu"]', '[role="listbox"]', 'mat-menu-panel', '.mat-mdc-menu-panel', 'mat-select-panel',
+      '.cdk-overlay-pane',
+    ].join(",");
+    const visibleOverlays = () => [...new Set(document.querySelectorAll(overlaySelector))]
+      .filter(el => visible(el) && !isSettingsDialog(el));
+    const isMediaPicker = el => {
+      const text = normalize(`${root.accessibleName?.(el) || ""} ${el.getAttribute?.("aria-label") || ""} ${el.innerText || el.textContent || ""}`);
+      const hasAssetSearch = /search assets|tim kiem noi dung|tim kiem tai nguyen/.test(text);
+      const hasMediaCategory = /all media|images|uploads|album|anh tren flow|anh tham chieu|tai len|tat ca noi dung/.test(text);
+      const explicitPickerTitle = /(?:choose|select|chon)\s*\/\s*(?:upload|tai len)|(?:chon|tai)\s*\/\s*(?:tai len|chon)/.test(text);
+      return explicitPickerTitle || (hasAssetSearch && hasMediaCategory) ||
+        (/\b(?:album|anh tren flow|tai len)\b/.test(text) && /\b(?:chon|upload|tai len)\b/.test(text));
+    };
+    const clickClose = surface => {
+      const closeButton = [...(surface?.querySelectorAll?.('button, [role="button"]') || [])].find(button => {
+        if (!visible(button) || button.disabled || button.getAttribute?.("aria-disabled") === "true") return false;
+        const label = normalize(`${root.accessibleName?.(button) || ""} ${button.innerText || button.textContent || ""} ${button.getAttribute?.("title") || ""}`);
+        const hasCloseIcon = [...(button.querySelectorAll?.('mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined') || [])]
+          .some(icon => /close|clear|cancel/.test(normalize(icon.innerText || icon.textContent)));
+        return hasCloseIcon || /^(?:close|dismiss|got it|cancel|dong|huy|bo qua)$/.test(label) || /\b(?:close|dong)\b/.test(label);
       });
+      if (!closeButton) return false;
+      closeButton.click();
+      return true;
+    };
+    const snapshot = () => {
+      const overlays = visibleOverlays();
+      const referencePicker = (() => {
+        try { return root.FlowReferenceActions?.inspectDiagnostics?.() || null; } catch { return null; }
+      })();
+      const backdrops = [...document.querySelectorAll('.cdk-overlay-backdrop.cdk-overlay-backdrop-showing')].filter(visible);
+      return {
+        overlays,
+        referencePickerOpen: referencePicker?.pickerOpen === true,
+        mediaPickerOpen: overlays.some(isMediaPicker),
+        backdropOpen: backdrops.length > 0,
+        settingsOpen: overlays.some(isSettingsDialog),
+      };
+    };
+    const publicSnapshot = state => ({
+      dialogCount: state.overlays.filter(el => /dialog|modal/i.test(`${el.getAttribute?.("role") || ""} ${el.tagName || ""}`)).length,
+      menuCount: state.overlays.filter(el => /menu|listbox|select|pane/i.test(`${el.getAttribute?.("role") || ""} ${el.className?.baseVal || el.className || ""} ${el.tagName || ""}`)).length,
+      referencePickerOpen: state.referencePickerOpen,
+      mediaPickerOpen: state.mediaPickerOpen,
+      backdropOpen: state.backdropOpen,
+    });
 
-      if (closeBtn) {
-        closeBtn.click();
+    for (let attempt = 0; attempt < 4; attempt++) {
+      checkTime("checking Flow popups before the next operation");
+      const state = snapshot();
+      const hasBlockingPopup = state.referencePickerOpen || state.overlays.length > 0 || state.backdropOpen;
+      if (!hasBlockingPopup) return dismissedAny;
+
+      if (state.referencePickerOpen && typeof root.FlowReferenceActions?.closePicker === "function") {
+        await root.FlowReferenceActions.closePicker({ deadline: options.deadline, signal: options.signal });
         dismissedAny = true;
-        await pause(150, "closing a Flow blocking dialog");
-      } else {
-        root.dispatchEscapeKey?.();
-        dismissedAny = true;
-        await pause(150, "closing a Flow blocking dialog");
+        await pause(100, "closing the Flow media reference picker");
+        continue;
       }
+
+      const surface = state.overlays.find(el => !isSettingsDialog(el));
+      if (surface && clickClose(surface)) {
+        dismissedAny = true;
+        await pause(150, state.mediaPickerOpen || isMediaPicker(surface) ? "closing the Flow media picker" : "closing a Flow popup");
+        continue;
+      }
+
+      // Escape is sent only after a visible Flow popup/backdrop was detected.
+      // This avoids accidentally changing the composer when there is no popup.
+      root.dispatchEscapeKey?.();
+      dismissedAny = true;
+      await pause(150, "closing a Flow popup with Escape");
     }
 
-    const backdrops = [...document.querySelectorAll('.cdk-overlay-backdrop.cdk-overlay-backdrop-showing')].filter(el => root.visible?.(el));
-    if (backdrops.length > 0) {
-      const activePanels = [...document.querySelectorAll('.cdk-overlay-pane')].filter(el => root.visible?.(el));
-      const hasOnlySettings = activePanels.length > 0 && activePanels.every(isSettingsDialog);
-      if (!hasOnlySettings) {
-        root.dispatchEscapeKey?.();
-        dismissedAny = true;
-        await pause(150, "closing a Flow overlay");
-      }
+    const remaining = snapshot();
+    if (remaining.referencePickerOpen || remaining.overlays.length || remaining.backdropOpen) {
+      const error = root.flowError
+        ? root.flowError("FLOW_BLOCKING_OVERLAY_UNRESOLVED", "A Flow media/library popup is still open after cleanup. The next operation was stopped before it could change the composer or submit generation.", true, false)
+        : new Error("A Flow popup is still open after cleanup; the next operation was not started.");
+      error.diagnostics = publicSnapshot(remaining);
+      throw error;
     }
-
     return dismissedAny;
+  }
+
+  async function prepareFlowOperation(options = {}) {
+    // Popup cleanup must still get a short bounded window if the command that
+    // opened the picker was cancelled or timed out; otherwise an aborted
+    // signal can strand the very overlay this preflight is meant to remove.
+    const now = Date.now();
+    const requestedDeadline = Number.isFinite(options.deadline) ? options.deadline : now + 6_000;
+    const cleanupDeadline = Math.min(Math.max(requestedDeadline, now + 2_500), now + 8_000);
+    const before = await dismissBlockingOverlays({ deadline: cleanupDeadline });
+    const referencePicker = (() => {
+      try { return root.FlowReferenceActions?.inspectDiagnostics?.()?.pickerOpen === true; } catch { return false; }
+    })();
+    const overlays = [...new Set(document.querySelectorAll('[role="dialog"],mat-dialog-container,flow-dialog,[aria-modal="true"],[role="menu"],[role="listbox"],mat-menu-panel,.mat-mdc-menu-panel,mat-select-panel,.cdk-overlay-pane'))]
+      .filter(el => root.visible?.(el) && !isSettingsDialogForPreflight(el));
+    if (referencePicker || overlays.length) {
+      const error = root.flowError("FLOW_OPERATION_PREFLIGHT_FAILED", "Flow still has an open popup. The requested operation was not started.", true, false);
+      error.diagnostics = { referencePickerOpen: referencePicker, visiblePopupCount: overlays.length };
+      throw error;
+    }
+    return { ready: true, popupDismissed: before };
+  }
+
+  function isSettingsDialogForPreflight(el) {
+    if (!el) return false;
+    if (el.querySelector?.('button[id*="-trigger-"]')) return true;
+    return [...(el.querySelectorAll?.('[role="radio"], mat-radio-button') || [])]
+      .some(radio => /image|video|9:16|16:9/i.test(root.accessibleName?.(radio) || ""));
   }
 
   async function leaveFlowDetailView() {
@@ -211,7 +325,7 @@
     }
   }
 
-  async function ensureFlowProjectEditor(options = {}) {
+  async function ensureFlowProjectEditorInternal(options = {}) {
     const waitOptions = { deadline: options.deadline, signal: options.signal };
     const checkTime = label => root.FlowUiDeadline?.requireTime(Number.isFinite(options.deadline) ? options.deadline : Infinity, label, false, options.signal);
     const describe = () => (root.ProviderRegistry?.describeUrl?.(location.href) || root.FlowDriverRegistry?.describeUrl?.(location.href) || null);
@@ -226,6 +340,10 @@
     // 2. Stuck on sub-routes (/character, /edit, ...)
     if (target?.projectId && !target.isProjectEditor) {
       console.log("[FlowNavigation] Detected sub-route (" + location.pathname + "), recovering to project root editor...");
+      const sameProject = () => {
+        const current = describe();
+        return current?.origin === target.origin && current?.projectId === target.projectId && current?.routePrefix === target.routePrefix;
+      };
 
       const doneOrBack = [...document.querySelectorAll('button, [role="button"]')].find(el => {
         if (!root.visible?.(el)) return false;
@@ -238,19 +356,25 @@
         if (leftSubRoute) return { success: true, isProjectEditor: true, projectId: target.projectId };
       }
 
-      const allMedia = flowNavigationItem("All media");
+      const allMedia = configuredNavigationItem("All media");
       if (allMedia) {
         allMedia.click();
-        const leftSubRoute = await waitForFlowRoute(() => describe()?.isProjectEditor === true, 2000, "", waitOptions).catch(() => false);
+        const clickDeadline = Math.min(Date.now() + 2500, Number.isFinite(options.deadline) ? options.deadline : Infinity);
+        let leftSubRoute = false;
+        while (Date.now() < clickDeadline) {
+          checkTime("returning to the Flow project editor");
+          if (!sameProject()) throw root.flowError("FLOW_EXECUTION_TARGET_CHANGED", "The Flow project changed while returning to its editor. No further action was taken.", false, false);
+          if (describe()?.isProjectEditor) { leftSubRoute = true; break; }
+          if (root.FlowUiDeadline?.boundedWait) await root.FlowUiDeadline.boundedWait(100, clickDeadline, "waiting for the Flow project editor", false, options.signal);
+          else await root.wait?.(100);
+        }
         if (leftSubRoute) return { success: true, isProjectEditor: true, projectId: target.projectId };
       }
 
+      if (!sameProject()) throw root.flowError("FLOW_EXECUTION_TARGET_CHANGED", "The Flow project changed before navigation recovery. No further action was taken.", false, false);
       const rootUrl = `${target.origin}${target.routePrefix}/project/${target.projectId}`;
       console.log("[FlowNavigation] Navigating directly to project root URL:", rootUrl);
       location.assign(rootUrl);
-      if (describe()?.isProjectEditor) {
-        return { success: true, isProjectEditor: true, projectId: target.projectId };
-      }
       throw (root.flowError ? root.flowError("FLOW_PROJECT_NAVIGATING", "Navigating back to project root editor. Please retry.", true, false) : new Error("Navigating back to project root editor."));
     }
 
@@ -284,6 +408,15 @@
     }
 
     return { success: false, error: "FLOW_PROJECT_REQUIRED" };
+  }
+
+  function ensureFlowProjectEditor(options = {}) {
+    if (projectNavigationPending) return projectNavigationPending;
+    const operation = ensureFlowProjectEditorInternal(options);
+    projectNavigationPending = operation;
+    return operation.finally(() => {
+      if (projectNavigationPending === operation) projectNavigationPending = null;
+    });
   }
 
   function blurFlowNavigationFocus() {
@@ -366,6 +499,7 @@
     ensureFlowProjectEditor,
     exitFlowMediaViewer,
     dismissBlockingOverlays,
+    prepareFlowOperation,
     leaveFlowDetailView,
     ensureFlowLibrarySection,
     flowNavigationItem,
@@ -378,6 +512,7 @@
   root.ensureFlowProjectEditor = ensureFlowProjectEditor;
   root.exitFlowMediaViewer = exitFlowMediaViewer;
   root.dismissBlockingOverlays = dismissBlockingOverlays;
+  root.prepareFlowOperation = prepareFlowOperation;
   root.leaveFlowDetailView = leaveFlowDetailView;
   root.ensureFlowLibrarySection = ensureFlowLibrarySection;
   root.waitForFlowRoute = waitForFlowRoute;

@@ -496,6 +496,109 @@
       color: var(--text-muted);
     }
 
+    .ref-picker-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 10000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      background: rgba(0, 0, 0, 0.72);
+    }
+
+    .ref-picker-overlay[hidden] { display: none; }
+
+    .ref-picker-dialog {
+      width: min(620px, 100%);
+      max-height: min(760px, 92vh);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      color: var(--text-primary);
+      background: #202020;
+      border: 1px solid #414141;
+      border-radius: 16px;
+      box-shadow: 0 20px 70px rgba(0, 0, 0, 0.65);
+    }
+
+    .ref-picker-header, .ref-picker-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 18px;
+      flex-shrink: 0;
+    }
+
+    .ref-picker-header { border-bottom: 1px solid #363636; font-weight: 700; }
+    .ref-picker-footer { border-top: 1px solid #363636; color: var(--text-muted); font-size: 12px; }
+
+    .ref-picker-close {
+      width: 32px; height: 32px; border: 0; border-radius: 8px;
+      color: var(--text-muted); background: transparent; font-size: 20px; cursor: pointer;
+    }
+
+    .ref-picker-close:hover { color: white; background: #343434; }
+
+    .ref-picker-tabs {
+      display: grid; grid-template-columns: 1fr 1fr; flex-shrink: 0;
+      border-bottom: 1px solid #363636;
+    }
+
+    .ref-picker-tab {
+      padding: 12px 8px; border: 0; border-bottom: 2px solid transparent;
+      color: var(--text-muted); background: transparent; font: inherit; cursor: pointer;
+    }
+
+    .ref-picker-tab.active { color: var(--text-primary); border-bottom-color: var(--primary); }
+
+    .ref-picker-content { min-height: 0; overflow: auto; padding: 14px 18px; }
+    .ref-picker-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+    .ref-picker-results { display:flex; justify-content:space-between; align-items:center; gap:10px; margin:0 0 10px; color:var(--text-muted); font-size:11px; }
+    .ref-picker-search {
+      width: 100%; min-width: 0; padding: 9px 11px; color: var(--text-primary);
+      background: #151515; border: 1px solid #383838; border-radius: 8px; outline: none;
+    }
+    .ref-picker-search:focus { border-color: var(--primary); }
+    .ref-picker-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+    .ref-picker-asset {
+      position: relative; min-width: 0; aspect-ratio: 1; padding: 0; overflow: hidden;
+      color: white; background: #111; border: 2px solid transparent; border-radius: 10px; cursor: pointer;
+    }
+    .ref-picker-asset:hover { border-color: #8aa800; }
+    .ref-picker-asset.selected { border-color: var(--primary); }
+    .ref-picker-asset:disabled { cursor: not-allowed; opacity: 0.5; }
+    .ref-picker-asset img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .ref-picker-asset-placeholder { height: 100%; display: grid; place-items: center; color: #777; font-size: 26px; }
+    .ref-picker-asset-name {
+      position: absolute; inset: auto 0 0; padding: 16px 5px 5px; overflow: hidden;
+      color: white; text-align: left; text-overflow: ellipsis; white-space: nowrap; font-size: 10px;
+      background: linear-gradient(transparent, rgba(0,0,0,.82));
+    }
+    .ref-picker-check {
+      position: absolute; top: 5px; left: 5px; display: grid; place-items: center;
+      width: 20px; height: 20px; border-radius: 6px; color: #111; background: var(--primary); font-weight: 800;
+    }
+    .ref-picker-message { padding: 36px 12px; color: var(--text-muted); text-align: center; font-size: 12px; }
+    .ref-picker-more { width:100%; margin-top:12px; padding:12px; color:var(--text-muted); background:#1a1a1a; border:1px dashed #414141; border-radius:10px; cursor:pointer; }
+    .ref-picker-more:hover { color:var(--text-primary); border-color:var(--primary); }
+    .ref-picker-drop {
+      min-height: 180px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 12px; padding: 20px; border: 1px dashed #4a4a4a; border-radius: 12px; color: var(--text-muted); text-align: center;
+    }
+    .ref-picker-local-list { display: grid; gap: 8px; margin-top: 12px; }
+    .ref-picker-local-row { display: flex; align-items: center; gap: 10px; padding: 7px; background: #171717; border-radius: 8px; font-size: 11px; }
+    .ref-picker-local-row img { width: 42px; height: 42px; object-fit: cover; border-radius: 6px; }
+    .ref-picker-local-row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    @media (max-width: 420px) {
+      .ref-picker-overlay { padding: 8px; }
+      .ref-picker-header, .ref-picker-footer { padding: 11px 13px; }
+      .ref-picker-content { padding: 12px 13px; }
+      .ref-picker-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    }
+
     /* Buttons */
     .btn {
       display: inline-flex;
@@ -795,7 +898,7 @@
 
           <div class="ref-container">
             <div class="ref-cards-list" id="refCardsListImage">
-              <div class="ref-upload-slot" id="refUploadSlotImage" title="Chọn ảnh tải lên từ máy tính">
+              <div class="ref-upload-slot" id="refUploadSlotImage" title="Chọn ảnh từ Flow hoặc tải ảnh lên">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                   <polyline points="17 8 12 3 7 8"/>
@@ -804,8 +907,7 @@
                 <span>Tải ảnh</span>
               </div>
             </div>
-            <div class="ref-dropzone-hint" id="refDropzoneHintImage">Chọn ảnh hoặc kéo thả vào đây (Tối đa 3 ảnh)</div>
-            <input type="file" id="refFileInputImage" accept="image/*" multiple style="display: none;" />
+            <div class="ref-dropzone-hint" id="refDropzoneHintImage">Chọn ảnh từ Flow, tải ảnh lên hoặc kéo thả vào đây (Tối đa 3 ảnh)</div>
           </div>
         </div>
 
@@ -878,7 +980,7 @@
 
           <div class="ref-container">
             <div class="ref-cards-list" id="refCardsListVideo">
-              <div class="ref-upload-slot" id="refUploadSlotVideo" title="Chọn ảnh tải lên từ máy tính">
+              <div class="ref-upload-slot" id="refUploadSlotVideo" title="Chọn ảnh từ Flow hoặc tải ảnh lên">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                   <polyline points="17 8 12 3 7 8"/>
@@ -887,8 +989,7 @@
                 <span>Tải ảnh</span>
               </div>
             </div>
-            <div class="ref-dropzone-hint" id="refDropzoneHintVideo">Chọn ảnh hoặc kéo thả vào đây (Tối đa 3 ảnh)</div>
-            <input type="file" id="refFileInputVideo" accept="image/*" multiple style="display: none;" />
+            <div class="ref-dropzone-hint" id="refDropzoneHintVideo">Chọn ảnh từ Flow, tải ảnh lên hoặc kéo thả vào đây (Tối đa 3 ảnh)</div>
           </div>
         </div>
 
@@ -1133,9 +1234,49 @@
     </div>
   </div>
 
+  <div class="ref-picker-overlay" id="referencePickerModal" hidden>
+    <section class="ref-picker-dialog" role="dialog" aria-modal="true" aria-labelledby="refPickerTitle">
+      <header class="ref-picker-header">
+        <span id="refPickerTitle">Chọn / Tải ảnh lên</span>
+        <button type="button" class="ref-picker-close" id="refPickerClose" aria-label="Đóng">×</button>
+      </header>
+      <nav class="ref-picker-tabs" aria-label="Nguồn ảnh">
+        <button type="button" class="ref-picker-tab active" data-ref-picker-tab="flow">Ảnh trên Flow</button>
+        <button type="button" class="ref-picker-tab" data-ref-picker-tab="upload">Upload</button>
+      </nav>
+      <div class="ref-picker-content" id="refPickerFlowPanel">
+        <div class="ref-picker-toolbar">
+          <input class="ref-picker-search" id="refPickerSearch" type="search" placeholder="Tìm ảnh trên Flow..." aria-label="Tìm ảnh trên Flow">
+          <button type="button" class="btn btn-secondary" id="refPickerRefresh" style="width:auto;white-space:nowrap">Quét lại</button>
+        </div>
+        <div class="ref-picker-results"><span id="refPickerAssetCount">Tìm thấy 0 ảnh</span><span>Tối đa 3 ảnh tham chiếu</span></div>
+        <div class="ref-picker-grid" id="refPickerFlowGrid"></div>
+        <button type="button" class="ref-picker-more" id="refPickerMore" hidden></button>
+        <div class="ref-picker-message" id="refPickerFlowMessage">Đang tìm ảnh trong thư viện Flow...</div>
+      </div>
+      <div class="ref-picker-content" id="refPickerUploadPanel" hidden>
+        <div class="ref-picker-drop" id="refPickerDrop">
+          <span>Chọn ảnh từ máy hoặc kéo thả ảnh vào đây</span>
+          <button type="button" class="btn btn-secondary" id="refPickerChooseFiles" style="width:auto">Chọn ảnh</button>
+          <input type="file" id="refPickerFileInput" accept="image/*" multiple hidden>
+          <small>Ảnh sẽ được tải lên Flow khi bạn bấm Tạo ảnh hoặc Tạo video.</small>
+        </div>
+        <div class="ref-picker-local-list" id="refPickerLocalList"></div>
+      </div>
+      <footer class="ref-picker-footer">
+        <span id="refPickerCount">0/3 ảnh đã chọn</span>
+        <div style="display:flex;gap:8px">
+          <button type="button" class="btn btn-secondary" id="refPickerCancel" style="width:auto">Hủy</button>
+          <button type="button" class="btn btn-primary" id="refPickerConfirm" style="width:auto">Xác nhận</button>
+        </div>
+      </footer>
+    </section>
+  </div>
+
   <script src="../content/shared/i18n.js"></script>
   <script src="flow-upload-client.js"></script>
   <script src="flow-queue-panel.js"></script>
+  <script src="reference-picker.js"></script>
   <script src="sidebar.js"></script>
 </body>
 </html>
