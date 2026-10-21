@@ -3,7 +3,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { assemble, localVoices, speakLocally } from "./assemble.js";
 import { GEMINI_VOICES, geminiKey, saveGeminiKey, speakWithGemini } from "./gemini.js";
 import { extractLastFrame } from "./chain.js";
-import { characterLook, createCharacter, createFlowProject, downloadAsset, trashAsset, editCharacter, getCorrelationObserverHealth, getFlowState, listAssets, listCharacters, listFlowProjects, listFlowVoiceOptions, openFlowProject, rememberCharacter, runAgentBatch, runContinue, runEdit, runGeneration, uploadFlowMediaToProject } from "./flow.js";
+import { characterLook, createCharacter, createFlowProject, downloadAsset, renameAsset, trashAsset, editCharacter, getCorrelationObserverHealth, getFlowState, listAssets, listCharacters, listFlowProjects, listFlowVoiceOptions, openFlowProject, rememberCharacter, runAgentBatch, runContinue, runEdit, runGeneration, uploadFlowMediaToProject } from "./flow.js";
 import { JobQueue, type Job } from "./queue.js";
 import { attachReferences, clearFlowReferences } from "./flow.js";
 import { buildAnglePrompt, listAnglePresets } from "./angles.js";
@@ -68,6 +68,7 @@ export interface Core {
   character_edit(a: Args<"character_edit">): Promise<unknown>;
   edit(a: Args<"edit">): Promise<unknown>;
   trash(a: Args<"trash">): Promise<unknown>;
+  rename_asset(a: Args<"rename_asset">): Promise<unknown>;
   discard(a: Args<"discard">): Promise<unknown>;
   set_key(a: Args<"set_key">): Promise<unknown>;
   continue_shot(a: Args<"continue_shot">): Promise<unknown>;
@@ -434,6 +435,12 @@ export class LocalCore implements Core {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     if (this.queue.busy) throw new Error(BUSY);
     return trashAsset(name);
+  }
+
+  async rename_asset({ name, id, new_name }: Args<"rename_asset">) {
+    if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
+    if (this.queue.busy) throw new Error(BUSY);
+    return renameAsset(name, new_name, id);
   }
 
   async character(a: Args<"character">) {

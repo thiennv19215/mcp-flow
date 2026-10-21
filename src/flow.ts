@@ -340,6 +340,15 @@ export async function trashAsset(name: string): Promise<{ trashed: string }> {
   return nativeOperation("flow.asset.trash", { name }, "flow.native.asset.trash", undefined, 30_000);
 }
 
+export async function renameAsset(name: string, newName: string, id?: string): Promise<{ renamed: string; name: string }> {
+  const exactName = name.replace(/\s+/g, " ").trim();
+  const exactNewName = newName.replace(/\s+/g, " ").trim();
+  if (!exactName || exactName.length > 120 || !exactNewName || exactName === exactNewName || /[\u0000-\u001f\u007f]/.test(exactNewName) || exactNewName.length > 120 || (id !== undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id))) {
+    throw Object.assign(new Error("Provide an exact existing asset title and a different new title of at most 120 characters, without control characters."), { code: "FLOW_INVALID_ARGUMENT", retryable: false, outcome_unknown: false });
+  }
+  return nativeOperation("flow.asset.rename", { name: exactName, ...(id ? { id } : {}), newName: exactNewName }, "flow.native.asset.rename", undefined, 35_000);
+}
+
 const EDIT_TIMEOUT_MS = 10 * 60_000;
 function saveWorkflowDispatchReceipt(
   job: Job,

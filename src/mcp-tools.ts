@@ -283,6 +283,17 @@ server.registerTool(
 );
 
 server.registerTool(
+  "flow_asset_rename",
+  {
+    title: "Rename a Flow asset",
+    description: "Rename one image, video, or scene in the open Flow project. Use the exact title from flow_assets; optionally include its UUID to guard against stale or mismatched titles. Refuses duplicate source titles and an already-used destination title. The rename must be verified in Flow before success is returned.",
+    inputSchema: shapes.rename_asset,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  },
+  args => reply(patient("flow_asset_rename", core.rename_asset(args))),
+);
+
+server.registerTool(
   "flow_character",
   {
     title: "Create a reusable character",

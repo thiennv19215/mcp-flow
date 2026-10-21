@@ -115,7 +115,7 @@ test('a missing uploaded tile returns bounded scan evidence and an unknown outco
 test('video upload confirmation reports and clicks a recognized control', async () => {
   let ticks = 1;
   let clicks = 0;
-  const dialog = { innerText: 'Upload video?', textContent: 'Upload video?', querySelectorAll: () => [{ label: 'Continue', click: () => { clicks++; } }] };
+  const dialog = { innerText: 'Upload video?', textContent: 'Upload video?', querySelectorAll: () => [{ label: 'Continue', getAttribute: () => null, click: () => { clicks++; } }] };
   const context = vm.createContext({
     document: { querySelectorAll: selector => selector.includes('dialog') ? [dialog] : [] },
     Date: { now: () => ticks },
@@ -138,7 +138,7 @@ test('video upload confirmation reports and clicks a recognized control', async 
 test('video upload confirmation fails safely on an unrecognized dialog and redacts its text', async () => {
   let ticks = 1;
   const secretText = 'Upload video for customer-secret@example.test';
-  const dialog = { innerText: secretText, textContent: secretText, querySelectorAll: () => [{ label: 'Review', click() {} }] };
+  const dialog = { innerText: secretText, textContent: secretText, querySelectorAll: () => [{ label: 'Review', getAttribute: () => null, click() {} }] };
   const context = vm.createContext({
     document: { querySelectorAll: selector => selector.includes('dialog') ? [dialog] : [] },
     Date: { now: () => ticks },
@@ -169,6 +169,68 @@ test('video upload confirmation fails safely on an unrecognized dialog and redac
       return true;
     },
   );
+});
+
+test('video upload confirmation rejects multiple independent dialogs without clicking', async () => {
+  let ticks = 1;
+  let clicks = 0;
+  const makeDialog = label => ({
+    innerText: `Upload video ${label}`,
+    textContent: `Upload video ${label}`,
+    querySelectorAll: () => [{ label: 'Continue', getAttribute: () => null, click: () => { clicks++; } }],
+  });
+  const context = vm.createContext({
+    document: { querySelectorAll: selector => selector.includes('dialog') ? [makeDialog('secret-one'), makeDialog('secret-two')] : [] },
+    Date: { now: () => ticks },
+    wait: async ms => { ticks += ms; },
+    visible: () => true,
+    accessibleName: element => element.label,
+    FlowUiDeadline: { boundedWait: async () => {} },
+    flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
+  });
+  vm.runInContext(source, context);
+  await assert.rejects(context.confirmFlowVideoUploadIfPrompted(Date.now() + 5000), error => {
+    assert.equal(error.code, 'FLOW_UPLOAD_CONFIRMATION_AMBIGUOUS');
+    assert.equal(error.outcome_unknown, true);
+    assert.equal(error.diagnostics.confirmationDialogCandidateCount, 2);
+    assert.equal(error.diagnostics.enabledConfirmationControlCount, 0);
+    assert.equal(error.message.includes('secret-one'), false);
+    assert.equal(JSON.stringify(error.diagnostics).includes('secret'), false);
+    return true;
+  });
+  assert.equal(clicks, 0);
+});
+
+test('video upload confirmation rejects duplicate enabled controls without clicking', async () => {
+  let ticks = 1;
+  let clicks = 0;
+  const dialog = {
+    innerText: 'Upload video?',
+    textContent: 'Upload video?',
+    querySelectorAll: () => [
+      { label: 'Upload', getAttribute: () => null, click: () => { clicks++; } },
+      { label: 'Confirm', getAttribute: () => null, click: () => { clicks++; } },
+    ],
+  };
+  const context = vm.createContext({
+    document: { querySelectorAll: selector => selector.includes('dialog') ? [dialog] : [] },
+    Date: { now: () => ticks },
+    wait: async ms => { ticks += ms; },
+    visible: () => true,
+    accessibleName: element => element.label,
+    FlowUiDeadline: { boundedWait: async () => {} },
+    flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
+  });
+  vm.runInContext(source, context);
+  await assert.rejects(context.confirmFlowVideoUploadIfPrompted(Date.now() + 5000), error => {
+    assert.equal(error.code, 'FLOW_UPLOAD_CONFIRMATION_AMBIGUOUS');
+    assert.equal(error.outcome_unknown, true);
+    assert.equal(error.diagnostics.confirmationDialogCandidateCount, 1);
+    assert.equal(error.diagnostics.enabledConfirmationControlCount, 2);
+    assert.equal(error.message.includes('Upload video?'), false);
+    return true;
+  });
+  assert.equal(clicks, 0);
 });
 
 

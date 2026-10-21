@@ -138,36 +138,75 @@
       }
 
       if (name === "flow.asset.rename" || name === "flow.asset.trash") {
-        const title = String(payload.name || "");
+        const title = String(payload.name || "").replace(/\s+/g, " ").trim();
         if (!title) throw this.error("FLOW_INVALID_ARGUMENT", "Asset name is required.");
-        const copies = await tiles.countFlowTitleAcrossGrid(title);
-        if (copies !== 1) throw this.error(copies > 1 ? "FLOW_AMBIGUOUS_ASSET" : "FLOW_ASSET_NOT_FOUND", copies > 1 ? `${copies} assets are named "${title}"; no mutation was performed.` : `Could not find asset "${title}".`, true);
-        const tile = await tiles.findFlowTile(title);
+        const newName = name === "flow.asset.rename" ? String(payload.newName || "").replace(/\s+/g, " ").trim() : "";
+        if (name === "flow.asset.rename" && (!newName || newName.length > 120 || /[\u0000-\u001f\u007f]/.test(newName) || newName === title)) {
+          throw this.error("FLOW_INVALID_ARGUMENT", "A new asset title must be different, non-empty, at most 120 characters, and contain no control characters.");
+        }
+        const normalizeTitle = value => String(value || "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
+        let sourceAsset = null;
+        if (name === "flow.asset.rename") {
+          const deadline = Date.now() + Math.min(25_000, Number(command.timeoutMs) || 25_000);
+          const assets = await menu.scanNativeAssets({ requireComplete: true, maxDurationMs: 12_000, deadline });
+          const sourceMatches = assets.filter(asset => normalizeTitle(asset.name) === normalizeTitle(title));
+          if (sourceMatches.length !== 1) throw this.error(sourceMatches.length ? "FLOW_AMBIGUOUS_ASSET" : "FLOW_ASSET_NOT_FOUND", sourceMatches.length ? `More than one asset is named "${title}"; no mutation was performed.` : `Could not find exact asset title "${title}" in the complete library scan.`, true, false);
+          sourceAsset = sourceMatches[0];
+          if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(sourceAsset.id || ""))) {
+            throw this.error("FLOW_RENAME_ID_UNAVAILABLE", `Flow did not expose a stable media UUID for "${title}"; no rename was started.`, false, false);
+          }
+          if (payload.id && String(payload.id).toLowerCase() !== String(sourceAsset.id).toLowerCase()) {
+            throw this.error("FLOW_ASSET_ID_MISMATCH", `The complete library scan found a different media UUID for "${title}"; no mutation was performed.`, false, false);
+          }
+          const destinationMatches = assets.filter(asset => normalizeTitle(asset.name) === normalizeTitle(newName));
+          if (destinationMatches.length) throw this.error("FLOW_ASSET_NAME_TAKEN", `Flow already contains an asset named "${newName}"; no rename was performed.`, false, false);
+        } else {
+          const copies = await tiles.countFlowTitleAcrossGrid(title);
+          if (copies !== 1) throw this.error(copies > 1 ? "FLOW_AMBIGUOUS_ASSET" : "FLOW_ASSET_NOT_FOUND", copies > 1 ? `${copies} assets are named "${title}"; no mutation was performed.` : `Could not find asset "${title}".`, true);
+        }
+        const tile = await tiles.findFlowTile(title, name === "flow.asset.rename" ? 30 : undefined);
         if (!tile) throw this.error("FLOW_ASSET_NOT_FOUND", `Could not find asset "${title}" after scanning the project grid.`, true);
+        const tileId = root.mediaId?.(tile);
+        if (name === "flow.asset.rename" && (String(tileId || "").toLowerCase() !== String(sourceAsset?.id || "").toLowerCase() || normalizeTitle(tile.getAttribute?.("aria-label") || tile.getAttribute?.("title")) !== normalizeTitle(title))) {
+          throw this.error("FLOW_ASSET_ID_MISMATCH", `The project tile no longer matches the exact scanned Flow asset "${title}"; no mutation was performed.`, false, false);
+        }
+        if (name === "flow.asset.trash" && payload.id && String(payload.id).toLowerCase() !== String(tileId || "").toLowerCase()) {
+          throw this.error("FLOW_ASSET_ID_MISMATCH", `The current Flow tile for "${title}" does not match the supplied media UUID; no mutation was performed.`, false);
+        }
         tile.scrollIntoView({ block: "center" }); await root.wait?.(150);
         const more = root.flowButton?.("More options", tile); if (!more) throw this.error("FLOW_TILE_MENU_MISSING", `Could not open options for "${title}".`, true);
         more.click(); await root.wait?.(200);
         const actionPatterns = name === "flow.asset.trash"
           ? /^(?:Move to trash|Chuyển vào thùng rác|Xóa|Xóa tệp|Xóa nội dung)$/i
           : /^(?:Rename|Đổi tên)$/i;
-        const menuEl = [...document.querySelectorAll('[role="menuitem"]')].find(item => {
+        const menuItems = [...document.querySelectorAll('[role="menuitem"]')].filter(item => {
           if (!root.visible?.(item)) return false;
           const label = (root.accessibleName?.(item) || item.innerText || item.textContent || "").trim();
           return actionPatterns.test(label);
         });
-        if (!menuEl) throw this.error("FLOW_MENU_ITEM_MISSING", `Flow did not show "${name === "flow.asset.trash" ? "Move to trash" : "Rename"}" for "${title}".`, true);
+        if (menuItems.length !== 1) throw this.error(menuItems.length ? "FLOW_MENU_ITEM_AMBIGUOUS" : "FLOW_MENU_ITEM_MISSING", `Flow did not show one unique "${name === "flow.asset.trash" ? "Move to trash" : "Rename"}" action for "${title}".`, true);
+        const menuEl = menuItems[0];
         menuEl.click(); await root.wait?.(250);
         if (name === "flow.asset.trash") return { trashed: title };
-        const input = [...document.querySelectorAll('input:not([type="file"]),[contenteditable="true"]')].find(el => root.visible?.(el));
-        if (!input) throw this.error("FLOW_RENAME_INPUT_MISSING", "Flow opened rename but no editable title field is visible.", false, true);
-        const newName = String(payload.newName || "");
-        if (!newName) throw this.error("FLOW_INVALID_ARGUMENT", "newName is required.");
+        const renameSurfaces = [...document.querySelectorAll('[role="dialog"],mat-dialog-container,.cdk-overlay-pane')].filter(el => root.visible?.(el));
+        const dialogInputs = renameSurfaces.flatMap(surface => [...surface.querySelectorAll('input:not([type="file"]),[contenteditable="true"]')]).filter(el => root.visible?.(el));
+        const inputs = [...new Set(dialogInputs.length ? dialogInputs : [...document.querySelectorAll('input:not([type="file"]),[contenteditable="true"]')].filter(el => root.visible?.(el)))];
+        if (inputs.length !== 1) throw this.error(inputs.length ? "FLOW_RENAME_INPUT_AMBIGUOUS" : "FLOW_RENAME_INPUT_MISSING", "Flow did not expose one unique editable title field; inspect Flow before retrying.", false, true);
+        const input = inputs[0];
         if (input.isContentEditable) input.textContent = newName;
         else { input.value = newName; input.dispatchEvent(new Event("input", { bubbles: true })); }
         input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
         input.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true }));
-        await root.wait?.(400);
-        return { renamed: title, name: newName };
+        const deadline = Date.now() + Math.min(10_000, Number(command.timeoutMs) || 10_000);
+        let renamed = false;
+        while (Date.now() < deadline) {
+          const current = [...document.querySelectorAll("flow-grid-tile-container")].find(candidate => String(root.mediaId?.(candidate) || "").toLowerCase() === String(tileId).toLowerCase());
+          const currentTitle = String(current?.getAttribute("aria-label") || current?.getAttribute("title") || "").replace(/\s+/g, " ").trim();
+          if (currentTitle === newName) { renamed = true; break; }
+          await root.wait?.(250);
+        }
+        if (!renamed) throw this.error("FLOW_RENAME_UNCONFIRMED", `Flow did not confirm that "${title}" was renamed to "${newName}". Inspect the library before retrying.`, false, true);
+        return { renamed: title, name: newName, ...(tileId ? { id: tileId } : {}) };
       }
 
       return undefined;

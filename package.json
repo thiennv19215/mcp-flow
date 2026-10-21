@@ -4,7 +4,7 @@
   "description": "Google Flow MCP with browser-side Chrome extension automation",
   "main": "index.js",
   "scripts": {
-    "test": "node --test tests/native-references.test.mjs tests/remote-session.e2e.test.mjs tests/flow-video-modes.test.mjs tests/flow-video-reference.test.mjs tests/flow-observer-health.test.mjs tests/flow-correlation-diagnostics.test.mjs tests/flow-correlation-arm.test.mjs tests/flow-unknown-request-diagnostics.test.mjs tests/flow-audit-request-diagnostics.test.mjs tests/flow-audit-native-options.test.mjs tests/flow-character-naming.test.mjs tests/flow-reference-clear.test.mjs tests/flow-project-create.test.mjs tests/flow-project-tools.test.mjs tests/flow-voice-selection.test.mjs tests/flow-voice-options-api.test.mjs tests/flow-upload-media.test.mjs",
+    "test": "node --test tests/native-references.test.mjs tests/remote-session.e2e.test.mjs tests/flow-video-modes.test.mjs tests/flow-video-reference.test.mjs tests/flow-observer-health.test.mjs tests/flow-correlation-diagnostics.test.mjs tests/flow-correlation-arm.test.mjs tests/flow-unknown-request-diagnostics.test.mjs tests/flow-audit-request-diagnostics.test.mjs tests/flow-audit-native-options.test.mjs tests/flow-character-naming.test.mjs tests/flow-reference-clear.test.mjs tests/flow-project-create.test.mjs tests/flow-project-tools.test.mjs tests/flow-voice-selection.test.mjs tests/flow-voice-options-api.test.mjs tests/flow-upload-media.test.mjs tests/flow-asset-rename.test.mjs",
     "build": "tsc && node scripts/sync-extension-capabilities.mjs",
     "dev:extension": "node scripts/dev-extension.mjs",
     "start": "node dist/index.js",

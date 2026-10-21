@@ -157,6 +157,11 @@ export const shapes = {
     submit_only: z.boolean().optional().describe("Return after Flow's correlated continuation request is dispatched; rendering and download are not awaited. Default waits for the finished clip."),
   },
   trash: { name: z.string().min(1).describe("Exact title of the item to move to Flow's Trash, as listed by flow_assets.") },
+  rename_asset: {
+    name: z.string().trim().min(1).max(120).describe("Exact title of the Flow asset, as listed by flow_assets."),
+    id: z.string().uuid().optional().describe("Optional Flow media UUID from flow_assets; when provided it must match the exact title."),
+    new_name: z.string().trim().min(1).max(120).refine(value => !/[\u0000-\u001f\u007f]/.test(value), "A Flow asset name cannot contain control characters.").describe("New title for this Flow asset."),
+  },
   set_key: { key: z.string().min(1).max(200) },
   discard: { path: z.string().min(1).describe("A saved film, still, narration or whole project folder inside the films folder, to move to this computer's bin (Mac Trash, Windows Recycle Bin).") },
   outputs: {},

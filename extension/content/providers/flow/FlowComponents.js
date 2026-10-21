@@ -1520,14 +1520,36 @@ async function uploadStagedFlowMedia(file, kind, command, options = {}) {
 
 async function confirmFlowVideoUploadIfPrompted(deadline = Date.now() + 10_000, signal, selection = {}) {
   const result = { confirmationDialogSeen: false, confirmationButtonClicked: false, confirmationDialogUnrecognized: false };
+  const ambiguous = (reason, dialogCount, controlCount) => {
+    const error = flowError("FLOW_UPLOAD_CONFIRMATION_AMBIGUOUS", `Flow displayed an ambiguous video upload confirmation (${reason}); no confirmation control was clicked. Inspect Flow before retrying.`, false, true);
+    error.diagnostics = {
+      ...result,
+      confirmationDialogCandidateCount: dialogCount,
+      enabledConfirmationControlCount: controlCount,
+      filePickerSelectionConfirmed: selection.filePickerSelectionConfirmed === true,
+      pickerMethod: safeFlowPickerMethod(selection.pickerMethod),
+      pickerType: safeFlowPickerType(selection.pickerType),
+      uploadUi: inspectFlowUploadUiState(),
+    };
+    throw error;
+  };
   for (let attempt = 0; attempt < 24; attempt++) {
     if (Date.now() >= deadline) throw flowError("FLOW_OPERATION_TIMEOUT", "Timed out while confirming Flow's video upload. Inspect Flow before retrying.", false, true);
-    const dialog = [...document.querySelectorAll('[role="dialog"],mat-dialog-container')].find(el =>
-      visible(el) && /video|upload/i.test((el.innerText || el.textContent || "").slice(0, 1200)));
-    if (!dialog) return result;
+    const matchingDialogs = [...document.querySelectorAll('[role="dialog"],mat-dialog-container')].filter(el =>
+      visible(el) && /video|upload/i.test(String(el.innerText || el.textContent || "").slice(0, 1200)));
+    // Flow sometimes nests its actual dialog inside a presentation wrapper.
+    // Keep only the deepest matching surfaces, then require that surface to be unique.
+    const specificDialogs = matchingDialogs.filter(dialog =>
+      !matchingDialogs.some(other => other !== dialog && dialog.contains?.(other)));
+    if (!specificDialogs.length) return result;
     result.confirmationDialogSeen = true;
-    const confirm = [...dialog.querySelectorAll("button,[role=button]")].find(el =>
-      visible(el) && /^(upload|continue|confirm)$/i.test(accessibleName(el).replace(/\s+/g, " ").trim()));
+    if (specificDialogs.length !== 1) ambiguous("multiple visible dialogs", specificDialogs.length, 0);
+    const dialog = specificDialogs[0];
+    const confirms = [...dialog.querySelectorAll("button,[role=button]")].filter(el =>
+      visible(el) && !el.disabled && el.getAttribute("aria-disabled") !== "true" &&
+      /^(upload|continue|confirm)$/i.test(accessibleName(el).replace(/\s+/g, " ").trim()));
+    if (confirms.length > 1) ambiguous("multiple enabled confirmation controls", 1, confirms.length);
+    const confirm = confirms[0];
     if (confirm) { confirm.click(); result.confirmationButtonClicked = true; await globalThis.FlowUiDeadline?.boundedWait(250, deadline, "confirming Flow's video upload", true, signal); return result; }
     await globalThis.FlowUiDeadline?.boundedWait(300, deadline, "waiting for Flow's video upload confirmation", true, signal);
   }

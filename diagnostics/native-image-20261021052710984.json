@@ -1,0 +1,32 @@
+{
+  "started": "2026-10-21T05:27:10.984Z",
+  "mode": "image",
+  "api": "http://127.0.0.1:18897",
+  "probes": [
+    {
+      "name": "image.submit_only",
+      "status": "queued",
+      "job_id": "bd696fee"
+    },
+    {
+      "name": "image.submit_only",
+      "status": "failed_before_dispatch",
+      "error": "Job bd696fee ended as failed before confirmed dispatch (outcome_unknown=false): Stopped waiting during Flow submit stage: preparing image settings. That page step may still be running; no later submit stage will start. Inspect Flow before retrying.. Do not replay this job.",
+      "request_diagnostics": null
+    }
+  ],
+  "job_id": "bd696fee",
+  "latest_job": {
+    "status": "failed",
+    "attempts": 1,
+    "credits": null,
+    "credit_quote_verified": false,
+    "error_category": "generation",
+    "outcome_unknown": false,
+    "request_dispatched": false,
+    "server_acceptance_observed": false,
+    "request_diagnostics": null
+  },
+  "finished": "2026-10-21T05:28:56.391Z",
+  "fatal_error": "Job bd696fee ended as failed before confirmed dispatch (outcome_unknown=false): Stopped waiting during Flow submit stage: preparing image settings. That page step may still be running; no later submit stage will start. Inspect Flow before retrying.. Do not replay this job."
+}

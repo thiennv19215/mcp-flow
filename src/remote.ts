@@ -217,6 +217,7 @@ export class RemoteCore implements Core {
   character_edit = async (a: Parameters<Core["character_edit"]>[0]) => this.mapRemotePaths(await this.request("character_edit", a));
   edit = async (a: Parameters<Core["edit"]>[0]) => this.mapRemotePaths(await this.request("edit", a));
   trash = (a: Parameters<Core["trash"]>[0]) => this.request("trash", a);
+  rename_asset = (a: Parameters<Core["rename_asset"]>[0]) => this.request("rename_asset", a);
   discard = (a: Parameters<Core["discard"]>[0]) => this.request("discard", a);
   set_key = (a: Parameters<Core["set_key"]>[0]) => this.request("set_key", a);
   continue_shot = async (a: Parameters<Core["continue_shot"]>[0]) => this.mapRemotePaths(await this.request("continue_shot", a));
@@ -284,6 +285,7 @@ export class ForwardingCore implements Core {
   character_edit = (a: Parameters<Core["character_edit"]>[0]) => this.active().character_edit(a);
   edit = (a: Parameters<Core["edit"]>[0]) => this.active().edit(a);
   trash = (a: Parameters<Core["trash"]>[0]) => this.active().trash(a);
+  rename_asset = (a: Parameters<Core["rename_asset"]>[0]) => this.active().rename_asset(a);
   // discard is a local filesystem action; remote outputs are materialized under this owner's OUTPUT_ROOT first.
   discard = (a: Parameters<Core["discard"]>[0]) => this.local.discard(a);
   set_key = (a: Parameters<Core["set_key"]>[0]) => this.active().set_key(a);
