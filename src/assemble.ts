@@ -1,9 +1,9 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
 
-import { FFMPEG_HINT, IS_WIN, powershell, psQuote } from "./platform.js";
+import { FFMPEG_HINT } from "./platform.js";
 
 const run = promisify(execFile);
 const FFMPEG = process.env.FLOW_MCP_FFMPEG ?? "ffmpeg";
@@ -68,63 +68,6 @@ export async function extractAudio(video: string, target: string): Promise<{ out
   await run(FFMPEG, ["-y", "-i", video, "-vn", "-af", "highpass=f=80,acompressor=threshold=-18dB:ratio=3:attack=5:release=120,loudnorm=I=-16:TP=-1.5:LRA=11", "-ar", "48000", "-ac", "2", target]);
   const { stdout } = await run(FFPROBE, ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", target]);
   return { output: target, duration: Number(stdout.trim()) };
-}
-
-const SAY = process.env.FLOW_MCP_SAY ?? "say";
-
-// The voices this computer has installed. On a Mac that is `say` (Premium voices appear as soon as the user downloads
-// them in System Settings); on Windows it is the built-in speech engine, the voices under Settings > Time & language >
-// Speech. The Windows branch is written to the documented System.Speech API but has not been run on a real PC yet.
-export async function localVoices(): Promise<{ name: string; description: string }[]> {
-  if (IS_WIN) {
-    try {
-      const out = powershell(
-        "Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).GetInstalledVoices() | Where-Object { $_.Enabled } | ForEach-Object { $_.VoiceInfo.Name + '|' + $_.VoiceInfo.Culture.Name }",
-      );
-      return out
-        .split(/\r?\n/)
-        .map((l) => l.trim().split("|"))
-        .filter(([name, culture]) => name && /^en-/i.test(culture ?? ""))
-        .map(([name, culture]) => ({ name, description: `${culture} · Windows, free` }));
-    } catch {
-      return [];
-    }
-  }
-  const { stdout } = await run(SAY, ["-v", "?"], { maxBuffer: 4 * 1024 * 1024 }).catch(() => ({ stdout: "" }));
-  return stdout
-    .split("\n")
-    .map((line) => line.match(/^(.+?)\s{2,}(\w{2}_\w{2})\s+#\s*(.*)$/))
-    .filter((m): m is RegExpMatchArray => Boolean(m) && /^en_/.test(m![2]))
-    .map((m) => ({ name: m[1].trim(), description: `${m[2].replace("_", "-")} · macOS, free` }))
-    .filter((v) => !/^(Bad News|Bahh|Bells|Boing|Bubbles|Cellos|Good News|Jester|Organ|Superstar|Trinoids|Whisper|Wobble|Zarvox|Albert|Fred|Grandma|Grandpa|Junior|Kathy|Princess|Ralph|Rocko|Shelley|Sandy|Eddy|Flo|Reed|Rishi)/.test(v.name));
-}
-
-// Speaks a line with this computer's own voice. Free and instant, but only as good as the installed voice.
-export async function speakLocally(text: string, voice?: string, target: string = ""): Promise<{ output: string; duration: number; voice?: string }> {
-  const stem = target.replace(/\.\w+$/, "");
-  const raw = stem + (IS_WIN ? ".wav" : ".aiff");
-  const trimmedVoice = (voice ?? "").trim();
-  if (IS_WIN) {
-    // The line goes through a file, never the command line, so quotes or symbols in it cannot break the script.
-    const lineFile = stem + ".line.txt";
-    writeFileSync(lineFile, text, "utf8");
-    try {
-      const selectSnippet = trimmedVoice ? `try { $s.SelectVoice(${psQuote(trimmedVoice)}) } catch {}` : "";
-      powershell(
-        `Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; ${selectSnippet}; $s.SetOutputToWaveFile(${psQuote(raw)}); $s.Speak([System.IO.File]::ReadAllText(${psQuote(lineFile)}, [System.Text.Encoding]::UTF8)); $s.Dispose()`,
-        300_000,
-      );
-    } finally {
-      rmSync(lineFile, { force: true });
-    }
-  } else {
-    const sayArgs = trimmedVoice ? ["-v", trimmedVoice, "-r", "168", "-o", raw, text] : ["-r", "168", "-o", raw, text];
-    await run(SAY, sayArgs);
-  }
-  await run(FFMPEG, ["-y", "-i", raw, "-af", "highpass=f=80,acompressor=threshold=-18dB:ratio=3:attack=5:release=120,loudnorm=I=-16:TP=-1.5:LRA=11", "-ar", "48000", "-ac", "2", target]);
-  rmSync(raw, { force: true });
-  const { stdout } = await run(FFPROBE, ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", target]);
-  return { output: target, duration: Number(stdout.trim()), voice: trimmedVoice || undefined };
 }
 
 // Joins the scene clips into one film, keeping their own sound and laying music / voiceover on top.

@@ -107,17 +107,6 @@ export const shapes = {
     download_quality: z.enum(["original", "upscaled"]).optional(),
     submit_only: z.boolean().optional().describe("Return after Flow's correlated image request is dispatched; rendering and downloads continue in Flow. Default waits for finished images."),
   },
-  voices: {},
-  narrate: {
-    project: z.string().min(1).describe("Folder for the narration audio."),
-    engine: z
-      .string()
-      .default("local")
-      .describe("Voice engine: 'local' uses the speech synthesizer installed on this computer (macOS voices on a Mac, Windows speech voices on Windows). Free, instant, completely offline."),
-    text: z.string().min(1).max(400).describe("The line to speak. About 20 words fits 8 s, 30 words fits 12 s; anything longer needs a longer take."),
-    voice: z.string().min(1).optional().describe("Voice name from flow_voices, e.g. Zoe or Samantha for macOS; David or Zira for Windows. Defaults to system default voice if omitted."),
-    style: z.string().max(200).optional().describe("Delivery or style note (optional)."),
-  },
   edit: {
     project: z.string().min(1).describe("Local folder for the edited clip."),
     asset: z.string().min(1).describe("Title (or title prefix) of a video already in the Flow project; see flow_assets."),

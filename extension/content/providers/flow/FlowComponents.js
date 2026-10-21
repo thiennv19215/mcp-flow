@@ -1370,7 +1370,7 @@ async function uploadStagedFlowMedia(file, kind, command, options = {}) {
 
   const uploadButton = await ensureAddMediaButton(deadline, options.signal);
   const normalize = value => String(value || "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
-  const uploadNames = new Set(["upload", "upload media", "upload file", "tải lên", "tải tệp lên", "tải nội dung nghe nhìn lên"]);
+  const uploadNames = new Set(["upload", "upload media", "upload file", "tải lên", "tải tệp", "tải tệp lên", "tải lên tệp", "tải ảnh lên", "tải hình ảnh lên", "tải nội dung nghe nhìn lên", "tải phương tiện lên"]);
   const labelOf = el => {
     const labels = [accessibleName(el), el.getAttribute("aria-label"), el.getAttribute("title"), el.innerText, el.textContent];
     // Material icon ligatures are exposed as text in some Flow builds (for example,
@@ -1391,7 +1391,7 @@ async function uploadStagedFlowMedia(file, kind, command, options = {}) {
     if (el.matches('[role="tab"]') || el.getAttribute("aria-selected") !== null) return false;
     const icon = el.querySelector("mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined,svg")?.textContent?.trim() || "";
     if (["file_upload", "upload_file", "cloud_upload"].includes(icon)) return true;
-    const actionNames = new Set(["upload", "upload media", "upload file", "tải lên", "tải tệp lên", "tải nội dung nghe nhìn lên"]);
+    const actionNames = new Set(["upload", "upload media", "upload file", "tải lên", "tải tệp", "tải tệp lên", "tải lên tệp", "tải ảnh lên", "tải hình ảnh lên", "tải nội dung nghe nhìn lên", "tải phương tiện lên"]);
     return labelOf(el).some(label => actionNames.has(label));
   };
   const menuRoots = () => [...document.querySelectorAll('[role="menu"],mat-menu-panel,[role="dialog"],.cdk-overlay-pane,[data-state="open"]')]
@@ -1404,7 +1404,7 @@ async function uploadStagedFlowMedia(file, kind, command, options = {}) {
         const icon = tab.querySelector("mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined,svg")?.textContent?.trim() || "";
         const label = accessibleName(tab).replace(/\s+/g, " ").trim().toLowerCase();
         const isUploadTab = ["upload", "file_upload", "upload_file", "cloud_upload"].includes(icon) ||
-          label === "upload" || label === "tải lên" || label.includes("upload") || label.includes("tải lên");
+          ["upload", "upload file", "tải lên", "tải tệp", "tải tệp lên", "tải lên tệp"].includes(label) || label.includes("upload") || label.includes("tải lên");
         if (isUploadTab) {
           const isSelected = tab.getAttribute("aria-selected") === "true" || tab.getAttribute("data-state") === "active";
           if (!isSelected) {
@@ -1536,7 +1536,7 @@ async function confirmFlowVideoUploadIfPrompted(deadline = Date.now() + 10_000, 
   for (let attempt = 0; attempt < 24; attempt++) {
     if (Date.now() >= deadline) throw flowError("FLOW_OPERATION_TIMEOUT", "Timed out while confirming Flow's video upload. Inspect Flow before retrying.", false, true);
     const matchingDialogs = [...document.querySelectorAll('[role="dialog"],mat-dialog-container')].filter(el =>
-      visible(el) && /video|upload/i.test(String(el.innerText || el.textContent || "").slice(0, 1200)));
+      visible(el) && /video|upload|tải lên|tải video|tải tệp/i.test(String(el.innerText || el.textContent || "").slice(0, 1200)));
     // Flow sometimes nests its actual dialog inside a presentation wrapper.
     // Keep only the deepest matching surfaces, then require that surface to be unique.
     const specificDialogs = matchingDialogs.filter(dialog =>
@@ -1547,7 +1547,7 @@ async function confirmFlowVideoUploadIfPrompted(deadline = Date.now() + 10_000, 
     const dialog = specificDialogs[0];
     const confirms = [...dialog.querySelectorAll("button,[role=button]")].filter(el =>
       visible(el) && !el.disabled && el.getAttribute("aria-disabled") !== "true" &&
-      /^(upload|continue|confirm)$/i.test(accessibleName(el).replace(/\s+/g, " ").trim()));
+      /^(?:upload|continue|confirm|tải lên|tiếp tục|xác nhận|đồng ý)$/i.test(accessibleName(el).replace(/\s+/g, " ").trim()));
     if (confirms.length > 1) ambiguous("multiple enabled confirmation controls", 1, confirms.length);
     const confirm = confirms[0];
     if (confirm) { confirm.click(); result.confirmationButtonClicked = true; await globalThis.FlowUiDeadline?.boundedWait(250, deadline, "confirming Flow's video upload", true, signal); return result; }
@@ -1924,4 +1924,4 @@ function inspectNativeFramePickerDiagnostics() {
   return diagnostics ? JSON.parse(JSON.stringify(diagnostics)) : null;
 }
 
-const FlowComponents = Object.freeze({ clearExistingIngredientChips: globalThis.clearExistingIngredientChips, uploadStagedFlowMedia, chooseNativePickerAsset, selectNativeFlowVoice: globalThis.selectNativeFlowVoice, listNativeFlowVoiceOptions: globalThis.listNativeFlowVoiceOptions, resolveNativeMediaUuid: globalThis.resolveNativeMediaUuid, findAddMediaButton, ensureAddMediaButton, inspectUploadTrigger: inspectFlowUploadTrigger, inspectFramePickerDiagnostics: inspectNativeFramePickerDiagnostics, FlowReferenceActions: globalThis.FlowReferenceActions }); globalThis.FlowComponents = FlowComponents; globalThis.uploadStagedFlowMedia = uploadStagedFlowMedia; globalThis.chooseNativePickerAsset = chooseNativePickerAsset; globalThis.findAddMediaButton = findAddMediaButton; globalThis.ensureAddMediaButton = ensureAddMediaButton;
+const FlowComponents = Object.freeze({ clearExistingIngredientChips: globalThis.clearExistingIngredientChips, uploadStagedFlowMedia, chooseNativePickerAsset, confirmVideoUploadIfPrompted: confirmFlowVideoUploadIfPrompted, selectNativeFlowVoice: globalThis.selectNativeFlowVoice, listNativeFlowVoiceOptions: globalThis.listNativeFlowVoiceOptions, resolveNativeMediaUuid: globalThis.resolveNativeMediaUuid, findAddMediaButton, ensureAddMediaButton, inspectUploadTrigger: inspectFlowUploadTrigger, inspectFramePickerDiagnostics: inspectNativeFramePickerDiagnostics, FlowReferenceActions: globalThis.FlowReferenceActions }); globalThis.FlowComponents = FlowComponents; globalThis.uploadStagedFlowMedia = uploadStagedFlowMedia; globalThis.chooseNativePickerAsset = chooseNativePickerAsset; globalThis.findAddMediaButton = findAddMediaButton; globalThis.ensureAddMediaButton = ensureAddMediaButton;

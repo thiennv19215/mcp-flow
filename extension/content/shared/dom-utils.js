@@ -222,7 +222,12 @@ var BUTTON_SYNONYMS = {
   "select a voice": ["select a voice", "chọn giọng nói", "giọng nói", "chọn một giọng nói"],
   "add to character": ["add to character", "thêm vào nhân vật", "thêm giọng nói vào nhân vật", "thêm giọng nói"],
   "add from project": ["add from project", "thêm từ dự án", "chọn từ dự án", "từ dự án"],
-  "upload": ["upload", "tải lên", "tải tệp lên", "tải ảnh lên"],
+  "upload": ["upload", "tải lên", "tải tệp lên", "tải lên tệp", "tải ảnh lên", "tải hình ảnh lên", "tải phương tiện lên"],
+  "upload file": ["upload file", "tải tệp lên", "tải lên tệp", "tải tệp"],
+  "continue": ["continue", "tiếp tục"],
+  "confirm": ["confirm", "xác nhận", "đồng ý"],
+  "rename": ["rename", "đổi tên", "đổi tên tệp", "đổi tên nội dung"],
+  "move to trash": ["move to trash", "chuyển vào thùng rác", "đưa vào thùng rác", "bỏ vào thùng rác"],
 };
 
 function flowButton(name, root = document) {
@@ -960,7 +965,7 @@ async function leaveFlowDetailView() {
       return;
     }
     if (/\/character(?:\/|$)/i.test(location.pathname)) {
-      const done = [...document.querySelectorAll("button,[role=button]")].find(el => visible(el) && /^Done( editing)?$/i.test(accessibleName(el).trim()));
+      const done = flowButton("Done") || flowButton("Done editing");
       if (done) {
         done.click();
         const left = await waitForFlowRoute(path => !/\/character(?:\/|$)/i.test(path), 2000, "").catch(() => false);

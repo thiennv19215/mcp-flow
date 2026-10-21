@@ -341,37 +341,14 @@ server.registerTool(
 );
 
 server.registerTool(
-  "flow_narrate",
-  {
-    title: "Record narration with local voice",
-    description:
-      "Record narration as an .m4a audio file, completely free, instant, and offline using the speech synthesizer installed on this computer (macOS voices or Windows built-in speech). Does not cost Flow credits and requires no external API key. flow_assemble can lay the result over a film.",
-    inputSchema: shapes.narrate,
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  },
-  (args) => reply(patient("flow_narrate", core.narrate(args))),
-);
-
-server.registerTool(
   "flow_voice_options",
   {
     title: "Inspect Flow video voice options",
-    description: "Read the exact voice labels currently visible in Flow's v2 composer picker. It opens the picker only when needed, never selects a voice or submits a generation, and closes only a picker it opened. These are Flow prompt voice chips, separate from flow_voices narration options.",
+    description: "Read the exact voice labels currently visible in Flow's v2 composer picker. It opens the picker only when needed, never selects a voice or submits a generation, and closes only a picker it opened. These are Flow prompt voice chips for spoken dialogue in generated videos.",
     inputSchema: shapes.voice_options,
     annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
   },
   () => reply(patient("flow_voice_options", core.voice_options())),
-);
-
-server.registerTool(
-  "flow_voices",
-  {
-    title: "List narration voices",
-    description: "Narrator voices available for flow_narrate: lists the local speech voices installed on this computer (macOS or Windows).",
-    inputSchema: shapes.voices,
-    annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
-  },
-  () => reply(core.voices()),
 );
 
 server.registerTool(

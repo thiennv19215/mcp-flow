@@ -23,7 +23,7 @@
   const NAV_SYNONYMS = {
     "characters": ["characters", "nhân vật", "nhan vat"],
     "all media": [
-      "all media", "tất cả nội dung nghe nhìn", "tất cả phương tiện", "tất cả media", "thư viện", "tất cả tệp"
+      "all media", "tất cả nội dung nghe nhìn", "tất cả nội dung", "nội dung nghe nhìn", "tất cả phương tiện", "tất cả media", "thư viện", "tất cả tệp"
     ]
   };
 

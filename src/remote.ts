@@ -207,8 +207,6 @@ export class RemoteCore implements Core {
   download = async (a: Parameters<Core["download"]>[0]) => this.mapRemotePaths(await this.request("download", a));
   assemble = async (a: Parameters<Core["assemble"]>[0]) => this.mapRemotePaths(await this.stagedRequest("assemble", a));
   techniques = (a: Parameters<Core["techniques"]>[0]) => this.request("techniques", a);
-  voices = () => this.request("voices", {});
-  narrate = async (a: Parameters<Core["narrate"]>[0]) => this.mapRemotePaths(await this.request("narrate", a));
   character = async (a: Parameters<Core["character"]>[0]) => this.mapRemotePaths(await this.stagedRequest("character", a));
   characters = () => this.request("characters", {});
   character_edit = async (a: Parameters<Core["character_edit"]>[0]) => this.mapRemotePaths(await this.request("character_edit", a));
@@ -272,8 +270,6 @@ export class ForwardingCore implements Core {
   download = (a: Parameters<Core["download"]>[0]) => this.active().download(a);
   assemble = (a: Parameters<Core["assemble"]>[0]) => this.active().assemble(a);
   techniques = (a: Parameters<Core["techniques"]>[0]) => this.active().techniques(a);
-  voices = () => this.active().voices();
-  narrate = (a: Parameters<Core["narrate"]>[0]) => this.active().narrate(a);
   character = (a: Parameters<Core["character"]>[0]) => this.active().character(a);
   characters = () => this.active().characters();
   character_edit = (a: Parameters<Core["character_edit"]>[0]) => this.active().character_edit(a);

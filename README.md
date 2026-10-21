@@ -128,8 +128,7 @@ Nothing below costs a credit until step 4, and the assistant asks before spendin
 4. **Shoot it.** *"Turn those into three 10-second shots, each starting where the last one ended,
    720p, no more than 15 credits each."* This spends credits. The price is read from Flow's own
    quote first and the scene is skipped if it is over your cap.
-5. **Narrate it.** *"Record this line with a warm documentary voice."* Free, any length.
-6. **Cut it.** *"Join the three shots under the narration, don't freeze the last frame."*
+5. **Cut it.** *"Join the three shots into one video, with optional music or voiceover."*
    The finished file lands in `~/flow-mcp-out/<project>/`.
 
 ---
@@ -201,8 +200,6 @@ agree on what is running. That API listens on 127.0.0.1 only and needs a per-run
 | `flow_character_edit` | Restyle an existing character in place (free) and save the new portrait; name, personality and voice are kept, so every scene referencing it updates. Pass `look` with the updated description; with only a name it re-saves the current portrait |
 | `flow_characters` | List the project's characters |
 | `flow_techniques` | 39 film-technique prompt presets (camera moves, product shots, transitions, image commands); pass an id as a scene's `technique` |
-| `flow_narrate` | Free narration audio, any length, using the local speech synthesizer installed on this computer (macOS voices or Windows built-in speech). 100% offline, instant, no key needed |
-| `flow_voices` | Narrator voices available on this computer |
 | `flow_assemble` | Join clips into one MP4 (a project's clips, or any you list, in order) with optional music and voiceover, and separate volume for the clips' own sound (local FFmpeg, no credits) |
 
 **Continuity between shots:** `chain_previous` (this clip starts on the last frame of the previous
@@ -212,13 +209,6 @@ when you need a start frame **and** a character locked together, use `flow_conti
 Flow's agent mode and does both.
 
 Output lands in `~/flow-mcp-out/<project>/scene-NN.ext`.
-
-### Local Narration
-
-`flow_narrate` uses your computer's own installed voices and works out of the box: macOS voices on a Mac,
-the built-in speech voices on Windows. Completely free, instant, and offline without requiring any external API key.
-
----
 
 ## Behaviour and settings
 

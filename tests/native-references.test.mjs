@@ -14,6 +14,7 @@ import { readFlowDownloadChunk } from '../extension/background/flow-download-rel
 
 const source = readFileSync(new URL('../extension/content/providers/flow/FlowComponents.js', import.meta.url), 'utf8');
 const mediaMenuSource = readFileSync(new URL('../extension/content/providers/flow/FlowMediaMenu.js', import.meta.url), 'utf8');
+const libraryOperationsSource = readFileSync(new URL('../extension/content/providers/flow/FlowLibraryOperations.js', import.meta.url), 'utf8');
 const nativeFileTransferSource = readFileSync(new URL('../extension/content/shared/native-file-transfer.js', import.meta.url), 'utf8');
 function harness({ names = ['MCP Test Mug'], addedKind = 'character', hideAttached = false, openInitially = true, afterOpenSurface = 'listbox', ambiguousSurface = false, menuTransitionMs = 0, characterUuid = '22222222-2222-4222-8222-222222222222' } = {}) {
   let open = openInitially, ticks = 0;
@@ -1245,6 +1246,90 @@ test('Vietnamese localization: flowButton recognizes Vietnamese button synonyms 
   assert.equal(flowButton('Start generation'), buttons[1]);
   assert.equal(flowButton('Clear prompt'), buttons[2]);
   assert.equal(flowButton('Back'), buttons[3]);
+});
+
+test('Vietnamese upload, confirmation, and character save labels resolve as exact aliases', () => {
+  const domUtilsSource = readFileSync(new URL('../extension/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const buttons = ['Tải lên tệp', 'Xác nhận', 'Hoàn tất'].map(name => ({ name, innerText: name, querySelector: () => null,
+    getAttribute: () => null, disabled: false, getBoundingClientRect: () => ({ width: 100, height: 30 }) }));
+  const context = vm.createContext({ globalThis: {}, window: {},
+    document: { querySelectorAll: selector => selector.includes('button') ? buttons : [], getElementById: () => null },
+    location: { href: 'https://flow.google.com/u/0/?hl=vi' },
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+    accessibleName: element => element.name || element.innerText || '',
+  });
+  vm.runInContext(domUtilsSource, context);
+  assert.equal(context.globalThis.flowButton('Upload file'), buttons[0]);
+  assert.equal(context.globalThis.flowButton('Confirm'), buttons[1]);
+  assert.equal(context.globalThis.flowButton('Done editing'), buttons[2]);
+});
+
+test('video upload confirmation accepts one exact Vietnamese action and rejects ambiguous aliases', async () => {
+  function makeContext(labels) {
+    let clicks = 0;
+    const buttons = labels.map(name => ({ name, innerText: name, disabled: false, click() { clicks++; }, getAttribute: () => null }));
+    const dialog = { innerText: 'Tải lên video', textContent: 'Tải lên video', contains: child => buttons.includes(child), querySelectorAll: selector => selector === 'button,[role=button]' ? buttons : [] };
+    const document = { querySelectorAll: selector => selector === '[role="dialog"],mat-dialog-container' ? [dialog] : [] };
+    const context = vm.createContext({ document, Date, wait: async () => {}, visible: () => true, accessibleName: element => element.name || element.innerText || '',
+      flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
+    });
+    vm.runInContext(source, context);
+    return { api: context.FlowComponents, clicks: () => clicks };
+  }
+  const single = makeContext(['Tiếp tục']);
+  const result = await single.api.confirmVideoUploadIfPrompted(Date.now() + 1000);
+  assert.equal(result.confirmationDialogSeen, true);
+  assert.equal(result.confirmationButtonClicked, true);
+  assert.equal(single.clicks(), 1);
+
+  const ambiguous = makeContext(['Tải lên', 'Xác nhận']);
+  await assert.rejects(ambiguous.api.confirmVideoUploadIfPrompted(Date.now() + 1000), error => error.code === 'FLOW_UPLOAD_CONFIRMATION_AMBIGUOUS');
+  assert.equal(ambiguous.clicks(), 0);
+});
+
+test('asset rename and trash actions match exact Vietnamese menu labels', async () => {
+  const uuid = '22222222-2222-4222-8222-222222222222';
+  async function run(operation, localizedAction) {
+    let clicks = 0;
+    let menuOpen = false;
+    let title = 'Original asset';
+    const tile = {
+      scrollIntoView() {},
+      getAttribute: key => key === 'aria-label' ? title : null,
+    };
+    const menuItem = { innerText: localizedAction, getAttribute: key => key === 'role' ? 'menuitem' : null,
+      click() { clicks++; } };
+    const input = { value: '', dispatchEvent(event) {
+      if (event.type === 'keyup' && event.key === 'Enter') title = this.value;
+    } };
+    const dialog = { querySelectorAll: selector => selector.includes('input') ? [input] : [] };
+    const document = { querySelectorAll(selector) {
+      if (selector === '[role="menuitem"]') return menuOpen ? [menuItem] : [];
+      if (selector === '[role="dialog"],mat-dialog-container,.cdk-overlay-pane') return operation === 'rename' && clicks > 0 ? [dialog] : [];
+      if (selector === 'flow-grid-tile-container') return [tile];
+      return [];
+    } };
+    const more = { click() { menuOpen = true; } };
+    const context = vm.createContext({ document, location: { pathname: '/project/test' }, Date,
+      FlowTiles: { countFlowTitleAcrossGrid: async () => 1, findFlowTile: async () => tile },
+      FlowMediaMenu: { scanNativeAssets: async () => [{ name: 'Original asset', id: uuid }] },
+      visible: () => true, accessibleName: element => element.innerText || '', mediaId: () => uuid,
+      flowButton: name => name === 'More options' ? more : null,
+      wait: async () => {}, Event: class { constructor(type) { this.type = type; } },
+      KeyboardEvent: class { constructor(type, detail) { this.type = type; Object.assign(this, detail); } },
+    });
+    vm.runInContext(libraryOperationsSource, context);
+    const adapter = new context.FlowLibraryOperations({ error: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }) });
+    const result = await adapter.execute(operation === 'rename' ? 'flow.asset.rename' : 'flow.asset.trash',
+      operation === 'rename' ? { name: 'Original asset', newName: 'Renamed asset' } : { name: 'Original asset' }, { timeoutMs: 1000 });
+    return { result, clicks };
+  }
+  const renamed = await run('rename', 'Đổi tên tệp');
+  assert.equal(renamed.result.name, 'Renamed asset');
+  assert.equal(renamed.clicks, 1);
+  const trashed = await run('trash', 'Đưa vào thùng rác');
+  assert.deepEqual(JSON.parse(JSON.stringify(trashed.result)), { trashed: 'Original asset' });
+  assert.equal(trashed.clicks, 1);
 });
 
 test('Vietnamese localization: flowRadio and flowNavigationItem resolve Vietnamese labels', () => {

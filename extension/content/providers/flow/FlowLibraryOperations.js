@@ -177,8 +177,8 @@
         const more = root.flowButton?.("More options", tile); if (!more) throw this.error("FLOW_TILE_MENU_MISSING", `Could not open options for "${title}".`, true);
         more.click(); await root.wait?.(200);
         const actionPatterns = name === "flow.asset.trash"
-          ? /^(?:Move to trash|Chuyển vào thùng rác|Xóa|Xóa tệp|Xóa nội dung)$/i
-          : /^(?:Rename|Đổi tên)$/i;
+          ? /^(?:Move to trash|Chuyển vào thùng rác|Đưa vào thùng rác|Bỏ vào thùng rác|Xóa|Xóa tệp|Xóa nội dung)$/i
+          : /^(?:Rename|Đổi tên|Đổi tên tệp|Đổi tên nội dung)$/i;
         const menuItems = [...document.querySelectorAll('[role="menuitem"]')].filter(item => {
           if (!root.visible?.(item)) return false;
           const label = (root.accessibleName?.(item) || item.innerText || item.textContent || "").trim();

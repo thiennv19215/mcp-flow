@@ -293,7 +293,7 @@ body{padding:0;background:var(--ink)}
 .app-sidebar .tabs{position:static;display:flex;flex-direction:column;gap:5px;overflow:visible;margin:0;padding:0;border:0;background:transparent;backdrop-filter:none}
 .app-sidebar .tabs button{position:relative;display:grid;grid-template-columns:34px minmax(0,1fr);grid-template-rows:auto auto;align-items:center;min-height:54px;padding:7px 10px;color:#bdc8d7;background:transparent;border:1px solid transparent;border-radius:10px;text-align:left;font:650 14px var(--body);white-space:normal}
 .app-sidebar .tabs button::before{grid-row:1/3;grid-column:1;content:attr(data-step);display:grid;place-items:center;width:25px;height:25px;border-radius:8px;background:#202c3b;color:#9eafc3;font:700 10px var(--mono)}
-.app-sidebar .tabs button[data-tab="cast"]::before{content:"01"}.app-sidebar .tabs button[data-tab="frames"]::before{content:"02"}app-sidebar .tabs button[data-tab="shots"]::before{content:"03"}.app-sidebar .tabs button[data-tab="narrate"]::before{content:"04"}.app-sidebar .tabs button[data-tab="restyle"]::before{content:"05"}.app-sidebar .tabs button[data-tab="cut"]::before{content:"06"}.app-sidebar .tabs button[data-tab="library"]::before{content:"07"}
+.app-sidebar .tabs button[data-tab="cast"]::before{content:"01"}.app-sidebar .tabs button[data-tab="frames"]::before{content:"02"}app-sidebar .tabs button[data-tab="shots"]::before{content:"03"}.app-sidebar .tabs button[data-tab="restyle"]::before{content:"04"}.app-sidebar .tabs button[data-tab="cut"]::before{content:"05"}.app-sidebar .tabs button[data-tab="library"]::before{content:"06"}
 .app-sidebar .tabs button:hover{color:#fff;background:#202c3b;border-color:#2b3b4f}
 .app-sidebar .tabs button.on{color:#eaf3ff;background:#263c58;border-color:#3e5d83;box-shadow:inset 3px 0 #8bb9ff}
 .app-sidebar .tabs button.on::before{color:#102033;background:#8bb9ff}
@@ -361,7 +361,6 @@ body{padding:0;background:var(--ink)}
       <button data-tab="cast" class="on">Cast<small>characters</small></button>
       <button data-tab="frames">Frames<small>still images</small></button>
       <button data-tab="shots">Shots<small>video clips</small></button>
-      <button data-tab="narrate">Voice<small>narration</small></button>
       <button data-tab="restyle">Restyle<small>edit a clip</small></button>
       <button data-tab="cut">Cut<small>assemble film</small></button>
       <button data-tab="library">Library<small>in Flow</small></button>
@@ -489,26 +488,6 @@ body{padding:0;background:var(--ink)}
         </div>
       </section>
 
-      <!-- NARRATE -->
-      <section class="panel" data-panel="narrate">
-        <div class="step">Step 4</div>
-        <h2>Voice</h2>
-        <p class="lede">Record narration for free, at any length. Uses voices installed on <span data-place="computer">this computer</span> (<span data-place="local_engine">system voice</span>). Completely offline, free, and needs no key or Flow credits.</p>
-        <div class="card">
-          <label class="f">Project folder</label><input type="text" id="n_project" placeholder="MyFilm">
-          <label class="f">Line to speak</label><textarea id="n_text" style="min-height:100px" placeholder="Sometimes the obstacles in your life aren't there to block you…"></textarea>
-          <div class="phrase" id="n_engineNote"></div>
-          <div class="grid2">
-            <div><label class="f">Voice</label><select id="n_voice"></select></div>
-          </div>
-          <p class="empty" id="n_fit" style="margin-top:10px"></p>
-          <div class="rowbtns"><button class="btn" id="n_go">Record take</button></div>
-          <div id="n_out" style="margin-top:16px"></div>
-        </div>
-        <h2 style="margin-top:18px">Your narrations <small>saved on <span data-place="computer">this Mac</span></small></h2>
-        <div class="card"><div id="n_takes"><p class="empty">No narrations saved yet.</p></div></div>
-      </section>
-
       <!-- RESTYLE -->
       <section class="panel" data-panel="restyle">
         <div class="step">Optional</div>
@@ -618,13 +597,13 @@ const DEFAULTS = {
   character: { variants: 1 },
   frames: { project: "MyFilm", aspect: "16:9", variants: 1, engine: "exact", scenes: [blank()] },
   shots: { project: "MyFilm", model: "Omni 1.1 Flash", aspect: "16:9", duration: 8, resolution: "720p", variants: 1, quality: "original", max: 25, scenes: [blank()] },
-  narrate: { project: "MyFilm", engine: "local", voice: "", text: "" },
   cut: { project: "MyFilm", music: null, voiceover: null, hold: true, clips: [] },
 };
 const S = Object.assign(structuredClone(DEFAULTS), JSON.parse(localStorage.getItem("flow-studio-v2") || "{}"));
 const save = () => localStorage.setItem("flow-studio-v2", JSON.stringify(S));
 if (S.frames.engine === "agent" && S.frames.variants !== 1) { S.frames.variants = 1; save(); }
-let TECH = [], VOICES = { local: [], mac: [] }, CAST = [], LIB = [], GAL = [], castImage = null, pickTarget = null, busy = false;
+let TECH = [], CAST = [], LIB = [], GAL = [], castImage = null, pickTarget = null, busy = false;
+const FLOW_VOICES = ["Achernar", "Achird", "Algenib", "Algieba", "Alnilam", "Aoede", "Autonoe", "Callirrhoe", "Charon", "Despina", "Enceladus", "Erinome", "Fenrir", "Gacrux", "Iapetus", "Kore", "Laomedeia", "Leda", "Orus", "Puck", "Pulcherrima", "Rasalgethi", "Sadachbia", "Sadaltager", "Schedar", "Sulafat", "Umbriel", "Vindemiatrix", "Zephyr", "Zubenelgenubi"];
 
 /* ---------- tabs ---------- */
 function showTab(name) {
@@ -733,7 +712,7 @@ function renderCast() {
         <button class="btn small ghost" data-castuse="${esc(c.name)}">Use</button><button class="btn small ghost" data-castedit="${esc(c.name)}">Edit</button></div>`).join("")
     : `<p class="empty">No characters yet — describe one below and Flow will draw it.</p>`;
   const slot = $('[data-slot="cast"]'); if (slot) slot.outerHTML = slotHtml("cast", 0, castImage, "Picture instead of a description");
-  $("#castVoice").innerHTML = `<option value="">No voice</option>` + ((VOICES.local || VOICES.voices || VOICES.mac) ?? []).map((v) => `<option value="${v.name}">${v.name} — ${v.description}</option>`).join("");
+  $("#castVoice").innerHTML = `<option value="">No voice</option>` + FLOW_VOICES.map((v) => `<option value="${v}">${v}</option>`).join("");
 }
 $("#castList").addEventListener("click", async (e) => {
   const use = e.target.closest("[data-castuse]"), edit = e.target.closest("[data-castedit]");
@@ -844,40 +823,6 @@ document.addEventListener("click", (e) => {
   const keep = mode === "append" ? S[group].scenes.filter((x) => x.prompt.trim()) : [];
   S[group].scenes = [...keep, ...made].slice(0, 100); save(); renderAll();
   toast(`${parts.length} frame(s) created`);
-});
-
-/* ---------- narrate ---------- */
-function renderNarrate() {
-  const list = VOICES.local || VOICES.voices || VOICES.mac || [];
-  const picked = S.narrate.voice;
-  $("#n_voice").innerHTML = list.map((v) => `<option value="${v.name}" ${v.name === picked ? "selected" : ""}>${v.name} — ${v.description}</option>`).join("") || `<option value="">Default system voice</option>`;
-  $("#n_engineNote").innerHTML = `Spoken on ${PLACE.computer} — free, instant, offline. Quality depends on the installed system voice: ${PLACE.platform === "win32" ? "add more voices in <b>Settings → Time &amp; language → Speech</b> and they appear here" : "download a <b>Premium</b> voice in System Settings → Accessibility → Spoken Content → System Voice"}. ${list.length} voice(s) available.`;
-  const words = $("#n_text").value.trim().split(/\s+/).filter(Boolean).length;
-  const secs = Math.ceil(words / 2.5);
-  $("#n_fit").textContent = words ? `${words} words ≈ ${secs}s of speech. No length limit, no credits.` : "";
-}
-$("#n_text").addEventListener("input", () => { S.narrate.text = $("#n_text").value; save(); renderNarrate(); });
-$("#n_voice").addEventListener("change", () => { S.narrate.voice = $("#n_voice").value; save(); });
-$("#n_go").onclick = async () => {
-  if (!guard()) return;
-  const text = $("#n_text").value.trim(); if (!text) return toast("Write the line first.", true);
-  const voice = S.narrate.voice;
-  const b = $("#n_go"); b.disabled = true; b.textContent = "Recording…";
-  try {
-    const out = await api("narrate", { project: $("#n_project").value.trim() || S.narrate.project, text, voice });
-    {
-      $("#n_out").innerHTML = `<audio controls src="${media(out.output)}&t=${Date.now()}"></audio><p class="empty" style="margin-top:8px">${out.duration.toFixed(1)}s · free · ${esc(out.output)}</p>
-        <div class="rowbtns"><button class="btn small" data-usevo="${esc(out.output)}">Use in Cut</button></div>`;
-      loadGallery();
-    }
-  } catch (err) { $("#n_out").innerHTML = `<p class="empty" style="color:var(--bad);white-space:pre-wrap">${esc(err.message)}</p>`; toast(err.message, true); }
-  b.disabled = false; b.textContent = "Record take";
-};
-
-$("#n_out").addEventListener("click", (e) => {
-  const u = e.target.closest("[data-usevo]"); if (!u) return;
-  S.cut.voiceover = { path: u.dataset.usevo, name: u.dataset.usevo.split(/[\\/]/).pop() };
-  save(); renderAll(); showTab("cut"); toast("Narration loaded into Cut");
 });
 
 /* ---------- restyle ---------- */
@@ -1065,9 +1010,8 @@ function estimate() {
     $("#estSub").textContent = `${ready.length} shot(s) ready`;
     btn.disabled = busy || !ready.length;
   } else {
-    const narrateCost = "Free";
-    $("#estNum").textContent = { cast: "Free", narrate: narrateCost, restyle: "≈ 20 credits", cut: "Free", library: "Free" }[tab] ?? "";
-    $("#estSub").textContent = { cast: "characters cost nothing", narrate: S.narrate.engine === "mac" ? `spoken on ${PLACE.computer}` : "Google AI Studio, free", restyle: "use Restyle clip", cut: "use Assemble film", library: "downloads cost nothing" }[tab] ?? "";
+    $("#estNum").textContent = { cast: "Free", restyle: "≈ 20 credits", cut: "Free", library: "Free" }[tab] ?? "";
+    $("#estSub").textContent = { cast: "characters cost nothing", restyle: "use Restyle clip", cut: "use Assemble film", library: "downloads cost nothing" }[tab] ?? "";
     btn.disabled = true;
   }
 }
@@ -1117,16 +1061,6 @@ function applyPlace(p) {
   PLACE = { ...PLACE, ...p, binShort: p.platform === "win32" ? "Recycle Bin" : p.platform === "darwin" ? "Mac Trash" : "Trash" };
   $$("[data-place]").forEach((el) => { const v = PLACE[el.dataset.place]; if (v) el.textContent = v; });
 }
-function renderTakes() {
-  const takes = GAL.flatMap((p) => p.files.filter((f) => f.kind === "audio").map((f) => ({ ...f, project: p.name }))).sort((a, b) => b.mtime - a.mtime);
-  $("#n_takes").innerHTML = takes.length
-    ? takes.map((t) => `<div class="take"><div style="min-width:0"><b>${esc(t.name)}</b><small>${esc(t.project)}</small></div><button type="button" class="btn small ghost" data-taketrash="${esc(t.path)}" style="border-color:var(--bad);color:var(--bad)">Move to ${PLACE.binShort}</button><audio controls preload="none" src="${media(t.path)}"></audio></div>`).join("")
-    : `<p class="empty">No narrations saved yet.</p>`;
-}
-$("#n_takes").addEventListener("click", async (e) => {
-  const b = e.target.closest("[data-taketrash]"); if (!b) return;
-  if (await discardLocal(b.dataset.taketrash, `"${b.dataset.taketrash.split(/[\\/]/).pop()}"`)) loadGallery();
-});
 function renderGallery() {
   const p = GAL.find((x) => x.name === $("#galProject").value);
   $("#galInfo").textContent = p ? p.dir : `Finished work is saved on ${PLACE.computer} and listed here.`;
@@ -1175,7 +1109,6 @@ const STUDIO_I18N = {
       cast: "Nhân vật<small>characters</small>",
       frames: "Khung ảnh<small>ảnh tĩnh</small>",
       shots: "Phân cảnh<small>video clips</small>",
-      narrate: "Lồng tiếng<small>voice</small>",
       restyle: "Sửa clip<small>edit clip</small>",
       cut: "Ghép phim<small>assemble</small>",
       library: "Thư viện<small>Flow</small>"
@@ -1201,7 +1134,6 @@ const STUDIO_I18N = {
       cast: "Cast<small>characters</small>",
       frames: "Frames<small>still images</small>",
       shots: "Shots<small>video clips</small>",
-      narrate: "Voice<small>narration</small>",
       restyle: "Restyle<small>edit a clip</small>",
       cut: "Cut<small>assemble film</small>",
       library: "Library<small>in Flow</small>"
@@ -1287,19 +1219,18 @@ async function poll(detailed = false) {
 
 /* ---------- boot ---------- */
 function renderAll() {
-  for (const [id, val] of [["f_project", S.frames.project], ["s_project", S.shots.project], ["n_project", S.narrate.project], ["c_project", S.cut.project], ["e_project", S.cut.project], ["l_project", S.cut.project]]) if ($("#" + id) && !$("#" + id).value) $("#" + id).value = val;
+  for (const [id, val] of [["f_project", S.frames.project], ["s_project", S.shots.project], ["c_project", S.cut.project], ["e_project", S.cut.project], ["l_project", S.cut.project]]) if ($("#" + id) && !$("#" + id).value) $("#" + id).value = val;
   $("#s_model").innerHTML = Object.keys(VIDEO_COST).map((m) => `<option ${m === S.shots.model ? "selected" : ""}>${m}</option>`).join("");
-  renderSegs(); renderScenes(); renderCast(); renderNarrate();
+  renderSegs(); renderScenes(); renderCast();
   const mus = $('[data-slot="music"]'), vo = $('[data-slot="voiceover"]');
   if (mus) mus.outerHTML = slotHtml("music", 0, S.cut.music, "Music track");
   if (vo) vo.outerHTML = slotHtml("voiceover", 0, S.cut.voiceover, "Narration");
   $("#c_hold").checked = S.cut.hold;
   renderClips();
-  if ($("#n_style")) $("#n_style").value = S.narrate.style ?? "";
   estimate(); save();
 }
 $("#s_model").addEventListener("change", (e) => { S.shots.model = e.target.value; save(); renderAll(); });
-for (const [id, path] of [["f_project", "frames"], ["s_project", "shots"], ["n_project", "narrate"], ["c_project", "cut"]])
+for (const [id, path] of [["f_project", "frames"], ["s_project", "shots"], ["c_project", "cut"]])
   $("#" + id).addEventListener("input", (e) => { S[path].project = e.target.value; save(); });
 
 $("#studioLangVi").onclick = () => {
@@ -1351,8 +1282,7 @@ if (false) {
       toast("Không thể đăng xuất. Hãy thử lại.", true);
     }
   });
-  try { [TECH, VOICES] = await Promise.all([api("techniques"), api("voices")]); } catch { VOICES = { local: [], mac: [] }; }
-  applyPlace(VOICES.place);
+  try { TECH = await api("techniques"); } catch { TECH = []; }
   loadCast().then((c) => { CAST = c; renderCast(); }).catch(() => {});
   renderAll(); showTab(S.tab); poll(true); loadGallery(); void loadFlowProjects();
 })();

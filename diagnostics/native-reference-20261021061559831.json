@@ -1,0 +1,32 @@
+{
+  "started": "2026-10-21T06:15:59.831Z",
+  "mode": "reference",
+  "api": "http://127.0.0.1:18897",
+  "probes": [
+    {
+      "name": "image.reference.submit_only",
+      "status": "queued",
+      "job_id": "d6e59a6c"
+    },
+    {
+      "name": "image.reference.submit_only",
+      "status": "failed_before_dispatch",
+      "error": "Job d6e59a6c ended as failed before confirmed dispatch (outcome_unknown=false): No exact reference named \"fm-415bc373e1e9-upload.png\" in the selected project. Nothing was attached.. Do not replay this job.",
+      "request_diagnostics": null
+    }
+  ],
+  "job_id": "d6e59a6c",
+  "latest_job": {
+    "status": "failed",
+    "attempts": 1,
+    "credits": null,
+    "credit_quote_verified": false,
+    "error_category": null,
+    "outcome_unknown": false,
+    "request_dispatched": false,
+    "server_acceptance_observed": false,
+    "request_diagnostics": null
+  },
+  "finished": "2026-10-21T06:16:12.711Z",
+  "fatal_error": "Job d6e59a6c ended as failed before confirmed dispatch (outcome_unknown=false): No exact reference named \"fm-415bc373e1e9-upload.png\" in the selected project. Nothing was attached.. Do not replay this job."
+}

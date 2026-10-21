@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { assemble, localVoices, speakLocally } from "./assemble.js";
+import { assemble } from "./assemble.js";
 import { extractLastFrame } from "./chain.js";
 import { characterLook, createCharacter, createFlowProject, downloadAsset, renameAsset, trashAsset, editCharacter, getCorrelationObserverHealth, getFlowState, listAssets, listCharacters, listFlowProjects, listFlowVoiceOptions, openFlowProject, rememberCharacter, runAgentBatch, runContinue, runEdit, runGeneration, uploadFlowMediaToProject } from "./flow.js";
 import { JobQueue, type Job } from "./queue.js";
@@ -59,8 +59,6 @@ export interface Core {
   download(a: Args<"download">): Promise<unknown>;
   assemble(a: Args<"assemble">): Promise<unknown>;
   techniques(a: Args<"techniques">): Promise<unknown>;
-  voices(): Promise<unknown>;
-  narrate(a: Args<"narrate">): Promise<unknown>;
   character(a: Args<"character">): Promise<unknown>;
   characters(): Promise<unknown>;
   character_edit(a: Args<"character_edit">): Promise<unknown>;
@@ -465,21 +463,6 @@ export class LocalCore implements Core {
       ...character,
       use_as: `character:${character.name}`,
     }));
-  }
-
-  async voices() {
-    // The panel words itself from these, so a PC never reads "this Mac".
-    const place = { computer: COMPUTER, bin: BIN, local_engine: IS_MAC ? "macOS voice" : IS_WIN ? "Windows voice" : "System voice", platform: process.platform };
-    const local = await localVoices();
-    return { voices: local, local, mac: local, place };
-  }
-
-  async narrate({ project, text, voice }: Args<"narrate">) {
-    const output_dir = projectDir(project);
-    mkdirSync(output_dir, { recursive: true });
-    const target = join(output_dir, `${this.nextStem(output_dir, "narration")}.m4a`);
-    const spoken = await speakLocally(text.trim(), voice, target);
-    return { output_dir, credits: 0, engine: "local", voice: spoken.voice ?? voice ?? "default", ...spoken };
   }
 
   async techniques({ category }: Args<"techniques">) {

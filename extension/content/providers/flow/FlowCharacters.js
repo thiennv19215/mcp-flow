@@ -136,7 +136,7 @@
       const list = listGetter();
       const loading = [...document.querySelectorAll('[role="progressbar"],[aria-busy="true"]')].some(visible);
       if (list && !loading) {
-        if (visibleOptions(list).length || /no (?:assets|voices) found/i.test(list.innerText || "")) return list;
+        if (visibleOptions(list).length || /no (?:assets|voices) found|không tìm thấy (?:tài sản|nội dung|giọng nói|giọng|kết quả)/i.test(list.innerText || "")) return list;
         if (!stableAt) stableAt = Date.now();
         if (Date.now() - stableAt >= 700) return list;
       } else stableAt = 0;
