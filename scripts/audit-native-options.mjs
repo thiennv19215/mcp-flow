@@ -1,6 +1,6 @@
 const allowedModes = new Set([
   'readonly', 'upload', 'image', 'video', 'frame', 'last-frame', 'frame-pair', 'reference', 'video-reference',
-  'edit', 'continue-exact', 'continue-likeness', 'agent', 'reangle', 'character', 'character-edit', 'create-project', 'voice-options',
+  'edit', 'continue-exact', 'continue-likeness', 'agent', 'character', 'character-edit', 'create-project', 'voice-options',
 ]);
 
 export function parseAuditOptions(args) {
@@ -36,13 +36,13 @@ export function parseAuditOptions(args) {
   if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 30 || timeoutSeconds > 1800) {
     throw new Error('--timeout-seconds must be an integer from 30 to 1800.');
   }
-  const imageAssetModes = new Set(['frame', 'last-frame', 'frame-pair', 'reference', 'video-reference', 'reangle', 'character']);
+  const imageAssetModes = new Set(['frame', 'last-frame', 'frame-pair', 'reference', 'video-reference', 'character']);
   const videoAssetModes = new Set(['edit', 'continue-exact', 'continue-likeness']);
   const characterReferenceModes = new Set(['reference', 'video-reference']);
   if (imageAssetModes.has(mode) && !assetNames.length && !characterReferenceModes.has(mode)) throw new Error(`--mode ${mode} requires --asset with the exact title of an existing Flow image.`);
   if (videoAssetModes.has(mode) && assetNames.length !== 1) throw new Error(`--mode ${mode} requires exactly one --asset with the exact title of an existing Flow video.`);
   if (mode === 'frame-pair' && assetNames.length !== 2) throw new Error('--mode frame-pair requires exactly two --asset values: first frame, then last frame.');
-  if (['frame', 'last-frame', 'reangle', 'character'].includes(mode) && assetNames.length !== 1) throw new Error(`--mode ${mode} requires exactly one --asset value.`);
+  if (['frame', 'last-frame', 'character'].includes(mode) && assetNames.length !== 1) throw new Error(`--mode ${mode} requires exactly one --asset value.`);
   if (mode === 'video-reference' && assetNames.length > 3) throw new Error('--mode video-reference accepts at most three --asset image references.');
   if (mode === 'reference' && assetNames.length > 3) throw new Error('--mode reference accepts at most three --asset image references.');
   if (mode === 'upload' && !filePath) throw new Error('--mode upload requires --file with an absolute local image or video path.');

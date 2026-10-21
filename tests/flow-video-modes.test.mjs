@@ -490,11 +490,10 @@ test('edit, continue, and Agent schemas expose optional submit_only', () => {
   assert.equal(z.object(shapes.edit).parse({ project: 'test', asset: 'clip', prompt: 'edit', acknowledge_cost: true, submit_only: true }).submit_only, true);
   assert.equal(z.object(shapes.continue_shot).parse({ project: 'test', from_asset: 'clip', prompt: 'continue', acknowledge_cost: true, submit_only: true }).submit_only, true);
   assert.equal(z.object(shapes.agent).parse({ project: 'test', scenes: ['scene'], submit_only: true }).submit_only, true);
-  assert.equal(z.object(shapes.reangle).parse({ reference_image: 'asset:still', submit_only: true }).submit_only, true);
 });
 
-test('submit_only edit, continue, Agent, and re-angle jobs force retries to zero', async () => {
-  for (const mode of ['agent', 'edit', 'continue', 'reangle']) {
+test('submit_only edit, continue, and Agent jobs force retries to zero', async () => {
+  for (const mode of ['agent', 'edit', 'continue']) {
     const core = new LocalCore(`submit-safety-${randomUUID()}`);
     let captured;
     core.queue.add = params => {
@@ -505,7 +504,6 @@ test('submit_only edit, continue, Agent, and re-angle jobs force retries to zero
     if (mode === 'agent') await core.agent({ project, scenes: ['one scene'], submit_only: true });
     if (mode === 'edit') await core.edit({ project, asset: 'source clip', prompt: 'edit prompt', acknowledge_cost: true, submit_only: true });
     if (mode === 'continue') await core.continue_shot({ project, from_asset: 'source clip', prompt: 'continue prompt', acknowledge_cost: true, force: true, submit_only: true });
-    if (mode === 'reangle') await core.reangle({ project, reference_image: 'asset:source still', submit_only: true });
     assert.equal(captured?.submit_only, true, `${mode} must retain submit_only in the queued job`);
     assert.equal(captured?.retries, 0, `${mode} must never auto-retry a submit_only request`);
   }

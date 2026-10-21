@@ -163,9 +163,6 @@ export class RemoteCore implements Core {
     if (method === "character" && args.image && !/^(?:asset|character):/i.test(args.image)) {
       return this.request(method, { ...args, image: await this.stageLocalPath(args.image) });
     }
-    if (method === "reangle" && args.reference_image && !/^(?:asset|character):/i.test(args.reference_image)) {
-      return this.request(method, { ...args, reference_image: await this.stageLocalPath(args.reference_image) });
-    }
     if (method === "assemble") {
       const clips = args.clips ? await Promise.all(args.clips.map((path: string) => this.stageLocalPath(path))) : undefined;
       const music = args.music ? await this.stageLocalPath(args.music) : undefined;
@@ -219,12 +216,9 @@ export class RemoteCore implements Core {
   trash = (a: Parameters<Core["trash"]>[0]) => this.request("trash", a);
   rename_asset = (a: Parameters<Core["rename_asset"]>[0]) => this.request("rename_asset", a);
   discard = (a: Parameters<Core["discard"]>[0]) => this.request("discard", a);
-  set_key = (a: Parameters<Core["set_key"]>[0]) => this.request("set_key", a);
   continue_shot = async (a: Parameters<Core["continue_shot"]>[0]) => this.mapRemotePaths(await this.request("continue_shot", a));
   agent = async (a: Parameters<Core["agent"]>[0]) => this.mapRemotePaths(await this.request("agent", a));
   outputs = async () => this.mapRemotePaths(await this.request("outputs", {}));
-  reangle = async (a: Parameters<Core["reangle"]>[0]) => this.mapRemotePaths(await this.stagedRequest("reangle", a));
-  angle_presets = () => this.request("angle_presets", {});
 
   async wait(a: Parameters<Core["wait"]>[0]): Promise<unknown> {
     const deadline = Date.now() + a.timeout_seconds * 1000;
@@ -288,10 +282,7 @@ export class ForwardingCore implements Core {
   rename_asset = (a: Parameters<Core["rename_asset"]>[0]) => this.active().rename_asset(a);
   // discard is a local filesystem action; remote outputs are materialized under this owner's OUTPUT_ROOT first.
   discard = (a: Parameters<Core["discard"]>[0]) => this.local.discard(a);
-  set_key = (a: Parameters<Core["set_key"]>[0]) => this.active().set_key(a);
   continue_shot = (a: Parameters<Core["continue_shot"]>[0]) => this.active().continue_shot(a);
   agent = (a: Parameters<Core["agent"]>[0]) => this.active().agent(a);
   outputs = () => this.active().outputs();
-  reangle = (a: Parameters<Core["reangle"]>[0]) => this.active().reangle(a);
-  angle_presets = () => this.active().angle_presets();
 }

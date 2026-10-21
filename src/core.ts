@@ -1,12 +1,10 @@
 import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { assemble, localVoices, speakLocally } from "./assemble.js";
-import { GEMINI_VOICES, geminiKey, saveGeminiKey, speakWithGemini } from "./gemini.js";
 import { extractLastFrame } from "./chain.js";
 import { characterLook, createCharacter, createFlowProject, downloadAsset, renameAsset, trashAsset, editCharacter, getCorrelationObserverHealth, getFlowState, listAssets, listCharacters, listFlowProjects, listFlowVoiceOptions, openFlowProject, rememberCharacter, runAgentBatch, runContinue, runEdit, runGeneration, uploadFlowMediaToProject } from "./flow.js";
 import { JobQueue, type Job } from "./queue.js";
 import { attachReferences, clearFlowReferences } from "./flow.js";
-import { buildAnglePrompt, listAnglePresets } from "./angles.js";
 import { BIN, COMPUTER, IS_MAC, IS_WIN, moveToBin } from "./platform.js";
 import { TECHNIQUES, techniqueById } from "./techniques.js";
 import { OUTPUT_ROOT, outputRootForContext, projectDir } from "./paths.js";
@@ -70,12 +68,9 @@ export interface Core {
   trash(a: Args<"trash">): Promise<unknown>;
   rename_asset(a: Args<"rename_asset">): Promise<unknown>;
   discard(a: Args<"discard">): Promise<unknown>;
-  set_key(a: Args<"set_key">): Promise<unknown>;
   continue_shot(a: Args<"continue_shot">): Promise<unknown>;
   agent(a: Args<"agent">): Promise<unknown>;
   outputs(): Promise<unknown>;
-  reangle(a: Args<"reangle">): Promise<unknown>;
-  angle_presets(): Promise<unknown>;
 }
 
 // Flow's own voices: still offered when giving a character a voice, but narration no longer goes through Flow.
@@ -472,82 +467,23 @@ export class LocalCore implements Core {
     }));
   }
 
-  // Panel only: deliberately NOT registered as an MCP tool, so a key typed into Flow Studio never reaches Claude.
-  async set_key({ key }: Args<"set_key">) {
-    return saveGeminiKey(key);
-  }
-
   async voices() {
     // The panel words itself from these, so a PC never reads "this Mac".
     const place = { computer: COMPUTER, bin: BIN, local_engine: IS_MAC ? "macOS voice" : IS_WIN ? "Windows voice" : "System voice", platform: process.platform };
-    return { gemini: GEMINI_VOICES, gemini_ready: Boolean(geminiKey()), mac: await localVoices(), place };
+    const local = await localVoices();
+    return { voices: local, local, mac: local, place };
   }
 
-  async narrate({ project, text, voice, engine, style }: Args<"narrate">) {
+  async narrate({ project, text, voice }: Args<"narrate">) {
     const output_dir = projectDir(project);
     mkdirSync(output_dir, { recursive: true });
     const target = join(output_dir, `${this.nextStem(output_dir, "narration")}.m4a`);
-    const spoken = engine === "mac" ? await speakLocally(text.trim(), voice, target) : await speakWithGemini(text.trim(), voice, target, style);
-    return { output_dir, credits: 0, engine, voice, ...spoken };
+    const spoken = await speakLocally(text.trim(), voice, target);
+    return { output_dir, credits: 0, engine: "local", voice: spoken.voice ?? voice ?? "default", ...spoken };
   }
 
   async techniques({ category }: Args<"techniques">) {
     return TECHNIQUES.filter((t) => !category || t.category === category);
   }
 
-  async reangle({
-    project,
-    reference_image,
-    rotation,
-    tilt,
-    zoom,
-    preset,
-    custom_prompt,
-    extra_prompt,
-    aspect_ratio,
-    variants,
-    submit_only,
-  }: Args<"reangle">) {
-    if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
-    const angleResult = buildAnglePrompt({
-      preset,
-      rotation,
-      tilt,
-      zoom,
-      customPrompt: custom_prompt,
-      extraPrompt: extra_prompt,
-    });
-
-    const gen = await this.generate({
-      project: project || "Angles",
-      scenes: [
-        {
-          prompt: angleResult.prompt,
-          type: "image",
-          aspect_ratio: aspect_ratio || "9:16",
-          variants: variants || 1,
-          reference_images: [reference_image],
-          max_credits: 0,
-          retries: submit_only ? 0 : 1,
-          submit_only,
-        },
-      ],
-    });
-
-    return {
-      ...(typeof gen === "object" ? gen : {}),
-      angle: {
-        rotation: angleResult.rotation,
-        tilt: angleResult.tilt,
-        zoom: angleResult.zoom,
-        preset: angleResult.preset.name,
-        modifiers: angleResult.modifiers,
-        compiled_prompt: angleResult.prompt,
-      },
-    };
-  }
-
-  async angle_presets() {
-    return listAnglePresets();
-  }
 }

@@ -343,9 +343,9 @@ server.registerTool(
 server.registerTool(
   "flow_narrate",
   {
-    title: "Record narration in a Flow voice",
+    title: "Record narration with local voice",
     description:
-      "Record narration as an .m4a, free and instantly. `engine: \"gemini\"` uses Google AI Studio's text-to-speech (the same voices Flow has, needs a free key in ~/.flow-mcp/gemini-key, and takes a `style` note like 'warmly, like a documentary narrator'); `engine: \"mac\"` uses a voice installed on this computer (macOS, or Windows' built-in speech voices). Neither costs credits or caps the length. flow_assemble can lay the result over a film.",
+      "Record narration as an .m4a audio file, completely free, instant, and offline using the speech synthesizer installed on this computer (macOS voices or Windows built-in speech). Does not cost Flow credits and requires no external API key. flow_assemble can lay the result over a film.",
     inputSchema: shapes.narrate,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },
@@ -366,8 +366,8 @@ server.registerTool(
 server.registerTool(
   "flow_voices",
   {
-    title: "List Flow voices",
-    description: "Narrator voices available for flow_narrate: Google AI Studio's (with whether a key is set up) and the English voices installed on this computer.",
+    title: "List narration voices",
+    description: "Narrator voices available for flow_narrate: lists the local speech voices installed on this computer (macOS or Windows).",
     inputSchema: shapes.voices,
     annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
   },
@@ -384,29 +384,6 @@ server.registerTool(
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   (args) => reply(patient("flow_assemble", core.assemble(args))),
-);
-
-server.registerTool(
-  "flow_reangle_image",
-  {
-    title: "Re-angle image via 3D Camera Orbit",
-    description:
-      "Generate a new perspective of an existing character, product, or subject using Flow's reference image consistency and 3D spherical camera coordinates (rotation, tilt, zoom). Rotation: -180 to 180 deg (0 = front, 90 = right profile, -90 = left profile, 180 = back). Tilt: -60 to 90 deg (-60 = worm's eye looking up, 0 = eye level, 60 = high angle, 90 = top down). Zoom: -2 to 2 (-2 = wide, 0 = medium, 1 = close-up, 2 = macro).",
-    inputSchema: shapes.reangle,
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  },
-  (args) => reply(core.reangle(args)),
-);
-
-server.registerTool(
-  "flow_angle_presets",
-  {
-    title: "List 3D camera angle presets",
-    description: "List available camera angle presets (portrait-reangle, product-reangle, cinematic-orbit, character-turnaround).",
-    inputSchema: shapes.angle_presets,
-    annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
-  },
-  () => reply(core.angle_presets()),
 );
 
 return server;

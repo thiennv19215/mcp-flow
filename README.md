@@ -201,8 +201,8 @@ agree on what is running. That API listens on 127.0.0.1 only and needs a per-run
 | `flow_character_edit` | Restyle an existing character in place (free) and save the new portrait; name, personality and voice are kept, so every scene referencing it updates. Pass `look` with the updated description; with only a name it re-saves the current portrait |
 | `flow_characters` | List the project's characters |
 | `flow_techniques` | 39 film-technique prompt presets (camera moves, product shots, transitions, image commands); pass an id as a scene's `technique` |
-| `flow_narrate` | Free narration audio, any length: `gemini` (Google AI Studio text-to-speech, with the same voices Flow has, plus a `style` note) or `mac` (a voice installed on this computer, no key needed) |
-| `flow_voices` | Narrator voices available, and whether a Google key is set up |
+| `flow_narrate` | Free narration audio, any length, using the local speech synthesizer installed on this computer (macOS voices or Windows built-in speech). 100% offline, instant, no key needed |
+| `flow_voices` | Narrator voices available on this computer |
 | `flow_assemble` | Join clips into one MP4 (a project's clips, or any you list, in order) with optional music and voiceover, and separate volume for the clips' own sound (local FFmpeg, no credits) |
 
 **Continuity between shots:** `chain_previous` (this clip starts on the last frame of the previous
@@ -213,13 +213,10 @@ Flow's agent mode and does both.
 
 Output lands in `~/flow-mcp-out/<project>/scene-NN.ext`.
 
-### Narration with Google's voices (optional)
+### Local Narration
 
-`flow_narrate` with `engine: "mac"` uses your computer's own voices and works out of the box: macOS voices on a
-Mac, the built-in speech voices on Windows. For Google's voices (the same ones Flow offers), get a free key from
-[Google AI Studio](https://aistudio.google.com/apikey) and paste it into **Flow Studio → Voice → Google AI Studio
-key → Save key**. It's checked with Google before it's saved, and stored only on your computer. Or set
-`GEMINI_API_KEY`. Either way, never paste the key into a chat; it would end up in the conversation history.
+`flow_narrate` uses your computer's own installed voices and works out of the box: macOS voices on a Mac,
+the built-in speech voices on Windows. Completely free, instant, and offline without requiring any external API key.
 
 ---
 
@@ -233,7 +230,7 @@ key → Save key**. It's checked with Google before it's saved, and stored only 
 - Any Google account language works. The server finds Flow's buttons by their English names, so its
   Chrome window always shows Flow in English (it adds `?hl=en` to the address). Your account's own
   language setting is never changed, and prompts can be written in any language.
-- Environment variables: `GEMINI_API_KEY`, `FLOW_MCP_PORT` (18899), `FLOW_MCP_OUTPUT`,
+- Environment variables: `FLOW_MCP_PORT` (18899), `FLOW_MCP_OUTPUT`,
   `FLOW_MCP_HOME`, `FLOW_MCP_PAUSE_MIN_S`,
   `FLOW_MCP_PAUSE_MAX_S`.
 

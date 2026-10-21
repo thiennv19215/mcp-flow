@@ -100,28 +100,31 @@ export async function localVoices(): Promise<{ name: string; description: string
 }
 
 // Speaks a line with this computer's own voice. Free and instant, but only as good as the installed voice.
-export async function speakLocally(text: string, voice: string, target: string): Promise<{ output: string; duration: number }> {
+export async function speakLocally(text: string, voice?: string, target: string = ""): Promise<{ output: string; duration: number; voice?: string }> {
   const stem = target.replace(/\.\w+$/, "");
   const raw = stem + (IS_WIN ? ".wav" : ".aiff");
+  const trimmedVoice = (voice ?? "").trim();
   if (IS_WIN) {
     // The line goes through a file, never the command line, so quotes or symbols in it cannot break the script.
     const lineFile = stem + ".line.txt";
     writeFileSync(lineFile, text, "utf8");
     try {
+      const selectSnippet = trimmedVoice ? `try { $s.SelectVoice(${psQuote(trimmedVoice)}) } catch {}` : "";
       powershell(
-        `Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; $s.SelectVoice(${psQuote(voice)}); $s.SetOutputToWaveFile(${psQuote(raw)}); $s.Speak([System.IO.File]::ReadAllText(${psQuote(lineFile)}, [System.Text.Encoding]::UTF8)); $s.Dispose()`,
+        `Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; ${selectSnippet}; $s.SetOutputToWaveFile(${psQuote(raw)}); $s.Speak([System.IO.File]::ReadAllText(${psQuote(lineFile)}, [System.Text.Encoding]::UTF8)); $s.Dispose()`,
         300_000,
       );
     } finally {
       rmSync(lineFile, { force: true });
     }
   } else {
-    await run(SAY, ["-v", voice, "-r", "168", "-o", raw, text]);
+    const sayArgs = trimmedVoice ? ["-v", trimmedVoice, "-r", "168", "-o", raw, text] : ["-r", "168", "-o", raw, text];
+    await run(SAY, sayArgs);
   }
   await run(FFMPEG, ["-y", "-i", raw, "-af", "highpass=f=80,acompressor=threshold=-18dB:ratio=3:attack=5:release=120,loudnorm=I=-16:TP=-1.5:LRA=11", "-ar", "48000", "-ac", "2", target]);
   rmSync(raw, { force: true });
   const { stdout } = await run(FFPROBE, ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", target]);
-  return { output: target, duration: Number(stdout.trim()) };
+  return { output: target, duration: Number(stdout.trim()), voice: trimmedVoice || undefined };
 }
 
 // Joins the scene clips into one film, keeping their own sound and laying music / voiceover on top.

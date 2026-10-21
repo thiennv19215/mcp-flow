@@ -210,12 +210,7 @@ try {
       scenes: ['A single red ceramic mug on a plain white background, studio product photo, no text.'],
       aspect_ratio: '1:1', submit_only: true,
     }, 'image.agent_batch.submit_only');
-  } else if (mode === 'reangle') {
-    await requireAsset(assetNames[0], 'image');
-    await submitOperation('reangle', {
-      project: `NativeE2E-${mode}-${stamp}`, reference_image: `asset:${assetNames[0]}`,
-      rotation: 30, tilt: 0, zoom: 0, preset: 'product-reangle', aspect_ratio: '9:16', variants: 1, submit_only: true,
-    }, 'image.reangle.submit_only', 0);
+
   } else if (mode === 'character') {
     await requireAsset(assetNames[0], 'image');
     const audit = await runCharacterCreateAudit({

@@ -293,7 +293,7 @@ body{padding:0;background:var(--ink)}
 .app-sidebar .tabs{position:static;display:flex;flex-direction:column;gap:5px;overflow:visible;margin:0;padding:0;border:0;background:transparent;backdrop-filter:none}
 .app-sidebar .tabs button{position:relative;display:grid;grid-template-columns:34px minmax(0,1fr);grid-template-rows:auto auto;align-items:center;min-height:54px;padding:7px 10px;color:#bdc8d7;background:transparent;border:1px solid transparent;border-radius:10px;text-align:left;font:650 14px var(--body);white-space:normal}
 .app-sidebar .tabs button::before{grid-row:1/3;grid-column:1;content:attr(data-step);display:grid;place-items:center;width:25px;height:25px;border-radius:8px;background:#202c3b;color:#9eafc3;font:700 10px var(--mono)}
-.app-sidebar .tabs button[data-tab="cast"]::before{content:"01"}.app-sidebar .tabs button[data-tab="frames"]::before{content:"02"}.app-sidebar .tabs button[data-tab="angles"]::before{content:"3D"}.app-sidebar .tabs button[data-tab="shots"]::before{content:"03"}.app-sidebar .tabs button[data-tab="narrate"]::before{content:"04"}.app-sidebar .tabs button[data-tab="restyle"]::before{content:"05"}.app-sidebar .tabs button[data-tab="cut"]::before{content:"06"}.app-sidebar .tabs button[data-tab="library"]::before{content:"07"}
+.app-sidebar .tabs button[data-tab="cast"]::before{content:"01"}.app-sidebar .tabs button[data-tab="frames"]::before{content:"02"}app-sidebar .tabs button[data-tab="shots"]::before{content:"03"}.app-sidebar .tabs button[data-tab="narrate"]::before{content:"04"}.app-sidebar .tabs button[data-tab="restyle"]::before{content:"05"}.app-sidebar .tabs button[data-tab="cut"]::before{content:"06"}.app-sidebar .tabs button[data-tab="library"]::before{content:"07"}
 .app-sidebar .tabs button:hover{color:#fff;background:#202c3b;border-color:#2b3b4f}
 .app-sidebar .tabs button.on{color:#eaf3ff;background:#263c58;border-color:#3e5d83;box-shadow:inset 3px 0 #8bb9ff}
 .app-sidebar .tabs button.on::before{color:#102033;background:#8bb9ff}
@@ -360,7 +360,6 @@ body{padding:0;background:var(--ink)}
     <nav class="tabs" id="tabs" aria-label="Studio navigation">
       <button data-tab="cast" class="on">Cast<small>characters</small></button>
       <button data-tab="frames">Frames<small>still images</small></button>
-      <button data-tab="angles">Angles<small>3D camera orbit</small></button>
       <button data-tab="shots">Shots<small>video clips</small></button>
       <button data-tab="narrate">Voice<small>narration</small></button>
       <button data-tab="restyle">Restyle<small>edit a clip</small></button>
@@ -444,72 +443,6 @@ body{padding:0;background:var(--ink)}
         </div>
       </section>
 
-      <!-- ANGLES (3D CAMERA ORBIT) -->
-      <section class="panel" data-panel="angles">
-        <div class="step">3D Camera</div>
-        <h2>Angles <small>orbit re-angle · Flow consistency</small></h2>
-        <p class="lede">Chụp lại nhân vật hoặc sản phẩm từ bất kỳ góc máy 3D nào với Google Flow, giữ nguyên 100% diện mạo và ánh sáng.</p>
-        <div class="card">
-          <label class="f">Project folder</label><input type="text" id="a_project" placeholder="MyFilm">
-          
-          <label class="f">Source image to re-angle</label>
-          <div class="slots" style="margin-top:4px"><div class="slot" data-slot="angles_ref" data-i="0"></div></div>
-
-          <!-- 3D Orbit Canvas -->
-          <div style="margin:14px 0 8px;background:#151d27;border:1px solid #2e3d50;border-radius:12px;padding:14px;display:flex;flex-direction:column;align-items:center;position:relative;">
-            <div style="font:600 11px var(--mono);color:#8bb9ff;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.08em;">3D Orbit Camera (Kéo chuột/chạm để xoay góc)</div>
-            <canvas id="studioOrbitCanvas" width="300" height="200" style="background:#0e1520;border-radius:10px;border:1px solid #223247;cursor:grab;touch-action:none;"></canvas>
-            <div id="orbitReadout" style="margin-top:8px;font:650 12px var(--mono);color:#ccff00;">Yaw: 0° | Pitch: 0° | Zoom: 0</div>
-          </div>
-
-          <!-- Sliders -->
-          <div class="grid2" style="margin-top:10px;">
-            <div>
-              <label class="f">Rotation (Góc ngang) <span id="a_rotVal" style="color:#8bb9ff;font-weight:700;">0°</span></label>
-              <input type="range" id="a_rotation" min="-180" max="180" step="15" value="0">
-              <small style="color:var(--dim);display:block;margin-top:2px;" id="a_rotDesc">Frontal view facing camera</small>
-            </div>
-            <div>
-              <label class="f">Tilt (Góc nghiêng/cao) <span id="a_tiltVal" style="color:#8bb9ff;font-weight:700;">0°</span></label>
-              <input type="range" id="a_tilt" min="-60" max="90" step="15" value="0">
-              <small style="color:var(--dim);display:block;margin-top:2px;" id="a_tiltDesc">Eye level</small>
-            </div>
-          </div>
-
-          <div class="grid2" style="margin-top:10px;">
-            <div>
-              <label class="f">Zoom (Khoảng cách) <span id="a_zoomVal" style="color:#8bb9ff;font-weight:700;">0</span></label>
-              <input type="range" id="a_zoom" min="-2" max="2" step="1" value="0">
-              <small style="color:var(--dim);display:block;margin-top:2px;" id="a_zoomDesc">Medium shot, waist up</small>
-            </div>
-            <div>
-              <label class="f">Preset mẫu</label>
-              <select id="a_preset">
-                <option value="portrait-reangle">Portrait Re-angle (Khóa nhân vật)</option>
-                <option value="product-reangle">Product 360 Spin (Sản phẩm Studio)</option>
-                <option value="cinematic-orbit">Cinematic Dynamic Angle (Góc phim 85mm)</option>
-                <option value="character-turnaround">Character Turnaround (Model Sheet)</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="grid2" style="margin-top:10px;">
-            <div><label class="f">Khung hình</label><div class="seg" data-seg="a_aspect"></div></div>
-            <div><label class="f">Số lượng ảnh sinh</label><div class="seg" data-seg="a_variants"></div></div>
-          </div>
-
-          <!-- Compiled Prompt Preview -->
-          <label class="f" style="margin-top:12px;">Câu lệnh Prompt gửi lên Google Flow</label>
-          <div id="a_promptPreview" style="background:#131d29;border:1px solid #2e3d50;border-radius:8px;padding:10px;font:500 12px/1.5 var(--mono);color:#bdc8d7;min-height:54px;user-select:text;"></div>
-
-          <div class="rowbtns" style="margin-top:14px;">
-            <button class="btn" id="btnRollAngle" style="background:#ccff00;color:#102033;font-weight:750;">Sinh ảnh góc 3D trên Flow</button>
-            <button class="btn ghost small" id="btnResetAngle">Đặt lại góc ban đầu</button>
-          </div>
-          <p class="empty" id="angleStatus" style="margin-top:8px;"></p>
-        </div>
-      </section>
-
       <!-- SHOTS -->
       <section class="panel" data-panel="shots">
         <div class="step">Step 3</div>
@@ -560,21 +493,14 @@ body{padding:0;background:var(--ink)}
       <section class="panel" data-panel="narrate">
         <div class="step">Step 4</div>
         <h2>Voice</h2>
-        <p class="lede">Record narration for free, at any length. <b>Google AI Studio</b> gives you the same voices Flow uses and takes a delivery note; <b data-place="local_engine">macOS voice</b> speaks with a voice installed on <span data-place="computer">this Mac</span> and needs no key. Neither spends credits.</p>
+        <p class="lede">Record narration for free, at any length. Uses voices installed on <span data-place="computer">this computer</span> (<span data-place="local_engine">system voice</span>). Completely offline, free, and needs no key or Flow credits.</p>
         <div class="card">
           <label class="f">Project folder</label><input type="text" id="n_project" placeholder="MyFilm">
           <label class="f">Line to speak</label><textarea id="n_text" style="min-height:100px" placeholder="Sometimes the obstacles in your life aren't there to block you…"></textarea>
-          <label class="f">Voice engine</label><div class="seg" data-seg="n_engine"></div>
           <div class="phrase" id="n_engineNote"></div>
-          <div id="n_keyWrap">
-            <label class="f" for="n_key">Google AI Studio key</label>
-            <div class="rowbtns" style="margin-top:0;flex-wrap:nowrap"><input type="password" id="n_key" autocomplete="off" spellcheck="false" placeholder="Paste your key" style="flex:1;min-width:0"><button type="button" class="btn small" id="n_keysave">Save key</button></div>
-            <p class="empty" id="n_keyStatus" style="margin-top:6px"></p>
-          </div>
           <div class="grid2">
             <div><label class="f">Voice</label><select id="n_voice"></select></div>
           </div>
-          <div id="n_styleWrap"><label class="f">Delivery (optional)</label><input type="text" id="n_style" placeholder="slowly and warmly, like a documentary narrator"></div>
           <p class="empty" id="n_fit" style="margin-top:10px"></p>
           <div class="rowbtns"><button class="btn" id="n_go">Record take</button></div>
           <div id="n_out" style="margin-top:16px"></div>
@@ -691,15 +617,14 @@ const DEFAULTS = {
   tab: "cast",
   character: { variants: 1 },
   frames: { project: "MyFilm", aspect: "16:9", variants: 1, engine: "exact", scenes: [blank()] },
-  angles: { project: "MyFilm", ref: null, rotation: 0, tilt: 0, zoom: 0, preset: "portrait-reangle", aspect: "9:16", variants: 1 },
   shots: { project: "MyFilm", model: "Omni 1.1 Flash", aspect: "16:9", duration: 8, resolution: "720p", variants: 1, quality: "original", max: 25, scenes: [blank()] },
-  narrate: { project: "MyFilm", engine: "gemini", geminiVoice: "Charon", macVoice: "Zoe (Premium)", text: "", style: "" },
+  narrate: { project: "MyFilm", engine: "local", voice: "", text: "" },
   cut: { project: "MyFilm", music: null, voiceover: null, hold: true, clips: [] },
 };
 const S = Object.assign(structuredClone(DEFAULTS), JSON.parse(localStorage.getItem("flow-studio-v2") || "{}"));
 const save = () => localStorage.setItem("flow-studio-v2", JSON.stringify(S));
 if (S.frames.engine === "agent" && S.frames.variants !== 1) { S.frames.variants = 1; save(); }
-let TECH = [], VOICES = { gemini: [], mac: [] }, CAST = [], LIB = [], GAL = [], castImage = null, pickTarget = null, busy = false;
+let TECH = [], VOICES = { local: [], mac: [] }, CAST = [], LIB = [], GAL = [], castImage = null, pickTarget = null, busy = false;
 
 /* ---------- tabs ---------- */
 function showTab(name) {
@@ -721,14 +646,11 @@ const SEGS = {
   f_aspect: { get: () => S.frames.aspect, set: (v) => (S.frames.aspect = v), opts: ["16:9", "9:16", "1:1", "4:3", "3:4"] },
   f_variants: { get: () => S.frames.variants, set: (v) => (S.frames.variants = +v), opts: [1, 2, 3, 4] },
   f_engine: { get: () => S.frames.engine, set: (v) => (S.frames.engine = v), opts: ["exact", "agent"], labels: { exact: "One by one", agent: "Flow agent · all at once" } },
-  a_aspect: { get: () => (S.angles ??= {}).aspect || "9:16", set: (v) => ((S.angles ??= {}).aspect = v), opts: ["9:16", "1:1", "16:9", "3:4", "4:3"] },
-  a_variants: { get: () => (S.angles ??= {}).variants || 1, set: (v) => ((S.angles ??= {}).variants = +v), opts: [1, 2, 3, 4] },
   s_aspect: { get: () => S.shots.aspect, set: (v) => (S.shots.aspect = v), opts: ["16:9", "9:16"] },
   s_duration: { get: () => S.shots.duration, set: (v) => (S.shots.duration = +v), opts: [4, 6, 8, 10] },
   s_resolution: { get: () => S.shots.resolution, set: (v) => (S.shots.resolution = v), opts: ["360p", "720p"] },
   s_quality: { get: () => S.shots.quality, set: (v) => (S.shots.quality = v), opts: ["original", "upscaled"], labels: { original: "720p", upscaled: "1080p" } },
   s_variants: { get: () => S.shots.variants, set: (v) => (S.shots.variants = +v), opts: [1, 2, 3, 4] },
-  n_engine: { get: () => S.narrate.engine, set: (v) => (S.narrate.engine = v), opts: ["gemini", "mac"], labels: { gemini: "Google AI Studio", get mac() { return PLACE.local_engine; } } },
 };
 function renderSegs() {
   for (const [key, cfg] of Object.entries(SEGS)) {
@@ -759,7 +681,6 @@ function slotHtml(kind, i, val, label) {
 }
 function setSlot(kind, idx, val) {
   if (kind === "cast") castImage = val;
-  else if (kind === "angles_ref") { (S.angles ??= {}).ref = val; loadAngleRefThumb(); }
   else if (kind === "music" || kind === "voiceover") S.cut[kind] = val;
   else if (kind === "clip") { (S.cut.clips ??= []); if (val) S.cut.clips.push(val); }
   else if (kind.startsWith("ref")) { const [, group, i, j] = kind.split(":"); const sc = S[group].scenes[+i]; val ? (sc.refs[+j] = val) : sc.refs.splice(+j, 1); }
@@ -812,7 +733,7 @@ function renderCast() {
         <button class="btn small ghost" data-castuse="${esc(c.name)}">Use</button><button class="btn small ghost" data-castedit="${esc(c.name)}">Edit</button></div>`).join("")
     : `<p class="empty">No characters yet — describe one below and Flow will draw it.</p>`;
   const slot = $('[data-slot="cast"]'); if (slot) slot.outerHTML = slotHtml("cast", 0, castImage, "Picture instead of a description");
-  $("#castVoice").innerHTML = `<option value="">No voice</option>` + (VOICES.gemini ?? []).map((v) => `<option value="${v.name}">${v.name} — ${v.description}</option>`).join("");
+  $("#castVoice").innerHTML = `<option value="">No voice</option>` + ((VOICES.local || VOICES.voices || VOICES.mac) ?? []).map((v) => `<option value="${v.name}">${v.name} — ${v.description}</option>`).join("");
 }
 $("#castList").addEventListener("click", async (e) => {
   const use = e.target.closest("[data-castuse]"), edit = e.target.closest("[data-castedit]");
@@ -927,35 +848,23 @@ document.addEventListener("click", (e) => {
 
 /* ---------- narrate ---------- */
 function renderNarrate() {
-  const mac = S.narrate.engine === "mac";
-  const list = (mac ? VOICES.mac : VOICES.gemini) ?? [];
-  const picked = mac ? S.narrate.macVoice : S.narrate.geminiVoice;
-  $("#n_voice").innerHTML = list.map((v) => `<option value="${v.name}" ${v.name === picked ? "selected" : ""}>${v.name} — ${v.description}</option>`).join("") || `<option value="">No voices found</option>`;
-  $("#n_styleWrap").style.display = mac ? "none" : "";
-  $("#n_engineNote").innerHTML = !mac
-    ? (VOICES.gemini_ready
-        ? "Google's own text-to-speech — the same voices Flow uses, free on the AI Studio tier, any length, and no Flow credits."
-        : `<b>Needs a free key.</b> Get one at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> and paste it below. Same voices as Flow, free, no length limit.`)
-    : `Spoken on ${PLACE.computer} — free, instant, any length. Quality depends on the installed voice: ${PLACE.platform === "win32" ? "add more English voices in <b>Settings → Time &amp; language → Speech</b> and they appear here" : "download a <b>Premium</b> English voice in System Settings → Accessibility → Spoken Content → System Voice → Manage Voices and it appears here automatically"}. ${(VOICES.mac ?? []).length} voice(s) available.`;
-  $("#n_keyWrap").hidden = mac;
-  $("#n_keyStatus").innerHTML = VOICES.gemini_ready
-    ? `A key is saved on ${PLACE.computer}. Paste a new one only to replace it.`
-    : `Paste it here, not into a chat — it's saved only on ${PLACE.computer} and checked with Google first.`;
+  const list = VOICES.local || VOICES.voices || VOICES.mac || [];
+  const picked = S.narrate.voice;
+  $("#n_voice").innerHTML = list.map((v) => `<option value="${v.name}" ${v.name === picked ? "selected" : ""}>${v.name} — ${v.description}</option>`).join("") || `<option value="">Default system voice</option>`;
+  $("#n_engineNote").innerHTML = `Spoken on ${PLACE.computer} — free, instant, offline. Quality depends on the installed system voice: ${PLACE.platform === "win32" ? "add more voices in <b>Settings → Time &amp; language → Speech</b> and they appear here" : "download a <b>Premium</b> voice in System Settings → Accessibility → Spoken Content → System Voice"}. ${list.length} voice(s) available.`;
   const words = $("#n_text").value.trim().split(/\s+/).filter(Boolean).length;
   const secs = Math.ceil(words / 2.5);
   $("#n_fit").textContent = words ? `${words} words ≈ ${secs}s of speech. No length limit, no credits.` : "";
 }
 $("#n_text").addEventListener("input", () => { S.narrate.text = $("#n_text").value; save(); renderNarrate(); });
-$("#n_voice").addEventListener("change", () => { S.narrate[S.narrate.engine === "mac" ? "macVoice" : "geminiVoice"] = $("#n_voice").value; save(); });
-$("#n_style").addEventListener("input", () => { S.narrate.style = $("#n_style").value; save(); });
+$("#n_voice").addEventListener("change", () => { S.narrate.voice = $("#n_voice").value; save(); });
 $("#n_go").onclick = async () => {
   if (!guard()) return;
   const text = $("#n_text").value.trim(); if (!text) return toast("Write the line first.", true);
-  const eng = S.narrate.engine, mac = eng === "mac";
-  const voice = mac ? S.narrate.macVoice : S.narrate.geminiVoice;
+  const voice = S.narrate.voice;
   const b = $("#n_go"); b.disabled = true; b.textContent = "Recording…";
   try {
-    const out = await api("narrate", { project: $("#n_project").value.trim() || S.narrate.project, text, voice, engine: eng, style: mac ? undefined : $("#n_style").value.trim() || undefined });
+    const out = await api("narrate", { project: $("#n_project").value.trim() || S.narrate.project, text, voice });
     {
       $("#n_out").innerHTML = `<audio controls src="${media(out.output)}&t=${Date.now()}"></audio><p class="empty" style="margin-top:8px">${out.duration.toFixed(1)}s · free · ${esc(out.output)}</p>
         <div class="rowbtns"><button class="btn small" data-usevo="${esc(out.output)}">Use in Cut</button></div>`;
@@ -1017,21 +926,6 @@ $("#k_go").onclick = async () => {
     $("#k_info").textContent = "Queued — watch the Monitor.";
     poll();
   } catch (err) { $("#k_info").textContent = err.message; toast(err.message, true); }
-};
-
-$("#n_keysave").onclick = async () => {
-  const key = $("#n_key").value.trim(); if (!key) return toast("Paste your key first.", true);
-  if (!guard()) return;
-  const b = $("#n_keysave"); b.disabled = true; b.textContent = "Checking…";
-  try {
-    const out = await api("set_key", { key });
-    $("#n_key").value = "";
-    VOICES = await api("voices");
-    renderNarrate();
-    $("#n_keyStatus").textContent = `Saved — Google accepted it (ends in …${out.ending}). Google voices are ready.`;
-    toast("Key saved");
-  } catch (err) { $("#n_keyStatus").innerHTML = `<span style="color:var(--bad)">${esc(err.message)}</span>`; }
-  b.disabled = false; b.textContent = "Save key";
 };
 
 /* ---------- cut ---------- */
@@ -1214,7 +1108,7 @@ async function loadGallery(prefer) {
   renderGallery(); renderTakes();
 }
 // Which saved files each tab's gallery shows. Shots uses stills as first and last frames as well as clips.
-const GALLERY_KINDS = { cast: ["image"], frames: ["image"], angles: ["image"], shots: ["video", "image"], restyle: ["video"], cut: ["video"] };
+const GALLERY_KINDS = { cast: ["image"], frames: ["image"], shots: ["video", "image"], restyle: ["video"], cut: ["video"] };
 // How to name this computer and its bin. Starts with the Mac wording and is replaced by what the server reports, so a
 // PC says "this PC" and "the Recycle Bin".
 let PLACE = { computer: "this Mac", bin: "the Mac's Trash", binShort: "Mac Trash", local_engine: "macOS voice", platform: "darwin" };
@@ -1280,7 +1174,6 @@ const STUDIO_I18N = {
     tabs: {
       cast: "Nhân vật<small>characters</small>",
       frames: "Khung ảnh<small>ảnh tĩnh</small>",
-      angles: "Góc 3D<small>camera orbit</small>",
       shots: "Phân cảnh<small>video clips</small>",
       narrate: "Lồng tiếng<small>voice</small>",
       restyle: "Sửa clip<small>edit clip</small>",
@@ -1307,7 +1200,6 @@ const STUDIO_I18N = {
     tabs: {
       cast: "Cast<small>characters</small>",
       frames: "Frames<small>still images</small>",
-      angles: "Angles<small>3D camera orbit</small>",
       shots: "Shots<small>video clips</small>",
       narrate: "Voice<small>narration</small>",
       restyle: "Restyle<small>edit a clip</small>",
@@ -1395,7 +1287,7 @@ async function poll(detailed = false) {
 
 /* ---------- boot ---------- */
 function renderAll() {
-  for (const [id, val] of [["f_project", S.frames.project], ["a_project", (S.angles ??= {}).project || "Angles"], ["s_project", S.shots.project], ["n_project", S.narrate.project], ["c_project", S.cut.project], ["e_project", S.cut.project], ["l_project", S.cut.project]]) if ($("#" + id) && !$("#" + id).value) $("#" + id).value = val;
+  for (const [id, val] of [["f_project", S.frames.project], ["s_project", S.shots.project], ["n_project", S.narrate.project], ["c_project", S.cut.project], ["e_project", S.cut.project], ["l_project", S.cut.project]]) if ($("#" + id) && !$("#" + id).value) $("#" + id).value = val;
   $("#s_model").innerHTML = Object.keys(VIDEO_COST).map((m) => `<option ${m === S.shots.model ? "selected" : ""}>${m}</option>`).join("");
   renderSegs(); renderScenes(); renderCast(); renderNarrate();
   const mus = $('[data-slot="music"]'), vo = $('[data-slot="voiceover"]');
@@ -1403,14 +1295,11 @@ function renderAll() {
   if (vo) vo.outerHTML = slotHtml("voiceover", 0, S.cut.voiceover, "Narration");
   $("#c_hold").checked = S.cut.hold;
   renderClips();
-  const aslot = $('[data-slot="angles_ref"]');
-  if (aslot) aslot.outerHTML = slotHtml("angles_ref", 0, S.angles?.ref, "Source image to re-angle");
-  updateAnglePrompt();
   if ($("#n_style")) $("#n_style").value = S.narrate.style ?? "";
   estimate(); save();
 }
 $("#s_model").addEventListener("change", (e) => { S.shots.model = e.target.value; save(); renderAll(); });
-for (const [id, path] of [["f_project", "frames"], ["a_project", "angles"], ["s_project", "shots"], ["n_project", "narrate"], ["c_project", "cut"]])
+for (const [id, path] of [["f_project", "frames"], ["s_project", "shots"], ["n_project", "narrate"], ["c_project", "cut"]])
   $("#" + id).addEventListener("input", (e) => { S[path].project = e.target.value; save(); });
 
 $("#studioLangVi").onclick = () => {
@@ -1427,295 +1316,6 @@ $("#studioLangEn").onclick = () => {
 };
 
 /* ---------- 3D Camera Orbit Engine ---------- */
-const ROT_MODS = {
-  "-180": "directly behind the subject, showing the back",
-  "-135": "behind and to the left of the subject, three-quarter back view",
-  "-90": "to the left of the subject, left profile view",
-  "-45": "slightly to the left of the subject, three-quarter front view from the left",
-  "0": "directly in front of the subject, frontal view facing the camera",
-  "45": "slightly to the right of the subject, three-quarter front view from the right",
-  "90": "to the right of the subject, right profile view",
-  "135": "behind and to the right of the subject, three-quarter back view",
-  "180": "directly behind the subject, showing the back",
-};
-const TILT_MODS = {
-  "-60": "very low near the ground looking up at the subject, worm's eye perspective",
-  "-30": "low angle looking up at the subject",
-  "0": "at eye level with the subject",
-  "30": "high angle looking down at the subject",
-  "60": "very high angle looking steeply down at the subject, bird's eye view",
-  "90": "directly above the subject, strictly top-down overhead perspective",
-};
-const ZOOM_MODS = {
-  "-2": "far away, extreme wide shot showing the full surrounding environment",
-  "-1": "wide shot, full body visible in frame",
-  "0": "medium shot, waist up",
-  "1": "close-up shot focused on face and shoulders",
-  "2": "extreme close-up macro detail",
-};
-const ANGLE_PRESETS_DEF = {
-  "portrait-reangle": "Recreate this exact subject from the reference image, camera positioned {angle_modifier}, {tilt_modifier}, {zoom_modifier}. Maintain identical appearance, facial structure, clothing, colors, and all details. Same lighting and background style.",
-  "product-reangle": "Studio product photography of the exact item from the reference image, camera positioned {angle_modifier}, {tilt_modifier}, {zoom_modifier}. Keep product geometry, materials, branding, labels and colors 100% identical. Premium commercial lighting with soft clean reflections.",
-  "cinematic-orbit": "Cinematic movie still featuring the exact subject from the reference image, shot with camera placed {angle_modifier}, {tilt_modifier}, {zoom_modifier}. 85mm lens, shallow depth of field, cinematic atmospheric lighting, photorealistic textures.",
-  "character-turnaround": "Clean character turnaround model sheet view of the exact character, camera view {angle_modifier}, {tilt_modifier}, {zoom_modifier}. Crisp clean contours, neutral even studio lighting, precise proportions matching the reference image perfectly."
-};
-
-function findNearestMod(val, dict) {
-  const keys = Object.keys(dict).map(Number).sort((a, b) => a - b);
-  let best = keys[0], diff = Math.abs(val - best);
-  for (const k of keys) {
-    const d = Math.abs(val - k);
-    if (d < diff) { diff = d; best = k; }
-  }
-  return dict[best] || "";
-}
-
-let angleThumbImg = null;
-function loadAngleRefThumb() {
-  const ref = S.angles?.ref;
-  if (ref?.path) {
-    angleThumbImg = new Image();
-    angleThumbImg.src = media(ref.path);
-    angleThumbImg.onload = () => drawOrbitCanvas();
-  } else {
-    angleThumbImg = null;
-    drawOrbitCanvas();
-  }
-}
-
-function drawOrbitCanvas() {
-  const canvas = $("#studioOrbitCanvas");
-  if (!canvas) return;
-  const ctx = canvas.getContext("2d");
-  const w = canvas.width, h = canvas.height;
-  const cx = w / 2, cy = h / 2;
-  const R = 75;
-  ctx.clearRect(0, 0, w, h);
-
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, R, R * 0.35, 0, 0, Math.PI * 2);
-  ctx.strokeStyle = "rgba(139, 185, 255, 0.25)";
-  ctx.lineWidth = 1;
-  ctx.stroke();
-
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, R * 0.35, R, 0, 0, Math.PI * 2);
-  ctx.strokeStyle = "rgba(139, 185, 255, 0.15)";
-  ctx.stroke();
-
-  ctx.save();
-  ctx.translate(cx, cy);
-  for (const angle of [30, -30, 60, -60]) {
-    const rad = (angle * Math.PI) / 180;
-    ctx.save();
-    ctx.rotate(rad);
-    ctx.beginPath();
-    ctx.ellipse(0, 0, R * 0.35, R, 0, 0, Math.PI * 2);
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
-    ctx.stroke();
-    ctx.restore();
-  }
-  ctx.restore();
-
-  ctx.beginPath();
-  ctx.arc(cx, cy, R, 0, Math.PI * 2);
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
-  ctx.stroke();
-
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
-  ctx.lineWidth = 1;
-  const aOff = R + 8, aS = 4;
-  ctx.beginPath();
-  ctx.moveTo(cx - aS, cy - aOff + aS); ctx.lineTo(cx, cy - aOff); ctx.lineTo(cx + aS, cy - aOff + aS);
-  ctx.moveTo(cx - aS, cy + aOff - aS); ctx.lineTo(cx, cy + aOff); ctx.lineTo(cx + aS, cy + aOff - aS);
-  ctx.stroke();
-
-  const a = S.angles || { rotation: 0, tilt: 0, zoom: 0 };
-  const rotRad = (a.rotation * Math.PI) / 180;
-  const tiltRad = (a.tilt * Math.PI) / 180;
-  const camX = cx + R * Math.sin(rotRad) * Math.cos(tiltRad);
-  const camY = cy - R * Math.sin(tiltRad);
-  const camZ = R * Math.cos(rotRad) * Math.cos(tiltRad);
-  const isBehind = camZ < 0;
-
-  const thumbS = 36;
-  ctx.save();
-  ctx.beginPath();
-  ctx.arc(cx, cy, thumbS / 2, 0, Math.PI * 2);
-  ctx.clip();
-  if (angleThumbImg && angleThumbImg.complete && angleThumbImg.naturalWidth > 0) {
-    ctx.drawImage(angleThumbImg, cx - thumbS / 2, cy - thumbS / 2, thumbS, thumbS);
-  } else {
-    ctx.fillStyle = "#202c3b";
-    ctx.fillRect(cx - thumbS / 2, cy - thumbS / 2, thumbS, thumbS);
-    ctx.fillStyle = "#8bb9ff";
-    ctx.font = "bold 11px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText("REF", cx, cy);
-  }
-  ctx.restore();
-  ctx.beginPath();
-  ctx.arc(cx, cy, thumbS / 2, 0, Math.PI * 2);
-  ctx.strokeStyle = "#8bb9ff";
-  ctx.lineWidth = 2;
-  ctx.stroke();
-
-  ctx.beginPath();
-  ctx.moveTo(cx, cy);
-  ctx.lineTo(camX, camY);
-  ctx.strokeStyle = isBehind ? "rgba(204, 255, 0, 0.3)" : "rgba(204, 255, 0, 0.85)";
-  ctx.setLineDash(isBehind ? [3, 3] : []);
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  ctx.beginPath();
-  ctx.arc(camX, camY, isBehind ? 6 : 8, 0, Math.PI * 2);
-  ctx.fillStyle = isBehind ? "#8a9900" : "#ccff00";
-  ctx.fill();
-  ctx.strokeStyle = "#102033";
-  ctx.lineWidth = 2;
-  ctx.stroke();
-}
-
-function updateAnglePrompt() {
-  const a = S.angles ??= { rotation: 0, tilt: 0, zoom: 0, preset: "portrait-reangle", aspect: "9:16", variants: 1 };
-  const rot = a.rotation || 0;
-  const tilt = a.tilt || 0;
-  const zoom = a.zoom || 0;
-  const presetKey = a.preset || "portrait-reangle";
-  const template = ANGLE_PRESETS_DEF[presetKey] || ANGLE_PRESETS_DEF["portrait-reangle"];
-
-  const rotMod = findNearestMod(rot, ROT_MODS);
-  const tiltMod = findNearestMod(tilt, TILT_MODS);
-  const zoomMod = findNearestMod(zoom, ZOOM_MODS);
-
-  const prompt = template
-    .replace("{angle_modifier}", rotMod)
-    .replace("{tilt_modifier}", tiltMod)
-    .replace("{zoom_modifier}", zoomMod);
-
-  if ($("#a_promptPreview")) $("#a_promptPreview").textContent = prompt;
-  if ($("#a_rotation")) $("#a_rotation").value = rot;
-  if ($("#a_tilt")) $("#a_tilt").value = tilt;
-  if ($("#a_zoom")) $("#a_zoom").value = zoom;
-  if ($("#a_preset")) $("#a_preset").value = presetKey;
-
-  if ($("#a_rotVal")) $("#a_rotVal").textContent = rot + "°";
-  if ($("#a_rotDesc")) $("#a_rotDesc").textContent = rotMod;
-  if ($("#a_tiltVal")) $("#a_tiltVal").textContent = tilt + "°";
-  if ($("#a_tiltDesc")) $("#a_tiltDesc").textContent = tiltMod;
-  if ($("#a_zoomVal")) $("#a_zoomVal").textContent = zoom;
-  if ($("#a_zoomDesc")) $("#a_zoomDesc").textContent = zoomMod;
-  if ($("#orbitReadout")) $("#orbitReadout").textContent = `Yaw: ${rot}° | Pitch: ${tilt}° | Zoom: ${zoom}`;
-
-  drawOrbitCanvas();
-}
-
-function initOrbitController() {
-  const canvas = $("#studioOrbitCanvas");
-  if (!canvas) return;
-
-  let dragging = false, startX = 0, startY = 0, startRot = 0, startTilt = 0;
-
-  const onStart = (e) => {
-    dragging = true;
-    canvas.style.cursor = "grabbing";
-    const pos = e.touches ? e.touches[0] : e;
-    startX = pos.clientX;
-    startY = pos.clientY;
-    startRot = S.angles?.rotation || 0;
-    startTilt = S.angles?.tilt || 0;
-  };
-
-  const onMove = (e) => {
-    if (!dragging) return;
-    const pos = e.touches ? e.touches[0] : e;
-    const dx = pos.clientX - startX;
-    const dy = pos.clientY - startY;
-
-    let newRot = Math.round((startRot + dx * 0.75) / 15) * 15;
-    newRot = Math.max(-180, Math.min(180, newRot));
-
-    let newTilt = Math.round((startTilt - dy * 0.6) / 15) * 15;
-    newTilt = Math.max(-60, Math.min(90, newTilt));
-
-    (S.angles ??= {}).rotation = newRot;
-    S.angles.tilt = newTilt;
-    save();
-    updateAnglePrompt();
-  };
-
-  const onEnd = () => {
-    dragging = false;
-    canvas.style.cursor = "grab";
-  };
-
-  canvas.addEventListener("mousedown", onStart);
-  window.addEventListener("mousemove", onMove);
-  window.addEventListener("mouseup", onEnd);
-  canvas.addEventListener("touchstart", onStart, { passive: true });
-  window.addEventListener("touchmove", onMove, { passive: true });
-  window.addEventListener("touchend", onEnd);
-
-  $("#a_rotation")?.addEventListener("input", (e) => {
-    (S.angles ??= {}).rotation = +e.target.value;
-    save(); updateAnglePrompt();
-  });
-  $("#a_tilt")?.addEventListener("input", (e) => {
-    (S.angles ??= {}).tilt = +e.target.value;
-    save(); updateAnglePrompt();
-  });
-  $("#a_zoom")?.addEventListener("input", (e) => {
-    (S.angles ??= {}).zoom = +e.target.value;
-    save(); updateAnglePrompt();
-  });
-  $("#a_preset")?.addEventListener("change", (e) => {
-    (S.angles ??= {}).preset = e.target.value;
-    save(); updateAnglePrompt();
-  });
-  $("#btnResetAngle")?.addEventListener("click", () => {
-    (S.angles ??= {}).rotation = 0;
-    S.angles.tilt = 0;
-    S.angles.zoom = 0;
-    save(); updateAnglePrompt();
-  });
-  $("#btnRollAngle")?.addEventListener("click", async () => {
-    if (!guard()) return;
-    const ref = S.angles?.ref;
-    if (!ref) {
-      toast("Vui lòng chọn ảnh gốc (Source Image) hoặc nhân vật trước.", true);
-      return;
-    }
-    const refArg = ref.asset ? `asset:${ref.asset}` : ref.path;
-    const btn = $("#btnRollAngle");
-    const status = $("#angleStatus");
-    btn.disabled = true;
-    if (status) status.textContent = "Đang gửi yêu cầu sinh góc quay 3D lên Google Flow...";
-    try {
-      const res = await api("reangle", {
-        project: S.angles?.project || "Angles",
-        reference_image: refArg,
-        rotation: S.angles?.rotation || 0,
-        tilt: S.angles?.tilt || 0,
-        zoom: S.angles?.zoom || 0,
-        preset: S.angles?.preset || "portrait-reangle",
-        aspect_ratio: S.angles?.aspect || "9:16",
-        variants: S.angles?.variants || 1,
-      });
-      toast("Đã đưa vào hàng đợi sinh ảnh Flow!");
-      if (status) status.textContent = `Đã gửi thành công! ID tác vụ: ${res.jobs?.[0]?.id || "queued"}`;
-      poll(true);
-    } catch (err) {
-      toast(err.message, true);
-      if (status) status.textContent = "Lỗi: " + err.message;
-    } finally {
-      btn.disabled = false;
-    }
-  });
-}
-
 // Lang placeholder cleanup
 if (false) {
   applyStudioLang();
@@ -1751,10 +1351,10 @@ if (false) {
       toast("Không thể đăng xuất. Hãy thử lại.", true);
     }
   });
-  try { [TECH, VOICES] = await Promise.all([api("techniques"), api("voices")]); } catch { VOICES = { gemini: [], mac: [] }; }
+  try { [TECH, VOICES] = await Promise.all([api("techniques"), api("voices")]); } catch { VOICES = { local: [], mac: [] }; }
   applyPlace(VOICES.place);
   loadCast().then((c) => { CAST = c; renderCast(); }).catch(() => {});
-  renderAll(); showTab(S.tab); initOrbitController(); poll(true); loadGallery(); void loadFlowProjects();
+  renderAll(); showTab(S.tab); poll(true); loadGallery(); void loadFlowProjects();
 })();
 </script>
 </body>

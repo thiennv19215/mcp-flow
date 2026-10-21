@@ -111,14 +111,12 @@ export const shapes = {
   narrate: {
     project: z.string().min(1).describe("Folder for the narration audio."),
     engine: z
-      .enum(["gemini", "mac"])
-      .default("gemini")
-      .describe(
-        "'gemini' uses Google AI Studio's text-to-speech - the same voices Flow has, free on the AI Studio tier, no length limit, needs a key in ~/.flow-mcp/gemini-key. 'mac' uses a voice installed on this computer (macOS voices on a Mac, the built-in speech voices on Windows): free, instant, no key.",
-      ),
+      .string()
+      .default("local")
+      .describe("Voice engine: 'local' uses the speech synthesizer installed on this computer (macOS voices on a Mac, Windows speech voices on Windows). Free, instant, completely offline."),
     text: z.string().min(1).max(400).describe("The line to speak. About 20 words fits 8 s, 30 words fits 12 s; anything longer needs a longer take."),
-    voice: z.string().min(1).default("Charon").describe("Voice name from flow_voices, e.g. Charon (informative), Aoede (breezy), Gacrux (mature) for Google; Zoe or Samantha for macOS."),
-    style: z.string().max(200).optional().describe("Delivery note for the 'gemini' engine, e.g. 'slowly and warmly, like a documentary narrator'."),
+    voice: z.string().min(1).optional().describe("Voice name from flow_voices, e.g. Zoe or Samantha for macOS; David or Zira for Windows. Defaults to system default voice if omitted."),
+    style: z.string().max(200).optional().describe("Delivery or style note (optional)."),
   },
   edit: {
     project: z.string().min(1).describe("Local folder for the edited clip."),
@@ -162,7 +160,6 @@ export const shapes = {
     id: z.string().uuid().optional().describe("Optional Flow media UUID from flow_assets; when provided it must match the exact title."),
     new_name: z.string().trim().min(1).max(120).refine(value => !/[\u0000-\u001f\u007f]/.test(value), "A Flow asset name cannot contain control characters.").describe("New title for this Flow asset."),
   },
-  set_key: { key: z.string().min(1).max(200) },
   discard: { path: z.string().min(1).describe("A saved film, still, narration or whole project folder inside the films folder, to move to this computer's bin (Mac Trash, Windows Recycle Bin).") },
   outputs: {},
   characters: {},
@@ -204,20 +201,6 @@ export const shapes = {
     voice: z.string().optional().describe("Flow voice name, e.g. 'Charon' (male, informative) or 'Aoede' (female, breezy)."),
   },
   techniques: { category: z.enum(["camera", "product", "transition", "image"]).optional() },
-  reangle: {
-    project: z.string().min(1).default("Angles").describe("Folder name for outputs under films directory."),
-    reference_image: z.string().min(1).describe("Source image to re-angle: absolute file path, or 'asset:<title>' or 'character:<name>'."),
-    rotation: z.number().min(-180).max(180).default(0).describe("Camera yaw/rotation in degrees: -180 to 180 (0 = front view, 90 = right profile, -90 = left profile, 180 = full back view)."),
-    tilt: z.number().min(-60).max(90).default(0).describe("Camera pitch/tilt in degrees: -60 to 90 (-60 = worm's eye looking up, 0 = eye level, 30 = high angle, 90 = top-down view)."),
-    zoom: z.number().min(-2).max(2).default(0).describe("Camera zoom/distance: -2 to 2 (-2 = extreme wide shot, -1 = wide full body, 0 = medium shot waist up, 1 = close-up, 2 = extreme macro)."),
-    preset: z.string().optional().describe("Preset ID: 'portrait-reangle' | 'product-reangle' | 'cinematic-orbit' | 'character-turnaround'. Default: portrait-reangle."),
-    custom_prompt: z.string().optional().describe("Custom base prompt template containing {angle_modifier}, {tilt_modifier}, {zoom_modifier} placeholders."),
-    extra_prompt: z.string().optional().describe("Extra text appended to the prompt (e.g. lighting or background details)."),
-    aspect_ratio: z.enum(["16:9", "9:16", "1:1", "4:3", "3:4"]).default("9:16").describe("Image aspect ratio."),
-    variants: z.number().int().min(1).max(4).default(1).describe("Number of takes/variants to generate."),
-    submit_only: z.boolean().optional().describe("Return after Flow's correlated image request is dispatched; rendering and download are not awaited. Default waits for the finished image."),
-  },
-  angle_presets: {},
 };
 
 export type Args<K extends keyof typeof shapes> = z.infer<z.ZodObject<(typeof shapes)[K]>>;
