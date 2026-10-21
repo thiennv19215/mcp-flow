@@ -1401,6 +1401,487 @@
           "kind": "image"
         }
       ]
+    },
+    {
+      "name": "characters.list",
+      "status": "passed",
+      "seconds": 4.086,
+      "result": [
+        {
+          "name": {
+            "name": "Untitled character"
+          },
+          "use_as": "character:[object Object]"
+        }
+      ]
     }
-  ]
+  ],
+  "flow": {
+    "url": "https://flow.google.com/project/e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "signedIn": true,
+    "inProject": true,
+    "isProjectEditor": true,
+    "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+    "uploadControlDiagnostics": {
+      "bundle": "flow-components-upload-trigger-diag-20261021a",
+      "composer": {
+        "tag": "div",
+        "aria": "What do you want to create? add Agent 🍌 Nano Banana 2.1 crop_9_16 x1 arrow_forward",
+        "text": "What do you want to create? add Agent 🍌 Nano Banana 2.1 crop_9_16 x1 arrow_forward",
+        "icon": "",
+        "className": "base-prompt-box",
+        "disabled": false,
+        "connected": true
+      },
+      "containsEditor": true,
+      "containsSubmit": true,
+      "promptDiagnostics": {
+        "contentEditable": true,
+        "characterCount": 0,
+        "chipCount": 0
+      },
+      "directResolver": {
+        "tag": "button",
+        "aria": "Add ingredients to the prompt box",
+        "text": "add",
+        "icon": "add",
+        "className": "mdc-icon-button mat-mdc-icon-button mat-mdc-button-base mat-mdc-tooltip-trigger add-menu-trigger mat-unthemed",
+        "disabled": false,
+        "connected": true
+      },
+      "componentResolver": {
+        "tag": "button",
+        "aria": "Add ingredients to the prompt box",
+        "text": "add",
+        "icon": "add",
+        "className": "mdc-icon-button mat-mdc-icon-button mat-mdc-button-base mat-mdc-tooltip-trigger add-menu-trigger mat-unthemed",
+        "disabled": false,
+        "connected": true
+      },
+      "visibleComposerControls": [
+        {
+          "tag": "button",
+          "role": null,
+          "aria": "Add ingredients to the prompt box",
+          "title": "",
+          "text": "add",
+          "ariaPressed": null,
+          "ariaSelected": null,
+          "dataState": null,
+          "checked": null,
+          "disabled": false,
+          "icon": "add",
+          "className": "mdc-icon-button mat-mdc-icon-button mat-mdc-button-base mat-mdc-tooltip-trigger add-menu-trigger mat"
+        },
+        {
+          "tag": "button",
+          "role": null,
+          "aria": "Agent",
+          "title": "",
+          "text": "Agent",
+          "ariaPressed": "false",
+          "ariaSelected": null,
+          "dataState": null,
+          "checked": null,
+          "disabled": false,
+          "icon": "",
+          "className": "agent-mode-chip"
+        },
+        {
+          "tag": "button",
+          "role": null,
+          "aria": "Settings trigger",
+          "title": "",
+          "text": "🍌 Nano Banana 2.1 crop_9_16 x1",
+          "ariaPressed": null,
+          "ariaSelected": null,
+          "dataState": null,
+          "checked": null,
+          "disabled": false,
+          "icon": "crop_9_16",
+          "className": "mdc-button mat-mdc-button-base settings-trigger-button mdc-button--unelevated mat-mdc-unelevated-but"
+        },
+        {
+          "tag": "button",
+          "role": null,
+          "aria": "Start generation",
+          "title": "",
+          "text": "arrow_forward",
+          "ariaPressed": null,
+          "ariaSelected": null,
+          "dataState": null,
+          "checked": null,
+          "disabled": true,
+          "icon": "arrow_forward",
+          "className": "mdc-icon-button mat-mdc-icon-button mat-mdc-button-base generate-icon-button mat-unthemed flow-icon-"
+        }
+      ]
+    },
+    "framePickerDiagnostics": null,
+    "referenceClearDiagnostics": {
+      "composer": {
+        "tag": "flow-base-prompt-box",
+        "className": "",
+        "connected": true
+      },
+      "clearPromptButton": null,
+      "chipCount": 0,
+      "chips": [],
+      "helper": {
+        "phase": "returned",
+        "initialCount": 0,
+        "removedCount": 0,
+        "error": null,
+        "updatedAt": "2026-10-21T05:20:42.433Z",
+        "remainingCount": 0
+      }
+    },
+    "referenceActionDiagnostics": {
+      "action": "idle",
+      "phase": "idle",
+      "step": "idle",
+      "errorCode": null,
+      "cleanupErrorCode": null,
+      "pickerOpen": false,
+      "pickerRole": null,
+      "pickerOptionCount": 0,
+      "visibleSurfaces": [],
+      "categoryTabs": [],
+      "chipCount": 0,
+      "chips": [],
+      "surfaceStatus": null,
+      "path": null,
+      "provenanceConfirmed": false,
+      "chipUuidConfirmed": false,
+      "menuRelatedToTile": false,
+      "menuNearTrigger": false,
+      "cleanup": null,
+      "updatedAt": "2026-10-21T05:25:32.121Z",
+      "lastResult": null
+    },
+    "characterNameDiagnostics": null,
+    "characterListDiagnostics": {
+      "url": "https://flow.google.com/project/e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+      "route": "/project/e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+      "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+      "currentSection": "Characters",
+      "sectionActive": true,
+      "activeEvidence": [
+        "new_character_action",
+        "character_tiles_visible"
+      ],
+      "routeIsCharacterForm": false,
+      "navigation": {
+        "text": "accessibility_new Characters",
+        "ariaCurrent": null,
+        "ariaSelected": null,
+        "ariaPressed": null,
+        "dataState": null,
+        "className": "mat-mdc-list-item mdc-list-item mat-mdc-tooltip-trigger mat-mdc-list-item-interactive mdc-list-item--with-leading-icon m"
+      },
+      "createActionVisible": true,
+      "explicitEmptyState": false,
+      "visibleTileCount": 1,
+      "totalTileCount": 1,
+      "loadingCount": 0,
+      "scrollContainer": {
+        "tag": "div",
+        "className": "cdk-virtual-scrollable page-container",
+        "scrollTop": 523.2000122070312,
+        "clientHeight": 727,
+        "scrollHeight": 1250,
+        "connected": true
+      },
+      "result": "complete",
+      "scanComplete": true,
+      "nameCount": 1,
+      "stableUuidCount": 0,
+      "checkedAt": "2026-10-21T05:20:38.949Z"
+    },
+    "imageSettingsDiagnostics": {
+      "phase": "completed",
+      "step": "closing legacy settings",
+      "startedAt": "2026-10-21T05:20:42.433Z",
+      "updatedAt": "2026-10-21T05:20:45.436Z",
+      "lastResult": {
+        "creditQuote": 0,
+        "modernComposer": false
+      },
+      "error": null
+    },
+    "videoSettingsDiagnostics": {
+      "phase": "idle",
+      "step": "idle",
+      "startedAt": null,
+      "updatedAt": null,
+      "lastResult": null,
+      "error": null
+    },
+    "submitWarnings": [
+      "warning Failed We noticed some unusual activity. Note that browser extensions that modify the page may cause issues. Please visit the Help Center for more information. You have not been charged for this generation. refresh undo delete_forever",
+      "warning Failed We noticed some unusual activity. Note that browser extensions that modify the page may cause issues. Please visit the Help Center for more information. You have not been charged for this generation. refresh undo delete_forever",
+      "warning Failed We noticed some unusual activity. Note that browser extensions that modify the page may cause issues. Please visit the Help Center for more information. You have not been charged for this generation. refresh undo delete_forever"
+    ],
+    "composer": "🍌 Nano Banana 2.1 crop_9_16 x1",
+    "generation_credit_quote_candidates": [],
+    "progress_diagnostics": {
+      "receiptId": 30,
+      "receivedAt": "2026-10-21T05:25:16.513Z",
+      "requestId": "3",
+      "tabId": 1784013709,
+      "flowUrl": true,
+      "isInteractive": false,
+      "isSelectedFlowTab": true,
+      "acceptedByWorker": true,
+      "progress": "Flow progress telemetry check",
+      "transport": "http-poll",
+      "backendState": "backend_matched_pending_command",
+      "backendMatchedRequest": true,
+      "httpStatus": 200,
+      "forwardedAt": "2026-10-21T05:25:16.518Z"
+    },
+    "correlation_observer_diagnostics": {
+      "pageProjectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+      "descriptor": {
+        "driverKey": "flow",
+        "origin": "https://flow.google.com",
+        "routePrefix": ""
+      },
+      "observer": {
+        "ready": true,
+        "version": 1,
+        "observerRevision": 23,
+        "structuredPromptVersion": 2,
+        "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+        "activeAttempts": 0,
+        "retiredCount": 3,
+        "retiredSaturated": false,
+        "requestDiagnostics": {
+          "version": 1,
+          "count": 1,
+          "events": [
+            {
+              "observedAt": 1792560047992,
+              "attemptId": "95585d1a-28ab-4337-af0a-55159bbd689a",
+              "mediaType": "image",
+              "transport": "fetch",
+              "path": "/_/AiSandboxAngularFrontend/data/batchexecute",
+              "rpcId": "ogiZ0b",
+              "payloadVersion": "image_rows_v1",
+              "payloadShape": {
+                "type": "array",
+                "length": 5,
+                "items": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "array",
+                    "length": 1,
+                    "items": [
+                      {
+                        "type": "array",
+                        "length": 14,
+                        "items": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "string",
+                            "length": 6
+                          },
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "array",
+                            "length": 11,
+                            "items": [
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "type": "string",
+                                "length": 36
+                              },
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "type": "array",
+                                "length": 2
+                              }
+                            ]
+                          },
+                          {
+                            "type": "array",
+                            "length": 1,
+                            "items": [
+                              {
+                                "type": "array",
+                                "length": 1
+                              }
+                            ]
+                          },
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "array",
+                    "length": 11,
+                    "items": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "string",
+                        "length": 36
+                      },
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "array",
+                        "length": 2,
+                        "items": [
+                          {
+                            "type": "string",
+                            "length": 2766
+                          },
+                          {
+                            "type": "number"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "array",
+                    "length": 1,
+                    "items": [
+                      {
+                        "type": "string",
+                        "length": 36
+                      }
+                    ]
+                  }
+                ]
+              },
+              "pathRecognized": true,
+              "payloadMatched": true,
+              "fields": {
+                "shape": true,
+                "prompt": true,
+                "model": null,
+                "quantity": true,
+                "referenceIds": true,
+                "project": true
+              },
+              "reasons": []
+            }
+          ]
+        },
+        "xhrHookActive": true,
+        "fetchHookActive": true
+      },
+      "projectMatch": true,
+      "armPreflight": {
+        "result": "armed_and_disarmed",
+        "expected": {
+          "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+          "mediaType": "image",
+          "promptFingerprint": "id-62c70bde"
+        },
+        "receipt": {
+          "schemaVersion": 1,
+          "nonce": "3b00992d-dce5-425b-a8c3-c3ca85a36474",
+          "attemptId": "75249946-6d9a-474d-937c-89012c588291",
+          "stage": "armed",
+          "mediaType": "image",
+          "expectedQuantity": 1,
+          "projectId": "e4bf4bae-626d-4718-a66a-cbdb04c8e6fa",
+          "observedAt": 1792560332155,
+          "structuredPromptVersion": 2,
+          "observerRevision": 23,
+          "xhrHookActive": true,
+          "fetchHookActive": true,
+          "reason": null
+        },
+        "reason": null
+      }
+    }
+  },
+  "counts": {
+    "projects": 21,
+    "assets": 7,
+    "characters": 1
+  },
+  "finished": "2026-10-21T05:25:53.327Z"
 }
