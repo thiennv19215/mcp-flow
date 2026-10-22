@@ -1,7 +1,10 @@
 (function (root) {
   "use strict";
 
-  const foldFlowText = value => root.normalizeFlowUiText?.(value) || String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+  const foldFlowText = value => {
+    const norm = root.normalizeFlowUiText?.(value) || value;
+    return String(norm || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/Đ/g, "D").replace(/\s+/g, " ").trim().toLowerCase();
+  };
 
   function matchesLocalizedAction(el, ...keys) {
     const values = [root.accessibleName?.(el), el?.getAttribute?.("aria-label"), el?.getAttribute?.("title"), el?.innerText, el?.textContent]
@@ -15,9 +18,12 @@
   }
 
   function agentSaveControls(surface, enabledOnly = false) {
-    return [...(surface?.querySelectorAll?.('button,[role="button"]') || [])]
+    const hook = root.flowButton?.("Save", surface) || root.flowButton?.("Done", surface) || root.flowButton?.("Apply", surface);
+    const queried = [...(surface?.querySelectorAll?.('button,[role="button"]') || [])]
       .filter(el => root.visible?.(el) && (!enabledOnly || (!el.disabled && el.getAttribute?.("aria-disabled") !== "true")) &&
         matchesLocalizedAction(el, "Save", "Done", "Apply"));
+    if (hook && !queried.includes(hook)) queried.unshift(hook);
+    return queried;
   }
 
   function isRunConfirmationAction(button) {

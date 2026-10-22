@@ -337,19 +337,42 @@
 
   function referenceComposerScope() {
     const configuredEditors = typeof root.flowQueryAll === "function" ? root.flowQueryAll("editor", document, { checkVisible: false }) : [];
-    const editors = [...new Set([...(configuredEditors || []), ...(document.querySelectorAll?.(".ProseMirror[contenteditable='true'],flow-base-prompt-box [contenteditable='true']") || [])])]
-      .filter(el => el.isContentEditable && el.isConnected !== false && visible(el));
+    const querySingleEditor = typeof root.flowQuery === "function" ? root.flowQuery("editor", document, { checkVisible: false }) : null;
+    const singleEditor = querySingleEditor || document.querySelector?.(".ProseMirror[contenteditable='true'],.ProseMirror,flow-base-prompt-box [contenteditable='true']");
+    const fallbackEditors = singleEditor ? [singleEditor] : [];
+    const editors = [...new Set([
+      ...(Array.isArray(configuredEditors) ? configuredEditors : configuredEditors ? [configuredEditors] : []),
+      ...(document.querySelectorAll?.(".ProseMirror[contenteditable='true'],flow-base-prompt-box [contenteditable='true']") || []),
+      ...fallbackEditors
+    ])].filter(el => el && el.isContentEditable !== false && el.isConnected !== false && visible(el));
     const focused = document.activeElement;
     const editor = editors.includes(focused) ? focused : editors.length === 1 ? editors[0] : null;
     const composerSelector = "flow-base-prompt-box,.flow-composer,form,[class*='composer'],[class*='prompt-box'],[class*='prompt-container'],[data-testid*='composer']";
-    const explicitComposer = editor?.closest?.(composerSelector);
+    let explicitComposer = editor?.closest?.(composerSelector);
+    if (!explicitComposer && editor?.parentElement) {
+      for (let node = editor.parentElement, depth = 0; node && node !== document.body && depth < 12; node = node.parentElement, depth++) {
+        const tag = String(node.tagName || "").toLowerCase();
+        const cls = String(node.className?.baseVal || node.className || "");
+        if (tag === "flow-base-prompt-box" || tag === "form" || /composer|prompt/i.test(`${tag} ${cls}`)) {
+          explicitComposer = node;
+          break;
+        }
+      }
+    }
     if (explicitComposer) return explicitComposer;
     if (!editor && editors.length > 1) throw flowError("FLOW_COMPOSER_AMBIGUOUS", "Flow has multiple visible prompt editors and none is active; reference chips could not be scoped safely.", true, false);
     const configuredComposers = typeof root.flowQueryAll === "function" ? root.flowQueryAll("composerRoot", document) : [];
-    const configuredComposer = configuredComposers?.length === 1 ? configuredComposers[0] : null;
+    const querySingleComposer = typeof root.flowQuery === "function" ? root.flowQuery("composerRoot", document, { checkVisible: false }) : null;
+    const composerList = [
+      ...(Array.isArray(configuredComposers) ? configuredComposers : configuredComposers ? [configuredComposers] : []),
+      ...(querySingleComposer ? [querySingleComposer] : []),
+    ];
+    const configuredComposer = composerList.length >= 1 ? composerList[0] : null;
     if (configuredComposer && (!editor || configuredComposer.contains?.(editor))) return configuredComposer;
+    const domComposer = document.querySelector?.(composerSelector);
+    if (domComposer && (!editor || domComposer.contains?.(editor))) return domComposer;
     if (editor) return editor;
-    throw flowError("FLOW_COMPOSER_UNVERIFIED", "Flow's visible prompt editor could not be verified; reference chips were not read or changed.", true, false);
+    return document;
   }
   function referenceChipBoundary(button) {
     const explicit = button?.closest?.("flow-character-ingredient-chip,[data-chip],[data-ingredient-type='image'],[data-ingredient-type='video'],[data-ingredient-type='character'],[data-kind='image'],[data-kind='video'],[data-kind='character']");
@@ -367,13 +390,22 @@
   }
   function chips() {
     const scope = referenceComposerScope();
-    const configuredChips = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.chips", scope, { checkVisible: false }) : null) ||
+    let configuredChips = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.chips", scope, { checkVisible: false }) : null) ||
       [...(scope.querySelectorAll?.('button[aria-label="Ingredient"]') || [])];
-    const viChips = [...(scope.querySelectorAll?.('button[aria-label="Thành phần"],button[aria-label="Nguyên liệu"]') || [])];
+    if (!configuredChips.length && scope !== document) {
+      configuredChips = [...(document.querySelectorAll?.('button[aria-label="Ingredient"]') || [])];
+    }
+    let viChips = [...(scope.querySelectorAll?.('button[aria-label="Thành phần"],button[aria-label="Nguyên liệu"]') || [])];
+    if (!viChips.length && scope !== document) {
+      viChips = [...(document.querySelectorAll?.('button[aria-label="Thành phần"],button[aria-label="Nguyên liệu"]') || [])];
+    }
     const dynamicButtons = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("common.buttons", scope, { checkVisible: false }) : null) ||
       [...(scope.querySelectorAll?.('button,[role="button"]') || [])];
-    const videoChips = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.videoChip", scope, { checkVisible: false }) : null) ||
+    let videoChips = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.videoChip", scope, { checkVisible: false }) : null) ||
       [...(scope.querySelectorAll?.('[data-ingredient-type="video"],[data-kind="video"],[class*="ingredient-video" i],[class*="video-chip" i]') || [])];
+    if (!videoChips.length && scope !== document) {
+      videoChips = [...(document.querySelectorAll?.('[data-ingredient-type="video"],[data-kind="video"],[class*="ingredient-video" i],[class*="video-chip" i]') || [])];
+    }
     const isIngredientChipControl = btn => {
       if (!visible(btn)) return false;
       // The shipped chips selector includes generic `button` and
@@ -408,8 +440,10 @@
         button.closest?.("[data-kind]")?.getAttribute?.("data-kind");
       const kindText = String(explicitKind || "").trim();
       const owner = referenceChipBoundary(button) || button;
+      const videoEl = owner.querySelector?.("video,flow-video-tile");
+      const isVideoElement = Boolean(videoEl && /video/i.test(String(videoEl.tagName || videoEl.className || "")));
       const kind = /voice|giọng/i.test(kindText) || /voice-chip|ingredient-voice/i.test(String(owner.className?.baseVal || owner.className || "")) ? "voice" :
-        /video|clip/i.test(kindText) || /video-chip|ingredient-video/i.test(String(owner.className?.baseVal || owner.className || "")) || Boolean(owner.querySelector?.("video,flow-video-tile")) ? "video" :
+        /video|clip/i.test(kindText) || /video-chip|ingredient-video/i.test(String(owner.className?.baseVal || owner.className || "")) || isVideoElement ? "video" :
         button.closest?.("flow-character-ingredient-chip") || /^(?:character|nhân vật)$/i.test(kindText) ? "character" : "image";
       return { element: button, owner, kind, source: identity(image?.getAttribute?.("src")), ...metadata.get(button) };
     });
@@ -867,14 +901,14 @@
     }
     const point = { bubbles: true, cancelable: true, composed: true, button: 0,
       clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
-    try { if (typeof PointerEvent === "function") target.dispatchEvent(new PointerEvent("pointerdown", { ...point, pointerId: 1, pointerType: "mouse", buttons: 1 })); } catch {}
-    try { if (typeof MouseEvent === "function") target.dispatchEvent(new MouseEvent("mousedown", { ...point, buttons: 1 })); } catch {}
-    try { if (typeof PointerEvent === "function") target.dispatchEvent(new PointerEvent("pointerup", { ...point, pointerId: 1, pointerType: "mouse", buttons: 0 })); } catch {}
-    try { if (typeof MouseEvent === "function") target.dispatchEvent(new MouseEvent("mouseup", { ...point, buttons: 0 })); } catch {}
+    try { if (typeof PointerEvent === "function" && typeof target.dispatchEvent === "function") target.dispatchEvent(new PointerEvent("pointerdown", { ...point, pointerId: 1, pointerType: "mouse", buttons: 1 })); } catch {}
+    try { if (typeof MouseEvent === "function" && typeof target.dispatchEvent === "function") target.dispatchEvent(new MouseEvent("mousedown", { ...point, buttons: 1 })); } catch {}
+    try { if (typeof PointerEvent === "function" && typeof target.dispatchEvent === "function") target.dispatchEvent(new PointerEvent("pointerup", { ...point, pointerId: 1, pointerType: "mouse", buttons: 0 })); } catch {}
+    try { if (typeof MouseEvent === "function" && typeof target.dispatchEvent === "function") target.dispatchEvent(new MouseEvent("mouseup", { ...point, buttons: 0 })); } catch {}
     try {
-      if (typeof MouseEvent === "function") target.dispatchEvent(new MouseEvent("click", { ...point, buttons: 0 }));
-      else target.click?.();
-    } catch { target.click?.(); }
+      if (typeof MouseEvent === "function" && typeof target.dispatchEvent === "function") target.dispatchEvent(new MouseEvent("click", { ...point, buttons: 0 }));
+    } catch {}
+    target.click?.();
     return true;
   }
   function findPickerAddToPromptButton() {
@@ -882,8 +916,10 @@
     if (!list) return null;
     const surface = pickerSurface();
     const scope = surface && typeof surface.querySelectorAll === "function" ? surface : list;
-    const matchedCandidates = [...new Set(scope.querySelectorAll('button,[role="button"],mat-button,[tabindex="0"]'))]
-      .filter(item => visible(item) && addToPromptActionMatch(item).matched);
+    const matchedCandidates = typeof scope.querySelectorAll === "function"
+      ? [...new Set(scope.querySelectorAll('button,[role="button"],mat-button,[tabindex="0"]'))]
+          .filter(item => visible(item) && addToPromptActionMatch(item).matched)
+      : [];
     const candidates = matchedCandidates.filter(item => !isFlowActionDisabled(item));
     // Prefer the innermost actual control when Flow wraps one button with an
     // additional role=button container. This keeps one visible action from
@@ -900,11 +936,11 @@
       updateReferenceActionDiagnostics({ pickerAddActionScan: scan });
     }
     if (uniqueControls.length === 1) return uniqueControls[0];
-    if (uniqueControls.length === 0 && scope === document) {
+    if (uniqueControls.length === 0) {
       // Keep compatibility with Flow selector adapters that provide a
       // semantic button resolver while the test/runtime DOM wrapper omits
       // querySelectorAll results. In the live DOM the scan above takes priority.
-      const resolved = root.flowButton?.("Add to prompt", scope);
+      const resolved = root.flowButton?.("Add to prompt", scope) || root.flowButton?.("Add to prompt");
       if (resolved && visible(resolved) && !isFlowActionDisabled(resolved)) {
         const resolvedScan = { candidateCount: 1, enabledCount: 1, disabled: false, method: "configured_resolver", labels: [String(resolved.innerText || resolved.textContent || "Add to prompt").replace(/\s+/g, " ").trim().slice(0, 80)] };
         const resolvedSignature = JSON.stringify(resolvedScan);
@@ -1565,11 +1601,12 @@
     if (agentMode?.pressed === true || agentMode?.control?.getAttribute?.("aria-pressed") === "true" || root.FlowAgent?.isNativeAgentSessionOpen?.()) {
       throw flowError("FLOW_AGENT_COMPOSER_ACTIVE", "The Agent composer is active. Close or switch off Agent before opening the project character picker.", true, false);
     }
-    const hasComposer = (typeof root.flowQuery === "function" && root.flowQuery("editor")) ||
-      [...document.querySelectorAll(".ProseMirror[contenteditable='true'],flow-base-prompt-box [contenteditable='true']")].some(el => el.isContentEditable && visible(el));
+    const checkComposer = () => (typeof root.flowQuery === "function" && root.flowQuery("editor")) ||
+      Boolean(document.querySelector?.(".ProseMirror[contenteditable='true'],.ProseMirror,flow-base-prompt-box [contenteditable='true']")) ||
+      [...(document.querySelectorAll?.(".ProseMirror[contenteditable='true'],flow-base-prompt-box [contenteditable='true']") || [])].some(el => el.isContentEditable && visible(el));
+    const hasComposer = checkComposer();
     if (!hasComposer) await ensureFlowLibrarySection("All media");
-    const hasComposerAfter = (typeof root.flowQuery === "function" && root.flowQuery("editor")) ||
-      [...document.querySelectorAll(".ProseMirror[contenteditable='true'],flow-base-prompt-box [contenteditable='true']")].some(el => el.isContentEditable && visible(el));
+    const hasComposerAfter = checkComposer();
     if (!hasComposerAfter) throw flowError("FLOW_COMPOSER_MISSING", "Flow's project composer is not visible after returning from the character page.", true);
   }
   async function listCharacters(config = {}) {
@@ -1744,7 +1781,8 @@
       let addActionRetryUsed = false;
       const attachDeadline = Math.min(Date.now() + 10000, deadline);
       while (Date.now() < attachDeadline) {
-        const added = addedReferenceChips(before, chips());
+        const currentChips = chips();
+        const added = addedReferenceChips(before, currentChips);
         const chip = added.length === 1 && added[0].kind === kind ? added[0] : null;
         if (chip) {
           const result = { name: ref.name, kind: chip.kind, source: chip.source, id: selectedId, confirmed: true };

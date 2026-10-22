@@ -291,38 +291,47 @@
       "upload", "continue", "confirm", "agree", "accept", "next", "done", "ok", "got it",
       "upload video", "upload file", "upload media", "continue upload", "agree and continue",
       "tải lên", "tiếp tục", "xác nhận", "đồng ý", "chấp nhận", "tải video", "tải video lên", "tiếp tục tải lên",
+      "đồng ý và tiếp tục", "xác nhận và tiếp tục", "tải lên và tiếp tục",
     ].map(normalizeFlowUploadActionLabel).filter(Boolean);
     const confirmationSelectors = [...new Set([
       ...(Array.isArray(confirmationConfig.selectors) ? confirmationConfig.selectors : []),
       "button", "[role=button]",
     ])];
     const confirmationControls = scope => {
-      const controls = [];
-      for (const selector of confirmationSelectors) {
-        try {
-          for (const element of scope.querySelectorAll(selector)) if (!controls.includes(element)) controls.push(element);
-          if (scope.matches?.(selector) && !controls.includes(scope)) controls.unshift(scope);
-        } catch {}
+      try {
+        const selector = confirmationSelectors.join(",");
+        let controls = scope.querySelectorAll ? [...scope.querySelectorAll(selector)] : [];
+        if (!controls.length && confirmationSelectors.length > 1) {
+          const selectorWithSpace = confirmationSelectors.join(", ");
+          controls = scope.querySelectorAll ? [...scope.querySelectorAll(selectorWithSpace)] : [];
+        }
+        if (typeof scope.matches === "function" && scope.matches(selector) && !controls.includes(scope)) {
+          controls.unshift(scope);
+        }
+        return controls;
+      } catch {
+        const controls = [];
+        for (const selector of confirmationSelectors) {
+          try {
+            for (const element of scope.querySelectorAll(selector)) if (!controls.includes(element)) controls.push(element);
+            if (scope.matches?.(selector) && !controls.includes(scope)) controls.unshift(scope);
+          } catch {}
+        }
+        return controls;
       }
-      return controls;
     };
     const isConfirmationControl = element => {
-      if (!isVisible(element) || element.disabled || element.getAttribute("aria-disabled") === "true") return false;
-      const text = normalizeFlowUploadActionLabel(getAria(element) || element.innerText || element.textContent || "");
+      if (!isVisible(element) || element.disabled || element.getAttribute?.("aria-disabled") === "true") return false;
+      const rawText = String(getAria(element) || element.innerText || element.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+      const text = normalizeFlowUploadActionLabel(rawText);
       // Confirmation labels are actions with high impact. Match complete
       // accessible labels from the locale profile (or the small action
       // grammar below) so a destructive negative option such as "Do not
       // upload" cannot match the generic word "upload" by substring.
-      return confirmationLabels.some(label => text === label) ||
-        /^(?:upload|continue|confirm|agree|accept|next|done|ok|got it|tải lên|tiếp tục|xác nhận|đồng ý|chấp nhận|tải video)(?:\s+(?:và\s+|and\s+)?(?:tiếp tục|upload|tải lên|video|file|media))?$/.test(text);
+      return confirmationLabels.some(label => text === label || rawText === label) ||
+        /^(?:upload|continue|confirm|agree|accept|next|done|ok|got it|tai len|tiep tuc|xac nhan|dong y|chap nhan|tai video)(?:\s+(?:va\s+|and\s+)?(?:tiep tuc|upload|tai len|video|file|media))?$/i.test(text) ||
+        /^(?:upload|continue|confirm|agree|accept|next|done|ok|got it|tải lên|tiếp tục|xác nhận|đồng ý|chấp nhận|tải video)(?:\s+(?:và\s+|and\s+)?(?:tiếp tục|upload|tải lên|video|file|media))?$/i.test(rawText);
     };
-    const summarizeControls = dialog => confirmationControls(dialog).filter(isVisible).slice(0, 12).map(element => ({
-      tag: String(element.tagName || "unknown").toLowerCase(),
-      role: element.getAttribute("role") || null,
-      label: String(getAria(element) || "").replace(/\s+/g, " ").trim().slice(0, 120) || null,
-      text: String(element.innerText || element.textContent || "").replace(/\s+/g, " ").trim().slice(0, 120) || null,
-      disabled: Boolean(element.disabled || element.getAttribute("aria-disabled") === "true"),
-    }));
     const result = { confirmationDialogSeen: false, confirmationButtonClicked: false, confirmationDialogUnrecognized: false };
     const ambiguous = (reason, dialogCount, controlCount) => {
       const error = fn("FLOW_UPLOAD_CONFIRMATION_AMBIGUOUS", `Flow displayed an ambiguous video upload confirmation (${reason}); no confirmation control was clicked. Inspect Flow before retrying.`, false, true);
@@ -333,14 +342,17 @@
         filePickerSelectionConfirmed: selection.filePickerSelectionConfirmed === true,
         pickerMethod: safeFlowPickerMethod(selection.pickerMethod),
         pickerType: safeFlowPickerType(selection.pickerType),
-        dialogs: [...document.querySelectorAll('[role="dialog"],mat-dialog-container')].filter(isVisible).slice(0, 4).map(dialog => ({
-          label: String(getAria(dialog) || "").replace(/\s+/g, " ").trim().slice(0, 180) || null,
-          text: String(dialog.innerText || dialog.textContent || "").replace(/\s+/g, " ").trim().slice(0, 500),
-          controls: summarizeControls(dialog),
-        })),
         uploadUi: inspectFlowUploadUiState(),
       };
       throw error;
+    };
+    const waitHelper = async (ms, op) => {
+      if (root.FlowUiDeadline?.boundedWait) {
+        return root.FlowUiDeadline.boundedWait(ms, deadline, op, true, signal);
+      }
+      if (typeof root.wait === "function") {
+        return root.wait(ms);
+      }
     };
     for (let attempt = 0; attempt < 24; attempt++) {
       if (Date.now() >= deadline) throw fn("FLOW_OPERATION_TIMEOUT", "Timed out while confirming Flow's video upload. Inspect Flow before retrying.", false, true);
@@ -361,7 +373,7 @@
       const specificDialogs = matchingDialogs.filter(dialog =>
         !matchingDialogs.some(other => other !== dialog && dialog.contains?.(other)));
       if (!specificDialogs.length) {
-        await root.FlowUiDeadline?.boundedWait(300, deadline, "waiting for Flow's video upload confirmation", true, signal);
+        await waitHelper(300, "waiting for Flow's video upload confirmation");
         continue;
       }
       result.confirmationDialogSeen = true;
@@ -370,8 +382,8 @@
       const confirms = confirmationControls(dialog).filter(isConfirmationControl);
       if (confirms.length > 1) ambiguous("multiple enabled confirmation controls", 1, confirms.length);
       const confirm = confirms[0];
-      if (confirm) { confirm.click(); result.confirmationButtonClicked = true; await root.FlowUiDeadline?.boundedWait(250, deadline, "confirming Flow's video upload", true, signal); return result; }
-      await root.FlowUiDeadline?.boundedWait(300, deadline, "waiting for Flow's video upload confirmation", true, signal);
+      if (confirm) { confirm.click(); result.confirmationButtonClicked = true; await waitHelper(250, "confirming Flow's video upload"); return result; }
+      await waitHelper(300, "waiting for Flow's video upload confirmation");
     }
     // Flow does not show a consent dialog for every account or upload route.
     // Toby treats that as the normal path and verifies the new tile afterward.
@@ -389,11 +401,6 @@
       dropReceiptConfirmed: selection.dropReceiptConfirmed === true,
       configuredSelectorCount: confirmationSelectors.length,
       configuredTextMatchCount: Array.isArray(configuredConfirmationLabels) ? configuredConfirmationLabels.length : Number(Boolean(configuredConfirmationLabels)),
-      dialogs: [...document.querySelectorAll('[role="dialog"],mat-dialog-container')].filter(isVisible).slice(0, 4).map(dialog => ({
-        label: String(getAria(dialog) || "").replace(/\s+/g, " ").trim().slice(0, 180) || null,
-        text: String(dialog.innerText || dialog.textContent || "").replace(/\s+/g, " ").trim().slice(0, 500),
-        controls: summarizeControls(dialog),
-      })),
       uploadUi: inspectFlowUploadUiState(),
     };
     throw error;

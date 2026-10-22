@@ -1965,7 +1965,7 @@ test('asset rename and trash actions match exact Vietnamese menu labels', async 
     const document = { querySelectorAll(selector) {
       if (selector === '[role="menuitem"]') return menuOpen ? [menuItem] : [];
       if (selector === '[role="dialog"],mat-dialog-container,.cdk-overlay-pane') return operation === 'rename' && clicks > 0 ? [dialog] : [];
-      if (selector === 'flow-grid-tile-container') return [tile];
+      if (selector === 'flow-grid-tile-container') return operation === 'trash' && clicks > 0 ? [] : [tile];
       return [];
     } };
     const more = { click() { menuOpen = true; } };

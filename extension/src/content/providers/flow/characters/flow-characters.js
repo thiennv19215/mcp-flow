@@ -277,6 +277,10 @@
   }
 
   function characterLibraryScrollContainer() {
+    if (typeof root.scrollContainer === "function") {
+      const container = root.scrollContainer();
+      if (container) return container;
+    }
     const fallback = document.scrollingElement || document.documentElement;
     const canScroll = element => {
       if (!element || element === document.body || element === document.documentElement) return false;
@@ -300,7 +304,7 @@
       if (canScroll(element) && (!best || element.scrollHeight > best.scrollHeight)) best = element;
     }
     if (best) return best;
-    return fallback && fallback.scrollHeight - fallback.clientHeight >= 50 ? fallback : null;
+    return fallback && Number.isFinite(fallback.scrollHeight) && Number.isFinite(fallback.clientHeight) && fallback.clientHeight > 0 ? fallback : null;
   }
 
   async function findCharacterTiles(name, timeoutMs = 45_000) {

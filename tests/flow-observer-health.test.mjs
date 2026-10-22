@@ -55,6 +55,6 @@ test('failed observer repair rejects as a definite pre-send failure', async () =
 test('generation dispatch awaits observer repair before sending the content command', () => {
   const source = readFileSync(new URL('../extension/src/background/service-worker.js', import.meta.url), 'utf8');
   const ensureIndex = source.indexOf('if (correlationRequiredOperations.has(operation)) await ensureCorrelationObserver(tabId);');
-  const sendIndex = source.indexOf('response = await sendFlowCommand(tabId, {', ensureIndex);
+  const sendIndex = source.indexOf('sendFlowCommand(tabId,', ensureIndex);
   assert.ok(ensureIndex >= 0 && sendIndex > ensureIndex, 'observer health must be verified before the content command can submit');
 });

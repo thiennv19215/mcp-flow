@@ -39,6 +39,7 @@ function makeSettingsHarness() {
   const radios = {
     image: makeOption('Image'),
     video: makeOption('Video'),
+    model: makeOption('Nano Banana', false),
     r916: makeOption('9:16'),
     r169: makeOption('16:9'),
     r11: makeOption('1:1'),

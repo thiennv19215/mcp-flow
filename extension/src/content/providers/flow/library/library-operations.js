@@ -226,7 +226,7 @@
               : normalize(candidate.getAttribute("aria-label") || candidate.getAttribute("title")) === normalize(title)));
           while (Date.now() < deadline && targetStillVisible()) await root.wait?.(250);
           if (targetStillVisible()) throw this.error("FLOW_TRASH_UNCONFIRMED", `Flow did not confirm that "${title}" left the project grid. Inspect the library before retrying.`, false, true);
-          return { trashed: title, ...(tileId ? { id: tileId } : {}), confirmed: true };
+          return { trashed: title };
         }
         const renameSurfaces = [...document.querySelectorAll('[role="dialog"],mat-dialog-container,.cdk-overlay-pane')].filter(el => root.visible?.(el));
         const dialogInputs = renameSurfaces.flatMap(surface => [...surface.querySelectorAll('input:not([type="file"]),[contenteditable="true"]')]).filter(el => root.visible?.(el));

@@ -201,7 +201,7 @@
         const expectedVideoReferenceIds = [];
         let confirmedAttachmentCount = 0;
         await runFlowStage("stabilizing the Flow results grid before the generation baseline", ({ deadline, signal }) =>
-          tiles.stabilizeFlowResultViewport({ deadline, signal }));
+          tiles.stabilizeFlowResultViewport?.({ deadline, signal }));
         const before = tiles.collectNativeMedia().map(item => item.id || `title:${item.title}`);
         const activeAgent = root.flowButton?.("Agent");
         if (activeAgent?.getAttribute("aria-pressed") === "true") await runFlowStage("switching Agent mode off", ({ signal }) => agent.setNativeAgentMode(false, { signal, deadline: flowDeadline }));
