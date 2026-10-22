@@ -25,6 +25,14 @@ export interface SafeUnknownSubmitDiagnostics {
 }
 
 export interface SafeFlowOperationDiagnostics {
+  selectorAttempts?: Array<{
+    key: string;
+    reason: string;
+    selectorCount: number;
+    candidateCount: number;
+    visibleCandidateCount: number;
+    invalidSelectors: Array<{ selector: string; error: string }>;
+  }>;
   screen?: SafeFlowScreenDiagnostics;
   locale: "en" | "vi" | "unknown";
   activeCategory: "all" | "characters" | "voices" | "uploads" | "ingredients" | "unknown";
@@ -55,7 +63,7 @@ export interface SafeFlowOperationDiagnostics {
 
 export interface SafeFlowScreenDiagnostics {
   state: "signed_out" | "project_error" | "agent_blocked" | "media_viewer" | "ready" | "unknown";
-  reason: "sign_in_surface_detected" | "project_error_message_detected" | "media_viewer_route_active" | "agent_mode_active" | "agent_panel_open" | "project_editor_and_composer_visible" | "composer_not_detected" | "screen_inspector_unavailable" | "unknown";
+  reason: "sign_in_surface_detected" | "project_error_message_detected" | "media_viewer_route_active" | "media_viewer_dom_owner_detected" | "agent_mode_active" | "agent_panel_open" | "project_editor_and_composer_visible" | "composer_not_detected" | "screen_inspector_unavailable" | "unknown";
   projectIdPresent: boolean;
   isProjectEditor: boolean;
   composerVisible: boolean;
@@ -63,6 +71,7 @@ export interface SafeFlowScreenDiagnostics {
   agentPanelOpen: boolean;
   signInControlCount: number;
   projectHomeRecoveryLinkCount: number;
+  mediaViewerOwnerCount: number;
   visibleAlertCount: number;
 }
 
@@ -81,7 +90,7 @@ export function sanitizeFlowOperationDiagnostics(value: unknown): SafeFlowOperat
       : null;
   const screen: SafeFlowScreenDiagnostics | undefined = rawScreen ? {
     state: enumValue(rawScreen.state, ["signed_out", "project_error", "agent_blocked", "media_viewer", "ready", "unknown"] as const, "unknown"),
-    reason: enumValue(rawScreen.reason, ["sign_in_surface_detected", "project_error_message_detected", "media_viewer_route_active", "agent_mode_active", "agent_panel_open", "project_editor_and_composer_visible", "composer_not_detected", "screen_inspector_unavailable"] as const, "unknown"),
+    reason: enumValue(rawScreen.reason, ["sign_in_surface_detected", "project_error_message_detected", "media_viewer_route_active", "media_viewer_dom_owner_detected", "agent_mode_active", "agent_panel_open", "project_editor_and_composer_visible", "composer_not_detected", "screen_inspector_unavailable"] as const, "unknown"),
     projectIdPresent: Boolean(rawScreen.projectId),
     isProjectEditor: rawScreen.isProjectEditor === true,
     composerVisible: rawScreen.composerVisible === true,
@@ -89,6 +98,7 @@ export function sanitizeFlowOperationDiagnostics(value: unknown): SafeFlowOperat
     agentPanelOpen: rawScreen.agentPanelOpen === true,
     signInControlCount: boundedCount(rawScreen.signInControlCount, 100),
     projectHomeRecoveryLinkCount: boundedCount(rawScreen.projectHomeRecoveryLinkCount, 100),
+    mediaViewerOwnerCount: boundedCount(rawScreen.mediaViewerOwnerCount, 100),
     visibleAlertCount: boundedCount(rawScreen.visibleAlertCount, 100),
   } : undefined;
   const labels = new Set(["search assets", "tìm kiếm nội dung nghe nhìn", "tìm kiếm nội dung", "tìm kiếm", "search"]);
@@ -107,7 +117,33 @@ export function sanitizeFlowOperationDiagnostics(value: unknown): SafeFlowOperat
         reason === "english_will_use" || reason === "vietnamese_use" || reason === "unrecognized_credit_text" || reason === "no_candidate"))].slice(0, 4)
       : [],
   } : undefined;
+  const rawSelectorAttempts = Array.isArray(input.selectorAttempts)
+    ? input.selectorAttempts
+    : Array.isArray(source.selectorAttempts) ? source.selectorAttempts : [];
+  const selectorAttempts = rawSelectorAttempts.slice(-12).flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const attempt = item as Record<string, unknown>;
+    const invalidSelectors = Array.isArray(attempt.invalidSelectors)
+      ? attempt.invalidSelectors.slice(0, 6).flatMap((invalid) => {
+        if (!invalid || typeof invalid !== "object" || Array.isArray(invalid)) return [];
+        const entry = invalid as Record<string, unknown>;
+        return [{
+          selector: typeof entry.selector === "string" ? entry.selector.slice(0, 160) : "",
+          error: typeof entry.error === "string" ? entry.error.slice(0, 100) : "invalid_selector",
+        }];
+      })
+      : [];
+    return [{
+      key: typeof attempt.key === "string" ? attempt.key.slice(0, 120) : "configured-selector",
+      reason: typeof attempt.reason === "string" && /^[a-z_]{1,40}$/.test(attempt.reason) ? attempt.reason : "no_match",
+      selectorCount: boundedCount(attempt.selectorCount, 100),
+      candidateCount: boundedCount(attempt.candidateCount, 1000),
+      visibleCandidateCount: boundedCount(attempt.visibleCandidateCount, 1000),
+      invalidSelectors,
+    }];
+  });
   return {
+    ...(selectorAttempts.length ? { selectorAttempts } : {}),
     ...(screen ? { screen } : {}),
     locale: source.locale === "en" || source.locale === "vi" ? source.locale : "unknown",
     activeCategory: source.activeCategory === "all" || source.activeCategory === "characters" || source.activeCategory === "voices" || source.activeCategory === "uploads" || source.activeCategory === "ingredients"

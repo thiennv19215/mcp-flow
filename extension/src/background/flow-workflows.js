@@ -215,7 +215,7 @@ export function planFlowBatch({ project, output_dir = project, scenes }, { queue
   const jobs = scenes.map((source, index) => {
     const {
       chain_previous, reference_previous, technique, reference_images, first_frame, last_frame,
-      aspect_ratio, max_credits, submit_only, model, duration, resolution, ...scene
+      aspect_ratio, max_credits, submit_only, manual_submit, model, duration, resolution, ...scene
     } = source;
     const sceneNumber = offset + index + 1;
     const phrase = resolveTechnique(technique, techniques, index + 1);
@@ -244,6 +244,7 @@ export function planFlowBatch({ project, output_dir = project, scenes }, { queue
         ...(aspectRatio !== undefined ? { aspectRatio } : {}),
         ...(maxCredits !== undefined ? { maxCredits } : {}),
         ...(submitOnly !== undefined ? { submitOnly } : {}),
+        ...(manual_submit === true ? { manualSubmit: true } : {}),
         ...(model !== undefined ? { model } : {}),
         ...(duration !== undefined ? { duration } : {}),
         ...(resolution !== undefined ? { resolution } : {}),

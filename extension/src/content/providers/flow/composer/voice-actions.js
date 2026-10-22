@@ -31,6 +31,7 @@
     .replace(/^(?:voice|giọng nói|giọng)\s*[:\-]\s*/, "")
     .replace(/\s+(?:remove|delete|clear|close|xóa|gỡ)(?:\s+(?:voice|giọng nói|giọng))?$/, "")
     .trim();
+  const inspectVoiceChips = composer => voiceChipNodes(composer).map(element => ({ element, owner: element, kind: "voice" }));
   async function selectNativeFlowVoice(name, config = {}) {
     const wanted = String(name || "").replace(/\s+/g, " ").trim();
     if (!wanted || wanted.length > 120) throw flowError("FLOW_INVALID_ARGUMENT", "An exact Flow voice name is required.", false, false);
@@ -184,7 +185,7 @@
       }
     }
   }
-  root.FlowVoiceActions = Object.freeze({ select: selectNativeFlowVoice, listOptions: listNativeFlowVoiceOptions });
+  root.FlowVoiceActions = Object.freeze({ select: selectNativeFlowVoice, listOptions: listNativeFlowVoiceOptions, chips: inspectVoiceChips });
   root.selectNativeFlowVoice = selectNativeFlowVoice;
   root.listNativeFlowVoiceOptions = listNativeFlowVoiceOptions;
 })();

@@ -2,7 +2,7 @@
 
 This plan follows the live route used by this repository: MCP client → local forwarding owner → authenticated remote device session → VPS queue → browser extension → Flow tab → Chrome download → MCP-visible file. TobyFlow is a reference for Flow-specific driver isolation, preflight gates, positive submit evidence, operation checkpoints, normalized errors, and retrying only when an operation is known to be safe. Its page selectors and internal API paths are not copied as dependencies.
 
-Automation locale policy: Flow navigation is English-only (`hl=en`). `flow_open_project` accepts only `language: "en"`, and tab preparation rewrites an existing Flow URL to English while preserving its other query parameters and fragment. Localized selector aliases remain a defensive detection aid; they do not enable Vietnamese automation. This is source/test verified, not a live locale-runtime check.
+Automation locale policy: Flow navigation preserves the active locale and tab preparation does not rewrite the URL. `flow_open_project` optionally accepts a locale tag such as `vi` or `en`; when omitted it inherits the rendered document locale, then the existing `hl` URL parameter. DOM recognition must remain locale tolerant, with semantic controls and attributes preferred over translated visible text. This policy is source verified, not a live locale-runtime check.
 
 ## Phase 0 — Freeze the contract and establish evidence
 

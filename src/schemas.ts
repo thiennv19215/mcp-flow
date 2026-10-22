@@ -19,6 +19,7 @@ export const sceneSchema = z.object({
   resolution: z.enum(["360p", "720p"]).optional().describe("Video resolution. Omni models only."),
   max_credits: z.number().int().min(0).default(25).describe("Video safety cap: the scene is skipped (nothing spent) if Flow quotes more credits than this. Image generation does not check a credit quote."),
   submit_only: z.boolean().optional().describe("Return when Flow's correlated generation request is dispatched; do not wait for rendering or download results. The default waits for finished media."),
+  manual_submit: z.boolean().optional().describe("Prepare the prompt and settings, then wait for you to click Create in Flow. After clicking, choose Continue in the extension queue so it can confirm the correlated request and wait for the result."),
   variants: z.number().int().min(1).max(4).optional().describe("Outputs per prompt (each one spends credits). Default 1."),
   first_frame: frameInputSchema.optional().describe("First frame: absolute image path, 'asset:<title>', or {asset:<exact title>, id:<Flow media UUID>} for an identity-verified project image."),
   last_frame: frameInputSchema.optional().describe("Last frame: absolute image path, 'asset:<title>', or {asset:<exact title>, id:<Flow media UUID>} for an identity-verified project image."),
@@ -87,13 +88,17 @@ export const shapes = {
     inspect_only: z.boolean().optional().describe("Open the reference picker, report its exact search/options, and close it without selecting or attaching anything."),
   },
   clear_references: {},
+  remove_reference_kind: {
+    kind: z.enum(["image", "video", "character", "voice"]).describe("Remove only this type of existing Flow prompt chip, preserving prompt text and other chip types."),
+  },
   upload_media: { path: z.string().min(1).describe("Absolute path to an image or video file to upload to the open Flow project. Supports PNG, JPG, WebP, GIF, HEIC, HEIF, AVIF, MP4, MOV, WebM, AVI, MKV or 3GP.") },
   projects: {},
   voice_options: {},
   create_project: {},
   open_project: {
     project_id: z.string().uuid(),
-    language: z.enum(["en"]).default("en").describe("Flow automation interface language. English is required."),
+    language: z.string().trim().regex(/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/).optional()
+      .describe("Optional Flow UI locale (for example, vi or en). If omitted, keep the locale already active in the Flow tab."),
   },
   download: {
     project: z.string().min(1).describe("Local folder name under the output root."),

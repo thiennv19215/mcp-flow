@@ -15,9 +15,17 @@
       selectors: ["main button", "main a[href]", "[role='main'] button", "[role='main'] a[href]"],
       textRegex: /^(?:sign in|log in|continue to sign in|sign in with google|đăng nhập|tiếp tục đăng nhập)(?:\s+.*)?$/i
     },
+    video_upload_confirm: {
+      selectors: ["button", "[role='button']"],
+      textMatch: ["Upload", "Continue", "Confirm", "Agree and continue", "Tải lên", "Tiếp tục", "Xác nhận", "Đồng ý", "Chấp nhận", "Tải video lên"],
+      dialogTextRegex: /(?:video|upload|tải lên|tải video|tải tệp)/i
+    },
     project_error_indicator: {
       selectors: ["[role='alert']", "mat-error", "flow-error", "[class*='project-error']", "[data-error]", "main h1", "main h2", "[role='main'] h1", "[role='main'] h2"],
-      textRegex: /(?:project (?:not found|unavailable|could not be loaded)|(?:we )?couldn['’]?t find (?:this )?project|unable to load (?:this )?project|failed to load project|dự án (?:không tồn tại|không khả dụng)|không thể tải (?:dự án|project)|không tìm thấy dự án)/i
+      textRegex: /(?:project (?:not found|unavailable|could not be loaded)|(?:we )?couldn['’]?t find (?:this )?project|unable to load (?:this )?project|failed to load project|dự án (?:không tồn tại|không khả dụng|bị xóa)|không thể tải (?:dự án|project)|không tìm thấy dự án|không có quyền truy cập dự án)/i
+    },
+    media_viewer_owner: {
+      selectors: ["flow-media-viewer", "flow-video-viewer", "flow-image-viewer", "[data-testid*='media-viewer']", "[class*='media-viewer']"]
     },
     composerRoot: {
       selectors: [
@@ -181,6 +189,23 @@
         selectors: [
           "button[id*='-trigger-']"
         ]
+      }
+    },
+
+    // 3b. Flow's persistent library layout preferences.
+    pageSettings: {
+      triggerButton: {
+        selectors: ["button", "[role='button']"],
+        icons: ["settings_2"]
+      },
+      panel: {
+        selectors: ["[role='dialog']", "[role='menu']", "[aria-modal='true']", "mat-dialog-container", "flow-dialog", ".cdk-overlay-pane", "mat-menu-panel"]
+      },
+      candidates: {
+        selectors: ["[role='tab']", "[role='radio']", "[role='switch']", "[role='checkbox']", "button", "[role='button']", "mat-slide-toggle"]
+      },
+      detailsRow: {
+        selectors: ["label", "[role='group']", "[role='switch']", "[role='checkbox']", "mat-slide-toggle", "button", "[role='button']"]
       }
     },
 
@@ -351,6 +376,11 @@
         "bạn đã hết credit",
         "không đủ credit",
         "hết hạn mức credit",
+        "không đủ tín dụng",
+        "không đủ điểm tín dụng",
+        "đã hết tín dụng",
+        "đã hết lượt tạo",
+        "đã đạt giới hạn tạo hàng ngày",
         "public_error_user_quota_reached"
       ]
     },
@@ -359,7 +389,7 @@
     agent: {
       toggleButton: {
         selectors: ["button", "[role='button']"],
-        textRegex: /^Agent$/i
+        textRegex: /^(?:Agent|Trợ lý)$/i
       },
       closeButton: {
         selectors: ["button", "[role='button']"],
@@ -369,6 +399,22 @@
         selectors: ["button", "[role='button']"],
         textRegex: /^(?:Done|Xong|Hoàn tất)$/i
       }
+    },
+    agent_instruction_dialog: {
+      selectors: ["[role='dialog']", "mat-dialog-container", "flow-dialog", "[aria-modal='true']"],
+      textRegex: /(?:agent|assistant|trợ lý).{0,160}(?:instruction|instructions|welcome|hướng dẫn|chỉ dẫn)|(?:instruction|instructions|hướng dẫn).{0,160}(?:agent|assistant|trợ lý)/i
+    },
+    agent_instruction_done: {
+      selectors: ["button", "[role='button']"],
+      textRegex: /^(?:Done|Xong|Hoàn tất)$/i
+    },
+    agent_panel_owner: {
+      selectors: ["flow-chat-agent-panel", "flow-agent-panel", "[data-testid*='agent-panel' i]", "[data-test-id*='agent-panel' i]", "[aria-label*='agent panel' i]", "[aria-label*='assistant panel' i]"]
+    },
+    agent_panel_close: {
+      selectors: ["button", "[role='button']"],
+      textRegex: /^(?:close|dismiss|đóng|thoát)$/i,
+      icon: "close"
     },
 
     // 8. Characters Elements
@@ -484,8 +530,108 @@
           ".cdk-overlay-pane"
         ]
       }
+    },
+
+    // Toby-compatible selector aliases.  They intentionally point at
+    // semantic, locale-tolerant defaults so a remote selector update can
+    // override one alias without changing operation code.
+    toby: {
+      slate_editor: { selectors: [".ProseMirror[contenteditable='true']", "flow-base-prompt-box [contenteditable='true']", "[contenteditable='true']"] },
+      editor: { selectors: [".ProseMirror[contenteditable='true']", "flow-base-prompt-box [contenteditable='true']", "[contenteditable='true']"] },
+      submit_button: { selectors: ["button[type='submit']", "button[data-action='submit']", "button[data-action='generate']", "button", "[role='button']"], icons: ["arrow_forward", "arrow_upward", "send", "sparkle", "auto_awesome", "play_arrow", "north", "east"], textRegex: /(?:start generation|generate|bắt đầu tạo|tạo video|tạo ảnh|tạo hình ảnh)/i },
+      tile_container: { selectors: ["flow-grid-tile-container", "[class*='grid-tile-container']", "[class*='grid-tile']"] },
+      tile_pending: { selectors: ["flow-progress-tile", "flow-rendering-tile", "flow-generating-tile", "flow-placeholder-tile", "[aria-busy='true']", "[role='progressbar']"] },
+      tile_retry_button: { selectors: ["button", "[role='button']"], textRegex: /(?:retry|try again|thử lại|tạo lại)/i, iconRegex: /refresh|replay|retry/i },
+      tile_video: { selectors: ["flow-video-tile", "flow-scene-tile", "video"] },
+      ingredient_bar: { selectors: ["[contenteditable='true']", "[class*='ingredient' i]", "flow-base-prompt-box"] },
+      ingredient_image_chip: { selectors: ["[data-ingredient-type='image']", "[data-kind='image']", "[class*='image-chip' i]"] },
+      ingredient_video_chip: { selectors: ["[data-ingredient-type='video']", "[data-kind='video']", "[class*='video-chip' i]"] },
+      mention_inline_chip: { selectors: ["[contenteditable='false']", "[data-mention]", "[class*='mention' i]"] },
+      ingredient_remove_button: { selectors: ["button", "[role='button']"], icons: ["close", "clear", "cancel"], textRegex: /(?:remove|delete|clear|close|xóa|gỡ|loại bỏ|bỏ khỏi)/i },
+      settings_button: { selectors: ["button", "[role='button']"], icons: ["tune", "settings", "settings_2"], textRegex: /(?:settings|cài đặt)/i },
+      settings_panel_candidates: { selectors: ["[role='dialog']", "[role='menu']", "mat-dialog-container", "flow-dialog", ".cdk-overlay-pane", "mat-menu-panel"] },
+      settings_panel_marker: { selectors: ["[role='radio']", "mat-radio-button", "[role='tab']", "button[id*='-trigger-']"] },
+      page_settings_root: { selectors: ["[role='dialog']", "[role='menu']", "[aria-modal='true']", "mat-dialog-container", ".cdk-overlay-pane"] },
+      page_settings_trigger: { selectors: ["button", "[role='button']"], icons: ["settings_2", "settings"] },
+      page_settings_grid_size: { selectors: ["button", "[role='button']", "[role='radio']"], textRegex: /(?:small|nhỏ|grid|lưới)/i },
+      page_settings_grid_view: { selectors: ["button", "[role='button']", "[role='tab']"], icons: ["grid_view", "dashboard", "view_module"], textRegex: /(?:grid|lưới)/i },
+      add_component_root: { selectors: ["[role='dialog']", "[role='listbox']", "mat-dialog-container", "flow-dialog", ".cdk-overlay-pane"] },
+      add_component_listbox: { selectors: ["[role='listbox']", "mat-select-panel", "[role='dialog']"] },
+      add_component_option: { selectors: ["[role='option']", "mat-option", "button", "[role='button']"] },
+      add_component_apply_button: { selectors: ["button", "[role='button']"], textRegex: /(?:add to prompt|thêm vào câu lệnh|apply|áp dụng|done|xong)/i },
+      add_to_prompt_menu_item: { selectors: ["[role='menuitem']", "mat-menu-item", "button", "[role='button']"], textRegex: /(?:add to prompt|thêm vào câu lệnh|thêm vào lời nhắc)/i, icons: ["add"] },
+      download_menu_trigger: { selectors: ["button", "[role='button']"], icons: ["download", "more_vert", "more_horiz"] },
+      menu_item: { selectors: ["[role='menuitem']", "button", "[role='button']"] },
+      icon_element: { selectors: ["mat-icon", ".mat-icon", ".google-symbols", ".material-symbols-outlined", "i", "svg"] },
+      warning_icon: { selectors: ["mat-icon", ".mat-icon", ".google-symbols", "svg"], icons: ["warning", "error", "report_problem"] },
+      signed_out_indicator: { selectors: ["main button", "main a[href]", "[role='main'] button", "[role='main'] a[href]"], textRegex: /(?:sign in|log in|đăng nhập|tiếp tục đăng nhập)/i },
+      video_upload_confirm: { selectors: ["button", "[role='button']"], textRegex: /(?:upload|continue|confirm|agree|tải lên|tiếp tục|xác nhận|đồng ý|chấp nhận)/i },
+      flow_scroll_container: { selectors: ["[class*='scroll']", "main", ".flow-scroll-container", "flow-app"] }
     }
   };
+
+  const selectorFailureLog = [];
+  let selectorFailureSequence = 0;
+  // Toby's content driver uses flat selector keys while the native extension
+  // keeps related keys grouped. Resolve both forms so an updated Toby profile
+  // can be copied into flow-selectors.json without forcing every DOM module to
+  // know which config layout supplied it.
+  const TOBY_SELECTOR_ALIASES = Object.freeze({
+    slate_editor: "toby.slate_editor",
+    editor: "toby.editor",
+    submit_button: "toby.submit_button",
+    tile_container: "toby.tile_container",
+    tile_pending: "toby.tile_pending",
+    tile_retry_button: "toby.tile_retry_button",
+    tile_video: "toby.tile_video",
+    ingredient_bar: "toby.ingredient_bar",
+    ingredient_image_chip: "toby.ingredient_image_chip",
+    ingredient_video_chip: "toby.ingredient_video_chip",
+    mention_inline_chip: "toby.mention_inline_chip",
+    ingredient_remove_button: "toby.ingredient_remove_button",
+    settings_button: "toby.settings_button",
+    settings_panel_candidates: "toby.settings_panel_candidates",
+    settings_panel_marker: "toby.settings_panel_marker",
+    page_settings_root: "toby.page_settings_root",
+    page_settings_trigger: "toby.page_settings_trigger",
+    page_settings_grid_size: "toby.page_settings_grid_size",
+    page_settings_grid_view: "toby.page_settings_grid_view",
+    add_component_root: "toby.add_component_root",
+    add_component_listbox: "toby.add_component_listbox",
+    add_component_option: "toby.add_component_option",
+    add_component_apply_button: "toby.add_component_apply_button",
+    add_to_prompt_menu_item: "toby.add_to_prompt_menu_item",
+    download_menu_trigger: "toby.download_menu_trigger",
+    menu_item: "toby.menu_item",
+    icon_element: "toby.icon_element",
+    warning_icon: "toby.warning_icon",
+    signed_out_indicator: "toby.signed_out_indicator",
+    video_upload_confirm: "toby.video_upload_confirm",
+    flow_scroll_container: "toby.flow_scroll_container",
+  });
+  function recordSelectorFailure(path, details = {}) {
+    const record = {
+      sequence: ++selectorFailureSequence,
+      at: new Date().toISOString(),
+      key: typeof path === "string" ? path.slice(0, 120) : "configured-selector",
+      reason: String(details.reason || "no_match").slice(0, 40),
+      selectorCount: Number(details.selectorCount) || 0,
+      candidateCount: Number(details.candidateCount) || 0,
+      visibleCandidateCount: Number(details.visibleCandidateCount) || 0,
+      invalidSelectors: (details.invalidSelectors || []).slice(0, 6).map(item => ({
+        selector: String(item.selector || "").slice(0, 160),
+        error: String(item.error || "invalid_selector").slice(0, 100),
+      })),
+    };
+    selectorFailureLog.push(record);
+    if (selectorFailureLog.length > 60) selectorFailureLog.splice(0, selectorFailureLog.length - 60);
+  }
+
+  function getSelectorFailureDiagnostics(options = {}) {
+    const after = Number(options.after) || 0;
+    const limit = Math.max(1, Math.min(20, Number(options.limit) || 12));
+    return selectorFailureLog.filter(record => record.sequence > after).slice(-limit).map(record => ({ ...record, invalidSelectors: record.invalidSelectors.map(item => ({ ...item })) }));
+  }
 
   /**
    * Truy xuất cấu hình selector theo chuỗi đường dẫn (dot notation).
@@ -500,7 +646,16 @@
       if (current == null) return null;
       current = current[part];
     }
-    return current || null;
+    if (current) return current;
+    if (parts.length === 1 && TOBY_SELECTOR_ALIASES[parts[0]]) {
+      let alias = FlowSelectors;
+      for (const part of TOBY_SELECTOR_ALIASES[parts[0]].split(".")) {
+        if (alias == null) return null;
+        alias = alias[part];
+      }
+      return alias || null;
+    }
+    return null;
   }
 
   /**
@@ -547,22 +702,50 @@
    * Truy vấn 1 element đầu tiên khớp với một key selector.
    */
   function flowQuery(path, scope = (typeof document !== "undefined" ? document : null), options = {}) {
-    if (!scope || typeof scope.querySelector !== "function") return null;
+    if (!scope || typeof scope.querySelectorAll !== "function") return null;
     const selectors = flowGetSelectors(path);
     if (!selectors.length) return null;
+    let candidateCount = 0;
+    let visibleCandidateCount = 0;
+    const invalidSelectors = [];
+    const failed = () => {
+      if (options.recordFailure !== false) recordSelectorFailure(path, {
+        reason: "no_match", selectorCount: selectors.length, candidateCount, visibleCandidateCount, invalidSelectors,
+      });
+      return null;
+    };
+    if (options.latestFirst === true) {
+      const candidates = [];
+      for (const sel of selectors) {
+        try {
+          const found = scope.querySelectorAll(sel);
+          candidateCount += found.length;
+          // Keep duplicates across selector tiers: Toby inspects the raw
+          // concatenated matches in reverse, so overlapping selectors must
+          // retain their tier priority when selecting the newest control.
+          for (const el of found) candidates.push(el);
+        } catch (error) { invalidSelectors.push({ selector: sel, error: error?.message || error }); }
+      }
+      for (let index = candidates.length - 1; index >= 0; index--) {
+        const element = candidates[index];
+        if (options.checkVisible === false) return element;
+        if (flowIsVisible(element)) { visibleCandidateCount++; return element; }
+      }
+      return failed();
+    }
     for (const sel of selectors) {
       try {
-        const el = scope.querySelector(sel);
-        if (el) {
-          if (options.checkVisible !== false) {
-            if (flowIsVisible(el)) return el;
-          } else {
-            return el;
-          }
+        // Do not stop at the first DOM match: Flow often leaves hidden stale
+        // controls ahead of the active overlay in document order.
+        const found = scope.querySelectorAll(sel);
+        candidateCount += found.length;
+        for (const el of found) {
+          if (options.checkVisible === false) return el;
+          if (flowIsVisible(el)) { visibleCandidateCount++; return el; }
         }
-      } catch (_) {}
+      } catch (error) { invalidSelectors.push({ selector: sel, error: error?.message || error }); }
     }
-    return null;
+    return failed();
   }
 
   /**
@@ -573,18 +756,31 @@
     const selectors = flowGetSelectors(path);
     if (!selectors.length) return [];
     const results = [];
+    const rawResults = [];
+    const invalidSelectors = [];
+    let candidateCount = 0;
     for (const sel of selectors) {
       try {
         const nodeList = scope.querySelectorAll(sel);
+        candidateCount += nodeList.length;
         for (const el of nodeList) {
           if (options.checkVisible !== false) {
-            if (flowIsVisible(el) && !results.includes(el)) results.push(el);
+            if (flowIsVisible(el)) rawResults.push(el);
           } else {
-            if (!results.includes(el)) results.push(el);
+            rawResults.push(el);
           }
         }
-      } catch (_) {}
+      } catch (error) { invalidSelectors.push({ selector: sel, error: error?.message || error }); }
     }
+    if (invalidSelectors.length && options.recordFailure !== false) recordSelectorFailure(path, {
+      reason: "invalid_selector",
+      selectorCount: selectors.length,
+      candidateCount,
+      visibleCandidateCount: options.checkVisible === false ? candidateCount : rawResults.length,
+      invalidSelectors,
+    });
+    const ordered = options.latestFirst === true ? rawResults.reverse() : rawResults;
+    for (const element of ordered) if (!results.includes(element)) results.push(element);
     return results;
   }
 
@@ -592,19 +788,16 @@
    * Duyệt candidates từ cấu hình selectors và chỉ chọn phần tử đang thực sự hiển thị trên DOM.
    * Tương tự _v2QueryVisibleConfigured của TobyFlow.
    */
-  function flowQueryVisible(path, scope = (typeof document !== "undefined" ? document : null)) {
-    if (!scope || typeof scope.querySelectorAll !== "function") return null;
-    const selectors = flowGetSelectors(path);
-    if (!selectors.length) return null;
-    for (const sel of selectors) {
-      try {
-        const candidates = scope.querySelectorAll(sel);
-        for (const el of candidates) {
-          if (flowIsVisible(el)) return el;
-        }
-      } catch (_) {}
-    }
-    return null;
+  function flowQueryVisible(path, scope = (typeof document !== "undefined" ? document : null), options = {}) {
+    // Toby's configured visible-query helper gathers candidates from every
+    // configured selector and inspects the most recently mounted one first.
+    // Flow keeps stale/hidden controls mounted behind active dialogs, so use
+    // that ordering by default while preserving an explicit first-match opt-out.
+    return flowQuery(path, scope, {
+      ...options,
+      latestFirst: options.latestFirst !== false,
+      checkVisible: true,
+    });
   }
 
   /**
@@ -632,17 +825,39 @@
     if (!selectors.length) return null;
 
     const targetIcon = options.icon || config.icon;
-    const targetIcons = (options.icons || config.icons || (targetIcon ? [targetIcon] : [])).map(i => String(i).toLowerCase());
-    const targetTextRegex = options.textRegex || (config.textRegex instanceof RegExp ? config.textRegex : (config.textRegex ? new RegExp(config.textRegex, "i") : null));
+    const configuredIcons = options.icons || config.icons || config.iconText || config.icon_text || (targetIcon ? [targetIcon] : []);
+    const targetIcons = (Array.isArray(configuredIcons) ? configuredIcons : [configuredIcons]).map(i => String(i).toLowerCase()).filter(Boolean);
+    const configuredIconRegex = options.iconRegex || config.iconRegex || config.icon_regex;
+    let targetIconRegex = null;
+    try { targetIconRegex = configuredIconRegex instanceof RegExp ? configuredIconRegex : configuredIconRegex ? new RegExp(String(configuredIconRegex), "i") : null; } catch {}
+    const configuredTextMatch = options.textMatch || config.textMatch || config.text_match;
+    const targetTextValues = (Array.isArray(configuredTextMatch) ? configuredTextMatch : [configuredTextMatch]).map(value => String(value || "").trim()).filter(Boolean);
+    const configuredTextRegex = options.textRegex || config.textRegex || config.text_regex;
+    let targetTextRegex = null;
+    try { targetTextRegex = configuredTextRegex instanceof RegExp ? configuredTextRegex : configuredTextRegex ? new RegExp(String(configuredTextRegex), "i") : null; } catch {}
     const targetText = options.text || config.text;
     const excludedTextRegex = options.excludedTextRegex || (config.excludedTextRegex instanceof RegExp ? config.excludedTextRegex : (config.excludedTextRegex ? new RegExp(config.excludedTextRegex, "i") : null));
     const excludedIcons = (options.excludedIcons || config.excludedComposerIcons || []).map(i => String(i).toLowerCase());
 
-    for (const sel of selectors) {
+    const configuredCandidates = [];
+    const invalidSelectors = [];
+    for (const selector of selectors) {
       try {
-        const candidates = scope.querySelectorAll(sel);
-        for (const el of candidates) {
-          if (options.checkVisible !== false && !flowIsVisible(el)) continue;
+        for (const candidate of scope.querySelectorAll(selector)) {
+          // Preserve cross-tier duplicates so reverse traversal matches
+          // Toby's configured selector semantics for overlapping selectors.
+          configuredCandidates.push(candidate);
+        }
+      } catch (error) { invalidSelectors.push({ selector, error: error?.message || error }); }
+    }
+    const candidates = options.latestFirst === false ? configuredCandidates : configuredCandidates.reverse();
+    let visibleCandidateCount = 0;
+    for (const el of candidates) {
+      try {
+          if (options.checkVisible !== false) {
+            if (!flowIsVisible(el)) continue;
+            visibleCandidateCount++;
+          }
 
           // Check icon
           const iconEl = flowFindIcon(el);
@@ -658,25 +873,36 @@
           if (excludedTextRegex && excludedTextRegex.test(cleanText)) continue;
 
           if (targetTextRegex) {
-            if (!targetTextRegex.test(cleanText)) continue;
-          } else if (targetText) {
-            if (options.exact) {
-              if (cleanText.toLowerCase() !== String(targetText).toLowerCase()) continue;
-            } else {
-              if (!cleanText.toLowerCase().includes(String(targetText).toLowerCase())) continue;
-            }
+            const matches = typeof root.matchesFlowUiRegex === "function"
+              ? root.matchesFlowUiRegex(cleanText, targetTextRegex)
+              : new RegExp(targetTextRegex.source, targetTextRegex.flags.replace("g", "").replace("y", "")).test(cleanText);
+            if (!matches) continue;
+          } else if (targetText || targetTextValues.length) {
+            const normalizedText = typeof root.normalizeFlowUiText === "function" ? root.normalizeFlowUiText(cleanText) : cleanText.toLowerCase();
+            const targets = targetTextValues.length ? targetTextValues : [targetText];
+            const matchesText = targets.some(value => {
+              const normalizedTarget = typeof root.normalizeFlowUiText === "function" ? root.normalizeFlowUiText(value) : String(value).toLowerCase();
+              return options.exact ? normalizedText === normalizedTarget : normalizedText.includes(normalizedTarget);
+            });
+            if (!matchesText) continue;
           }
 
-          if (targetIcons.length) {
-            const iconMatched = iconName && targetIcons.includes(iconName);
+          if (targetIcons.length || targetIconRegex) {
+            const iconMatched = Boolean(iconName && (targetIcons.includes(iconName) || targetIconRegex?.test(iconName)));
             if (options.requireIcon && !iconMatched) continue;
-            if (!targetTextRegex && !targetText && !iconMatched) continue;
+            if (!targetTextRegex && !targetText && !targetTextValues.length && !iconMatched) continue;
           }
 
           return el;
-        }
       } catch (_) {}
     }
+    if (options.recordFailure !== false) recordSelectorFailure(path, {
+      reason: "semantic_no_match",
+      selectorCount: selectors.length,
+      candidateCount: candidates.length,
+      visibleCandidateCount,
+      invalidSelectors,
+    });
     return null;
   }
 
@@ -686,7 +912,7 @@
   async function flowWaitFor(path, { timeoutMs = 5000, intervalMs = 100, scope = (typeof document !== "undefined" ? document : null) } = {}) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      const el = flowQueryVisible(path, scope) || flowQuery(path, scope);
+      const el = flowQueryVisible(path, scope, { recordFailure: false }) || flowQuery(path, scope, { recordFailure: false });
       if (el) return el;
       if (typeof root.wait === "function") {
         await root.wait(intervalMs);
@@ -694,6 +920,7 @@
         await new Promise(resolve => setTimeout(resolve, intervalMs));
       }
     }
+    recordSelectorFailure(path, { reason: "wait_timeout", selectorCount: flowGetSelectors(path).length });
     return null;
   }
 
@@ -753,4 +980,6 @@
   root.flowFindIcon = flowFindIcon;
   root.flowWaitFor = flowWaitFor;
   root.flowMergeSelectors = flowMergeSelectors;
+  root.flowSelectorDiagnosticCursor = () => selectorFailureSequence;
+  root.flowGetSelectorDiagnostics = getSelectorFailureDiagnostics;
 })(typeof globalThis !== "undefined" ? globalThis : self);

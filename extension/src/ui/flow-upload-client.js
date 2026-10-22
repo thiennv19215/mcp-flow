@@ -4,9 +4,40 @@
  */
 class FlowUploadClient {
   /**
+   * Flow uses the uploaded filename as the project asset title. Keep the
+   * original stem readable, but add a short per-upload suffix so two local
+   * files called e.g. "image.png" can never collide in the picker.
+   */
+  static uniqueAssetName(fileName, transferId, kind = "image", referenceIndex) {
+    const fallbackExt = kind === "video" ? "mp4" : "png";
+    const rawName = String(fileName || "").trim();
+    const lastDot = rawName.lastIndexOf(".");
+    const rawBase = lastDot > 0 ? rawName.slice(0, lastDot) : rawName;
+    const rawExt = lastDot > 0 ? rawName.slice(lastDot + 1).toLowerCase() : fallbackExt;
+    const base = rawBase
+      .replace(/[/\\?%*:|"<>#]/g, "-")
+      .replace(/\s+/g, " ")
+      .replace(/[. ]+$/g, "")
+      .trim() || `ref-${kind}`;
+    const ext = rawExt.replace(/[^a-z0-9]+/g, "").slice(0, 12) || fallbackExt;
+    const token = String(transferId || "")
+      .replace(/[^a-z0-9]/gi, "")
+      .slice(-10)
+      .toLowerCase() || `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const numericIndex = Number(referenceIndex);
+    const index = Number.isInteger(numericIndex) && numericIndex > 0 ? numericIndex : null;
+    const prefix = index !== null ? `ref-${String(index).padStart(2, "0")}` : kind === "video" ? "upload-video" : "upload-image";
+    const suffix = `-${token}`;
+    // Keep titles comfortably below Flow/browser filename limits while
+    // retaining enough of the original name to identify the source image.
+    const maxBaseLength = 120;
+    return `${prefix}-${base.slice(0, Math.max(1, maxBaseLength - prefix.length - suffix.length))}${suffix}.${ext}`;
+  }
+
+  /**
    * Tải một file lên Google Flow và trả về tên tài nguyên đã xác nhận
    * @param {File|Blob} file
-   * @param {Object} options { onProgress: (percent: number) => void, kind?: "image"|"video", name?: string }
+   * @param {Object} options { onProgress: (percent: number) => void, kind?: "image"|"video", name?: string, referenceIndex?: number }
    * @returns {Promise<string>} Tên asset trên Flow
    */
   static async upload(file, options = {}) {
@@ -24,19 +55,11 @@ class FlowUploadClient {
     const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
     const sha256 = [...new Uint8Array(hashBuffer)].map(b => b.toString(16).padStart(2, "0")).join("");
 
-    const ext = (file.name || "media").split(".").pop() || (kind === "video" ? "mp4" : "png");
-    let safeName = options.name;
-    if (!safeName) {
-      if (file.name) {
-        const lastDot = file.name.lastIndexOf(".");
-        let base = lastDot > 0 ? file.name.slice(0, lastDot) : file.name;
-        const fileExt = lastDot > 0 ? file.name.slice(lastDot + 1).toLowerCase() : ext;
-        base = base.replace(/[/\\?%*:|"<>#]/g, "-").replace(/\s+/g, " ").trim();
-        safeName = base ? `${base}.${fileExt}` : `ref-${Date.now()}.${fileExt}`;
-      } else {
-        safeName = `ref-${Date.now()}.${ext}`;
-      }
-    }
+    // Do not send the browser's original filename as the Flow asset title:
+    // separate local files often share names such as "image.png". A unique
+    // title lets Flow's picker and tile correlation resolve every reference
+    // by exact name and verified media ID.
+    const safeName = FlowUploadClient.uniqueAssetName(options.name || file.name, transferId, kind, options.referenceIndex);
 
     // 1. Khởi tạo phiên chuyển nhượng nhị phân
     const beginRes = await chrome.runtime.sendMessage({

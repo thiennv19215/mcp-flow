@@ -276,17 +276,38 @@
     return { newCharacterPage: false };
   }
 
+  function characterLibraryScrollContainer() {
+    const fallback = document.scrollingElement || document.documentElement;
+    const canScroll = element => {
+      if (!element || element === document.body || element === document.documentElement) return false;
+      if (element.scrollHeight - element.clientHeight < 50) return false;
+      try {
+        const overflowY = getComputedStyle(element).overflowY;
+        return overflowY === "auto" || overflowY === "scroll";
+      } catch {
+        return false;
+      }
+    };
+    const tiles = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("characters.characterTile", document, { checkVisible: false }) : null) ||
+      [...document.querySelectorAll("flow-character-tile")];
+    for (const tile of tiles) {
+      for (let parent = tile?.parentElement, hop = 0; parent && hop < 30; parent = parent.parentElement, hop++) {
+        if (canScroll(parent)) return parent;
+      }
+    }
+    let best = null;
+    for (const element of document.querySelectorAll("div,main,section")) {
+      if (canScroll(element) && (!best || element.scrollHeight > best.scrollHeight)) best = element;
+    }
+    if (best) return best;
+    return fallback && fallback.scrollHeight - fallback.clientHeight >= 50 ? fallback : null;
+  }
+
   async function findCharacterTiles(name, timeoutMs = 45_000) {
     const wanted = normalize(cleanCharacterName(name));
     if (!wanted) throw flowError("FLOW_INVALID_ARGUMENT", "Character name is required for an exact library lookup.");
     const found = new Map();
-    let scroller = scrollContainer();
-    if (!scroller) {
-      const pageScroller = document.scrollingElement || document.documentElement;
-      if (pageScroller && Number.isFinite(pageScroller.clientHeight) && pageScroller.clientHeight > 0 && Number.isFinite(pageScroller.scrollHeight)) {
-        scroller = pageScroller;
-      }
-    }
+    const scroller = characterLibraryScrollContainer();
     if (!scroller || !Number.isFinite(scroller.scrollTop) || !Number.isFinite(scroller.scrollHeight) || !Number.isFinite(scroller.clientHeight) || scroller.clientHeight <= 0) {
       throw flowError("FLOW_CHARACTER_SCAN_INCOMPLETE", "Flow's Characters library does not expose measurable scrolling state, so the full list cannot be confirmed; no character was selected.", true);
     }
@@ -353,6 +374,7 @@
     verifyNameLibrary: characterNameLibraryEvidence,
     recordNameSaveResponse: recordCharacterNameSaveResponse,
     findCharacterTiles,
+    characterLibraryScrollContainer,
     create: async (payload = {}, command = {}) => {
       const c = payload.character || payload.job?.params || payload;
       if (!String(c.name || "").trim()) throw flowError("FLOW_INVALID_ARGUMENT", "Character name is required.");
@@ -382,14 +404,14 @@
       if (!c.image) {
         await ensureFlowLibrarySection("All media");
         newPageReady = false;
-        const editorBox = (typeof root.flowQuery === "function" ? root.flowQuery("editor", document) : null) || document.querySelector(".ProseMirror");
+        const editorBox = root.getVisibleFlowPromptEditor?.() || (typeof root.flowQuery === "function" ? root.flowQuery("editor", document) : null);
         if (!editorBox) throw flowError("NATIVE_CAPABILITY_UNSUPPORTED", "Flow's image composer is unavailable for description-based character creation.", true);
-        if (scrollContainer()) scrollContainer().scrollTop = 0;
+        await root.FlowTiles?.stabilizeFlowResultViewport?.({ deadline: Date.now() + 5_000, signal: command.signal });
         const before = collectNativeMedia().map(item => item.id || `title:${item.title}`);
         const variants = Math.max(1, Math.min(4, Number(c.variants || 1)));
         const clear = flowButton("Clear prompt"); if (clear) clear.click();
         await globalThis.FlowImageActions.prepareCharacterPortrait(c, variants);
-        const box = (typeof root.flowQuery === "function" ? root.flowQuery("editor", document) : null) || document.querySelector(".ProseMirror");
+        const box = root.getVisibleFlowPromptEditor?.() || (typeof root.flowQuery === "function" ? root.flowQuery("editor", document) : null);
         if (!box || !(await insertNativeFlowPrompt(box, String(c.describe)))) throw flowError("FLOW_PROMPT_INPUT_UNCONFIRMED", "Flow's portrait prompt was not accepted. Nothing was submitted.", true);
         const start = await waitForGenerationSubmitButton(String(c.describe), 8000);
         if (!start) throw flowError("FLOW_SUBMIT_DISABLED", "Flow's portrait generation button did not become ready within 8 seconds; nothing was submitted.", true);
@@ -581,12 +603,12 @@
           await commitCharacterName(nameInput, renameTo);
         }
         if (payload.change) {
-          const box = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("editor", document) : null) || document.querySelectorAll(".ProseMirror"))].at(-1);
+          const box = root.getVisibleFlowPromptEditor?.();
           if (!box) throw flowError("FLOW_CHARACTER_EDITOR_MISSING", "Character editor prompt is not visible.", true);
           const beforeSrc = portrait?.getAttribute("src");
           const change = String(payload.change).replace(/\s*\n+\s*/g, " ").trim().replace(/[.\s]*$/, ".");
           const prompt = `${change} Exactly one ${characterName} in the picture: never add copies of ${characterName} or extra poses side by side.`;
-          if (!replaceNativeEditableText(box, prompt)) throw flowError("FLOW_PROMPT_INPUT_UNCONFIRMED", "Flow did not accept the character edit prompt. Nothing was submitted.", true);
+          if (!await root.insertNativeFlowPrompt?.(box, prompt)) throw flowError("FLOW_PROMPT_INPUT_UNCONFIRMED", "Flow did not accept the character edit prompt. Nothing was submitted.", true);
           const start = await waitForGenerationSubmitButton(prompt, 8000);
           if (!start) throw flowError("FLOW_SUBMIT_DISABLED", "Flow's character edit button is disabled.", true);
           await activateFlowSubmitButton(start, prompt);

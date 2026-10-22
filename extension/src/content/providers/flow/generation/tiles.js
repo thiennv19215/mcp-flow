@@ -7,6 +7,10 @@
   const FLOW_CORRELATION_HEALTH_READ_EVENT = "TOBY_FLOW_CORRELATION_HEALTH_READ";
   const FLOW_CORRELATION_HEALTH_RESPONSE_EVENT = "TOBY_FLOW_CORRELATION_HEALTH_RESPONSE";
 
+  const nativeFlowTileClaims = globalThis.__flowNativeTileClaims instanceof Map
+    ? globalThis.__flowNativeTileClaims
+    : (globalThis.__flowNativeTileClaims = new Map());
+
   function nativeFlowCorrelationMap() {
     if (!(globalThis.__flowNativeGenerationCorrelations instanceof Map)) {
       globalThis.__flowNativeGenerationCorrelations = new Map();
@@ -286,7 +290,19 @@
   }
 
   function descriptor(item) {
-    return { id: item.id, title: item.title, kind: item.kind };
+    return {
+      ...(item.id ? { id: item.id } : {}),
+      ...(item.persistentMediaId ? { persistentMediaId: item.persistentMediaId } : {}),
+      title: item.title,
+      displayName: item.displayName || item.title,
+      ...(item.fileName ? { fileName: item.fileName, file_name: item.fileName } : {}),
+      kind: item.kind,
+      type: item.type || item.kind,
+      ...(item.thumbnail ? { thumbnail: item.thumbnail, thumbnailUrl: item.thumbnailUrl || item.thumbnail } : {}),
+      ...(item.src ? { src: item.src } : {}),
+      ...(item.videoUrl ? { videoUrl: item.videoUrl, video_url: item.video_url || item.videoUrl } : {}),
+      ...(item.identityDurability ? { identityDurability: item.identityDurability } : {}),
+    };
   }
 
   function hasTileProgressBar(tile) {
@@ -402,7 +418,7 @@
     return !isTileBusy(tile) && hasRenderedMedia(tile);
   }
 
-  function collectNativeMedia() {
+  function collectNativeMedia(options = {}) {
     const tileContainers = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", document, { checkVisible: false }) : null) ||
       [...document.querySelectorAll("flow-grid-tile-container")];
     return tileContainers.map(tile => {
@@ -417,14 +433,42 @@
       const title = (tile.getAttribute("aria-label") || tile.getAttribute("title") || "").trim();
       const failureReason = error ? (error.innerText || error.textContent || (typeof error.getAttribute === "function" ? error.getAttribute("aria-label") : "") || "Flow generation failed").replace(/\s+/g, " ").trim() : undefined;
       const progress = getTileProgressText(tile) || (busy ? (hasTileGenerationText(tile) ? "Đang render..." : "") : "");
-      return { ...(id ? { id } : {}), title, busy, mediaReady, failed, failureReason, kind, progress, element: tile };
+      const media = tile.querySelector("img,video");
+      const video = tile.querySelector("video");
+      const thumbnail = tile.querySelector("img")?.currentSrc || tile.querySelector("img")?.getAttribute("src") || video?.getAttribute("poster") || video?.poster || "";
+      const src = media?.currentSrc || media?.getAttribute?.("src") || "";
+      const fileName = tile.getAttribute("data-file-name") || tile.getAttribute("data-filename") || media?.getAttribute?.("data-file-name") || "";
+      const persistentMediaId = tile.getAttribute("data-persistent-media-id") || tile.getAttribute("data-media-id") || media?.getAttribute?.("data-media-id") || (id && !String(id).startsWith("title:") ? id : undefined);
+      const projectId = (root.ProviderRegistry || root.FlowDriverRegistry)?.describeUrl?.(location.href)?.projectId || null;
+      return {
+        ...(id ? { id } : {}),
+        ...(persistentMediaId ? { persistentMediaId } : {}),
+        ...(projectId ? { projectId, project_id: projectId } : {}),
+        ...(options.operationId ? { operationId: String(options.operationId) } : {}),
+        title,
+        displayName: title,
+        fileName,
+        file_name: fileName,
+        busy,
+        mediaReady,
+        failed,
+        failureReason,
+        kind,
+        type: kind,
+        ...(thumbnail ? { thumbnail, thumbnailUrl: thumbnail } : {}),
+        ...(src ? { src } : {}),
+        ...(video ? { videoUrl: video.currentSrc || video.getAttribute("src") || "", video_url: video.currentSrc || video.getAttribute("src") || "" } : {}),
+        identityDurability: persistentMediaId ? "persistent" : "title_only",
+        progress,
+        element: tile,
+      };
     });
   }
 
   async function findFlowTile(title, retries = 100) {
     const norm = s => String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
     const wanted = norm(title);
-    const scroller = root.scrollContainer?.();
+    const scroller = flowMediaGridScrollContainer();
     if (scroller) scroller.scrollTop = 0;
     await root.wait?.(200);
 
@@ -447,15 +491,89 @@
   }
 
   function flowMediaGridScrollContainer() {
+    const fallback = document.scrollingElement || document.documentElement;
+    const canScroll = element => {
+      if (!element || element === document.body || element === document.documentElement) return false;
+      if (element.scrollHeight - element.clientHeight < 50) return false;
+      try {
+        const overflowY = getComputedStyle(element).overflowY;
+        return overflowY === "auto" || overflowY === "scroll";
+      } catch {
+        return false;
+      }
+    };
     const tiles = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", document, { checkVisible: false }) : null) ||
       [...document.querySelectorAll("flow-grid-tile-container")];
     for (const tile of tiles) {
-      for (let parent = tile?.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
-        if (parent.matches?.("nav,[role='navigation'],aside,mat-sidenav,[class*='sidebar'],[class*='drawer']")) continue;
-        if (parent.clientHeight > 100 && parent.scrollHeight > parent.clientHeight + 8) return parent;
+      for (let parent = tile?.parentElement, hop = 0; parent && hop < 30; parent = parent.parentElement, hop++) {
+        if (canScroll(parent)) return parent;
       }
     }
-    return root.scrollContainer?.() || null;
+    let best = null;
+    for (const element of document.querySelectorAll("div,main,section")) {
+      if (canScroll(element) && (!best || element.scrollHeight > best.scrollHeight)) best = element;
+    }
+    if (best) return best;
+    return fallback && fallback.scrollHeight - fallback.clientHeight >= 50 ? fallback : null;
+  }
+
+  async function stabilizeFlowResultViewport(options = {}) {
+    const deadline = Number.isFinite(options.deadline) ? options.deadline : Infinity;
+    const signal = options.signal;
+    const startedAt = Date.now();
+    const scroller = flowMediaGridScrollContainer();
+    const before = Number(scroller?.scrollTop || 0);
+    if (signal?.aborted) {
+      throw signal.reason instanceof Error ? signal.reason : root.flowError("FLOW_OPERATION_CANCELLED", "Flow result viewport stabilization was cancelled before it began.", false, false);
+    }
+    if (!scroller) return { success: true, moved: false, reason: "no_scroll_container", before: 0, after: 0 };
+
+    let settleReason = "already_at_top";
+    if (before > 1) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        root.FlowUiDeadline?.requireTime?.(deadline, "stabilizing the Flow result viewport", false, signal);
+        throw root.flowError("FLOW_OPERATION_TIMEOUT", "Timed out before the Flow result viewport could be stabilized.", false, false);
+      }
+      const settleMs = Math.max(1, Math.min(1_000, remaining));
+      await new Promise((resolve, reject) => {
+        let settled = false;
+        let observer = null;
+        let timer;
+        const onAbort = () => finish("cancelled", signal.reason instanceof Error ? signal.reason : root.flowError("FLOW_OPERATION_CANCELLED", "Flow result viewport stabilization was cancelled.", false, false));
+        const finish = (reason, error) => {
+          if (settled) return;
+          settled = true;
+          settleReason = reason;
+          observer?.disconnect();
+          clearTimeout(timer);
+          signal?.removeEventListener("abort", onAbort);
+          if (error) reject(error);
+          else resolve();
+        };
+        timer = setTimeout(() => finish("timeout"), settleMs);
+        if (typeof MutationObserver === "function") {
+          observer = new MutationObserver(() => finish("dom_mutation"));
+          observer.observe(scroller, { childList: true, subtree: true });
+        }
+        signal?.addEventListener("abort", onAbort, { once: true });
+        if (signal?.aborted) return onAbort();
+        scroller.scrollTop = 0;
+        if (Number(scroller.scrollTop || 0) > 1) finish("scroll_not_reset");
+      });
+    }
+
+    root.FlowUiDeadline?.requireTime?.(deadline, "stabilizing the Flow result viewport", false, signal);
+    const after = Number(scroller.scrollTop || 0);
+    return {
+      success: after <= 1,
+      moved: before > 1,
+      before,
+      after,
+      settleReason,
+      elapsedMs: Date.now() - startedAt,
+      mountedTiles: collectNativeMedia().length,
+    };
   }
 
   async function findFlowTileByMediaId(mediaId, options = {}) {
@@ -503,7 +621,7 @@
   async function countFlowTitleAcrossGrid(title) {
     const norm = s => String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
     const wanted = norm(title);
-    const scroller = root.scrollContainer?.();
+    const scroller = flowMediaGridScrollContainer();
     const originalTop = scroller?.scrollTop || 0;
     const seen = new Set();
 
@@ -533,12 +651,40 @@
     }
   }
 
-  async function retryNativeErrorTile(item) {
+  const retryElementIds = new WeakMap();
+  let nextRetryElementId = 1;
+  const retryIdentityForTile = tile => {
+    if (!tile) return null;
+    const media = root.mediaId?.(tile);
+    if (media && !String(media).startsWith("title:")) return `media:${String(media).toLowerCase()}`;
+    const runtimeId = tile.getAttribute?.("data-tile-id") || tile.getAttribute?.("data-runtime-id") || tile.id;
+    if (runtimeId) return `tile:${runtimeId}`;
+    if (!retryElementIds.has(tile)) retryElementIds.set(tile, nextRetryElementId++);
+    const title = String(tile.getAttribute?.("aria-label") || tile.getAttribute?.("title") || "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
+    return `element:${title}:${retryElementIds.get(tile)}`;
+  };
+  const retryIdentity = item => {
+    const id = String(item?.id || "");
+    if (id && !id.startsWith("title:")) return `media:${id.toLowerCase()}`;
+    if (item?.element) return retryIdentityForTile(item.element);
+    return `title:${String(item?.title || "").replace(/\s+/g, " ").trim().toLocaleLowerCase()}`;
+  };
+
+  async function retryNativeErrorTile(item, options = {}) {
+    const attempted = options.attempted instanceof Set ? options.attempted : new Set();
+    const retryKey = retryIdentity(item);
+    if (!retryKey || attempted.has(retryKey)) return null;
+    attempted.add(retryKey);
     const tileContainers = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", document, { checkVisible: false }) : null) ||
       [...document.querySelectorAll("flow-grid-tile-container")];
-    let tile = tileContainers.find(candidate =>
-      item.id && !item.id.startsWith("title:") ? root.mediaId?.(candidate) === item.id : candidate.getAttribute("aria-label") === item.title);
-    if (!tile) return false;
+    const matchesTarget = candidate => item.id && !item.id.startsWith("title:")
+      ? String(root.mediaId?.(candidate) || "").toLowerCase() === String(item.id).toLowerCase()
+      : candidate === item.element || retryIdentityForTile(candidate) === retryKey;
+    const targetMatches = tileContainers.filter(matchesTarget);
+    if (targetMatches.length !== 1) return null;
+    let tile = targetMatches[0];
+    const originalIdentity = retryIdentityForTile(tile);
+    const baseline = new Set(tileContainers.map(retryIdentityForTile).filter(Boolean));
     tile.scrollIntoView({ block: "center" });
     const rect = tile.getBoundingClientRect();
     const x = rect.left + rect.width / 2;
@@ -546,45 +692,94 @@
     tile.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, clientX: x, clientY: y, pointerId: 1, pointerType: "mouse" }));
     tile.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, clientX: x, clientY: y }));
     await root.wait?.(250);
+    tile = tile.isConnected ? tile : [...document.querySelectorAll("flow-grid-tile-container")].find(matchesTarget);
+    if (!tile || tile !== targetMatches[0]) return null;
+    const errorOwner = findTileErrorElement(tile);
+    if (!errorOwner) return null;
     const retryBtnConfig = root.FlowSelectors?.tiles?.retryButton;
     const labelRegex = retryBtnConfig?.textRegex || /^(?:retry|try again|thử lại)(?:\s+.*)?$/i;
     const iconRegex = retryBtnConfig?.iconRegex || /refresh|replay|retry/i;
-    const retry = (typeof root.flowFindSemantic === "function" ? root.flowFindSemantic("tiles.retryButton", tile) : null) ||
-      [...tile.querySelectorAll("button,[role=button]")].find(el => {
+    const ownerNodes = errorOwner.matches?.("button,[role=button]") ? [errorOwner, ...errorOwner.querySelectorAll("button,[role=button]")] : [...errorOwner.querySelectorAll("button,[role=button]")];
+    const retryCandidates = [...new Set(ownerNodes)].filter(el => {
         if (!root.visible?.(el) || el.disabled || el.getAttribute("aria-disabled") === "true") return false;
         const label = (root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim().toLowerCase();
         const icon = (root.flowFindIcon ? root.flowFindIcon(el) : el.querySelector("mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined,svg"))?.textContent?.trim() || "";
-        return root.matchesFlowUiRegex?.(label, labelRegex) || labelRegex.test(label) || iconRegex.test(icon);
-      });
-    if (!retry) return false;
+        const labelMatches = root.matchesFlowUiRegex?.(label, labelRegex) === true || labelRegex.test(label);
+        return labelMatches || iconRegex.test(icon);
+    });
+    if (retryCandidates.length !== 1) return null;
+    const retry = retryCandidates[0];
+    if (!tile.contains(retry) || !errorOwner.contains(retry)) return null;
     const retryRect = retry.getBoundingClientRect();
     const rx = retryRect.left + retryRect.width / 2;
     const ry = retryRect.top + retryRect.height / 2;
     const point = { bubbles: true, cancelable: true, composed: true, button: 0, clientX: rx, clientY: ry };
     retry.dispatchEvent(new PointerEvent("pointerover", { ...point, pointerId: 1, pointerType: "mouse" }));
     retry.dispatchEvent(new MouseEvent("mouseover", point));
-    retry.dispatchEvent(new PointerEvent("pointerdown", { ...point, pointerId: 1, pointerType: "mouse" }));
-    retry.dispatchEvent(new MouseEvent("mousedown", point));
-    retry.dispatchEvent(new PointerEvent("pointerup", { ...point, pointerId: 1, pointerType: "mouse" }));
-    retry.dispatchEvent(new MouseEvent("mouseup", point));
-    retry.dispatchEvent(new MouseEvent("click", point));
+    // One activation only. Dispatching a click and then calling .click() can
+    // enqueue two retries against the same Flow tile.
     retry.click();
-    await root.wait?.(2000);
-    if (root.scrollContainer?.()) root.scrollContainer().scrollTop = 0;
-    return true;
+    const timeoutMs = Math.max(250, Math.min(8_000, Number(options.timeoutMs) || 5_000));
+    const deadline = Math.min(Date.now() + timeoutMs, Number.isFinite(options.deadline) ? options.deadline : Infinity);
+    const resolveOriginal = () => {
+      if (tile.isConnected && retryIdentityForTile(tile) === originalIdentity) return tile;
+      const matches = [...document.querySelectorAll("flow-grid-tile-container")].filter(candidate => retryIdentityForTile(candidate) === originalIdentity);
+      return matches.length === 1 ? matches[0] : null;
+    };
+    while (Date.now() < deadline) {
+      const original = resolveOriginal();
+      if (original && !findTileErrorElement(original) && isTileBusy(original)) {
+        if (flowMediaGridScrollContainer?.()) flowMediaGridScrollContainer().scrollTop = 0;
+        return { accepted: true, ownerId: originalIdentity, signal: "original_tile_processing" };
+      }
+      const currentTiles = [...document.querySelectorAll("flow-grid-tile-container")].filter(root.visible);
+      const newOwners = currentTiles.filter(candidate => {
+        if (baseline.has(retryIdentityForTile(candidate))) return false;
+        const kind = candidate.querySelector("flow-scene-tile") ? "scene" : candidate.querySelector("flow-video-tile") ? "video" : "image";
+        return !item.kind || kind === item.kind || (item.kind === "video" && kind === "scene");
+      });
+      if (newOwners.length === 1) {
+        if (flowMediaGridScrollContainer?.()) flowMediaGridScrollContainer().scrollTop = 0;
+        return { accepted: true, ownerId: retryIdentityForTile(newOwners[0]), signal: "unique_new_tile_owner" };
+      }
+      if (root.FlowUiDeadline?.boundedWait && Number.isFinite(options.deadline)) {
+        await root.FlowUiDeadline.boundedWait(120, deadline, "confirming Flow accepted the failed-tile retry", true, options.signal);
+      } else await root.wait?.(120);
+    }
+    throw root.flowError("FLOW_TILE_RETRY_UNCONFIRMED", `Flow received one retry action for "${item.title || "the failed result"}", but no unique retry owner acknowledged it. Inspect Flow before retrying.`, false, true);
   }
 
-  async function waitForProgressResult(command, before, expected, kind, timeoutMs, selector = "flow-grid-tile-container", allowConfirmedPartial = false) {
+  async function waitForProgressResult(command, before, expected, kind, timeoutMs, selector = "flow-grid-tile-container", allowConfirmedPartial = false, waitOptions = {}) {
     const until = Date.now() + timeoutMs;
     const startedAt = Date.now();
+    const beforeIds = new Set((Array.isArray(before) ? before : []).map(value => String(value)));
+    const preFileNames = new Set((Array.isArray(waitOptions.preFileNames) ? waitOptions.preFileNames : []).map(value => String(value).trim().toLowerCase()).filter(Boolean));
+    const expectedMediaType = waitOptions.expectedMediaType || kind;
+    const operationId = waitOptions.operationId ? String(waitOptions.operationId) : null;
+    const claimKey = item => String(item?.persistentMediaId || item?.id || item?.fileName || item?.file_name || `title:${item?.title || ""}`);
+    const claimable = item => {
+      if (!operationId) return true;
+      const key = claimKey(item);
+      const claim = nativeFlowTileClaims.get(key);
+      if (claim && claim.expiresAt <= Date.now()) { nativeFlowTileClaims.delete(key); return true; }
+      return !claim || claim.operationId === operationId;
+    };
+    const isBefore = item => {
+      const identity = String(item?.id || `title:${item?.title || ""}`);
+      if (beforeIds.has(identity)) return true;
+      const fileName = String(item?.fileName || item?.file_name || "").trim().toLowerCase();
+      return Boolean(fileName && preFileNames.has(fileName));
+    };
     let hadProgress = false, last = "", lastTitleOnlyResult = "", retriesLeft = Math.max(1, Number(command?.retries ?? 2));
+    const retriedTiles = new Set();
     let renderObservedInFlight = false;
     while (Date.now() < until) {
-      const allMedia = collectNativeMedia();
-      const fresh = allMedia.filter(item => !before.includes(item.id || `title:${item.title}`) && (!kind || item.kind === kind));
+      const allMedia = collectNativeMedia({ operationId: waitOptions.operationId });
+      const fresh = allMedia.filter(item => !isBefore(item) && claimable(item) && (!expectedMediaType || item.kind === expectedMediaType || (expectedMediaType === "video" && item.kind === "scene")));
       const failed = fresh.filter(item => item.failed);
+      const retryCandidates = failed.filter(item => !retriedTiles.has(retryIdentity(item)));
       if (failed.length) {
-        const failureReason = failed[0]?.failureReason || "";
+        const failureReason = (retryCandidates[0] || failed[0])?.failureReason || "";
         const classified = root.classifyFlowError?.(failureReason);
         if (classified?.category === "rate_limit") {
           throw root.flowError(classified.code, classified.message, true, false);
@@ -592,12 +787,12 @@
         if (classified && !classified.retryable) {
           throw root.flowError(classified.code, classified.message, false, false);
         }
-        if (retriesLeft > 0 && await retryNativeErrorTile(failed[0])) {
+        if (retriesLeft > 0 && retryCandidates.length && await retryNativeErrorTile(retryCandidates[0], { attempted: retriedTiles, deadline: until, timeoutMs: Math.min(5000, until - Date.now()), signal: command?.signal })) {
           retriesLeft--;
           emitFlowProgress(command, `Flow thất bại render; đang thử lại (${retriesLeft} lần thử còn lại)`);
           continue;
         }
-        if (!allowConfirmedPartial || fresh.filter(item => item.mediaReady).length >= expected) {
+        if (!allowConfirmedPartial || fresh.filter(item => item.mediaReady).length >= expected || retryCandidates.length === 0) {
           const ready = fresh.filter(item => item.mediaReady && !item.failed);
           const failure = failed[0];
           const error = root.flowError("FLOW_GENERATION_FAILED", `Flow gặp lỗi khi xử lý "${failure.title}"${failure.failureReason ? `: ${failure.failureReason}` : ""}. Chưa bị trừ tín dụng cho lượt tạo lỗi này.`, false, false);
@@ -621,6 +816,9 @@
         const signature = picked.map(item => item.id || `title:${item.title}`).join("|");
         if (!titleOnly || signature === lastTitleOnlyResult) {
           emitFlowProgress(command, kind === "video" ? "Tạo video hoàn tất 100%" : "Tạo ảnh hoàn tất 100%");
+          if (operationId) {
+            for (const item of picked) nativeFlowTileClaims.set(claimKey(item), { operationId, claimedAt: Date.now(), expiresAt: Date.now() + 15 * 60_000 });
+          }
           return picked.map(descriptor);
         }
         lastTitleOnlyResult = signature;
@@ -644,7 +842,8 @@
       }
 
       if (text !== last) { emitFlowProgress(command, text); last = text; }
-      await root.wait?.(2000);
+      if (root.FlowUiDeadline?.boundedWait) await root.FlowUiDeadline.boundedWait(Math.min(2000, Math.max(1, until - Date.now())), until, "waiting for Flow generation tiles", false, command?.signal);
+      else await root.wait?.(2000);
     }
     throw root.flowError("FLOW_OPERATION_TIMEOUT", "Hết thời gian chờ Flow. Tác vụ có thể đã được tiếp nhận; vui lòng kiểm tra giao diện Flow trước khi thử lại.", false, true);
   }
@@ -655,6 +854,24 @@
     let previous = "";
     while (Date.now() < deadline) {
       const text = document.querySelector("main")?.innerText || document.body?.innerText || "";
+      const alerts = [...(document.querySelector("main") || document.body || document).querySelectorAll?.('[role="alert"],mat-error,[aria-live="assertive"],[data-error-code],[data-error]') || []]
+        .filter(el => root.visible?.(el));
+      const alertFailure = alerts.map(el => {
+        const message = String(el.innerText || el.textContent || el.getAttribute?.("aria-label") || "").replace(/\s+/g, " ").trim();
+        const classified = root.classifyFlowError?.(message);
+        const folded = root.normalizeFlowUiText?.(message) || message.toLowerCase();
+        const explicitFailure = /(?:error|failed|failure|could not|unable to|blocked|loi|that bai|khong the|khong thanh cong|bi chan|tu choi)/i.test(folded);
+        return message && (classified || explicitFailure) ? { message, classified } : null;
+      }).find(Boolean);
+      const failure = alertFailure?.message || text.split("\n").map(line => line.trim()).find(line => {
+        const folded = root.normalizeFlowUiText?.(line) || line.toLowerCase();
+        return /(?:failed to generate|generation failed|could not generate|something went wrong|try again|khong the tao|tao that bai|da xay ra loi|thu lai)/i.test(folded);
+      });
+      if (failure) {
+        const classified = alertFailure?.classified || root.classifyFlowError?.(failure);
+        if (classified) throw root.flowError(classified.code, classified.message, classified.retryable, true);
+        throw root.flowError("FLOW_GENERATION_FAILED", `Flow reported a failed ${description}: ${failure.slice(0, 300)}`, false, true);
+      }
       const progress = text.match(/\d{1,3}%/)?.[0];
       if (progress) {
         seenProgress = true;
@@ -663,9 +880,6 @@
       } else if (seenProgress) {
         return true;
       }
-      const failure = text.split("\n").map(line => line.trim()).find(line =>
-        /(?:failed to generate|generation failed|could not generate|something went wrong|try again)/i.test(line));
-      if (failure) throw root.flowError("FLOW_GENERATION_FAILED", `Flow reported a failed ${description}: ${failure.slice(0, 300)}`, false, true);
       await root.wait?.(2500);
     }
     throw root.flowError("FLOW_OPERATION_TIMEOUT", `Timed out waiting for Flow to finish the ${description}. Inspect Flow before retrying.`, false, true);
@@ -679,6 +893,7 @@
     findFlowTile,
     findFlowTileByMediaId,
     countFlowTitleAcrossGrid,
+    retryIdentity,
     retryNativeErrorTile,
     waitForProgressResult,
     waitForNativeEditorCompletion,
@@ -691,6 +906,8 @@
     readNativeFlowCorrelationHealth,
     flowPromptFingerprint,
     emitFlowProgress,
+    flowMediaGridScrollContainer,
+    stabilizeFlowResultViewport,
   });
 
   root.FlowTiles = FlowTiles;
@@ -710,4 +927,6 @@
   root.inspectNativeFlowCorrelationObserver = inspectNativeFlowCorrelationObserver;
   root.retryNativeErrorTile = retryNativeErrorTile;
   root.emitFlowProgress = emitFlowProgress;
+  root.flowMediaGridScrollContainer = flowMediaGridScrollContainer;
+  root.stabilizeFlowResultViewport = stabilizeFlowResultViewport;
 })(globalThis);

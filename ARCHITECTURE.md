@@ -12,7 +12,7 @@ Flow UI operations and the user-facing queue run in the Chrome extension. The VP
 
 ## Flow module ownership
 
-`extension/src/content/providers/flow/core/flow-driver.js` routes each supported operation to one of six operation groups. Keep operation dispatch separate from the page actions that manipulate Flow's DOM:
+`extension/src/content/providers/flow/core/flow-driver.js` routes each supported operation to focused operation groups. The explicit DOM contract is kept separate from end-to-end workflows so a page primitive can be inspected or reused without duplicating a generation workflow:
 
 | Domain | Operation/API layer | DOM/action layer | Responsibility |
 | --- | --- | --- | --- |
@@ -21,10 +21,24 @@ Flow UI operations and the user-facing queue run in the Chrome extension. The VP
 | Upload | `extension/src/content/providers/flow/media/upload-operations.js` | `native-file-transfer.js`, `extension/src/content/providers/flow/media/uploader.js` | Receive and assemble MCP file chunks, preflight the page, then use Flow's file input/dropzone and verify the uploaded media. |
 | Image generation | `extension/src/content/providers/flow/generation/generation-operations.js` | `extension/src/content/providers/flow/generation/image-settings.js`, `extension/src/content/providers/flow/composer/flow-editor.js`, `extension/src/content/providers/flow/generation/tiles.js` | Prepare image-specific settings (also used for character portraits), submit through the shared generation lifecycle, correlate dispatch, and observe output. |
 | Video generation | `extension/src/content/providers/flow/generation/generation-operations.js` | `extension/src/content/providers/flow/generation/video-settings.js`, `extension/src/content/providers/flow/generation/native-frame-picker.js`, `extension/src/content/providers/flow/composer/flow-editor.js`, `extension/src/content/providers/flow/generation/tiles.js` | Prepare video settings and Ingredients/Frames mode, select start/end frame assets where applicable, submit and observe through shared generation lifecycle. |
-| Library/media | `extension/src/content/providers/flow/library/library-operations.js` | `extension/src/content/providers/flow/media/media-menu.js`, `extension/src/content/providers/flow/generation/tiles.js` | Read projects/assets/characters and perform media download, rename, or trash actions. |
+| Library/media | `extension/src/content/providers/flow/library/library-operations.js` | `extension/src/content/providers/flow/media/media-menu.js`, `extension/src/content/providers/flow/library/page-settings.js`, `extension/src/content/providers/flow/generation/tiles.js` | Read projects/assets/characters, verify the Flow page layout preferences (grid, small tiles, tile details), and perform media download, rename, or trash actions. Page settings are an idempotent best-effort DOM setup; an unrecognized or ambiguous control is left untouched. |
 | Multi-step workflows | `extension/src/content/providers/flow/workflows/workflow-operations.js` | `extension/src/content/providers/flow/characters/flow-characters.js`, `extension/src/content/providers/flow/agent/flow-agent.js`, generation/reference modules | Orchestrate character, edit, Agent, and continue workflows by invoking focused operations/actions. |
+| DOM contract | `extension/src/content/providers/flow/core/dom-operations.js` | `flow-editor.js`, `settings.js`, `page-settings.js`, `tiles.js`, `media-menu.js`, reference/voice actions | Expose Toby-compatible editor, settings, page, tile, gallery, component, and preflight primitives with explicit result verification. |
 
 `extension/src/content/providers/flow/core/settings.js` supplies shared settings-panel primitives. `extension/src/content/providers/flow/compatibility/flow-components.js` is a compatibility facade for legacy callers; new business logic belongs in the domain module that owns the operation. `extension/src/content/providers/flow/core/flow-driver.js` should remain a router rather than accumulating selector logic or end-to-end workflows.
+
+### Main-world observation and media cleanup
+
+The main-world bridge keeps transport hooks separate from payload decoding and media post-processing:
+
+| File | Responsibility |
+| --- | --- |
+| `extension/src/content/bridge/flow-v2-correlation-codec.js` | Normalize prompts, reference IDs, model-independent fingerprints, structured RPC nodes, and Flow error codes. |
+| `extension/src/content/bridge/flow-correlation-observer.js` | Hook `XMLHttpRequest` and `fetch`, match only armed queue requests, decode response ownership, and emit correlation receipts. |
+| `extension/src/content/bridge/WatermarkRemover.js` | Pure ImageData cleanup with NCC location, gain search, subpixel roughness refinement, alpha unblending, dark-background denoise, and verification rollback. |
+| `extension/src/content/bridge/media-interceptor.js` | Claim only an explicitly armed Flow media download, pass image blobs through the remover, and leave ordinary requests and videos untouched. |
+
+The watermark path is mask-driven. A configured `alpha_png_b64` mask can be supplied through the bridge configuration event; without a mask, downloads are returned unchanged. This keeps the download path safe until the account-specific Flow watermark mask is available.
 
 ### Reference-aware generation lifecycle
 
@@ -52,4 +66,4 @@ The extension calls the VPS only for account/device login and verification. Devi
 
 ## Flow constraints and recovery
 
-The page driver validates supported operations and capability constraints before changing Flow. The extension uses Flow's visible UI and observation state for completion. If submission may have reached Flow but no completion can be confirmed, inspect the project before retrying to avoid duplicates.
+The page driver validates supported operations and capability constraints before changing Flow. Before a regular project operation, the shared DOM preflight dismisses an identified Agent instruction dialog/session/panel and turns off active Agent mode, then verifies that those states cleared. `flow.agent.batch` owns its Agent lifecycle and nested generation calls bypass that cleanup. Failed semantic queries keep a bounded, text-free selector trace on the operation error so selector key, invalid selector tier, and candidate counts can be inspected. The extension uses Flow's visible UI and observation state for completion. If submission may have reached Flow but no completion can be confirmed, inspect the project before retrying to avoid duplicates.

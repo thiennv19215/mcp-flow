@@ -17,8 +17,12 @@
 
   class FlowFloatingTracker {
     constructor() {
-      this.jobs = new Map(); // id -> job object
+      // Only queue jobs explicitly submitted through the extension belong in
+      // this widget. Flow itself contains many unrelated tiles and emits
+      // correlation events for those tiles as well.
+      this.jobs = new Map(); // queue job id -> job object
       this.minimized = false;
+      this.positionLocked = false;
       this.isDragging = false;
       this.dragOffset = { x: 0, y: 0 };
       this.timerInterval = null;
@@ -39,6 +43,7 @@
       this.bindEvents();
       this.startTimers();
       this.loadSavedPosition();
+      void this.refreshQueueSnapshot();
     }
 
     injectStyles() {
@@ -337,6 +342,132 @@
           padding: 0 4px;
           border: 2px solid #0f131a;
         }
+        /* Queue panel layout: compact summary + Auto Gen groups. */
+        #flow-mcp-tracker-root {
+          width: 525px;
+          max-height: min(620px, calc(100vh - 40px));
+          border-radius: 18px;
+          background: linear-gradient(180deg, rgba(25, 29, 37, 0.94), rgba(11, 14, 20, 0.97));
+        }
+        #flow-mcp-tracker-root.expanded {
+          width: min(680px, calc(100vw - 32px));
+          max-height: min(760px, calc(100vh - 32px));
+        }
+        .flow-ft-header {
+          gap: 8px;
+          padding: 10px 12px;
+          background: rgba(255, 255, 255, 0.045);
+        }
+        .flow-ft-icon {
+          width: 25px;
+          height: 25px;
+          border-radius: 50%;
+          background: #ccff00;
+          color: #172000;
+        }
+        .flow-ft-title {
+          font-size: 15px;
+          letter-spacing: 0;
+        }
+        .flow-ft-auto {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          padding: 4px 8px;
+          border-radius: 12px;
+          background: rgba(66, 153, 225, 0.22);
+          color: #78b9ff;
+          font-size: 11px;
+          font-weight: 700;
+        }
+        .flow-ft-auto::before { content: "↗"; font-size: 12px; }
+        .flow-ft-summary {
+          display: flex;
+          align-items: center;
+          gap: 11px;
+          padding: 8px 16px 7px;
+          color: #9ca3af;
+          font-size: 11px;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+          white-space: nowrap;
+          overflow-x: auto;
+        }
+        .flow-ft-summary-total { color: #f3f4f6; font-family: ui-monospace, monospace; margin-right: 2px; }
+        .flow-ft-summary-item { display: inline-flex; align-items: center; gap: 4px; }
+        .flow-ft-summary-item strong { font-size: 12px; color: #e5e7eb; }
+        .flow-ft-summary-item.sent strong { color: #93c5fd; }
+        .flow-ft-summary-item.rendering strong { color: #ccff00; }
+        .flow-ft-summary-item.queued strong { color: #facc15; }
+        .flow-ft-summary-item.completed strong { color: #34d399; }
+        .flow-ft-summary-item.failed strong { color: #fb7185; }
+        .flow-ft-group {
+          border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+          padding: 8px 0 6px;
+        }
+        .flow-ft-group:last-child { border-bottom: 0; }
+        .flow-ft-group-header {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          min-height: 25px;
+          padding: 0 4px 6px;
+        }
+        .flow-ft-group-dot { width: 8px; height: 8px; border-radius: 50%; background: #60a5fa; flex: 0 0 auto; }
+        .flow-ft-group-name { color: #f3f4f6; font-weight: 700; }
+        .flow-ft-group-time { color: #9ca3af; font-family: ui-monospace, monospace; font-size: 11px; }
+        .flow-ft-group-actions { margin-left: auto; display: flex; align-items: center; gap: 5px; }
+        .flow-ft-mini-btn {
+          width: 27px;
+          height: 25px;
+          border: 0;
+          border-radius: 6px;
+          background: rgba(255,255,255,0.08);
+          color: #aeb6c3;
+          cursor: pointer;
+          font-size: 12px;
+        }
+        .flow-ft-mini-btn:hover { background: rgba(255,255,255,0.18); color: #fff; }
+        .flow-ft-mini-btn.danger { color: #fb7185; }
+        .flow-ft-group-progress {
+          position: relative;
+          height: 3px;
+          margin: 0 4px 6px;
+          border-radius: 4px;
+          overflow: hidden;
+          background: rgba(255,255,255,0.08);
+        }
+        .flow-ft-group-progress > span { display: block; height: 100%; border-radius: 4px; background: #ccff00; transition: width .25s ease; }
+        .flow-ft-task {
+          display: flex;
+          align-items: center;
+          gap: 9px;
+          min-height: 47px;
+          padding: 5px 4px;
+          border-radius: 8px;
+        }
+        .flow-ft-task:hover { background: rgba(255,255,255,0.05); }
+        .flow-ft-task-index {
+          width: 24px;
+          height: 38px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #9ca3af;
+          font-family: ui-monospace, monospace;
+          font-size: 11px;
+          flex: 0 0 auto;
+        }
+        .flow-ft-task-info { min-width: 0; flex: 1; }
+        .flow-ft-task-line { display: flex; align-items: center; gap: 7px; min-width: 0; }
+        .flow-ft-task-type { color: #c4d4e8; font-size: 11px; font-weight: 700; white-space: nowrap; }
+        .flow-ft-task-prompt { color: #f3f4f6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+        .flow-ft-task-meta { display: flex; align-items: center; gap: 8px; min-height: 16px; color: #8b95a5; font-size: 10px; }
+        .flow-ft-task-remove { opacity: .7; }
+        .flow-ft-task-remove:hover { opacity: 1; color: #fb7185; }
+        .flow-ft-status-tag.queued { color: #facc15; }
+        .flow-ft-task .flow-ft-thumb { width: 28px; height: 28px; border-radius: 6px; }
+        .flow-ft-task .flow-ft-spinner { width: 15px; height: 15px; }
+        .flow-ft-task .flow-ft-action-btn { padding: 3px 7px; }
       `;
       (document.head || document.documentElement).appendChild(style);
     }
@@ -353,9 +484,20 @@
               <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
             </svg>
           </div>
-          <div class="flow-ft-title">Flow Pipeline</div>
-          <div class="flow-ft-badge" id="flow-ft-badge">Idle</div>
+          <div class="flow-ft-title">TobyFlow</div>
+          <div class="flow-ft-auto">Auto</div>
           <div class="flow-ft-controls">
+            <button class="flow-ft-btn" data-ft-action="expand" title="Mở rộng/thu gọn">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+            </button>
+            <button class="flow-ft-btn" data-ft-action="lock" title="Khóa vị trí">🔒</button>
+            <button class="flow-ft-btn" data-ft-action="clear" title="Xóa các task đã xong">🗑</button>
+            <button class="flow-ft-btn" data-ft-action="pause" title="Tạm dừng hàng chờ">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="4" width="5" height="16" rx="1"/><rect x="14" y="4" width="5" height="16" rx="1"/></svg>
+            </button>
+            <button class="flow-ft-btn flow-ft-stop-btn" data-ft-action="stop" title="Dừng hàng chờ">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>
+            </button>
             <button class="flow-ft-btn" id="flow-ft-minimize-btn" title="Thu nhỏ">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>
             </button>
@@ -363,6 +505,14 @@
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
           </div>
+        </div>
+        <div class="flow-ft-summary" id="flow-ft-summary">
+          <span class="flow-ft-summary-total" id="flow-ft-total">0/0</span>
+          <span class="flow-ft-summary-item sent">➤ <strong id="flow-ft-sent">0</strong> đã gửi</span>
+          <span class="flow-ft-summary-item rendering">⚡ <strong id="flow-ft-rendering">0</strong> đang tạo</span>
+          <span class="flow-ft-summary-item queued">Ⅱ <strong id="flow-ft-queued">0</strong> chờ</span>
+          <span class="flow-ft-summary-item completed">✓ <strong id="flow-ft-completed">0</strong> xong</span>
+          <span class="flow-ft-summary-item failed">× <strong id="flow-ft-failed">0</strong> lỗi</span>
         </div>
         <div class="flow-ft-progress-bar">
           <div class="flow-ft-progress-fill" id="flow-ft-progress-fill"></div>
@@ -375,7 +525,13 @@
       document.body.appendChild(rootEl);
       this.rootEl = rootEl;
       this.contentEl = rootEl.querySelector("#flow-ft-content");
-      this.badgeEl = rootEl.querySelector("#flow-ft-badge");
+      this.summaryEl = rootEl.querySelector("#flow-ft-summary");
+      this.totalEl = rootEl.querySelector("#flow-ft-total");
+      this.sentEl = rootEl.querySelector("#flow-ft-sent");
+      this.renderingEl = rootEl.querySelector("#flow-ft-rendering");
+      this.queuedEl = rootEl.querySelector("#flow-ft-queued");
+      this.completedEl = rootEl.querySelector("#flow-ft-completed");
+      this.failedEl = rootEl.querySelector("#flow-ft-failed");
       this.progressFillEl = rootEl.querySelector("#flow-ft-progress-fill");
     }
 
@@ -405,6 +561,24 @@
       const closeBtn = this.rootEl?.querySelector("#flow-ft-close-btn");
       closeBtn?.addEventListener("click", () => this.setMinimized(true));
 
+      this.rootEl?.querySelector('[data-ft-action="expand"]')?.addEventListener("click", () => {
+        this.rootEl?.classList.toggle("expanded");
+      });
+      this.rootEl?.querySelector('[data-ft-action="lock"]')?.addEventListener("click", event => {
+        this.positionLocked = !this.positionLocked;
+        event.currentTarget.classList.toggle("active", this.positionLocked);
+        event.currentTarget.title = this.positionLocked ? "Mở khóa vị trí" : "Khóa vị trí";
+      });
+      this.rootEl?.querySelector('[data-ft-action="pause"]')?.addEventListener("click", () => {
+        void this.sendQueueAction("flow-queue:pause");
+      });
+      this.rootEl?.querySelector('[data-ft-action="stop"]')?.addEventListener("click", () => {
+        void this.sendQueueAction("flow-queue:stop");
+      });
+      this.rootEl?.querySelector('[data-ft-action="clear"]')?.addEventListener("click", () => {
+        this.clearFinishedTasks();
+      });
+
       // Launcher click to restore
       this.launcherEl?.addEventListener("click", () => this.setMinimized(false));
 
@@ -421,6 +595,108 @@
 
       // Lắng nghe sự kiện custom từ MCP / Extension
       window.addEventListener("FLOW_MCP_TRACKER_UPDATE", (e) => this.handleCustomTrackerUpdate(e.detail));
+
+      // Queue broadcasts are the source of truth for tasks submitted by the
+      // user. This also keeps multiple submissions visible independently.
+      if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
+        chrome.runtime.onMessage.addListener((message) => {
+          if (message?.type === "flow-queue:changed") this.syncQueueSnapshot(message.snapshot);
+        });
+      }
+    }
+
+    async sendQueueAction(type, id) {
+      if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) return;
+      try {
+        await chrome.runtime.sendMessage({ type, ...(id ? { id } : {}) });
+      } catch (_) {}
+    }
+
+    clearFinishedTasks() {
+      for (const job of this.jobs.values()) {
+        if (["completed", "failed"].includes(job.status)) void this.sendQueueAction("flow-queue:remove", job.id);
+      }
+    }
+
+    async refreshQueueSnapshot() {
+      if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) return;
+      try {
+        const response = await chrome.runtime.sendMessage({ type: "flow-queue:get" });
+        if (response?.ok) this.syncQueueSnapshot(response);
+      } catch (_) {
+        // The tracker is optional; Flow can still be used when the worker is
+        // restarting or the extension context is being torn down.
+      }
+    }
+
+    resolveQueueType(job) {
+      const payload = job?.payload || job?.data?.payload || {};
+      const params = payload?.params || {};
+      const raw = String(payload?.type || params?.type || "").toLowerCase();
+      const operation = String(job?.operation || "").toLowerCase();
+      if (raw.includes("video") || operation.includes("video") || operation.includes("edit") || operation.includes("continue")) return "video";
+      if (raw.includes("character")) return "character";
+      return "image";
+    }
+
+    resolveQueuePrompt(job) {
+      const payload = job?.payload || job?.data?.payload || {};
+      const params = payload?.params || {};
+      const prompt = payload?.prompt || params?.prompt || params?.description || "";
+      const label = String(job?.label || job?.name || "").replace(/^\[(?:IMAGE|VIDEO)\]\s*/i, "").trim();
+      return String(prompt || label || "").trim();
+    }
+
+    queueStatus(status) {
+      if (status === "running") return "rendering";
+      if (status === "completed") return "completed";
+      if (status === "failed" || status === "cancelled") return "failed";
+      return "queued";
+    }
+
+    syncQueueSnapshot(snapshot) {
+      const queueJobs = Array.isArray(snapshot?.jobs)
+        ? snapshot.jobs
+        : Array.isArray(snapshot?.items) ? snapshot.items : [];
+      const visibleIds = new Set();
+      for (const queueJob of queueJobs) {
+        // Sidebar/queue-panel jobs and explicit MCP queue jobs carry one of
+        // these markers. Ignore persisted or Flow-created items without a
+        // submission source.
+        if (!(["extension", "mcp"].includes(String(queueJob?.metadata?.source || ""))) || !queueJob.id) continue;
+        const id = String(queueJob.id);
+        visibleIds.add(id);
+        const type = this.resolveQueueType(queueJob);
+        const typeLabel = type === "video" ? "Tạo video" : type === "character" ? "Tạo nhân vật" : "Tạo ảnh";
+        const detail = this.resolveQueuePrompt(queueJob);
+        const previous = this.jobs.get(id) || {};
+        const completed = queueJob.status === "completed";
+        Object.assign(previous, {
+          id,
+          queueJobId: id,
+          source: "queue",
+          metadata: queueJob.metadata,
+          batchId: queueJob.batchId || queueJob.metadata?.batchId,
+          createdAt: Number(queueJob.addedAt) || previous.createdAt || Date.now(),
+          completedAt: Number(queueJob.finishedAt) || previous.completedAt,
+          title: typeLabel,
+          prompt: detail ? `${typeLabel}: ${detail}` : typeLabel,
+          detailPrompt: detail,
+          type,
+          status: this.queueStatus(queueJob.status),
+          progress: queueJob.progress,
+          error: queueJob.error,
+          result: queueJob.result,
+          mediaUrl: previous.mediaUrl,
+          thumbnail: previous.thumbnail,
+          completed,
+        });
+        this.jobs.set(id, previous);
+      }
+
+      // A removed/cleared queue item should disappear from the tracker too.
+      for (const id of this.jobs.keys()) if (!visibleIds.has(id)) this.jobs.delete(id);
+      this.render();
     }
 
     setMinimized(val) {
@@ -457,7 +733,7 @@
     }
 
     onDragStart(e) {
-      if (e.target.closest("button")) return;
+      if (this.positionLocked || e.target.closest("button")) return;
       this.isDragging = true;
       const rect = this.rootEl.getBoundingClientRect();
       this.dragOffset.x = e.clientX - rect.left;
@@ -492,23 +768,21 @@
         this.updateTimers();
       }, 1000);
 
-      // Định kỳ quét DOM các tiles để đồng bộ trạng thái thực tế
-      this.domScanInterval = setInterval(() => {
-        this.scanDomTiles();
-      }, 2500);
+      // Completion comes from the main-world correlation observer and queue
+      // broadcasts. Do not poll every Flow tile here; old tiles are unrelated
+      // to the user's queue and DOM polling causes unnecessary page work.
+      this.domScanInterval = null;
     }
 
     handleCorrelationReceipt(detail) {
       if (!detail) return;
-      const id = detail.operationId || detail.attemptId || detail.mediaUuid;
-      if (!id) return;
-
-      const existing = this.jobs.get(id) || {
-        id,
-        createdAt: Date.now(),
-        prompt: detail.prompt || "Video Generation",
-        type: detail.mediaType || "video"
-      };
+      const candidates = [detail.jobId, detail.job_id, detail.operationId, detail.attemptId, detail.mediaUuid]
+        .filter(Boolean).map(String);
+      const existing = candidates.map(id => this.jobs.get(id)).find(Boolean)
+        || Array.from(this.jobs.values()).find(job => candidates.includes(String(job.operationId || job.attemptId || job.mediaUuid || "")));
+      // Never create a card from a passive Flow event. It may belong to a tile
+      // created outside this extension's queue.
+      if (!existing) return;
 
       if (detail.status === "COMPLETED" || detail.status === "SUCCESS") {
         existing.status = "completed";
@@ -522,7 +796,6 @@
         existing.status = "rendering";
       }
 
-      this.jobs.set(id, existing);
       this.render();
     }
 
@@ -531,7 +804,7 @@
       for (const entry of detail.entries) {
         const id = entry.mediaUuid || entry.mediaId;
         if (!id) continue;
-        const job = this.jobs.get(id);
+        const job = this.jobs.get(id) || Array.from(this.jobs.values()).find(item => String(item.mediaUuid || item.mediaId || "") === String(id));
         if (job) {
           job.mediaUuid = entry.mediaUuid;
           if (entry.videoUrl) job.mediaUrl = entry.videoUrl;
@@ -543,15 +816,14 @@
 
     handleCustomTrackerUpdate(payload) {
       if (!payload || !payload.id) return;
-      const id = payload.id;
-      const job = this.jobs.get(id) || {
-        id,
-        createdAt: Date.now(),
-        prompt: payload.prompt || "Flow Generation",
-        type: payload.type || "video"
-      };
-      Object.assign(job, payload);
-      this.jobs.set(id, job);
+      const id = String(payload.id);
+      const job = this.jobs.get(id);
+      // Custom events must identify a queue submission before they can add a
+      // card. This prevents background observer noise from creating extras.
+      if (!job && payload.source !== "queue" && payload.userSubmitted !== true) return;
+      const target = job || { id, queueJobId: id, createdAt: Date.now(), source: "queue" };
+      Object.assign(target, payload);
+      this.jobs.set(id, target);
       this.render();
     }
 
@@ -572,19 +844,8 @@
         const hasVideo = Boolean(tile.querySelector("video, flow-video-tile"));
         const hasError = Boolean(tile.querySelector("flow-error-tile, [role='alert']"));
 
-        if (!this.jobs.has(tileId)) {
-          // Phát hiện tile mới xuất hiện trên trang
-          const promptText = tile.querySelector?.("[data-prompt], .prompt-text")?.textContent?.trim() || "Google Flow Media";
-          this.jobs.set(tileId, {
-            id: tileId,
-            createdAt: Date.now(),
-            prompt: promptText,
-            status: isBusy ? "rendering" : (hasError ? "failed" : (hasVideo ? "completed" : "rendering")),
-            type: "video"
-          });
-          changed = true;
-        } else {
-          const job = this.jobs.get(tileId);
+        const job = this.jobs.get(tileId) || Array.from(this.jobs.values()).find(item => String(item.mediaUuid || item.mediaId || "") === String(tileId));
+        if (job) {
           const oldStatus = job.status;
           if (isBusy) {
             job.status = "rendering";
@@ -622,29 +883,24 @@
 
       const jobList = Array.from(this.jobs.values()).sort((a, b) => b.createdAt - a.createdAt);
       const activeCount = jobList.filter(j => j.status === "rendering").length;
+      const queuedCount = jobList.filter(j => j.status === "queued").length;
       const completedCount = jobList.filter(j => j.status === "completed").length;
+      const failedCount = jobList.filter(j => j.status === "failed").length;
+      const firstCreatedAt = jobList.length ? Math.min(...jobList.map(job => Number(job.createdAt) || Date.now())) : Date.now();
 
-      // Update badge
-      if (this.badgeEl) {
-        if (activeCount > 0) {
-          this.badgeEl.textContent = `${activeCount} Đang tạo...`;
-          this.badgeEl.className = "flow-ft-badge active";
-        } else if (jobList.length > 0) {
-          this.badgeEl.textContent = `${completedCount}/${jobList.length} Xong`;
-          this.badgeEl.className = "flow-ft-badge";
-        } else {
-          this.badgeEl.textContent = "Idle";
-          this.badgeEl.className = "flow-ft-badge";
-        }
-      }
+      // Summary mirrors the queue state shown by the reference TobyFlow UI.
+      if (this.totalEl) this.totalEl.textContent = `${completedCount}/${jobList.length}  ${this.formatDuration(Date.now() - firstCreatedAt)}`;
+      if (this.sentEl) this.sentEl.textContent = String(jobList.length);
+      if (this.renderingEl) this.renderingEl.textContent = String(activeCount);
+      if (this.queuedEl) this.queuedEl.textContent = String(queuedCount);
+      if (this.completedEl) this.completedEl.textContent = String(completedCount);
+      if (this.failedEl) this.failedEl.textContent = String(failedCount);
 
       // Update progress bar
       if (this.progressFillEl) {
-        if (activeCount > 0) {
-          this.progressFillEl.classList.add("active");
-        } else {
-          this.progressFillEl.classList.remove("active");
-        }
+        const ratio = jobList.length ? completedCount / jobList.length : 0;
+        this.progressFillEl.classList.toggle("active", activeCount > 0);
+        this.progressFillEl.style.transform = `scaleX(${Math.max(0, Math.min(1, ratio))})`;
       }
 
       // Update Launcher badge
@@ -660,59 +916,112 @@
       }
 
       if (jobList.length === 0) {
-        this.contentEl.innerHTML = `<div class="flow-ft-empty">Chưa có video hoặc ảnh nào đang xử lý.</div>`;
+        this.contentEl.innerHTML = `<div class="flow-ft-empty">Chưa có task nào trong hàng chờ.</div>`;
         return;
       }
 
-      this.contentEl.innerHTML = jobList.map(job => {
-        const isRendering = job.status === "rendering";
-        const isCompleted = job.status === "completed";
-        const isFailed = job.status === "failed";
+      const groups = new Map();
+      for (const job of jobList) {
+        const groupId = String(job.batchId || job.metadata?.batchId || `job-${job.id}`);
+        if (!groups.has(groupId)) groups.set(groupId, []);
+        groups.get(groupId).push(job);
+      }
 
-        let statusHtml = "";
-        if (isRendering) {
-          statusHtml = `<span class="flow-ft-status-tag rendering">⚙️ Đang tạo</span>`;
-        } else if (isCompleted) {
-          statusHtml = `<span class="flow-ft-status-tag completed">✅ Hoàn thành</span>`;
-        } else if (isFailed) {
-          statusHtml = `<span class="flow-ft-status-tag failed">❌ Thất bại</span>`;
-        }
-
-        const now = Date.now();
-        const elapsedSec = Math.floor(((job.completedAt || now) - job.createdAt) / 1000);
-        const mins = Math.floor(elapsedSec / 60).toString().padStart(2, "0");
-        const secs = (elapsedSec % 60).toString().padStart(2, "0");
-
-        let thumbContent = `<div class="flow-ft-spinner"></div>`;
-        if (job.mediaUrl) {
-          thumbContent = `<video src="${job.mediaUrl}" muted loop onmouseover="this.play()" onmouseout="this.pause()"></video>`;
-        } else if (job.thumbnail) {
-          thumbContent = `<img src="${job.thumbnail}" alt="Thumbnail">`;
-        } else if (isCompleted) {
-          thumbContent = `<span>🎬</span>`;
-        } else if (isFailed) {
-          thumbContent = `<span>⚠️</span>`;
-        }
-
-        let actionHtml = "";
-        if (isCompleted && job.mediaUrl) {
-          actionHtml = `<a class="flow-ft-action-btn" href="${job.mediaUrl}" target="_blank" download>Tải về</a>`;
-        }
-
+      this.contentEl.innerHTML = Array.from(groups.values()).map(groupJobs => {
+        const groupStart = Math.min(...groupJobs.map(job => Number(job.createdAt) || Date.now()));
+        const groupElapsed = this.formatDuration(Date.now() - groupStart);
+        const groupDone = groupJobs.filter(job => job.status === "completed").length;
+        const groupPercent = groupJobs.length ? Math.round(groupDone * 100 / groupJobs.length) : 0;
+        const groupId = String(groupJobs[0].batchId || groupJobs[0].metadata?.batchId || `job-${groupJobs[0].id}`);
+        const tasks = groupJobs.map((job, index) => this.renderTask(job, index + 1)).join("");
         return `
-          <div class="flow-ft-card" data-job-id="${job.id}">
-            <div class="flow-ft-thumb">${thumbContent}</div>
-            <div class="flow-ft-info">
-              <div class="flow-ft-prompt" title="${escapeHtml(job.prompt)}">${escapeHtml(job.prompt)}</div>
-              <div class="flow-ft-meta">
-                ${statusHtml}
-                <span class="flow-ft-timer" data-timer-id="${job.id}">${mins}:${secs}</span>
+          <section class="flow-ft-group" data-group-id="${escapeHtml(groupId)}">
+            <div class="flow-ft-group-header">
+              <span class="flow-ft-group-dot"></span>
+              <span class="flow-ft-group-name">Auto Gen</span>
+              <span class="flow-ft-group-time">${groupElapsed}</span>
+              <div class="flow-ft-group-actions">
+                <button class="flow-ft-mini-btn" data-ft-action="pause-group" title="Tạm dừng">Ⅱ</button>
+                <button class="flow-ft-mini-btn" data-ft-action="stop-group" title="Dừng">■</button>
+                <button class="flow-ft-mini-btn" data-ft-action="download-group" title="Tải kết quả">↓</button>
+                <button class="flow-ft-mini-btn danger" data-ft-action="remove-group" data-group-job-id="${escapeHtml(groupJobs[0].id)}" title="Xóa nhóm">🗑</button>
               </div>
             </div>
-            ${actionHtml}
-          </div>
+            <div class="flow-ft-group-progress"><span style="width:${groupPercent}%"></span></div>
+            ${tasks}
+          </section>
         `;
       }).join("");
+
+      this.contentEl.querySelectorAll("[data-ft-action='remove-group']").forEach(button => {
+        button.addEventListener("click", () => {
+          const group = button.closest(".flow-ft-group");
+          const ids = [...(group?.querySelectorAll("[data-task-id]") || [])].map(item => item.dataset.taskId).filter(Boolean);
+          if (!ids.length && button.dataset.groupJobId) ids.push(button.dataset.groupJobId);
+          for (const id of ids) void this.sendQueueAction("flow-queue:remove", id);
+        });
+      });
+      this.contentEl.querySelectorAll("[data-ft-action='pause-group']").forEach(button => {
+        button.addEventListener("click", () => void this.sendQueueAction("flow-queue:pause"));
+      });
+      this.contentEl.querySelectorAll("[data-ft-action='stop-group']").forEach(button => {
+        button.addEventListener("click", () => void this.sendQueueAction("flow-queue:stop"));
+      });
+      this.contentEl.querySelectorAll("[data-ft-action='download-group']").forEach(button => {
+        button.addEventListener("click", () => {
+          const group = button.closest(".flow-ft-group");
+          const media = group?.querySelector("a.flow-ft-action-btn");
+          media?.click();
+        });
+      });
+      this.contentEl.querySelectorAll("[data-ft-action='remove-task']").forEach(button => {
+        button.addEventListener("click", () => void this.sendQueueAction("flow-queue:remove", button.dataset.taskId));
+      });
+    }
+
+    formatDuration(durationMs) {
+      const seconds = Math.max(0, Math.floor(Number(durationMs || 0) / 1000));
+      const mins = Math.floor(seconds / 60).toString().padStart(2, "0");
+      const secs = (seconds % 60).toString().padStart(2, "0");
+      return `${mins}:${secs}`;
+    }
+
+    renderTask(job, index) {
+      const isQueued = job.status === "queued";
+      const isRendering = job.status === "rendering";
+      const isCompleted = job.status === "completed";
+      const isFailed = job.status === "failed";
+      const typeLabel = job.title || (job.type === "video" ? "Tạo video" : job.type === "character" ? "Tạo nhân vật" : "Tạo ảnh");
+      const statusLabel = isQueued ? "Chờ" : isRendering ? "Đang tạo" : isCompleted ? "Xong" : isFailed ? "Lỗi" : "Đang xử lý";
+      const statusClass = isQueued ? "queued" : isRendering ? "rendering" : isCompleted ? "completed" : isFailed ? "failed" : "";
+      const elapsed = this.formatDuration((job.completedAt || Date.now()) - job.createdAt);
+      const percent = Number.isFinite(Number(job.progress?.percent)) ? `${Math.max(0, Math.min(100, Number(job.progress.percent)))}%` : elapsed;
+      const prompt = job.detailPrompt || String(job.prompt || "").replace(/^(Tạo ảnh|Tạo video|Tạo nhân vật):\s*/i, "");
+      let thumbContent = isRendering || isQueued ? `<div class="flow-ft-spinner"></div>` : (isFailed ? "⚠️" : "✓");
+      if (job.thumbnail) thumbContent = `<img src="${escapeHtml(job.thumbnail)}" alt="Thumbnail">`;
+      let actionHtml = "";
+      const download = Array.isArray(job.result?.result?.browserDownloads) ? job.result.result.browserDownloads[0] : Array.isArray(job.result?.browserDownloads) ? job.result.browserDownloads[0] : null;
+      if (isCompleted && job.mediaUrl) actionHtml = `<a class="flow-ft-action-btn" href="${escapeHtml(job.mediaUrl)}" target="_blank" download>↓</a>`;
+      else if (download?.filename) actionHtml = `<span class="flow-ft-action-btn" title="${escapeHtml(download.filename)}">↓</span>`;
+      return `
+        <div class="flow-ft-task" data-job-id="${escapeHtml(job.id)}">
+          <div class="flow-ft-task-index">#${index}</div>
+          <div class="flow-ft-thumb">${thumbContent}</div>
+          <div class="flow-ft-task-info">
+            <div class="flow-ft-task-line">
+              <span class="flow-ft-task-type">${escapeHtml(typeLabel)}</span>
+              <span class="flow-ft-task-prompt" title="${escapeHtml(prompt)}">${escapeHtml(prompt || "Không có prompt")}</span>
+            </div>
+            <div class="flow-ft-task-meta">
+              <span class="flow-ft-status-tag ${statusClass}">${statusLabel}</span>
+              <span class="flow-ft-timer" data-timer-id="${escapeHtml(job.id)}">${percent}</span>
+              ${job.error ? `<span title="${escapeHtml(job.error)}">${escapeHtml(String(job.error).slice(0, 50))}</span>` : ""}
+            </div>
+          </div>
+          ${actionHtml}
+          <button class="flow-ft-mini-btn flow-ft-task-remove danger" data-ft-action="remove-task" data-task-id="${escapeHtml(job.id)}" title="Xóa task">🗑</button>
+        </div>
+      `;
     }
   }
 

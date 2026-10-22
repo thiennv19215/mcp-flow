@@ -14,9 +14,33 @@
     "selectors": ["main button", "main a[href]", "[role='main'] button", "[role='main'] a[href]"],
     "textRegex": "^(?:sign in|log in|continue to sign in|sign in with google|đăng nhập|tiếp tục đăng nhập)(?:\\s+.*)?$"
   },
+  "agent_instruction_dialog": {
+    "selectors": ["[role='dialog']", "mat-dialog-container", "flow-dialog", "[aria-modal='true']"],
+    "textRegex": "(?:agent|assistant|trợ lý).{0,160}(?:instruction|instructions|welcome|hướng dẫn|chỉ dẫn)|(?:instruction|instructions|hướng dẫn).{0,160}(?:agent|assistant|trợ lý)"
+  },
+  "agent_instruction_done": {
+    "selectors": ["button", "[role='button']"],
+    "textRegex": "^(?:Done|Xong|Hoàn tất)$"
+  },
+  "agent_panel_owner": {
+    "selectors": ["flow-chat-agent-panel", "flow-agent-panel", "[data-testid*='agent-panel' i]", "[data-test-id*='agent-panel' i]", "[aria-label*='agent panel' i]", "[aria-label*='assistant panel' i]"]
+  },
+  "agent_panel_close": {
+    "selectors": ["button", "[role='button']"],
+    "textRegex": "^(?:close|dismiss|đóng|thoát)$",
+    "icon": "close"
+  },
+  "video_upload_confirm": {
+    "selectors": ["button", "[role='button']"],
+    "text_match": ["Upload", "Continue", "Confirm", "Agree and continue", "Tải lên", "Tiếp tục", "Xác nhận", "Đồng ý", "Chấp nhận", "Tải video lên"],
+    "dialogTextRegex": "(?:video|upload|tải lên|tải video|tải tệp)"
+  },
   "project_error_indicator": {
     "selectors": ["[role='alert']", "mat-error", "flow-error", "[class*='project-error']", "[data-error]", "main h1", "main h2", "[role='main'] h1", "[role='main'] h2"],
-    "textRegex": "(?:project (?:not found|unavailable|could not be loaded)|(?:we )?couldn['’]?t find (?:this )?project|unable to load (?:this )?project|failed to load project|dự án (?:không tồn tại|không khả dụng)|không thể tải (?:dự án|project)|không tìm thấy dự án)"
+    "textRegex": "(?:project (?:not found|unavailable|could not be loaded)|(?:we )?couldn['’]?t find (?:this )?project|unable to load (?:this )?project|failed to load project|dự án (?:không tồn tại|không khả dụng)|không thể tải (?:dự án|project)|không tìm thấy dự án|dự án bị xóa|không có quyền truy cập dự án)"
+  },
+  "media_viewer_owner": {
+    "selectors": ["flow-media-viewer", "flow-video-viewer", "flow-image-viewer", "[data-testid*='media-viewer']", "[class*='media-viewer']"]
   },
   "composerRoot": {
     "selectors": [
@@ -178,6 +202,21 @@
       ]
     }
   },
+  "pageSettings": {
+    "triggerButton": {
+      "selectors": ["button", "[role='button']"],
+      "icons": ["settings_2"]
+    },
+    "panel": {
+      "selectors": ["[role='dialog']", "[role='menu']", "[aria-modal='true']", "mat-dialog-container", "flow-dialog", ".cdk-overlay-pane", "mat-menu-panel"]
+    },
+    "candidates": {
+      "selectors": ["[role='tab']", "[role='radio']", "[role='switch']", "[role='checkbox']", "button", "[role='button']", "mat-slide-toggle"]
+    },
+    "detailsRow": {
+      "selectors": ["label", "[role='group']", "[role='switch']", "[role='checkbox']", "mat-slide-toggle", "button", "[role='button']"]
+    }
+  },
   "components": {
     "inlineChips": {
       "selectors": [
@@ -220,7 +259,29 @@
         "button[aria-label*=\"delete\" i]",
         "button[aria-label*=\"xóa\" i]",
         "[role=\"button\"][aria-label*=\"remove\" i]"
+      ],
+      "icon": "close"
+    },
+    "videoChip": {
+      "selectors": [
+        "[data-ingredient-type=\"video\"]",
+        "[data-kind=\"video\"]",
+        "[class*=\"ingredient-video\" i]",
+        "[class*=\"video-chip\" i]"
       ]
+    },
+    "referenceRemoveButton": {
+      "selectors": [
+        "button[aria-label*=\"remove\" i]",
+        "button[aria-label*=\"delete\" i]",
+        "button[aria-label*=\"close\" i]",
+        "button[aria-label*=\"xóa\" i]",
+        "button[aria-label*=\"gỡ\" i]",
+        "[role=\"button\"][aria-label*=\"remove\" i]",
+        "[role=\"button\"][aria-label*=\"xóa\" i]",
+        "[role=\"button\"][aria-label*=\"gỡ\" i]"
+      ],
+      "icon": "close"
     },
     "categoryTabs": {
       "selectors": [
@@ -395,13 +456,18 @@
       "bạn đã hết credit",
       "không đủ credit",
       "hết hạn mức credit",
+      "không đủ tín dụng",
+      "không đủ điểm tín dụng",
+      "đã hết tín dụng",
+      "đã hết lượt tạo",
+      "đã đạt giới hạn tạo hàng ngày",
       "public_error_user_quota_reached"
     ]
   },
   "agent": {
     "toggleButton": {
       "selectors": ["button", "[role='button']"],
-      "textRegex": "^Agent$"
+      "textRegex": "^(?:Agent|Trợ lý)$"
     },
     "closeButton": {
       "selectors": ["button", "[role='button']"],
@@ -465,5 +531,38 @@
         ".cdk-overlay-pane"
       ]
     }
+  },
+  "toby": {
+    "slate_editor": { "selectors": [".ProseMirror[contenteditable='true']", "flow-base-prompt-box [contenteditable='true']", "[contenteditable='true']"] },
+    "editor": { "selectors": [".ProseMirror[contenteditable='true']", "flow-base-prompt-box [contenteditable='true']", "[contenteditable='true']"] },
+    "submit_button": { "selectors": ["button[type='submit']", "button[data-action='submit']", "button[data-action='generate']", "button", "[role='button']"], "icons": ["arrow_forward", "arrow_upward", "send", "sparkle", "auto_awesome", "play_arrow", "north", "east"], "textRegex": "(?:start generation|generate|bắt đầu tạo|tạo video|tạo ảnh|tạo hình ảnh)" },
+    "tile_container": { "selectors": ["flow-grid-tile-container", "[class*='grid-tile-container']", "[class*='grid-tile']"] },
+    "tile_pending": { "selectors": ["flow-progress-tile", "flow-rendering-tile", "flow-generating-tile", "flow-placeholder-tile", "[aria-busy='true']", "[role='progressbar']"] },
+    "tile_retry_button": { "selectors": ["button", "[role='button']"], "textRegex": "(?:retry|try again|thử lại|tạo lại)", "iconRegex": "refresh|replay|retry" },
+    "tile_video": { "selectors": ["flow-video-tile", "flow-scene-tile", "video"] },
+    "ingredient_bar": { "selectors": ["[contenteditable='true']", "[class*='ingredient' i]", "flow-base-prompt-box"] },
+    "ingredient_image_chip": { "selectors": ["[data-ingredient-type='image']", "[data-kind='image']", "[class*='image-chip' i]"] },
+    "ingredient_video_chip": { "selectors": ["[data-ingredient-type='video']", "[data-kind='video']", "[class*='video-chip' i]"] },
+    "mention_inline_chip": { "selectors": ["[contenteditable='false']", "[data-mention]", "[class*='mention' i]"] },
+    "ingredient_remove_button": { "selectors": ["button", "[role='button']"], "icons": ["close", "clear", "cancel"], "textRegex": "(?:remove|delete|clear|close|xóa|gỡ|loại bỏ|bỏ khỏi)" },
+    "settings_button": { "selectors": ["button", "[role='button']"], "icons": ["tune", "settings", "settings_2"], "textRegex": "(?:settings|cài đặt)" },
+    "settings_panel_candidates": { "selectors": ["[role='dialog']", "[role='menu']", "mat-dialog-container", "flow-dialog", ".cdk-overlay-pane", "mat-menu-panel"] },
+    "settings_panel_marker": { "selectors": ["[role='radio']", "mat-radio-button", "[role='tab']", "button[id*='-trigger-']"] },
+    "page_settings_root": { "selectors": ["[role='dialog']", "[role='menu']", "[aria-modal='true']", "mat-dialog-container", ".cdk-overlay-pane"] },
+    "page_settings_trigger": { "selectors": ["button", "[role='button']"], "icons": ["settings_2", "settings"] },
+    "page_settings_grid_size": { "selectors": ["button", "[role='button']", "[role='radio']"], "textRegex": "(?:small|nhỏ|grid|lưới)" },
+    "page_settings_grid_view": { "selectors": ["button", "[role='button']", "[role='tab']"], "icons": ["grid_view", "dashboard", "view_module"], "textRegex": "(?:grid|lưới)" },
+    "add_component_root": { "selectors": ["[role='dialog']", "[role='listbox']", "mat-dialog-container", "flow-dialog", ".cdk-overlay-pane"] },
+    "add_component_listbox": { "selectors": ["[role='listbox']", "mat-select-panel", "[role='dialog']"] },
+    "add_component_option": { "selectors": ["[role='option']", "mat-option", "button", "[role='button']"] },
+    "add_component_apply_button": { "selectors": ["button", "[role='button']"], "textRegex": "(?:add to prompt|thêm vào câu lệnh|apply|áp dụng|done|xong)" },
+    "add_to_prompt_menu_item": { "selectors": ["[role='menuitem']", "mat-menu-item", "button", "[role='button']"], "textRegex": "(?:add to prompt|thêm vào câu lệnh|thêm vào lời nhắc)", "icons": ["add"] },
+    "download_menu_trigger": { "selectors": ["button", "[role='button']"], "icons": ["download", "more_vert", "more_horiz"] },
+    "menu_item": { "selectors": ["[role='menuitem']", "button", "[role='button']"] },
+    "icon_element": { "selectors": ["mat-icon", ".mat-icon", ".google-symbols", ".material-symbols-outlined", "i", "svg"] },
+    "warning_icon": { "selectors": ["mat-icon", ".mat-icon", ".google-symbols", "svg"], "icons": ["warning", "error", "report_problem"] },
+    "signed_out_indicator": { "selectors": ["main button", "main a[href]", "[role='main'] button", "[role='main'] a[href]"], "textRegex": "(?:sign in|log in|đăng nhập|tiếp tục đăng nhập)" },
+    "video_upload_confirm": { "selectors": ["button", "[role='button']"], "textRegex": "(?:upload|continue|confirm|agree|tải lên|tiếp tục|xác nhận|đồng ý|chấp nhận)" },
+    "flow_scroll_container": { "selectors": ["[class*='scroll']", "main", ".flow-scroll-container", "flow-app"] }
   }
 }

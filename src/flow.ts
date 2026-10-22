@@ -157,7 +157,7 @@ export async function createFlowProject(): Promise<FlowProject> {
   return result.project;
 }
 
-export async function openFlowProject(projectId: string, language: "en" = "en"): Promise<{ opened: boolean; id: string; url: string; language: "en" }> {
+export async function openFlowProject(projectId: string, language?: string): Promise<{ opened: boolean; id: string; url: string; language: string | null }> {
   return executeFlowDom({
     op: "flowOperation", name: "flow.project.open", payload: { projectId, language }, capability: "flow.native.project.open", timeoutMs: 60_000,
   }, { timeoutMs: 65_000 });
@@ -323,6 +323,17 @@ export async function clearFlowReferences(): Promise<{ cleared: number; remainin
     "flow.references.clear",
     {},
     "flow.native.references.clear",
+    undefined,
+    30_000,
+  );
+}
+
+export async function removeFlowReferenceKind(kind: "image" | "video" | "character" | "voice"): Promise<{ kind: string; removed: number; remaining: number; confirmed: boolean; prompt_preserved: boolean }> {
+  requireCapabilities("flow.native.references.remove");
+  return nativeOperation(
+    "flow.references.remove",
+    { kind },
+    "flow.native.references.remove",
     undefined,
     30_000,
   );

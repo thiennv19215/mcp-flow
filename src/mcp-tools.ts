@@ -136,11 +136,11 @@ server.registerTool(
   "flow_open_project",
   {
     title: "Open a Flow project",
-    description: "Open the specified existing Flow project by UUID in the connected Flow tab using the English interface (hl=en). The call confirms that Flow rendered English. Use flow_projects to find project IDs.",
+    description: "Open the specified existing Flow project by UUID in the connected Flow tab. Keeps the locale already active in Flow unless language is provided (for example, vi or en). Use flow_projects to find project IDs.",
     inputSchema: shapes.open_project,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   },
-  (args) => reply(patient("flow_open_project", core.open_project({ ...args, language: args.language ?? "en" }))),
+  (args) => reply(patient("flow_open_project", core.open_project(args))),
 );
 
 server.registerTool(
@@ -148,7 +148,7 @@ server.registerTool(
   {
     title: "Queue Flow generations",
     description:
-      "Queue one clip or image per scene in the open Flow project. Runs one at a time with human-like pauses and spends the user's Google AI credits (approx. per video: Omni 1.1 Flash 7-12, Veo 3.1 Lite 10, Fast 20, Quality 100; images usually 0). Video scenes are checked against max_credits using Flow's own quote before anything is spent; image scenes are submitted without a credit quote check. Returns job ids immediately; use flow_wait for results. A scene may set submit_only=true to finish after Flow's correlated request is dispatched, without waiting for render/download; flow_wait reports status=\"submitted\" and request_dispatched=true. Dispatch does not prove server acceptance or a finished result; server_acceptance_observed is reported separately.",
+      "Queue one clip or image per scene in the open Flow project. Runs one at a time with human-like pauses and spends the user's Google AI credits (approx. per video: Omni 1.1 Flash 7-12, Veo 3.1 Lite 10, Fast 20, Quality 100; images usually 0). Video scenes are checked against max_credits using Flow's own quote before anything is spent; image scenes are submitted without a credit quote check. Returns job ids immediately; use flow_wait for results. A scene may set manual_submit=true to prepare its prompt and settings and wait for you to click Create in Flow; then choose Continue on the extension queue. A scene may set submit_only=true to finish after Flow's correlated request is dispatched, without waiting for render/download; flow_wait reports status=\"submitted\" and request_dispatched=true. Dispatch does not prove server acceptance or a finished result; server_acceptance_observed is reported separately.",
     inputSchema: shapes.generate,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },
@@ -160,7 +160,7 @@ server.registerTool(
   {
     title: "Wait for Flow jobs",
     description:
-      "Wait for queued jobs (default: all), or for the task_id of a call that answered still_working, then return their status, results and file paths. Comes back within about 40 s even when they are still running: call again until finished is true.",
+      "Wait for queued jobs (default: all), or for the task_id of a call that answered still_working, then return their status, results and file paths. Comes back within about 40 s even when they are still running: call again until finished is true. If a job has manual_submit=true, finished remains false with status=waiting_for_user until you submit in Flow and continue the job from the extension queue.",
     inputSchema: shapes.wait,
     annotations: { readOnlyHint: true, openWorldHint: true },
   },
@@ -220,6 +220,17 @@ server.registerTool(
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   },
   (args) => reply(patient("flow_clear_references", core.clear_references(args))),
+);
+
+server.registerTool(
+  "flow_remove_reference_kind",
+  {
+    title: "Remove one kind of Flow prompt reference",
+    description: "Remove only image, video, character, or voice chips of the selected kind from the current Flow prompt. Confirms each removal and verifies that prompt text and other chip kinds are preserved.",
+    inputSchema: shapes.remove_reference_kind,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  },
+  (args) => reply(patient("flow_remove_reference_kind", core.remove_reference_kind(args))),
 );
 
 server.registerTool(

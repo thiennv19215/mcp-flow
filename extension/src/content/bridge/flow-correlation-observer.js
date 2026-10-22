@@ -2,6 +2,7 @@
   "use strict";
   const VERSION = 1;
   const OBSERVER_REVISION = 24;
+  const codec = window.FlowV2CorrelationCodec || null;
   const ARM = "TOBY_FLOW_CORRELATION_ARM";
   const ARM_V2 = "TOBY_FLOW_V2_CORRELATION_ARM";
   const DISARM = "TOBY_FLOW_CORRELATION_DISARM";
@@ -376,7 +377,7 @@
       return false;
     }
   };
-  const identityFingerprint = (values) => {
+  const identityFingerprintLocal = (values) => {
     const input = [...new Set(values || [])].sort().join("|");
     let hash = 2166136261;
     for (let i = 0; i < input.length; i++) {
@@ -398,13 +399,15 @@
     }
     return `request-v2:${serialized.length}:${(hashA >>> 0).toString(16)}:${(hashB >>> 0).toString(16)}`;
   };
-  const normalizePrompt = (value) =>
+  const identityFingerprint = codec?.identityFingerprint || identityFingerprintLocal;
+  const normalizePromptLocal = (value) =>
     String(value || "")
       .normalize("NFKC")
       .trim()
       .replace(/\s+/g, " ");
-  const promptFingerprint = (value) => identityFingerprint([normalizePrompt(value)]);
-  const videoInputNodes = (row) => {
+  const normalizePrompt = codec?.normalizePrompt || normalizePromptLocal;
+  const promptFingerprint = codec?.promptFingerprint || ((value) => identityFingerprint([normalizePrompt(value)]));
+  const videoInputNodesLocal = (row) => {
     const canonical = row?.[0]?.[2]?.[0];
     if (Array.isArray(canonical) && canonical.length) return canonical;
     const edit = row?.[1]?.[2]?.[0];
@@ -425,7 +428,8 @@
       ? observedEightField
       : null;
   };
-  const decodeStructuredNodes = (nodes) => {
+  const videoInputNodes = codec?.videoInputNodes || videoInputNodesLocal;
+  const decodeStructuredNodesLocal = (nodes) => {
     if (!Array.isArray(nodes) || !nodes.length) return null;
     const normalize = (value) =>
       String(value || "")
@@ -491,13 +495,14 @@
       voiceIds: [...new Set(voiceIds)].sort(),
     };
   };
+  const decodeStructuredNodes = codec?.decodeStructuredNodes || decodeStructuredNodesLocal;
   const structuredInputFingerprints = (payload) => {
     if (!Array.isArray(payload?.[0]) || !payload[0].length) return [];
     return payload[0].map(
       (row) => decodeStructuredNodes(videoInputNodes(row))?.fingerprint || null
     );
   };
-  const plainInputSummary = (payload) => {
+  const plainInputSummaryLocal = (payload) => {
     const rows = payload?.[0];
     if (!Array.isArray(rows) || !rows.length) return null;
     const values = rows.map((row) => {
@@ -524,6 +529,7 @@
       ? values[0]
       : null;
   };
+  const plainInputSummary = codec?.plainInputSummary || plainInputSummaryLocal;
   const plainInputFingerprint = (payload) => plainInputSummary(payload)?.fingerprint || null;
   const normalizedRefs = (ids) =>
     [...new Set((ids || []).map((id) => String(id).toLowerCase()))].sort();
@@ -909,6 +915,7 @@
       mediaType: attempt.mediaType,
       expectedQuantity: attempt.expectedQuantity,
       promptFingerprint: attempt.promptFingerprint,
+      generationFingerprint: attempt.generationFingerprint,
       structuredPromptFingerprint: attempt.structuredPromptFingerprint,
       normalizedVoiceFingerprint: attempt.normalizedVoiceFingerprint,
       expectedImageModelKey: attempt.expectedImageModelKey,
@@ -931,6 +938,7 @@
       stage,
       mediaType: attempt.mediaType,
       expectedQuantity: attempt.expectedQuantity,
+      generationFingerprint: attempt.generationFingerprint || null,
       projectId: projectId(),
       observedAt: Date.now(),
       ...detail,
@@ -1926,6 +1934,16 @@
     )
       return;
     const expectedQuantity = Math.max(1, Math.min(16, Number(d.expectedQuantity) || 1));
+    const generationFingerprint = codec?.generationFingerprint
+      ? codec.generationFingerprint({
+          prompt: d.prompt || d.promptText || d.promptFingerprint,
+          promptFingerprint: d.promptFingerprint,
+          model: d.mediaType === "image" ? d.expectedImageModelKey : d.expectedVideoModelKey,
+          ratio: d.expectedVideoRatioEnum,
+          referenceIds: d.expectedMediaReferenceIds,
+          characterIds: d.expectedCharacterIds,
+        })
+      : null;
     const previous = attempts.get(d.attemptId);
     if (previous) retireUnbound(previous);
     attempts.set(d.attemptId, {
@@ -1935,6 +1953,7 @@
       mediaType: d.mediaType,
       expectedQuantity,
       promptFingerprint: d.promptFingerprint,
+      generationFingerprint,
       expectedVoiceCount,
       promptAnchorFingerprint: /^id-[0-9a-f]{8}$/.test(d.promptAnchorFingerprint || "")
         ? d.promptAnchorFingerprint
@@ -2014,6 +2033,7 @@
     emit(attempts.get(d.attemptId), "armed", {
       structuredPromptVersion: 2,
       observerRevision: OBSERVER_REVISION,
+      generationFingerprint,
       xhrHookActive:
         XMLHttpRequest.prototype.open === patchedOpen &&
         XMLHttpRequest.prototype.send === patchedSend,

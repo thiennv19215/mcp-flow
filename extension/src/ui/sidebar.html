@@ -783,8 +783,9 @@
       transition: all 0.2s ease;
     }
   </style>
+  <link rel="stylesheet" href="tobyflow-ui.css">
 </head>
-<body>
+<body class="flow-mcp-sidebar">
   <!-- Header TobyFlow style (Clean Sparkle Logo) -->
   <header class="tobyflow-header">
     <div class="tobyflow-header-brand">
@@ -814,20 +815,50 @@
   </header>
 
   <!-- Navigation Tabs -->
-  <nav class="tobyflow-tabs">
-    <button class="tobyflow-tab active" data-tab="tab-create">
+  <nav class="tobyflow-tabs" role="tablist" aria-label="Điều hướng Flow MCP">
+    <button class="tobyflow-tab active" id="navCreate" role="tab" aria-selected="true" aria-controls="tab-create" tabindex="0" data-tab="tab-create">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
         <path d="M12 2L14.2 9.8L22 12L14.2 14.2L12 22L9.8 14.2L2 12L9.8 9.8L12 2Z"/>
       </svg>
       <span id="tabCreateLabel">Tạo nội dung</span>
     </button>
-    <button class="tobyflow-tab" data-tab="tab-status">
+    <button class="tobyflow-tab" id="navWorkflow" role="tab" aria-selected="false" aria-controls="tab-workflow" tabindex="-1" data-tab="tab-workflow">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 5h16M4 12h10M4 19h16"/><circle cx="18" cy="12" r="2"/><circle cx="7" cy="5" r="2"/><circle cx="7" cy="19" r="2"/>
+      </svg>
+      <span id="tabWorkflowLabel">Quy trình</span>
+    </button>
+    <button class="tobyflow-tab" id="navPrompts" role="tab" aria-selected="false" aria-controls="tab-prompts" tabindex="-1" data-tab="tab-prompts">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/>
+      </svg>
+      <span id="tabPromptsLabel">Prompt</span>
+    </button>
+    <button class="tobyflow-tab" id="navLibrary" role="tab" aria-selected="false" aria-controls="tab-library" tabindex="-1" data-tab="tab-library">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2h6.5A2.5 2.5 0 0 1 21 9.5v8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z"/><path d="M3 10h18"/>
+      </svg>
+      <span id="tabLibraryLabel">Thư viện</span>
+    </button>
+    <button class="tobyflow-tab" id="navTasks" role="tab" aria-selected="false" aria-controls="tab-tasks" tabindex="-1" data-tab="tab-tasks">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="4" width="18" height="17" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M8 14h3M8 17h7"/>
+      </svg>
+      <span id="tabTasksLabel">Tác vụ</span>
+    </button>
+    <button class="tobyflow-tab" id="navHistory" role="tab" aria-selected="false" aria-controls="tab-history" tabindex="-1" data-tab="tab-history">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/><path d="M3 12H1"/>
+      </svg>
+      <span id="tabHistoryLabel">Lịch sử</span>
+    </button>
+    <button class="tobyflow-tab" id="navStatus" role="tab" aria-selected="false" aria-controls="tab-status" tabindex="-1" data-tab="tab-status">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
       </svg>
       <span id="tabStatusLabel">Trạng thái</span>
     </button>
-    <button class="tobyflow-tab" data-tab="tab-logs">
+    <button class="tobyflow-tab" id="navLogs" role="tab" aria-selected="false" aria-controls="tab-logs" tabindex="-1" data-tab="tab-logs">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
         <polyline points="14 2 14 8 20 8"></polyline>
@@ -836,7 +867,7 @@
       </svg>
       <span id="tabLogsLabel">Nhật ký MCP</span>
     </button>
-    <button class="tobyflow-tab" data-tab="tab-settings">
+    <button class="tobyflow-tab" id="navSettings" role="tab" aria-selected="false" aria-controls="tab-settings" tabindex="-1" data-tab="tab-settings">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="3"></circle>
         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
@@ -848,7 +879,10 @@
   <!-- Panes Content -->
   <div class="tabs-content">
     <!-- TAB 1: CREATE (TẠO ẢNH / VIDEO / NHÂN VẬT) -->
-    <div id="tab-create" class="tab-pane active">
+    <div id="tab-create" class="tab-pane active" role="tabpanel" aria-labelledby="navCreate" tabindex="0">
+      <div class="pane-heading">
+        <div><span class="pane-kicker">FLOW MCP</span><h1 id="viewCreateTitle">Tạo nội dung</h1><p id="viewCreateSubtitle">Tạo ảnh, video hoặc nhân vật trên tab Flow đang kết nối.</p></div>
+      </div>
       <!-- Mode Segment Switcher -->
       <div class="mode-segments">
         <button class="mode-segment-btn active" id="btnModeImage" data-mode="image">
@@ -1089,65 +1123,156 @@
       <div class="section-card" id="flowQueuePanel" aria-label="Hàng đợi Flow"></div>
 
       <details class="section-card" id="flowLibraryTools">
-        <summary class="section-title" style="cursor:pointer">Thư viện và thao tác Flow</summary>
+        <summary class="section-title" style="cursor:pointer" data-i18n="sidebar.libraryToolsTitle">Thư viện và thao tác Flow</summary>
         <div class="form-group">
-          <label class="form-label" for="flowProjectSelect">Dự án</label>
-          <select class="form-select" id="flowProjectSelect"><option value="">Tải danh sách dự án</option></select>
+          <label class="form-label" for="flowProjectSelect" data-i18n="sidebar.libraryProject">Dự án</label>
+          <select class="form-select" id="flowProjectSelect"><option value="" data-i18n="sidebar.libraryProjectsPlaceholder">Tải danh sách dự án</option></select>
           <div class="grid-2" style="margin-top:8px">
-            <button type="button" class="btn btn-secondary" id="btnRefreshProjects">Làm mới dự án</button>
-            <button type="button" class="btn btn-secondary" id="btnOpenProject">Mở dự án</button>
+            <button type="button" class="btn btn-secondary" id="btnRefreshProjects" data-i18n="sidebar.libraryRefreshProjects">Làm mới dự án</button>
+            <button type="button" class="btn btn-secondary" id="btnOpenProject" data-i18n="sidebar.libraryOpenProject">Mở dự án</button>
           </div>
-          <button type="button" class="btn btn-primary" id="btnCreateProject" style="margin-top:8px">Tạo dự án mới</button>
+          <button type="button" class="btn btn-primary" id="btnCreateProject" style="margin-top:8px" data-i18n="sidebar.libraryCreateProject">Tạo dự án mới</button>
         </div>
 
         <div class="form-group">
-          <label class="form-label" for="flowAssetSelect">Tài sản</label>
-          <select class="form-select" id="flowAssetSelect"><option value="">Tải danh sách tài sản</option></select>
+          <label class="form-label" for="flowAssetSelect" data-i18n="sidebar.libraryAsset">Tài sản</label>
+          <select class="form-select" id="flowAssetSelect"><option value="" data-i18n="sidebar.libraryAssetsPlaceholder">Tải danh sách tài sản</option></select>
           <div class="grid-2" style="margin-top:8px">
-            <button type="button" class="btn btn-secondary" id="btnRefreshAssets">Làm mới tài sản</button>
-            <button type="button" class="btn btn-secondary" id="btnDownloadAsset">Tải xuống</button>
+            <button type="button" class="btn btn-secondary" id="btnRefreshAssets" data-i18n="sidebar.libraryRefreshAssets">Làm mới tài sản</button>
+            <button type="button" class="btn btn-secondary" id="btnDownloadAsset" data-i18n="sidebar.libraryDownloadAsset">Tải xuống</button>
           </div>
           <div class="grid-2" style="margin-top:8px">
-            <input type="text" class="form-input" id="flowAssetNewName" placeholder="Tên mới" aria-label="Tên tài sản mới">
-            <button type="button" class="btn btn-secondary" id="btnRenameAsset">Đổi tên</button>
+            <input type="text" class="form-input" id="flowAssetNewName" data-i18n-placeholder="sidebar.libraryNewName" placeholder="Tên mới" aria-label="Tên tài sản mới">
+            <button type="button" class="btn btn-secondary" id="btnRenameAsset" data-i18n="sidebar.libraryRenameAsset">Đổi tên</button>
           </div>
-          <button type="button" class="btn btn-secondary" id="btnTrashAsset" style="margin-top:8px">Chuyển vào thùng rác</button>
+          <button type="button" class="btn btn-secondary" id="btnTrashAsset" style="margin-top:8px" data-i18n="sidebar.libraryTrashAsset">Chuyển vào thùng rác</button>
         </div>
 
         <div class="form-group">
-          <label class="form-label" for="flowLibraryCharacterSelect">Nhân vật</label>
-          <select class="form-select" id="flowLibraryCharacterSelect"><option value="">Tải danh sách nhân vật</option></select>
-          <button type="button" class="btn btn-secondary" id="btnRefreshLibraryCharacters" style="margin-top:8px">Làm mới nhân vật</button>
-          <input type="text" class="form-input" id="flowCharacterNewName" placeholder="Tên nhân vật mới" style="margin-top:8px">
-          <textarea class="form-textarea" id="flowCharacterChange" placeholder="Mô tả thay đổi cho nhân vật" style="margin-top:8px"></textarea>
-          <button type="button" class="btn btn-secondary" id="btnEditCharacter" style="margin-top:8px">Đưa chỉnh sửa vào hàng đợi</button>
+          <label class="form-label" for="flowLibraryCharacterSelect" data-i18n="sidebar.libraryCharacter">Nhân vật</label>
+          <select class="form-select" id="flowLibraryCharacterSelect"><option value="" data-i18n="sidebar.libraryCharactersPlaceholder">Tải danh sách nhân vật</option></select>
+          <button type="button" class="btn btn-secondary" id="btnRefreshLibraryCharacters" style="margin-top:8px" data-i18n="sidebar.libraryRefreshCharacters">Làm mới nhân vật</button>
+          <input type="text" class="form-input" id="flowCharacterNewName" data-i18n-placeholder="sidebar.libraryNewCharacterName" placeholder="Tên nhân vật mới" style="margin-top:8px">
+          <textarea class="form-textarea" id="flowCharacterChange" data-i18n-placeholder="sidebar.libraryCharacterChange" placeholder="Mô tả thay đổi cho nhân vật" style="margin-top:8px"></textarea>
+          <button type="button" class="btn btn-secondary" id="btnEditCharacter" style="margin-top:8px" data-i18n="sidebar.libraryEditCharacter">Đưa chỉnh sửa vào hàng đợi</button>
         </div>
 
         <div class="form-group">
-          <label class="form-label" for="flowReferenceInput">Gắn tham chiếu (mỗi dòng một tên, ví dụ asset:Tên ảnh)</label>
-          <textarea class="form-textarea" id="flowReferenceInput" placeholder="asset:Tên ảnh\ncharacter:Tên nhân vật"></textarea>
+          <label class="form-label" for="flowReferenceInput" data-i18n="sidebar.libraryReferences">Gắn tham chiếu (mỗi dòng một tên, ví dụ asset:Tên ảnh)</label>
+          <textarea class="form-textarea" id="flowReferenceInput" data-i18n-placeholder="sidebar.libraryReferencesPlaceholder" placeholder="asset:Tên ảnh\ncharacter:Tên nhân vật"></textarea>
           <div class="grid-2" style="margin-top:8px">
-            <button type="button" class="btn btn-secondary" id="btnAttachReferences">Gắn tham chiếu</button>
-            <button type="button" class="btn btn-secondary" id="btnClearReferences">Xóa tham chiếu</button>
+            <button type="button" class="btn btn-secondary" id="btnAttachReferences" data-i18n="sidebar.libraryAttachReferences">Gắn tham chiếu</button>
+            <button type="button" class="btn btn-secondary" id="btnClearReferences" data-i18n="sidebar.libraryClearReferences">Xóa tham chiếu</button>
+          </div>
+          <div class="grid-2" style="margin-top:8px">
+            <select class="form-select" id="flowReferenceKindToRemove" aria-label="Loại tham chiếu cần gỡ">
+              <option value="image" data-i18n="sidebar.referenceKindImage">Ảnh</option>
+              <option value="video" data-i18n="sidebar.referenceKindVideo">Video</option>
+              <option value="character" data-i18n="sidebar.referenceKindCharacter">Nhân vật</option>
+              <option value="voice" data-i18n="sidebar.referenceKindVoice">Giọng nói</option>
+            </select>
+            <button type="button" class="btn btn-secondary" id="btnRemoveReferenceKind" data-i18n="sidebar.removeReferenceKind">Gỡ loại đã chọn</button>
           </div>
         </div>
 
         <div class="form-group">
-          <label class="form-label" for="flowUploadFile">Tải media lên Flow</label>
+          <label class="form-label" for="flowUploadFile" data-i18n="sidebar.libraryUpload">Tải media lên Flow</label>
           <input type="file" class="form-input" id="flowUploadFile" accept="image/*,video/*">
-          <button type="button" class="btn btn-secondary" id="btnUploadMedia" style="margin-top:8px">Tải tệp lên</button>
+          <button type="button" class="btn btn-secondary" id="btnUploadMedia" style="margin-top:8px" data-i18n="sidebar.libraryUploadFile">Tải tệp lên</button>
         </div>
 
         <div class="form-group">
-          <button type="button" class="btn btn-secondary" id="btnLoadVoices">Xem tùy chọn giọng nói</button>
-          <select class="form-select" id="flowVoiceSelect" style="margin-top:8px"><option value="">Không dùng giọng nói</option></select>
+          <button type="button" class="btn btn-secondary" id="btnLoadVoices" data-i18n="sidebar.libraryVoices">Xem tùy chọn giọng nói</button>
+          <select class="form-select" id="flowVoiceSelect" style="margin-top:8px"><option value="" data-i18n="sidebar.libraryNoVoice">Không dùng giọng nói</option></select>
         </div>
         <pre id="flowLibraryResult" style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;color:var(--text-muted);margin:8px 0 0"></pre>
       </details>
     </div>
 
+    <div id="tab-workflow" class="tab-pane" role="tabpanel" aria-labelledby="navWorkflow" tabindex="0">
+      <div class="pane-heading"><div><span class="pane-kicker">FLOW MCP</span><h1 id="viewWorkflowTitle">Quy trình Flow</h1><p id="viewWorkflowSubtitle">Chạy Agent batch, chỉnh sửa hoặc tiếp tục video bằng DOM Flow.</p></div></div>
+      <section class="section-card flow-workflow-card">
+        <div class="form-group">
+          <label class="form-label" for="workflowType" id="lblWorkflowType">Loại quy trình</label>
+          <select class="form-select" id="workflowType">
+            <option value="agent" id="optWorkflowAgent">Agent batch (mỗi dòng một cảnh)</option>
+            <option value="edit" id="optWorkflowEdit">Chỉnh sửa video</option>
+            <option value="continue" id="optWorkflowContinue">Tiếp tục video</option>
+          </select>
+        </div>
+        <div class="form-group" id="workflowScenesGroup">
+          <label class="form-label" for="workflowScenes" id="lblWorkflowScenes">Cảnh / prompt</label>
+          <textarea class="form-textarea" id="workflowScenes" placeholder="Mỗi dòng là một cảnh hoặc prompt"></textarea>
+        </div>
+        <div class="form-group" id="workflowAssetGroup" hidden>
+          <label class="form-label" for="workflowAsset" id="lblWorkflowAsset">Tên video nguồn</label>
+          <input class="form-input" id="workflowAsset" placeholder="Tên đầy đủ hoặc tiền tố video trong Flow">
+        </div>
+        <div class="grid-2">
+          <div class="form-group"><label class="form-label" for="workflowAspect" id="lblWorkflowAspect">Tỷ lệ</label><select class="form-select" id="workflowAspect"><option value="16:9">16:9</option><option value="9:16">9:16</option><option value="1:1">1:1</option></select></div>
+          <div class="form-group"><label class="form-label" for="workflowPromptExtra" id="lblWorkflowExtra">Prompt bổ sung</label><input class="form-input" id="workflowPromptExtra" placeholder="Tùy chọn"></div>
+        </div>
+        <button type="button" class="btn btn-primary" id="btnRunWorkflow"><span id="txtRunWorkflow">Chạy quy trình</span></button>
+        <p class="flow-inline-note" id="workflowScopeNote">Extension chỉ gửi lệnh vào hàng đợi; thao tác DOM diễn ra trong tab Flow.</p>
+      </section>
+    </div>
+
+    <div id="tab-prompts" class="tab-pane" role="tabpanel" aria-labelledby="navPrompts" tabindex="0">
+      <div class="pane-heading"><div><span class="pane-kicker">FLOW MCP</span><h1 id="viewPromptsTitle">Prompt đã lưu</h1><p id="viewPromptsSubtitle">Lưu prompt cục bộ và đưa lại vào màn hình tạo.</p></div></div>
+      <section class="section-card flow-prompts-card">
+        <div class="form-group"><label class="form-label" for="promptName" id="lblPromptName">Tên prompt</label><input class="form-input" id="promptName" placeholder="Ví dụ: Product hero"></div>
+        <div class="form-group"><label class="form-label" for="promptDraft" id="lblPromptDraft">Prompt</label><textarea class="form-textarea" id="promptDraft" placeholder="Nhập prompt cần lưu"></textarea></div>
+        <button type="button" class="btn btn-primary" id="btnSavePrompt"><span id="txtSavePrompt">Lưu prompt hiện tại</span></button>
+      </section>
+      <section class="section-card"><div id="savedPromptsList" class="flow-saved-prompts" aria-live="polite"></div><p id="savedPromptsEmpty" class="flow-inline-note">Chưa có prompt nào được lưu.</p></section>
+    </div>
+
     <!-- TAB 2: STATUS & CONTROL -->
-    <div id="tab-status" class="tab-pane">
+    <div id="tab-library" class="tab-pane" role="tabpanel" aria-labelledby="navLibrary" tabindex="0">
+      <div class="pane-heading"><div><span class="pane-kicker">FLOW MCP</span><h1 id="viewLibraryTitle">Thư viện Flow</h1><p id="viewLibrarySubtitle">Dự án, media, nhân vật và tham chiếu.</p></div></div>
+      <section class="section-card flow-photos-gallery" aria-labelledby="flowPhotosTitle">
+        <div class="flow-photos-heading"><div><h2 id="flowPhotosTitle" data-i18n="sidebar.photosTitle">Ảnh và video Flow</h2><p id="flowPhotosSummary" data-i18n="sidebar.photosSummary">Duyệt media trong project hiện tại.</p></div>
+          <button type="button" class="btn btn-secondary" id="btnRefreshPhotos" data-i18n="sidebar.photosRefresh">Quét lại</button>
+        </div>
+        <div class="flow-photos-filters">
+          <input type="search" class="form-input" id="flowPhotosSearch" data-i18n-placeholder="sidebar.photosSearch" placeholder="Tìm theo tên…">
+          <select class="form-select" id="flowPhotosKind" aria-label="Lọc media Flow">
+            <option value="all" data-i18n="sidebar.photosAll">Tất cả</option>
+            <option value="image" data-i18n="sidebar.photosImages">Ảnh</option>
+            <option value="video" data-i18n="sidebar.photosVideos">Video</option>
+          </select>
+        </div>
+        <div id="flowPhotosGrid" class="flow-photos-grid" aria-live="polite"></div>
+        <p id="flowPhotosEmpty" class="flow-photos-empty" data-i18n="sidebar.photosEmpty">Chưa quét media.</p>
+        <button type="button" class="btn btn-secondary flow-photos-more" id="btnMorePhotos" hidden data-i18n="sidebar.photosMore">Xem thêm</button>
+      </section>
+      <div id="libraryPage"></div>
+    </div>
+
+    <dialog id="flowPhotoPreview" class="flow-photo-preview">
+      <form method="dialog"><button class="flow-photo-preview-close" aria-label="Close">×</button></form>
+      <img id="flowPhotoPreviewImage" alt="">
+      <video id="flowPhotoPreviewVideo" class="flow-photo-preview-video" controls playsinline hidden></video>
+      <p id="flowPhotoPreviewName"></p>
+      <p id="flowPhotoPreviewNote" class="flow-photo-preview-note" hidden></p>
+    </dialog>
+
+    <div id="tab-tasks" class="tab-pane" role="tabpanel" aria-labelledby="navTasks" tabindex="0">
+      <div class="pane-heading"><div><span class="pane-kicker">FLOW MCP</span><h1 id="viewTasksTitle">Tác vụ</h1><p id="viewTasksSubtitle">Theo dõi và điều khiển hàng đợi trên extension.</p></div></div>
+      <div id="queuePage"></div>
+    </div>
+
+    <div id="tab-history" class="tab-pane" role="tabpanel" aria-labelledby="navHistory" tabindex="0">
+      <div class="pane-heading"><div><span class="pane-kicker">FLOW MCP</span><h1 id="viewHistoryTitle">Lịch sử cục bộ</h1><p id="viewHistorySubtitle">Các lệnh đã chạy trên extension, không đồng bộ qua FlowAPI.</p></div></div>
+      <section class="section-card">
+        <div class="flow-history-toolbar"><span class="section-title" id="flowHistoryActivity">Hoạt động DOM Flow</span><div><button type="button" class="btn btn-secondary" id="btnRefreshHistory">Làm mới</button><button type="button" class="btn btn-secondary" id="btnClearHistory">Xóa lịch sử</button></div></div>
+        <div id="flowHistoryList" class="flow-history-list" aria-live="polite"></div>
+        <p id="flowHistoryEmpty" class="flow-inline-note">Chưa có lịch sử cục bộ.</p>
+      </section>
+    </div>
+
+    <div id="tab-status" class="tab-pane" role="tabpanel" aria-labelledby="navStatus" tabindex="0">
+      <div class="pane-heading"><div><span class="pane-kicker">FLOW MCP</span><h1 id="viewStatusTitle">Trạng thái Flow</h1><p id="viewStatusSubtitle">Tab Flow mà extension đang điều khiển.</p></div></div>
       <div class="section-card">
         <div class="status-row">
           <span class="status-badge" id="wsBadge">
@@ -1208,7 +1333,8 @@
     </div>
 
     <!-- TAB 3: LOGS -->
-    <div id="tab-logs" class="tab-pane">
+    <div id="tab-logs" class="tab-pane" role="tabpanel" aria-labelledby="navLogs" tabindex="0">
+      <div class="pane-heading"><div><span class="pane-kicker">FLOW MCP</span><h1 id="viewLogsTitle">Nhật ký MCP</h1><p id="viewLogsSubtitle">Các lệnh và kết quả gần đây từ extension.</p></div></div>
       <div class="section-card" style="padding: 10px;">
         <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
           <span style="font-weight: 700; font-size: 12px; color: var(--text-muted);" id="lblLogsTitle">Nhật ký tác vụ</span>
@@ -1221,7 +1347,8 @@
     </div>
 
     <!-- TAB 4: SETTINGS -->
-    <div id="tab-settings" class="tab-pane">
+    <div id="tab-settings" class="tab-pane" role="tabpanel" aria-labelledby="navSettings" tabindex="0">
+      <div class="pane-heading"><div><span class="pane-kicker">FLOW MCP</span><h1 id="viewSettingsTitle">Kết nối</h1><p id="viewSettingsSubtitle">Thiết lập backend mà extension nhận lệnh.</p></div></div>
       <div class="section-card">
         <div class="form-group">
           <label class="form-label">Xác thực tài khoản:</label>

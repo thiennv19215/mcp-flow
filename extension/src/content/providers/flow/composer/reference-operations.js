@@ -1,7 +1,7 @@
 (function (root) {
   class FlowReferenceOperations {
     constructor(driver) { this.driver = driver; }
-    supports(operation) { return ['flow.references.clear', 'flow.voices.options', 'flow.references.attach'].includes(operation); }
+    supports(operation) { return ['flow.references.clear', 'flow.references.remove', 'flow.voices.options', 'flow.references.attach'].includes(operation); }
     error(...args) { return this.driver.error(...args); }
     async execute(name, payload = {}, command = {}) {
       const editor = root.FlowEditor;
@@ -46,6 +46,21 @@
         return { cleared: Number(result.cleared) || 0, remaining: 0, confirmed: true, picker_closed: true, prompt_preserved: true, prompt_text: promptAfter };
       }
 
+      if (name === "flow.references.remove") {
+        const kind = String(payload.kind || "").trim().toLowerCase();
+        if (!new Set(["image", "video", "character", "voice"]).has(kind)) {
+          throw this.error("FLOW_INVALID_ARGUMENT", "Reference kind must be image, video, character, or voice.", false, false);
+        }
+        const removeKind = components.FlowReferenceActions?.removeKind;
+        if (typeof removeKind !== "function") throw this.error("FLOW_REFERENCE_REMOVE_UNAVAILABLE", "Flow's per-kind reference removal is unavailable; no chips were changed.", false, false);
+        const deadline = root.FlowUiDeadline?.makeDeadline(command, 20_000, 5_000) || Date.now() + 15_000;
+        const result = await removeKind(kind, { deadline, signal: command.signal, command });
+        if (!result?.confirmed || result.remaining !== 0 || result.prompt_preserved !== true || result.other_kinds_preserved !== true) {
+          throw this.error("FLOW_REFERENCE_REMOVE_UNCONFIRMED", `Flow did not confirm removal of all ${kind} reference chips while preserving prompt text and other reference kinds.`, false, false);
+        }
+        return result;
+      }
+
       if (name === "flow.voices.options") {
         if (typeof components.listNativeFlowVoiceOptions !== "function") {
           throw this.error("FLOW_VOICE_PICKER_UNAVAILABLE", "Flow's v2 voice picker inspection is unavailable.", false, false);
@@ -67,7 +82,7 @@
         const attached = [];
         for (const ref of references) {
           root.FlowUiDeadline?.requireTime(deadline, "attaching Flow references", attached.length > 0);
-          attached.push(await root.FlowReferenceActions.attach(ref, undefined, { deadline, command }));
+          attached.push(await root.FlowReferenceActions.attach(ref, undefined, { deadline, signal: command.signal, command }));
         }
         return { attached, submitted: false };
       }

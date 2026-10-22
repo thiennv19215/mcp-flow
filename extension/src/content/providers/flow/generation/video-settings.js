@@ -2,7 +2,11 @@
 (() => {
   "use strict";
   const root = globalThis;
-  const { emitImagePreparationProgress, assertNativeModelCapabilities, flowSettingsPanelVisible, openFlowSettings, chooseRadio, chooseVideoOption, chooseNativeModel, findModelPickerButton, normalizeModelLabel, getModelAliases, chooseNativeVariantCount, nativeRadioSelected, closeOwnedSettingsSurface, safeCreditQuoteDiagnostics, checkPreparation, waitPreparation, isNavControl, foldLabel } = root.FlowSettings;
+  const settings = root.FlowSettings;
+  const finishVideoPreparationDiagnostics = typeof settings?.finishVideoPreparationDiagnostics === "function"
+    ? settings.finishVideoPreparationDiagnostics
+    : () => console.warn("[FlowVideoSettings] Video preparation diagnostics are unavailable in this content-script build.");
+  const { emitImagePreparationProgress, assertNativeModelCapabilities, flowSettingsPanelVisible, openFlowSettings, chooseRadio, chooseVideoOption, chooseNativeModel, findModelPickerButton, normalizeModelLabel, getModelAliases, chooseNativeVariantCount, nativeRadioSelected, closeOwnedSettingsSurface, safeCreditQuoteDiagnostics, checkPreparation, waitPreparation, isNavControl, foldLabel } = settings || {};
   const MODE_ALIASES = {
     ingredients: ["ingredients", "thành phần", "nguyên liệu", "ingredient"],
     frames: ["frames", "khung hình", "khung", "frame"],
@@ -58,6 +62,9 @@
   }
 
   async function prepareNativeVideoSettings(payload, variants, framesMode, options = {}) {
+    if (!settings || typeof emitImagePreparationProgress !== "function" || typeof openFlowSettings !== "function" || typeof chooseRadio !== "function") {
+      throw root.flowError("FLOW_SETTINGS_UNAVAILABLE", "Flow's video settings module was not initialized in this tab. Reload the Flow tab before creating video.", true, false);
+    }
     let ownsSettingsSurface = false;
     options = { ...options, videoPreparation: true, onSettingsOpened: () => { ownsSettingsSurface = true; } };
     emitImagePreparationProgress(options, "validating requested settings");

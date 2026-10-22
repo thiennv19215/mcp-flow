@@ -3,54 +3,42 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   flowDocumentMatchesLocale,
+  flowHomeUrl,
   flowLocaleFromUrl,
   flowProjectUrl,
-  forceEnglishFlowUrl,
   normalizeFlowLocale,
 } from '../extension/src/background/flow-locale.js';
 
 const worker = readFileSync(new URL('../extension/src/background/service-worker.js', import.meta.url), 'utf8');
 const projectId = '01234567-89ab-4cde-8f01-23456789abcd';
 
-test('Flow automation URL policy is English-only and defaults project URLs to English', () => {
+test('Flow locale helpers preserve an optional user-selected locale', () => {
   assert.equal(normalizeFlowLocale('EN'), 'en');
-  assert.equal(normalizeFlowLocale('vi'), null);
-  assert.equal(normalizeFlowLocale('fr'), null);
-  assert.equal(flowLocaleFromUrl(`https://flow.google.com/project/${projectId}?hl=vi`), null);
-  assert.equal(flowLocaleFromUrl(`https://flow.google.com/project/${projectId}?hl=en`), 'en');
-  assert.equal(flowLocaleFromUrl(`https://flow.google.com/project/${projectId}?hl=fr`), null);
-  assert.equal(flowProjectUrl(projectId), `https://flow.google.com/project/${projectId}?hl=en`);
-  assert.throws(() => flowProjectUrl(projectId, 'vi'), /must be en/);
-  assert.throws(() => flowProjectUrl(projectId, 'fr'), /must be en/);
-  assert.equal(
-    forceEnglishFlowUrl(`https://flow.google.com/project/${projectId}?hl=vi&foo=keep&x=1#section`),
-    `https://flow.google.com/project/${projectId}?hl=en&foo=keep&x=1#section`,
-  );
-  assert.throws(() => forceEnglishFlowUrl('https://example.com/project/x?hl=vi'), /Expected a Flow URL/);
+  assert.equal(normalizeFlowLocale('vi-VN'), 'vi-vn');
+  assert.equal(normalizeFlowLocale('zh_Hant'), 'zh-hant');
+  assert.equal(normalizeFlowLocale('not a locale'), null);
+  assert.equal(flowLocaleFromUrl(`https://flow.google.com/project/${projectId}?hl=vi`), 'vi');
+  assert.equal(flowLocaleFromUrl(`https://flow.google.com/project/${projectId}?hl=fr`), 'fr');
+  assert.equal(flowProjectUrl(projectId), `https://flow.google.com/project/${projectId}`);
+  assert.equal(flowProjectUrl(projectId, 'vi'), `https://flow.google.com/project/${projectId}?hl=vi`);
+  assert.equal(flowHomeUrl(), 'https://flow.google.com/');
+  assert.equal(flowHomeUrl('vi'), 'https://flow.google.com/?hl=vi');
 });
 
-test('Flow document locale verification accepts English regional tags only', () => {
+test('Flow document locale comparison handles regional tags without imposing English', () => {
   assert.equal(flowDocumentMatchesLocale('en-US', 'en'), true);
+  assert.equal(flowDocumentMatchesLocale('vi-VN', 'vi'), true);
   assert.equal(flowDocumentMatchesLocale('vi-VN', 'en'), false);
-  assert.equal(flowDocumentMatchesLocale('en', 'vi'), false);
-  assert.equal(flowDocumentMatchesLocale('', 'en'), false);
+  assert.equal(flowDocumentMatchesLocale('fr', undefined), true);
+  assert.equal(flowDocumentMatchesLocale('', undefined), false);
 });
 
-test('tab preparation forces hl=en while preserving unrelated URL parameters', () => {
-  assert.match(worker, /const locale = "en"/);
-  assert.match(worker, /const englishUrl = forceEnglishFlowUrl\(currentUrl\)/);
-  assert.match(worker, /if \(englishUrl !== currentUrl \|\| !flowDocumentMatchesLocale\(documentLanguage, locale\)\)/);
-  assert.match(worker, /await verifyFlowDocumentLocale\(tabId, locale\)/);
-  assert.match(worker, /error\.code = "FLOW_LOCALE_MISMATCH"/);
+test('tab preparation leaves Flow locale and URL untouched', () => {
+  assert.doesNotMatch(worker, /forceEnglishFlowUrl|const locale = "en"/);
+  assert.match(worker, /Flow can change locale through its own controls\/account preferences/);
   assert.match(worker, /flowProjectUrl\(projectId, language\)/);
-  assert.match(worker, /requestedLanguage !== "en"/);
-  assert.doesNotMatch(worker, /flowTabLocales|rememberFlowTabLocale|storedFlowTabLocale/);
-  assert.match(worker, /command\.payload\?\.language \?\? "en"/);
-  assert.doesNotMatch(worker, /ensureEnglishFlowTab/);
-});
-
-test('Flow URL changes trigger locale preparation, with active-operation guards intact', () => {
-  assert.match(worker, /if \(flowUrl\(tab\.url\) && \(tab\.active \|\| selectedTabId === undefined\)\) \{[\s\S]*adoptFlowTab\(tab, Boolean\(changeInfo\.url\)\)/);
+  assert.doesNotMatch(worker, /requestedLanguage !== "en"/);
+  assert.doesNotMatch(worker, /command\.payload\?\.language \?\? "en"/);
   assert.match(worker, /async function prepareFlowTab\(tabId\) \{\s*if \(tabOperationActive\(tabId\)\) return;/);
-  assert.match(worker, /async function ensureFlowTabLocale\(tabId\) \{\s*if \(tabOperationActive\(tabId\)\) return;/);
+  assert.doesNotMatch(worker, /flowTabLocales|rememberFlowTabLocale|storedFlowTabLocale/);
 });

@@ -11,14 +11,19 @@
       const tiles = root.FlowTiles;
       const agent = root.FlowAgent;
       if (name === "flow.generation.upload.preflight") {
-        await nav.ensureFlowProjectEditor();
+        const deadline = root.FlowUiDeadline?.makeDeadline(command, 20_000, 5_000) || Date.now() + 15_000;
+        await nav.ensureFlowProjectEditor({ deadline, signal: command.signal });
+        if (typeof root.FlowScreenState?.assertOperationReady !== "function") {
+          throw this.error("FLOW_SCREEN_PREFLIGHT_UNAVAILABLE", "Flow screen detection is unavailable. Upload was not started.", false, false);
+        }
+        root.FlowScreenState.assertOperationReady();
         const state = menu.nativeRead("flowState");
         if (!state.signedIn || !state.inProject) throw this.error("FLOW_NOT_READY", state.hint || "Open a signed-in Flow project first.", true);
         const fileInputs = [...document.querySelectorAll('input[type="file"]')];
         return {
           ready: true,
           trustedFileSelection: false,
-          hasComposer: Boolean(document.querySelector(".ProseMirror")),
+          hasComposer: Boolean(root.getVisibleFlowPromptEditor?.()),
           hasUploadButton: Boolean(components.findAddMediaButton()),
           fileInputCount: fileInputs.length,
         };
@@ -74,7 +79,7 @@
         const kind = payload.kind === "video" ? "video" : "image";
         if (!file || file.name !== assetName) throw this.error("FLOW_TRANSFER_UNKNOWN", "The staged media file is missing or its name does not match.", true);
         const deadline = root.FlowUiDeadline?.makeDeadline(command, 75_000, 15_000) || Date.now() + 60_000;
-        const receipt = await components.uploadStagedFlowMedia(file, kind, command, { deadline });
+        const receipt = await components.uploadStagedFlowMedia(file, kind, command, { deadline, signal: command.signal });
         // Upload can leave Flow's asset picker or upload menu mounted while
         // the media tile finishes rendering. Close and verify it before the
         // caller starts image/video generation or another DOM operation.

@@ -14,6 +14,7 @@ export interface FlowState {
     configuredSignedOutIndicatorCount?: number;
     configuredProjectErrorIndicatorCount?: number;
     projectHomeRecoveryLinkCount?: number;
+    mediaViewerOwnerCount?: number;
     visibleAlertCount?: number;
     errorMessage?: string;
   };

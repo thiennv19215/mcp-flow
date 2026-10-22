@@ -1,11 +1,10 @@
-// Flow automation uses one stable English UI contract. Localized selector
-// aliases remain useful for diagnostics, but navigation must stay in English.
-export const FLOW_LOCALES = Object.freeze(["en"]);
+// Keep Flow's locale optional. Google Flow reads `hl` from the URL when set,
+// and otherwise uses the account/browser language preference.
+export const FLOW_LOCALES = Object.freeze(["en", "vi"]);
 
 export function normalizeFlowLocale(value) {
-  return FLOW_LOCALES.includes(String(value || "").trim().toLowerCase())
-    ? String(value).trim().toLowerCase()
-    : null;
+  const locale = String(value || "").trim().replaceAll("_", "-").toLowerCase();
+  return /^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/.test(locale) ? locale : null;
 }
 
 export function flowLocaleFromUrl(value) {
@@ -19,20 +18,23 @@ export function flowLocaleFromUrl(value) {
 export function flowDocumentMatchesLocale(documentLanguage, locale) {
   const expected = normalizeFlowLocale(locale);
   const actual = String(documentLanguage || "").trim().toLowerCase().split(/[-_]/, 1)[0];
-  return Boolean(expected && actual === expected);
+  // An omitted or unavailable requested locale means Flow owns language
+  // selection; do not reject a valid rendered locale in that case.
+  return expected ? actual === expected.split("-", 1)[0] : Boolean(actual);
 }
 
-export function flowProjectUrl(projectId, locale = "en") {
+export function flowHomeUrl(locale) {
+  const url = new URL("https://flow.google.com/");
   const language = normalizeFlowLocale(locale);
-  if (!language) throw new Error("Flow automation language must be en.");
-  const url = new URL(`https://flow.google.com/project/${projectId}`);
-  url.searchParams.set("hl", "en");
+  if (locale != null && locale !== "" && !language) throw new Error("Flow language must be a valid locale tag such as en or vi.");
+  if (language) url.searchParams.set("hl", language);
   return url.href;
 }
 
-export function forceEnglishFlowUrl(value) {
-  const url = new URL(value);
-  if (url.origin !== "https://flow.google.com") throw new Error("Expected a Flow URL.");
-  url.searchParams.set("hl", "en");
+export function flowProjectUrl(projectId, locale) {
+  const language = normalizeFlowLocale(locale);
+  if (locale != null && locale !== "" && !language) throw new Error("Flow language must be a valid locale tag such as en or vi.");
+  const url = new URL(`https://flow.google.com/project/${projectId}`);
+  if (language) url.searchParams.set("hl", language);
   return url.href;
 }

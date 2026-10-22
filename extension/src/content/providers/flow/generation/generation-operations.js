@@ -4,7 +4,7 @@
       this.driver = driver;
     }
     supports(operation) {
-      return ["flow.generation.submit", "flow.generation.observe"].includes(operation);
+      return ["flow.generation.submit", "flow.generation.observe", "flow.generation.manual.confirm", "flow.generation.manual.cancel"].includes(operation);
     }
     error(...args) {
       return this.driver.error(...args);
@@ -37,6 +37,58 @@
       const tiles = root.FlowTiles;
       const menu = root.FlowMediaMenu;
       const agent = root.FlowAgent;
+      if (name === "flow.generation.manual.confirm") {
+        const attemptId = String(payload.attemptId || "");
+        const entry = tiles.nativeFlowCorrelationMap().get(attemptId);
+        if (!entry) throw this.error("FLOW_MANUAL_SUBMIT_SESSION_LOST", "The prepared Flow submit observer is no longer active. Check Flow for a submitted generation before retrying.", false, true);
+        if (entry.interfered && !entry.requestSeen) {
+          tiles.disarmNativeFlowCorrelation(attemptId);
+          throw this.error("FLOW_MANUAL_SUBMIT_INTERFERENCE", "The Flow prompt changed during manual submit, so the request cannot be safely matched. Check the project before retrying.", false, true);
+        }
+        if (!entry.requestSeen) return { waitingForUser: true };
+        const prepared = payload.prepared && typeof payload.prepared === "object" ? payload.prepared : {};
+        const rawReceipt = [...entry.receipts].reverse().find(item => item?.stage === "request_seen");
+        if (!rawReceipt) throw this.error("FLOW_MANUAL_SUBMIT_RECEIPT_MISSING", "Flow request activity was observed but its correlated submit receipt is incomplete. Check Flow before retrying.", false, true);
+        const receipt = {
+          stage: "request_seen",
+          attemptId: entry.attemptId,
+          requestOrdinal: Number.isInteger(rawReceipt.requestOrdinal) ? rawReceipt.requestOrdinal : null,
+          requestCardinality: Number.isInteger(rawReceipt.requestCardinality) ? rawReceipt.requestCardinality : null,
+          matchKind: typeof rawReceipt.matchKind === "string" ? rawReceipt.matchKind : null,
+        };
+        if (prepared.submitOnly === true) tiles.releaseSubmitOnlyCorrelation?.(attemptId, true);
+        return {
+          submitted: true,
+          before: Array.isArray(prepared.before) ? prepared.before : [],
+          type: prepared.type === "image" ? "image" : "video",
+          expectedCount: Math.max(1, Math.min(4, Number(prepared.expectedCount) || 1)),
+          credits: Number.isFinite(prepared.credits) ? prepared.credits : null,
+          correlationAttemptId: attemptId,
+          requestDispatched: true,
+          manualSubmit: true,
+          correlationReceipt: receipt,
+        };
+      }
+      if (name === "flow.generation.manual.cancel") {
+        const attemptId = String(payload.attemptId || "");
+        const entry = tiles.nativeFlowCorrelationMap().get(attemptId);
+        if (!entry) throw this.error("FLOW_MANUAL_SUBMIT_SESSION_LOST", "The prepared Flow submit observer is no longer active. Check Flow before retrying.", false, true);
+        if (entry?.requestSeen) throw this.error("FLOW_MANUAL_SUBMIT_ALREADY_DISPATCHED", "Flow already dispatched this manual submit; it cannot be cancelled. Check the project for its result.", false, true);
+        let promptCleared = false;
+        const editor = root.getVisibleFlowPromptEditor?.();
+        if (!editor) throw this.error("FLOW_MANUAL_SUBMIT_STATE_UNKNOWN", "The Flow prompt editor is no longer visible. Check Flow before cancelling or retrying.", false, true);
+        const currentPrompt = root.FlowEditor?.getEditorUserText?.(editor) ?? "";
+        if (!currentPrompt && typeof payload.expectedPrompt === "string" && payload.expectedPrompt.length) {
+          throw this.error("FLOW_MANUAL_SUBMIT_STATE_UNKNOWN", "The prompt is already empty, so Flow may have accepted the manual submit. Check Flow before retrying.", false, true);
+        }
+        if (typeof payload.expectedPrompt === "string" && currentPrompt === payload.expectedPrompt) {
+          promptCleared = await root.FlowEditor.clearEditorTextPreservingChips(editor);
+          if (!promptCleared) throw this.error("FLOW_MANUAL_SUBMIT_CANCEL_UNCONFIRMED", "Flow could not clear the exact prepared prompt, so the manual job remains active.", false, false);
+        }
+        if (entry.requestSeen) throw this.error("FLOW_MANUAL_SUBMIT_ALREADY_DISPATCHED", "Flow dispatched this manual submit while it was being cancelled; check the project for its result.", false, true);
+        tiles.disarmNativeFlowCorrelation(attemptId);
+        return { cancelled: true, promptCleared, promptPreserved: !promptCleared };
+      }
       if (name === "flow.generation.submit") {
         if (payload.voice && (payload.type !== "video" || payload.firstFrame || payload.lastFrame)) {
           throw this.error("FLOW_VOICE_MODE_UNSUPPORTED", "Flow voice chips are available for text-to-video generation only; no composer changes were made.", false, false);
@@ -64,7 +116,12 @@
           } catch {}
           return error;
         };
-        const requireFlowTime = (operation, outcomeUnknown = false) => root.FlowUiDeadline?.requireTime(flowDeadline, operation, outcomeUnknown, flowAbort.signal);
+        const requireFlowTime = (operation, outcomeUnknown = false) => {
+          if (command.signal?.aborted) {
+            throw root.flowError("FLOW_OPERATION_CANCELLED", "The Flow queue stopped while " + operation + ". " + (outcomeUnknown ? "The submit outcome may be unknown; inspect Flow before retrying." : "No generation was submitted."), false, outcomeUnknown);
+          }
+          return root.FlowUiDeadline?.requireTime(flowDeadline, operation, outcomeUnknown, flowAbort.signal);
+        };
         const runFlowStage = async (label, operation, outcomeUnknown = false) => {
           requireFlowTime(label, outcomeUnknown);
           tiles.emitFlowProgress(command, `Flow submit: ${label}`);
@@ -76,18 +133,31 @@
               reject(root.flowError("FLOW_OPERATION_TIMEOUT", `Stopped waiting during Flow submit stage: ${label}. That page step may still be running; no later submit stage will start. Inspect Flow before retrying.`, false, outcomeUnknown));
             }, Math.max(1, remaining));
           });
+          let onAbort;
+          const cancelled = new Promise((_, reject) => {
+            onAbort = () => {
+              flowAbort.abort(command.signal?.reason);
+              reject(root.flowError("FLOW_OPERATION_CANCELLED", "The Flow queue stopped during " + label + ". " + (outcomeUnknown ? "The submit outcome may be unknown; inspect Flow before retrying." : "No generation was submitted."), false, outcomeUnknown));
+            };
+            if (command.signal?.aborted) onAbort();
+            else command.signal?.addEventListener("abort", onAbort, { once: true });
+          });
           let result;
           try {
             result = await Promise.race([
               Promise.resolve().then(() => operation({ deadline: flowDeadline, signal: flowAbort.signal })),
               timeout,
+              cancelled,
             ]);
           } catch (error) {
-            if (flowAbort.signal.aborted && error?.code !== "FLOW_OPERATION_TIMEOUT") {
+            if (flowAbort.signal.aborted && !["FLOW_OPERATION_TIMEOUT", "FLOW_OPERATION_CANCELLED"].includes(error?.code)) {
               throw root.flowError("FLOW_OPERATION_TIMEOUT", `Stopped waiting during Flow submit stage: ${label}. That page step may still be running; no later submit stage will start. Inspect Flow before retrying.`, false, outcomeUnknown);
             }
             throw error;
-          } finally { clearTimeout(timer); }
+          } finally {
+            clearTimeout(timer);
+            command.signal?.removeEventListener("abort", onAbort);
+          }
           requireFlowTime(label, outcomeUnknown);
           return result;
         };
@@ -130,7 +200,8 @@
         const expectedCharacterIds = [];
         const expectedVideoReferenceIds = [];
         let confirmedAttachmentCount = 0;
-        if (root.scrollContainer?.()) root.scrollContainer().scrollTop = 0;
+        await runFlowStage("stabilizing the Flow results grid before the generation baseline", ({ deadline, signal }) =>
+          tiles.stabilizeFlowResultViewport({ deadline, signal }));
         const before = tiles.collectNativeMedia().map(item => item.id || `title:${item.title}`);
         const activeAgent = root.flowButton?.("Agent");
         if (activeAgent?.getAttribute("aria-pressed") === "true") await runFlowStage("switching Agent mode off", ({ signal }) => agent.setNativeAgentMode(false, { signal, deadline: flowDeadline }));
@@ -313,6 +384,20 @@
             false
           );
         }
+        if (payload.manualSubmit === true || payload.manual_submit === true) {
+          tiles.emitFlowProgress(command, "Prompt and settings are ready in Flow. Click Create in Flow, then choose Continue in the extension queue.");
+          return {
+            submitted: false,
+            preparedForManualSubmit: true,
+            before,
+            prompt: payload.prompt,
+            type: payload.type === "image" ? "image" : "video",
+            expectedCount: variants,
+            credits: Number.isFinite(credits) ? credits : null,
+            correlationAttemptId,
+            submitOnly: payload.submitOnly === true || payload.submit_only === true,
+          };
+        }
         try { requireFlowTime("activating the Flow submit button"); }
         catch (error) {
           if (correlationAttemptId) tiles.disarmNativeFlowCorrelation(correlationAttemptId);
@@ -343,6 +428,7 @@
         let lastSubmitProgress = "";
 
         while (Date.now() < submitDeadline) {
+          requireFlowTime("waiting for Flow to dispatch the generation request", true);
           const correlationEntry = correlationAttemptId && tiles.nativeFlowCorrelationMap().get(correlationAttemptId);
           if (!correlationEntry) {
             tiles.disarmNativeFlowCorrelation(correlationAttemptId);
@@ -370,7 +456,8 @@
             tiles.emitFlowProgress(command, progress);
             lastSubmitProgress = progress;
           }
-          await root.wait?.(250);
+          if (root.FlowUiDeadline?.boundedWait) await root.FlowUiDeadline.boundedWait(250, submitDeadline, "waiting for Flow request dispatch", true, command.signal);
+          else await root.wait?.(250);
         }
 
         if (!acknowledged) {
@@ -414,11 +501,13 @@
         const correlationEntry = correlationAttemptId ? tiles.nativeFlowCorrelationMap().get(correlationAttemptId) : null;
         let priorProgress = "", lastTitleOnlyResult = "";
         let retriesLeft = Math.max(0, Math.min(3, Number(payload.retries ?? 1)));
+        const retriedTiles = new Set();
         const observeStartedAt = Date.now();
         let renderObservedInFlight = false;
 
         try {
           while (Date.now() < deadline) {
+            if (command.signal?.aborted) throw this.error("FLOW_OPERATION_CANCELLED", "The Flow queue stopped while waiting for generation results. The generation was already submitted; inspect Flow before retrying.", false, true);
             if (correlationEntry?.interfered) {
               throw this.error("FLOW_GENERATION_INTERFERENCE", "A trusted interaction changed the Flow composer before this generation request was observed. The result cannot be safely attributed; inspect the project before retrying.", false, true);
             }
@@ -482,8 +571,12 @@
               if (classified && !classified.retryable) {
                 throw this.error(classified.code, classified.message, false, false);
               }
-              const retryable = failed.find(item => item);
-              if (retryable && retriesLeft > 0 && await tiles.retryNativeErrorTile(retryable)) {
+              const retryable = failed.find(item => !retriedTiles.has(tiles.retryIdentity?.(item)));
+              if (retryable && retriesLeft > 0 && await tiles.retryNativeErrorTile(retryable, {
+                attempted: retriedTiles,
+                deadline,
+                timeoutMs: Math.min(5000, Math.max(250, deadline - Date.now())),
+              })) {
                 retriesLeft--;
                 tiles.emitFlowProgress(command, `Flow thất bại render; đang thử lại (${Math.max(0, Number(payload.retries ?? 1) - retriesLeft)}/${Number(payload.retries ?? 1)})`);
                 continue;
@@ -493,7 +586,7 @@
             }
 
             if (Date.now() - observeStartedAt > 5000 && fresh.length === 0 && !renderObservedInFlight) {
-              const composerBox = (typeof root.flowQuery === "function" ? root.flowQuery("editor") : null) || document.querySelector(".ProseMirror");
+              const composerBox = root.getVisibleFlowPromptEditor?.() || (typeof root.flowQuery === "function" ? root.flowQuery("editor") : null);
               const submitBtn = editor.getFlowSubmitButton() || root.flowButton?.("Start generation");
               const hasText = composerBox && Boolean(editor.getEditorUserText(composerBox));
               const buttonReady = submitBtn && !submitBtn.disabled && submitBtn.getAttribute("aria-disabled") !== "true";

@@ -2,6 +2,8 @@
 
 The Chrome extension owns Flow operations and its queue. A separate local stdio MCP process remains available for AI clients. The VPS service handles account and device verification only. Unsupported extension inputs fail before dispatch. See [ARCHITECTURE.md](ARCHITECTURE.md) and [NATIVE-MIGRATION-RUNBOOK.md](NATIVE-MIGRATION-RUNBOOK.md) for operation coverage and limitations.
 
+The side panel follows the Toby-style layout with local Create, Workflows, Prompts, Library, Tasks, History, Status, Logs, and Settings tabs. Prompts and local history use `chrome.storage.local`; Flow actions still enter the shared extension queue and execute through native DOM operations in the selected Flow tab.
+
 Windows: double-click **Start Flow.cmd** to build and start Studio in the background. Double-click **Stop Flow.cmd** to stop that Studio and release port **18899** (or `FLOW_MCP_PORT`). Logs are saved under `%LOCALAPPDATA%\FlowMCP\port-18899`. If another launcher already owns the port, close it first so both shortcuts can manage the same process.
 
 Drive **Google Flow** (flow.google.com) from Claude, Codex or any other MCP app, or from a local control
@@ -218,9 +220,9 @@ Output lands in `~/flow-mcp-out/<project>/scene-NN.ext`.
   invisible reCAPTCHA; this drives the real interface at human pace and does nothing to evade it.
 - Before each video generation the server reads Flow's own credit quote and skips the scene if it exceeds
   `max_credits` (default 25). Image generation skips this quote check.
-- Any Google account language works. The server finds Flow's buttons by their English names, so its
-  Chrome window always shows Flow in English (it adds `?hl=en` to the address). Your account's own
-  language setting is never changed, and prompts can be written in any language.
+- Flow keeps the locale already active in the selected tab; the extension does not rewrite the URL
+  to force English. `flow_open_project` can optionally take a locale such as `vi` or `en`.
+  Prompts can be written in any language.
 - Environment variables: `FLOW_MCP_PORT` (18899), `FLOW_MCP_OUTPUT`,
   `FLOW_MCP_HOME`, `FLOW_MCP_PAUSE_MIN_S`,
   `FLOW_MCP_PAUSE_MAX_S`.

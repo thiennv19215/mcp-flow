@@ -8,7 +8,8 @@ const mayHaveDispatched = value => value?.outcomeUnknown === true ||
 
 /**
  * A persistent, sequential queue for Flow work in the MV3 service worker.
- * add() only stages work. The extension UI must call start() or resume().
+ * add() only stages work. The extension UI bridge starts the queue after a
+ * normal add; callers that intentionally pause the queue can resume it later.
  */
 export class FlowJobQueue {
   constructor(runner, { storageKey = STORAGE_KEY, storage = globalThis.chrome?.storage?.local, minDelayMs = 5_000, maxDelayMs = 10_000 } = {}) {
@@ -61,6 +62,7 @@ export class FlowJobQueue {
       jobs,
       total: jobs.length,
       pending: jobs.filter(job => job.status === "pending").length,
+      waitingForUser: jobs.filter(job => job.status === "waiting_for_user").length,
       completed: jobs.filter(job => job.status === "completed").length,
       failed: jobs.filter(job => job.status === "failed").length,
       cancelled: jobs.filter(job => job.status === "cancelled").length,
@@ -155,6 +157,21 @@ export class FlowJobQueue {
     job.metadata = { ...(job.metadata || {}), ...(patch && typeof patch === "object" ? clone(patch) : {}) };
     await this.#persist();
     this.#emit("metadata-updated");
+    return clone(job);
+  }
+
+  async updateProgress(id, progress) {
+    await this.ready;
+    const job = this.jobs.find(item => item.id === String(id));
+    if (!job || job.status !== "running") return null;
+    const next = progress && typeof progress === "object"
+      ? clone(progress)
+      : { phase: "render", message: String(progress || "") };
+    const previous = job.progress && typeof job.progress === "object" ? job.progress : {};
+    if (previous.phase === next.phase && previous.message === next.message && previous.percent === next.percent) return clone(job);
+    job.progress = next;
+    await this.#persist();
+    this.#emit("job-progress");
     return clone(job);
   }
 
@@ -273,6 +290,15 @@ export class FlowJobQueue {
       this.#emit("job-cancelled");
       return { cancelled: true, active: false, job: clone(job) };
     }
+    if (job.status === "waiting_for_user") {
+      job.status = "cancelled";
+      job.outcomeUnknown = false;
+      job.retrySafe = false;
+      job.finishedAt = Date.now();
+      await this.#persist();
+      this.#emit("manual-job-cancelled");
+      return { cancelled: true, active: false, job: clone(job) };
+    }
     if (job.status === "running") {
       // Flow page actions do not support reliable cancellation after dispatch.
       // Stop later jobs, but let the active task report its actual outcome.
@@ -287,11 +313,43 @@ export class FlowJobQueue {
     return { cancelled: false, active: false, job: clone(job) };
   }
 
+  async continueManual(id) {
+    await this.ready;
+    if (this.running) await this.drainPromise?.catch(() => {});
+    const job = this.jobs.find(item => item.id === String(id));
+    if (!job || job.status !== "waiting_for_user") return null;
+    job.status = "pending";
+    job.finishedAt = undefined;
+    job.metadata = { ...(job.metadata || {}), manualSubmitPhase: "confirm" };
+    job.progress = { phase: "checking_user_submit", message: "Checking whether Flow accepted the manual submit…" };
+    await this.#persist();
+    this.#emit("manual-submit-continued");
+    return this.resume();
+  }
+
+  async failManual(id, error) {
+    await this.ready;
+    const job = this.jobs.find(item => item.id === String(id));
+    if (!job || job.status !== "waiting_for_user") return null;
+    job.status = "failed";
+    job.outcomeUnknown = true;
+    job.retrySafe = false;
+    job.error = String(error?.message || error || "The manual Flow submit session was lost; inspect Flow before retrying.").slice(0, 2000);
+    job.errorCode = String(error?.code || "FLOW_MANUAL_SUBMIT_OUTCOME_UNKNOWN");
+    job.finishedAt = Date.now();
+    this.paused = true;
+    this.stopped = false;
+    await this.#persist();
+    this.#emit("manual-submit-outcome-unknown");
+    return this.#snapshot();
+  }
+
   async remove(id) {
     await this.ready;
     const index = this.jobs.findIndex(job => job.id === id);
     if (index < 0 || this.jobs[index].status === "running") return false;
-    if (this.jobs.some(job => job.metadata?.dependsOnId === id && ["pending", "running"].includes(job.status))) return false;
+    if (this.jobs[index].status === "waiting_for_user") return false;
+    if (this.jobs.some(job => job.metadata?.dependsOnId === id && ["pending", "running", "waiting_for_user"].includes(job.status))) return false;
     this.jobs.splice(index, 1);
     await this.#persist();
     this.#emit("removed");
@@ -300,7 +358,7 @@ export class FlowJobQueue {
 
   async clear() {
     await this.ready;
-    if (this.running || this.controller) throw new Error("Stop the active Flow operation before clearing the queue.");
+    if (this.running || this.controller || this.jobs.some(job => job.status === "waiting_for_user")) throw new Error("Cancel the active or waiting Flow operation before clearing the queue.");
     this.jobs = [];
     this.paused = false;
     this.stopped = true;
@@ -358,9 +416,20 @@ export class FlowJobQueue {
             this.#emit("job-progress");
           },
         };
+        let waitingForUser = false;
         try {
           const result = await this.runner(clone(job), hooks);
-          if (mayHaveDispatched(result) && result?.completed !== true) {
+          if (result?.waitingForUser === true) {
+            waitingForUser = true;
+            job.status = "waiting_for_user";
+            job.result = clone(result);
+            job.outcomeUnknown = false;
+            job.requestDispatched = false;
+            job.progress = result.progress || { phase: "waiting_for_user", message: "Prompt is ready. Submit it in Flow, then continue this job from the extension." };
+            job.metadata = { ...(job.metadata || {}), manualSubmitPhase: result.phase === "confirm" ? "confirm" : "prepared", ...(Number.isInteger(result.flowTabId) ? { flowTabId: result.flowTabId } : {}) };
+            this.paused = true;
+            this.stopped = false;
+          } else if (mayHaveDispatched(result) && result?.completed !== true) {
             job.status = "failed";
             job.outcomeUnknown = true;
             job.error = String(result?.error || "Flow may have accepted this operation; inspect the project before retrying.");
@@ -374,9 +443,10 @@ export class FlowJobQueue {
           const error = asError(thrown);
           const explicitlySafe = error?.outcomeUnknown === false || error?.outcome_unknown === false;
           const unknown = mayHaveDispatched(error) || (!explicitlySafe && this.stopRequested && this.controller?.signal.aborted);
+          const downloadFailure = Boolean(error?.downloadError) || String(error?.code || "").toUpperCase().includes("DOWNLOAD");
           job.status = "failed";
           job.outcomeUnknown = unknown;
-          job.retrySafe = !unknown;
+          job.retrySafe = !unknown && !downloadFailure;
           if (error?.requestDispatched === true || error?.request_dispatched === true) job.requestDispatched = true;
           if (error?.serverAcceptanceObserved === true) job.serverAcceptanceObserved = true;
           if (typeof error?.credits === "number") job.credits = error.credits;
@@ -384,11 +454,12 @@ export class FlowJobQueue {
           job.error = error.message.slice(0, 2000);
           job.errorCode = error.code || (unknown ? "FLOW_SUBMIT_OUTCOME_UNKNOWN" : "FLOW_JOB_FAILED");
         }
-        job.finishedAt = Date.now();
+        if (!waitingForUser) job.finishedAt = Date.now();
         this.controller = null;
         this.currentJobId = null;
         await this.#persist();
-        this.#emit("job-finished");
+        this.#emit(waitingForUser ? "waiting-for-user" : "job-finished");
+        if (waitingForUser) break;
         completedOne = true;
       }
     } finally {

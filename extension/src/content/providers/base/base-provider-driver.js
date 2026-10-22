@@ -19,6 +19,9 @@
       if (!this.supports(operation)) {
         return Promise.reject(this.error("UNSUPPORTED_OPERATION", `${this.key} does not implement ${operation}.`));
       }
+      if (command?.signal?.aborted) {
+        return Promise.reject(this.error("FLOW_OPERATION_CANCELLED", "The Flow operation was cancelled before it started.", false, false));
+      }
       if (operation !== "flow.state" && operation !== "flow.context" && operation !== "flow.projects.list" && operation !== "flow.project.create" && !this.context.projectId) {
         return Promise.reject(this.error("FLOW_PROJECT_REQUIRED", "Open a project before running this operation.", true));
       }
@@ -37,7 +40,10 @@
         ["routePrefix", this.context.routePrefix || "", "FLOW_ROUTE_MISMATCH"],
       ];
       for (const [field, actual, code] of checks) {
-        if (expected[field] != null && expected[field] !== actual) {
+        const shouldCheck = field === "projectId"
+          ? Object.prototype.hasOwnProperty.call(expected, field)
+          : expected[field] != null;
+        if (shouldCheck && expected[field] !== actual) {
           // Allow "flow" and "flow_v2" compatibility
           if (field === "driverKey" && ((expected[field] === "flow_v2" && actual === "flow") || (expected[field] === "flow" && actual === "flow_v2"))) {
             continue;
@@ -68,9 +74,16 @@
     "flow.context", "flow.state", "flow.projects.list", "flow.project.create", "flow.assets.list", "flow.characters.list",
     "flow.generation.upload.preflight", "flow.file.upload.begin", "flow.file.upload.chunk",
     "flow.file.upload.finish", "flow.file.upload.abort", "flow.media.upload",
-    "flow.generation.submit", "flow.generation.observe", "flow.references.attach", "flow.references.clear", "flow.prompt.clear", "flow.voices.options", "flow.asset.download",
+    "flow.generation.submit", "flow.generation.observe", "flow.generation.manual.confirm", "flow.generation.manual.cancel", "flow.references.attach", "flow.references.clear", "flow.references.remove", "flow.prompt.clear", "flow.voices.options", "flow.asset.download",
     "flow.asset.rename", "flow.asset.trash", "flow.character.create", "flow.character.edit",
     "flow.edit.run", "flow.agent.batch", "flow.continue.run",
+    // Explicit Toby-compatible DOM primitives. Workflow operations compose
+    // these helpers, while callers can also inspect or drive one page step.
+    "flow.editor.get", "flow.editor.clear", "flow.prompt.insert",
+    "flow.generation.settings.apply", "flow.page.settings.apply",
+    "flow.tiles.enumerate", "flow.tiles.status", "flow.generation.wait",
+    "flow.gallery.scan",
+    "flow.components.list", "flow.components.select", "flow.generation.preflight",
   ]);
 
   root.BaseProviderDriver = BaseProviderDriver;

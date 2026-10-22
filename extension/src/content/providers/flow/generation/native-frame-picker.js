@@ -16,6 +16,14 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
   const requireTime = (operation, outcomeUnknown = false) => globalThis.FlowUiDeadline?.requireTime(deadline, operation, outcomeUnknown, config.signal);
   const boundedWait = (ms, operation, outcomeUnknown = false) => globalThis.FlowUiDeadline?.boundedWait(ms, deadline, operation, outcomeUnknown, config.signal);
   const normalize = value => String(value || "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
+  const fold = value => root.normalizeFlowUiText?.(value) || String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+  const explicitEmptyState = list => {
+    if (!list || listOptions(list).length) return false;
+    const state = [list.getAttribute?.("aria-label"), list.getAttribute?.("data-state"), list.getAttribute?.("data-testid"), list.innerText, list.textContent]
+      .map(fold).join(" ");
+    return /no (?:assets|items|results)(?: were)? found|nothing (?:is )?here|no results|khong (?:co|tim thay)|khong tim thay|danh sach trong|khong co ket qua/.test(state) ||
+      list.querySelector?.('[data-empty="true"],[aria-label*="empty" i],[data-testid*="empty" i]') != null;
+  };
   const categorySynonyms = { all: ["all", "tất cả", "tat ca"], ingredients: ["ingredients", "thành phần", "nguyên liệu"], uploads: ["uploads", "tải lên", "tai len"] };
   requireTime("opening the Flow asset picker");
   if (!slot) return globalThis.FlowReferenceActions.attach(assetName, undefined, { ...config, deadline });
@@ -40,7 +48,7 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
         [...document.querySelectorAll('[role="progressbar"],[aria-busy="true"]')].some(visible);
       if (list && !loading) {
         const options = listOptions(list);
-        if (options.length || /no (?:assets|items) found/i.test(list.innerText || "")) return list;
+        if (options.length || explicitEmptyState(list)) return list;
         if (!stableAt) stableAt = Date.now();
         if (Date.now() - stableAt >= 700) return list;
       } else stableAt = 0;

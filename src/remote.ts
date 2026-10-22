@@ -205,6 +205,7 @@ export class RemoteCore implements Core {
   assets = (a: Parameters<Core["assets"]>[0]) => this.request("assets", a);
   attach_references = (a: Parameters<Core["attach_references"]>[0]) => this.request("attach_references", a);
   clear_references = (a: Parameters<Core["clear_references"]>[0]) => this.request("clear_references", a);
+  remove_reference_kind = (a: Parameters<Core["remove_reference_kind"]>[0]) => this.request("remove_reference_kind", a);
   upload_media = (a: Parameters<Core["upload_media"]>[0]) => this.stagedRequest("upload_media", a);
   projects = () => this.request("projects", {});
   voice_options = () => this.request("voice_options", {});
@@ -257,8 +258,14 @@ export class ForwardingCore implements Core {
 
   async status(a: Parameters<Core["status"]>[0]): Promise<unknown> {
     const result = await this.active().status(a);
-    if (!this.remote || !result || typeof result !== "object" || Array.isArray(result)) return result;
-    return { ...(result as object), studio: this.remoteBaseUrl };
+    if (!result || typeof result !== "object" || Array.isArray(result)) return result;
+    return {
+      ...(result as object),
+      execution_target: this.remote
+        ? { mode: "remote", backend: this.remoteBaseUrl }
+        : { mode: "local" },
+      ...(this.remote ? { studio: this.remoteBaseUrl } : {}),
+    };
   }
   observer_health = (a: Parameters<Core["observer_health"]>[0]) => this.active().observer_health(a);
   clear_prompt = (a: Parameters<Core["clear_prompt"]>[0]) => this.active().clear_prompt(a);
@@ -269,6 +276,7 @@ export class ForwardingCore implements Core {
   assets = (a: Parameters<Core["assets"]>[0]) => this.active().assets(a);
   attach_references = (a: Parameters<Core["attach_references"]>[0]) => this.active().attach_references(a);
   clear_references = (a: Parameters<Core["clear_references"]>[0]) => this.active().clear_references(a);
+  remove_reference_kind = (a: Parameters<Core["remove_reference_kind"]>[0]) => this.active().remove_reference_kind(a);
   upload_media = (a: Parameters<Core["upload_media"]>[0]) => this.active().upload_media(a);
   projects = () => this.active().projects();
   voice_options = () => this.active().voice_options();

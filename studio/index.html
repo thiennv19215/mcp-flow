@@ -1103,6 +1103,8 @@ const STUDIO_I18N = {
     serverOffline: "Mất kết nối máy chủ",
     extensionOffline: "Flow chưa kết nối",
     extensionUnresponsive: "Flow extension không phản hồi",
+    targetLocal: "Đích: extension trên máy này",
+    targetRemote: "Đích: extension từ",
     nothingQueued: "Chưa có tác vụ nào trong hàng đợi.",
     credits: "credits",
     tabs: {
@@ -1128,6 +1130,8 @@ const STUDIO_I18N = {
     serverOffline: "Server offline",
     extensionOffline: "Flow is not connected",
     extensionUnresponsive: "Flow extension is not responding",
+    targetLocal: "Target: extension on this computer",
+    targetRemote: "Target: extension from",
     nothingQueued: "Nothing queued yet.",
     credits: "credits",
     tabs: {
@@ -1178,9 +1182,13 @@ function renderStatus(st) {
   const cls = !f.signedIn || !f.inProject ? "down" : active ? "rolling" : "ready";
   const dict = STUDIO_I18N[studioLang] || STUDIO_I18N.vi;
   const text = f.available === false ? dict.extensionUnresponsive : !f.signedIn ? dict.notSignedIn : !f.inProject ? dict.noProject : active ? dict.working : dict.ready;
+  const target = st.execution_target;
+  const targetLabel = target?.mode === "remote"
+    ? `${dict.targetRemote} ${(() => { try { return new URL(target.backend).host; } catch { return "remote backend"; } })()}`
+    : target?.mode === "local" ? dict.targetLocal : "";
   if (f.credits_remaining !== undefined) renderStatus.credits = f.credits_remaining;
   if (f.plan) renderStatus.plan = f.plan;
-  $("#status").innerHTML = `<span class="pill"><i class="tally ${cls}"></i>${text}</span>${renderStatus.plan ? `<span class="pill">${esc(renderStatus.plan)}</span>` : ""}${renderStatus.credits !== undefined ? `<span class="pill">${renderStatus.credits.toLocaleString()} credits</span>` : ""}`;
+  $("#status").innerHTML = `<span class="pill"><i class="tally ${cls}"></i>${text}</span>${targetLabel ? `<span class="pill">${esc(targetLabel)}</span>` : ""}${renderStatus.plan ? `<span class="pill">${esc(renderStatus.plan)}</span>` : ""}${renderStatus.credits !== undefined ? `<span class="pill">${renderStatus.credits.toLocaleString()} credits</span>` : ""}`;
   $("#hint").innerHTML = f.hint ? `<div class="hint">${esc(f.hint)}</div>` : "";
   $("#pacing").innerHTML = st.pacing ? `<div class="pacing">⏱ ${esc(st.pacing)}</div>` : "";
   const jobs = [...st.jobs].reverse();

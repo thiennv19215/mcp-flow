@@ -73,18 +73,20 @@
       if (name === "flow.asset.download") {
         const prefix = String(payload.name || "").toLowerCase();
         if (!prefix && !payload.id) throw this.error("FLOW_INVALID_ARGUMENT", "Asset name or media id is required.");
-        if (payload.id) return menu.triggerFlowDownload(String(payload.name || ""), payload.quality, String(payload.id));
-        const assets = await menu.scanNativeAssets();
+        const downloadOptions = { signal: command.signal, timeoutMs: command.timeoutMs };
+        if (payload.id) return menu.triggerFlowDownload(String(payload.name || ""), payload.quality, String(payload.id), downloadOptions);
+        const assets = await menu.scanNativeAssets({ signal: command.signal });
         const candidates = assets.filter(a => a.name.toLowerCase().startsWith(prefix));
         const matches = [];
         for (const a of candidates) {
+          if (command.signal?.aborted) throw this.error("FLOW_OPERATION_CANCELLED", "The Flow queue stopped while locating the asset to download; no download was started.", false, false);
           const count = await tiles.countFlowTitleAcrossGrid(a.name);
           for (let i = 0; i < count; i++) matches.push(a);
           if (matches.length > 1) break;
         }
         if (!matches.length) throw this.error("FLOW_ASSET_NOT_FOUND", `No asset title begins with "${payload.name}".`, true);
         if (matches.length > 1) throw this.error("FLOW_AMBIGUOUS_ASSET", `${matches.length} assets begin with "${payload.name}"; no download was started.`, true);
-        return menu.triggerFlowDownload(matches[0].name, payload.quality);
+        return menu.triggerFlowDownload(matches[0].name, payload.quality, undefined, downloadOptions);
       }
 
       if (name === "flow.state") {
@@ -101,13 +103,52 @@
         if (payload.detailed && state.signedIn) {
           const account = root.flowButton?.("Account details");
           if (account) {
-            account.click(); await root.wait?.(500);
-            const creditLink = [...document.querySelectorAll("a")].find(a => /(?:Google Flow credits|credits?|tín dụng)/i.test(root.accessibleName?.(a) || a.innerText || "") && root.visible?.(a));
-            const creditText = creditLink ? (root.accessibleName?.(creditLink) || creditLink.innerText || "") : "";
-            const n = Number(creditText.replace(/[^\d]/g, ""));
-            state.credits_remaining = Number.isFinite(n) && creditText ? n : undefined;
-            state.plan = [...document.querySelectorAll("button")].find(b => /(?:Account details|Chi tiết tài khoản|Tài khoản)/i.test(root.accessibleName?.(b) || b.innerText || ""))?.innerText?.split("\n")[0];
-            const close = root.flowButton?.("Close account panel"); if (close) close.click();
+            account.click();
+            let creditLink = null;
+            try {
+              await root.wait?.(500);
+              creditLink = [...document.querySelectorAll("a")].find(a => /(?:Google Flow credits|credits?|tín dụng)/i.test(root.accessibleName?.(a) || a.innerText || "") && root.visible?.(a));
+              const creditText = creditLink ? (root.accessibleName?.(creditLink) || creditLink.innerText || "") : "";
+              const n = Number(creditText.replace(/[^\d]/g, ""));
+              state.credits_remaining = Number.isFinite(n) && creditText ? n : undefined;
+              state.plan = [...document.querySelectorAll("button")].find(b => /(?:Account details|Chi tiết tài khoản|Tài khoản)/i.test(root.accessibleName?.(b) || b.innerText || ""))?.innerText?.split("\n")[0];
+            } finally {
+              // Flow's account control can open Google's account/credits popover,
+              // whose close button is labeled simply "Close" (or only has an X
+              // icon). Always clean up this surface, including when reading its
+              // contents throws, so the next generation is not blocked by it.
+              const closeButton = (() => {
+                const anchors = [];
+                let current = creditLink;
+                for (let depth = 0; current && depth < 7; depth++, current = current.parentElement) anchors.push(current);
+                const scopes = [...anchors, ...[...document.querySelectorAll('[role="dialog"],[aria-modal="true"], [role="menu"], .cdk-overlay-pane')].filter(el => root.visible?.(el))];
+                for (const scope of scopes) {
+                  const button = [...(scope.querySelectorAll?.('button,[role="button"]') || [])].find(candidate => {
+                    if (!root.visible?.(candidate) || candidate.disabled || candidate.getAttribute?.("aria-disabled") === "true") return false;
+                    const label = `${root.accessibleName?.(candidate) || ""} ${candidate.getAttribute?.("aria-label") || ""} ${candidate.getAttribute?.("title") || ""} ${candidate.innerText || candidate.textContent || ""}`.trim();
+                    const icon = [...(candidate.querySelectorAll?.("mat-icon,.mat-icon,.google-symbols,svg") || [])].map(node => node.textContent || "").join(" ");
+                    return /^(?:close|dismiss|закрыть|đóng|x)$/i.test(label) || /(?:close|dismiss|закрыть|đóng)/i.test(label) || /^(?:close|cancel|x)$/i.test(icon.trim());
+                  });
+                  if (button) return button;
+                }
+                return null;
+              })();
+              const closePanel = root.flowButton?.("Close account panel");
+              if (closeButton) closeButton.click();
+              else if (closePanel) closePanel.click();
+              else account.click();
+              await root.wait?.(150);
+              // Confirm that the account content disappeared. Some Flow builds
+              // expose a Google-owned popup with no Flow close-panel selector.
+              if (creditLink && root.visible?.(creditLink)) {
+                // The account trigger itself is a reliable toggle for this
+                // surface; use Escape only as a final fallback because this
+                // operation opened and therefore owns the popup.
+                account.click();
+                await root.wait?.(100);
+                if (root.visible?.(creditLink)) root.dispatchEscapeKey?.();
+              }
+            }
           }
         }
         if (payload.includeProgressDiagnostics && chrome.runtime?.sendMessage) {
@@ -125,7 +166,12 @@
         return state;
       }
 
-      if (name === "flow.assets.list") return menu.scanNativeAssets({ includeIncomplete: payload.includeIncomplete === true });
+      if (name === "flow.assets.list") {
+        try { await root.FlowPageSettings?.ensureApplied?.({ timeoutMs: 3500 }); } catch (error) {
+          console.debug("[FlowPageSettings] Library scan will continue without normalized layout:", error?.message || error);
+        }
+        return menu.scanNativeAssets({ includeIncomplete: payload.includeIncomplete === true, signal: command.signal });
+      }
       if (name === "flow.characters.list") {
         if (typeof menu?.scanNativeCharacters !== "function") {
           throw this.error("NATIVE_CAPABILITY_UNSUPPORTED", "Flow's character library scanner is unavailable in this extension context. Reload the extension and Flow tab, then retry.", true);
@@ -149,7 +195,7 @@
         let sourceAsset = null;
         if (name === "flow.asset.rename") {
           const deadline = Date.now() + Math.min(25_000, Number(command.timeoutMs) || 25_000);
-          const assets = await menu.scanNativeAssets({ requireComplete: true, maxDurationMs: 12_000, deadline });
+          const assets = await menu.scanNativeAssets({ requireComplete: true, maxDurationMs: 12_000, deadline, signal: command.signal });
           const sourceMatches = assets.filter(asset => normalizeTitle(asset.name) === normalizeTitle(title));
           if (sourceMatches.length !== 1) throw this.error(sourceMatches.length ? "FLOW_AMBIGUOUS_ASSET" : "FLOW_ASSET_NOT_FOUND", sourceMatches.length ? `More than one asset is named "${title}"; no mutation was performed.` : `Could not find exact asset title "${title}" in the complete library scan.`, true, false);
           sourceAsset = sourceMatches[0];
@@ -174,6 +220,7 @@
         if (name === "flow.asset.trash" && payload.id && String(payload.id).toLowerCase() !== String(tileId || "").toLowerCase()) {
           throw this.error("FLOW_ASSET_ID_MISMATCH", `The current Flow tile for "${title}" does not match the supplied media UUID; no mutation was performed.`, false);
         }
+        if (command.signal?.aborted) throw this.error("FLOW_OPERATION_CANCELLED", "The Flow queue stopped before changing the asset.", false, false);
         tile.scrollIntoView({ block: "center" }); await root.wait?.(150);
         const more = root.flowButton?.("More options", tile); if (!more) throw this.error("FLOW_TILE_MENU_MISSING", `Could not open options for "${title}".`, true);
         more.click(); await root.wait?.(200);
@@ -181,14 +228,53 @@
           ? /^(?:Move to trash|Chuyển vào thùng rác|Đưa vào thùng rác|Bỏ vào thùng rác|Xóa|Xóa tệp|Xóa nội dung)$/i
           : /^(?:Rename|Đổi tên|Đổi tên tệp|Đổi tên nội dung)$/i;
         const menuItems = [...document.querySelectorAll('[role="menuitem"]')].filter(item => {
-          if (!root.visible?.(item)) return false;
+          if (!root.visible?.(item) || item.disabled || item.getAttribute?.("aria-disabled") === "true") return false;
           const label = (root.accessibleName?.(item) || item.innerText || item.textContent || "").trim();
-          return actionPatterns.test(label);
+          return actionPatterns.test(label) || root.matchesFlowUiRegex?.(label, actionPatterns) === true;
         });
         if (menuItems.length !== 1) throw this.error(menuItems.length ? "FLOW_MENU_ITEM_AMBIGUOUS" : "FLOW_MENU_ITEM_MISSING", `Flow did not show one unique "${name === "flow.asset.trash" ? "Move to trash" : "Rename"}" action for "${title}".`, true);
         const menuEl = menuItems[0];
         menuEl.click(); await root.wait?.(250);
-        if (name === "flow.asset.trash") return { trashed: title };
+        if (name === "flow.asset.trash") {
+          const normalize = value => root.normalizeFlowUiText?.(value) || String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+          const dialogs = [...document.querySelectorAll('[role="dialog"],mat-dialog-container,[aria-modal="true"]')]
+            .filter(surface => root.visible?.(surface));
+          const trashLabels = ["move to trash", "delete", "trash", "xóa", "xóa tệp", "xóa nội dung", "chuyển vào thùng rác", "đưa vào thùng rác", "bỏ vào thùng rác"]
+            .map(normalize);
+          const matchingDialogs = dialogs.filter(surface => {
+            const text = normalize(surface.innerText || surface.textContent || "");
+            return /(?:move to trash|delete|trash|xoa|thung rac|chuyen vao thung rac|dua vao thung rac)/i.test(text) &&
+              [...surface.querySelectorAll('button,[role="button"]')].some(button => {
+                if (!root.visible?.(button) || button.disabled || button.getAttribute?.("aria-disabled") === "true") return false;
+                const label = normalize(root.accessibleName?.(button) || button.innerText || button.textContent || "");
+                return trashLabels.some(alias => label === alias);
+              });
+          }).filter(surface => !dialogs.some(other => other !== surface && surface.contains?.(other)));
+          if (dialogs.length && !matchingDialogs.length) {
+            throw this.error("FLOW_TRASH_CONFIRM_UNVERIFIED", `Flow opened a dialog after choosing trash for "${title}", but its confirmation action could not be identified safely.`, false, false);
+          }
+          if (matchingDialogs.length > 1) {
+            throw this.error("FLOW_TRASH_CONFIRM_AMBIGUOUS", `Flow opened multiple trash confirmation dialogs for "${title}"; no confirmation was clicked.`, false, false);
+          }
+          if (matchingDialogs.length === 1) {
+            const dialog = matchingDialogs[0];
+            const confirms = [...dialog.querySelectorAll('button,[role="button"]')].filter(button => {
+              if (!root.visible?.(button) || button.disabled || button.getAttribute?.("aria-disabled") === "true") return false;
+              const label = normalize(root.accessibleName?.(button) || button.innerText || button.textContent || "");
+              return trashLabels.some(alias => label === alias);
+            });
+            if (confirms.length !== 1) throw this.error("FLOW_TRASH_CONFIRM_AMBIGUOUS", `Flow did not expose one unique trash confirmation action for "${title}".`, false, false);
+            confirms[0].click();
+          }
+          const deadline = Date.now() + Math.min(10_000, Number(command.timeoutMs) || 10_000);
+          const targetStillVisible = () => [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", document, { checkVisible: false }) : null) || document.querySelectorAll("flow-grid-tile-container"))]
+            .some(candidate => root.visible?.(candidate) && (tileId
+              ? String(root.mediaId?.(candidate) || "").toLowerCase() === String(tileId).toLowerCase()
+              : normalize(candidate.getAttribute("aria-label") || candidate.getAttribute("title")) === normalize(title)));
+          while (Date.now() < deadline && targetStillVisible()) await root.wait?.(250);
+          if (targetStillVisible()) throw this.error("FLOW_TRASH_UNCONFIRMED", `Flow did not confirm that "${title}" left the project grid. Inspect the library before retrying.`, false, true);
+          return { trashed: title, ...(tileId ? { id: tileId } : {}), confirmed: true };
+        }
         const renameSurfaces = [...document.querySelectorAll('[role="dialog"],mat-dialog-container,.cdk-overlay-pane')].filter(el => root.visible?.(el));
         const dialogInputs = renameSurfaces.flatMap(surface => [...surface.querySelectorAll('input:not([type="file"]),[contenteditable="true"]')]).filter(el => root.visible?.(el));
         const inputs = [...new Set(dialogInputs.length ? dialogInputs : [...document.querySelectorAll('input:not([type="file"]),[contenteditable="true"]')].filter(el => root.visible?.(el)))];

@@ -2,7 +2,7 @@ import { readFlowDownloadChunk } from "./flow-download-relay.js";
 import { ensureCorrelationObserver } from "./flow-observer-health.js";
 import { inspectExtensionBuild } from "./flow-build-info.js";
 import { decideDevExtensionReload } from "./dev-extension-reload.js";
-import { flowDocumentMatchesLocale, flowProjectUrl, forceEnglishFlowUrl } from "./flow-locale.js";
+import { flowDocumentMatchesLocale, flowHomeUrl, flowLocaleFromUrl, flowProjectUrl, normalizeFlowLocale } from "./flow-locale.js";
 import { FlowJobQueue } from "./flow-job-queue.js";
 import { planFlowAgentBatch, planFlowBatch, planFlowContinue, planFlowEdit } from "./flow-workflows.js";
 import "../build-revision.js";
@@ -12,7 +12,8 @@ const defaults = { bridge: LOCAL_BRIDGE };
 const flowUrl = url => /^https:\/\/flow\.google\.com\//.test(url || "");
 const nativeFlowOperations = new Set([
   "flow.context", "flow.state", "flow.projects.list", "flow.project.create", "flow.project.open", "flow.assets.list", "flow.characters.list",
-  "flow.generation.submit", "flow.generation.observe", "flow.references.attach", "flow.references.clear", "flow.prompt.clear", "flow.voices.options",
+  "flow.generation.submit", "flow.generation.observe", "flow.generation.manual.confirm", "flow.generation.manual.cancel", "flow.references.attach", "flow.references.clear", "flow.references.remove", "flow.prompt.clear", "flow.voices.options",
+  "flow.editor.get", "flow.editor.clear", "flow.prompt.insert", "flow.generation.settings.apply", "flow.page.settings.apply", "flow.tiles.enumerate", "flow.tiles.status", "flow.generation.wait", "flow.gallery.scan", "flow.components.list", "flow.components.select", "flow.generation.preflight",
   "flow.generation.observer.health",
   "flow.generation.upload.preflight",
   "flow.file.upload.begin", "flow.file.upload.chunk", "flow.file.upload.finish", "flow.file.upload.abort", "flow.media.upload",
@@ -24,10 +25,11 @@ const nativeFlowOperations = new Set([
   "flow.frame.extract_last",
   "flow.queue.add", "flow.queue.generate", "flow.queue.edit", "flow.queue.continue", "flow.queue.agent",
   "flow.queue.get", "flow.queue.wait", "flow.queue.cancel", "flow.queue.retry", "flow.queue.metadata",
+  "flow.queue.manual.continue",
 ]);
 const extensionQueueOperations = new Set([
   "flow.queue.add", "flow.queue.generate", "flow.queue.edit", "flow.queue.continue", "flow.queue.agent",
-  "flow.queue.get", "flow.queue.wait", "flow.queue.cancel", "flow.queue.retry", "flow.queue.metadata",
+  "flow.queue.get", "flow.queue.wait", "flow.queue.cancel", "flow.queue.retry", "flow.queue.metadata", "flow.queue.manual.continue",
 ]);
 const extensionQueueJobOperations = new Set([
   "flow.generation.submit", "flow.edit.run", "flow.continue.run", "flow.agent.batch",
@@ -52,11 +54,11 @@ const tabPreparations = new Map();
 const activeTabOperations = new Map();
 let devReloadCheckInProgress = false;
 const maybeSubmittedOperations = new Set([
-  "flow.generation.submit", "flow.edit.run", "flow.continue.run", "flow.agent.batch",
+  "flow.generation.submit", "flow.generation.manual.confirm", "flow.edit.run", "flow.continue.run", "flow.agent.batch",
   "flow.character.create", "flow.character.edit",
 ]);
 const correlationRequiredOperations = new Set([
-  "flow.generation.submit", "flow.edit.run", "flow.continue.run", "flow.agent.batch",
+  "flow.generation.submit", "flow.generation.manual.confirm", "flow.edit.run", "flow.continue.run", "flow.agent.batch",
 ]);
 const tabOperationActive = tabId => (activeTabOperations.get(tabId) || 0) > 0;
 function enterTabOperation(tabId) {
@@ -188,6 +190,22 @@ async function ensureFlowUploadBridge(tabId) {
   } while (Date.now() < verifyDeadline);
   throw new Error(`Flow upload bridge failed to initialize after reloading the tab (upload=${uploadBridge.uploadVersion ?? "missing"}, client=${uploadClientVersion}).${loadTimedOut ? " The tab did not finish loading within 30 seconds." : ""}${injectionError ? ` Injection error: ${injectionError}` : ""}`);
 }
+async function reinjectFlowContentScripts(tabId) {
+  const flowScripts = (chrome.runtime.getManifest().content_scripts || []).filter(script =>
+    script.matches?.some(match => match === "https://flow.google.com/*") && Array.isArray(script.js) && script.js.length,
+  );
+  if (!flowScripts.length) throw new Error("No Flow content scripts are declared in the extension manifest.");
+
+  // Use the manifest as the single source of truth so retry injection cannot
+  // drift from the installed content-script modules or their load order.
+  for (const script of flowScripts) {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      world: script.world || "ISOLATED",
+      files: script.js,
+    });
+  }
+}
 async function sendFlowCommand(tabId, message) {
   try {
     return await chrome.tabs.sendMessage(tabId, message);
@@ -203,55 +221,10 @@ async function sendFlowCommand(tabId, message) {
     await waitForTabComplete(tabId, 15_000).catch(() => {});
     await new Promise(resolve => setTimeout(resolve, 300));
 
-    // A Flow tab can predate extension installation/reload, leaving no content
-    // script listener in that tab. Inject the declared scripts in manifest order
-    // and retry once instead of making the user reload the whole Flow page.
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      files: [
-        "build-revision.js",
-        "content/shared/i18n.js",
-        "content/shared/dom-utils.js",
-        "content/providers/flow/core/selectors.js",
-        "content/shared/activity-overlay.js",
-        "content/shared/native-file-transfer.js",
-        "content/providers/base/base-provider-driver.js",
-        "content/providers/base/provider-registry.js",
-        "content/providers/flow/core/navigation.js",
-        "content/providers/flow/composer/flow-editor.js",
-        "content/providers/flow/core/settings.js",
-        "content/providers/flow/generation/image-settings.js",
-        "content/providers/flow/generation/video-settings.js",
-        "content/providers/flow/composer/reference-actions.js",
-        "content/providers/flow/composer/voice-actions.js",
-        "content/providers/flow/media/uploader.js",
-        "content/providers/flow/generation/native-frame-picker.js",
-        "content/providers/flow/compatibility/flow-components.js",
-        "content/providers/flow/characters/flow-characters.js",
-        "content/providers/flow/generation/tiles.js",
-        "content/providers/flow/media/media-menu.js",
-        "content/providers/flow/agent/flow-agent.js",
-        "content/providers/flow/composer/prompt-operations.js",
-        "content/providers/flow/composer/reference-operations.js",
-        "content/providers/flow/media/upload-operations.js",
-        "content/providers/flow/generation/generation-operations.js",
-        "content/providers/flow/library/library-operations.js",
-        "content/providers/flow/workflows/workflow-operations.js",
-        "content/providers/flow/core/flow-driver.js",
-        "content/dom-actions.js",
-        "content/floating-tracker-flow.js",
-      ],
-    }).catch(() => {});
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      world: "MAIN",
-      files: [
-        "content/bridge/flow-upload-main.js",
-        "content/bridge/flow-correlation-observer.js",
-        "content/bridge/slate-bridge.js",
-      ],
-    }).catch(error => {
-      console.warn(`[ServiceWorker] Could not reinject Flow MAIN-world bridges for tab ${tabId}: ${error?.message || error}`);
+    // A Flow tab can predate extension installation/reload. Reinjection uses
+    // the manifest declarations in order instead of a second hard-coded list.
+    await reinjectFlowContentScripts(tabId).catch(error => {
+      console.warn(`[ServiceWorker] Could not reinject Flow content scripts for tab ${tabId}: ${error?.message || error}`);
     });
     await new Promise(resolve => setTimeout(resolve, 200));
     return await chrome.tabs.sendMessage(tabId, message);
@@ -290,7 +263,8 @@ async function listFlowProjects() {
   if (!/\/project\/[0-9a-f-]{36}(?:\/|$)/i.test(new URL(selected.url).pathname)) {
     return scan(selectedTabId);
   }
-  const tab = await chrome.tabs.create({ url: "https://flow.google.com/?hl=en", active: false });
+  const locale = normalizeFlowLocale(await readFlowDocumentLanguage(selectedTabId)) || flowLocaleFromUrl(selected.url);
+  const tab = await chrome.tabs.create({ url: flowHomeUrl(locale), active: false });
   try {
     await waitForTabComplete(tab.id);
     await new Promise(resolve => setTimeout(resolve, 700));
@@ -306,7 +280,8 @@ async function createFlowProject() {
   let tabId = selectedTabId;
   let temporaryTab = null;
   if (fromProject) {
-    temporaryTab = await chrome.tabs.create({ url: "https://flow.google.com/?hl=en", active: false });
+    const locale = normalizeFlowLocale(await readFlowDocumentLanguage(selectedTabId)) || flowLocaleFromUrl(selected.url);
+    temporaryTab = await chrome.tabs.create({ url: flowHomeUrl(locale), active: false });
     tabId = temporaryTab.id;
     await waitForTabComplete(tabId);
     await new Promise(resolve => setTimeout(resolve, 700));
@@ -350,17 +325,20 @@ async function verifyFlowDocumentLocale(tabId, locale, timeoutMs = 15_000) {
   error.actualLocale = actual || null;
   throw error;
 }
-async function openFlowProject(projectId, requestedLanguage = "en") {
+async function openFlowProject(projectId, requestedLanguage) {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(projectId || ""))) {
     throw new Error("Invalid Flow project id.");
   }
-  if (requestedLanguage !== "en") throw new Error("Flow automation supports English only (language: en).");
-  const language = "en";
+  const selected = await chrome.tabs.get(selectedTabId);
+  const requestedLocale = requestedLanguage == null || requestedLanguage === "" ? null : normalizeFlowLocale(requestedLanguage);
+  if (requestedLanguage && !requestedLocale) throw new Error("Flow language must be a valid locale tag such as en or vi.");
+  const language = requestedLocale || normalizeFlowLocale(await readFlowDocumentLanguage(selectedTabId)) || flowLocaleFromUrl(selected.url);
   const url = flowProjectUrl(projectId, language);
   await chrome.tabs.update(selectedTabId, { url });
   await waitForTabComplete(selectedTabId);
-  await verifyFlowDocumentLocale(selectedTabId, language);
-  return { opened: true, id: projectId, url, language };
+  if (language) await verifyFlowDocumentLocale(selectedTabId, language);
+  else await readFlowDocumentLanguage(selectedTabId);
+  return { opened: true, id: projectId, url, language: language || null };
 }
 async function ensureFlowTabLocale(tabId) {
   if (tabOperationActive(tabId)) return;
@@ -369,14 +347,9 @@ async function ensureFlowTabLocale(tabId) {
   if (tab.status === "loading") await waitForTabComplete(tabId);
   const loadedTab = await chrome.tabs.get(tabId).catch(() => tab);
   const currentUrl = loadedTab.url || tab.url;
-  const locale = "en";
-  const documentLanguage = await readFlowDocumentLanguage(tabId);
-  const englishUrl = forceEnglishFlowUrl(currentUrl);
-  if (englishUrl !== currentUrl || !flowDocumentMatchesLocale(documentLanguage, locale)) {
-    await chrome.tabs.update(tabId, { url: englishUrl });
-    await waitForTabComplete(tabId);
-  }
-  await verifyFlowDocumentLocale(tabId, locale);
+  // Flow can change locale through its own controls/account preferences. Keep
+  // the URL and rendered language as Flow left them instead of redirecting.
+  return normalizeFlowLocale(await readFlowDocumentLanguage(tabId)) || flowLocaleFromUrl(currentUrl);
 }
 async function prepareFlowTab(tabId) {
   if (tabOperationActive(tabId)) return;
@@ -465,25 +438,27 @@ async function event(method, params) {
 }
 async function chooseTab() {
   const tabs = await chrome.tabs.query({ url: "https://flow.google.com/*" });
-  const saved = (await chrome.storage.session.get("selectedFlowTabId")).selectedFlowTabId;
+  const stored = await chrome.storage.session.get(["selectedFlowTabId", "targetFlowContext"]);
+  const saved = stored.selectedFlowTabId;
   const active = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-  // Prefer the Flow tab the user is looking at. A saved tab is only a fallback;
-  // it may have been closed or left behind after a browser/extension restart.
-  const tab = tabs.find(tab => active.some(item => item.id === tab.id))
-    || tabs.find(tab => tab.id === saved)
+  // Keep one deliberate Flow target across focus changes. The active tab is
+  // used only to establish a target when none exists; reconnect explicitly
+  // reselects the currently active Flow tab.
+  const tab = tabs.find(tab => tab.id === saved)
     || tabs.find(tab => tab.id === selectedTabId)
+    || tabs.find(tab => active.some(item => item.id === tab.id))
     || tabs.find(tab => /\/project\/[0-9a-f-]{36}(?:\/|$)/i.test(new URL(tab.url).pathname))
     || tabs[0];
   if (!tab) throw new Error("Open a Google Flow tab to connect Flow MCP.");
   selectedTabId = tab.id;
-  await chrome.storage.session.set({ selectedFlowTabId: tab.id });
+  await chrome.storage.session.set({ selectedFlowTabId: tab.id, targetFlowContext: { tabId: tab.id, projectId: flowProjectIdFromUrl(tab.url) } });
   await prepareFlowTab(tab.id);
   return tab;
 }
 async function adoptFlowTab(tab, prepare = false) {
   if (!tab?.id || !flowUrl(tab.url)) return false;
   selectedTabId = tab.id;
-  await chrome.storage.session.set({ selectedFlowTabId: tab.id });
+  await chrome.storage.session.set({ selectedFlowTabId: tab.id, targetFlowContext: { tabId: tab.id, projectId: flowProjectIdFromUrl(tab.url) } });
   if (prepare) {
     await prepareFlowTab(tab.id);
   }
@@ -491,7 +466,23 @@ async function adoptFlowTab(tab, prepare = false) {
   if (!bridgeConnected() && socket?.readyState !== WebSocket.CONNECTING) void connect();
   return true;
 }
-async function execute(_ws, method, args = [], { queueOwner = false, connectorOwner = false } = {}) {
+function flowProjectIdFromUrl(value) {
+  try { return new URL(value).pathname.match(/\/project\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/|$)/i)?.[1]?.toLowerCase() || null; }
+  catch { return null; }
+}
+async function pinnedFlowTabId() {
+  if (Number.isInteger(selectedTabId)) return selectedTabId;
+  const stored = await chrome.storage.session.get("selectedFlowTabId");
+  if (!Number.isInteger(stored.selectedFlowTabId)) return undefined;
+  const tab = await chrome.tabs.get(stored.selectedFlowTabId).catch(() => null);
+  if (!tab || !flowUrl(tab.url)) {
+    await chrome.storage.session.remove(["selectedFlowTabId", "targetFlowContext"]);
+    return undefined;
+  }
+  selectedTabId = tab.id;
+  return selectedTabId;
+}
+async function execute(_ws, method, args = [], { queueOwner = false, connectorOwner = false, signal } = {}) {
   if (method === "flow.dom.execute") {
     const [command] = args;
     if (!command || typeof command !== "object" || typeof command.op !== "string") throw new Error("Invalid Flow DOM command");
@@ -526,6 +517,7 @@ async function execute(_ws, method, args = [], { queueOwner = false, connectorOw
           const source = payload.job && typeof payload.job === "object" ? payload.job : payload;
           plannedJobs = [source];
         }
+        const defaultFlowTarget = await captureFlowTargetMetadata();
         const batchId = crypto.randomUUID();
         const added = [];
         for (const [index, source] of plannedJobs.entries()) {
@@ -539,6 +531,7 @@ async function execute(_ws, method, args = [], { queueOwner = false, connectorOw
           const metadata = {
             source: 'mcp',
             ...(source.metadata ?? source.data?.metadata ?? {}),
+            ...(source.metadata?.flowTabId === undefined && source.data?.metadata?.flowTabId === undefined ? defaultFlowTarget : {}),
             batchId,
             ...(workflow && Object.keys(workflow).length ? { workflow } : {}),
             ...(previous && workflow.dependency ? { dependsOnId: previous.id, dependencyType: workflow.dependency.type } : {}),
@@ -574,9 +567,18 @@ async function execute(_ws, method, args = [], { queueOwner = false, connectorOw
         return { ...result, snapshot: flowQueueSnapshot(result.snapshot) };
       }
       if (command.name === "flow.queue.cancel") {
+        const queuedJob = await flowJobQueue.get(id);
+        const failedManual = await cancelManualWait(queuedJob);
+        if (failedManual) return flowQueueSnapshot(failedManual);
         const result = await flowJobQueue.cancel(id);
         if (!result) throw Object.assign(new Error(`No Flow queue job with id ${id}.`), { code: "FLOW_QUEUE_JOB_NOT_FOUND", outcome_unknown: false });
+        if (queuedJob?.status === "waiting_for_user") await flowJobQueue.resume();
         return result;
+      }
+      if (command.name === "flow.queue.manual.continue") {
+        const snapshot = await flowJobQueue.continueManual(id);
+        if (!snapshot) throw Object.assign(new Error(`Flow job ${id} is not waiting for a manual submit.`), { code: "FLOW_MANUAL_SUBMIT_NOT_WAITING", outcome_unknown: false });
+        return flowQueueSnapshot(snapshot);
       }
       if (command.name === "flow.queue.retry") {
         return retryExtensionFlowJob(id);
@@ -610,7 +612,7 @@ async function execute(_ws, method, args = [], { queueOwner = false, connectorOw
         tabId = (await chooseTab()).id;
       }
     }
-    if (!hasFlowTargetTab && tabId !== selectedTabId) throw new Error("Native Flow command targets a tab other than the selected Flow tab");
+    if (!hasFlowTargetTab && !queueOwner && tabId !== selectedTabId) throw new Error("Native Flow command targets a tab other than the selected Flow tab");
     if (tabId === undefined) throw new Error("No Flow tab is selected");
     const operation = command.name;
     const pendingPreparation = tabPreparations.get(tabId);
@@ -647,21 +649,44 @@ async function execute(_ws, method, args = [], { queueOwner = false, connectorOw
         });
       }
       enterTabOperation(tabId);
-      try { return await openFlowProject(command.payload?.projectId, command.payload?.language ?? "en"); }
+      try { return await openFlowProject(command.payload?.projectId, command.payload?.language); }
       finally { leaveTabOperation(tabId); }
     }
     if (correlationRequiredOperations.has(operation)) await ensureCorrelationObserver(tabId);
     if (operation === "flow.generation.upload.preflight") await prepareFlowTab(tabId);
-    const interactive = !["flow.state", "flow.assets.list", "flow.characters.list", "flow.voices.options", "flow.generation.observe", "flow.generation.upload.preflight", "flow.file.upload.begin", "flow.file.upload.chunk", "flow.file.upload.finish", "flow.file.upload.abort"].includes(operation);
-    const requestId = command.requestId ?? command.request_id ?? command.id;
+  const interactive = !["flow.state", "flow.assets.list", "flow.characters.list", "flow.voices.options", "flow.generation.observe", "flow.generation.upload.preflight", "flow.editor.get", "flow.tiles.enumerate", "flow.tiles.status", "flow.gallery.scan", "flow.components.list", "flow.file.upload.begin", "flow.file.upload.chunk", "flow.file.upload.finish", "flow.file.upload.abort"].includes(operation);
+    const requestId = command.requestId ?? command.request_id ?? command.id ?? crypto.randomUUID();
     const activityKey = interactive ? beginInteractiveRequest(tabId, requestId) : undefined;
     let response;
     enterTabOperation(tabId);
     try {
-      response = await sendFlowCommand(tabId, {
-        type: "flow-mcp:execute",
-        command: { ...command, id: command.requestId ?? command.request_id ?? command.id, jobId: command.jobId ?? command.job_id },
-      });
+      const targetTab = await chrome.tabs.get(tabId);
+      const suppliedTarget = command._flowTarget || command.flowTarget || command._target || command.target || {};
+      const guardedCommand = {
+        ...command,
+        id: requestId,
+        _flowTarget: {
+          ...suppliedTarget,
+          tabId,
+          driverKey: suppliedTarget.driverKey || "flow",
+          origin: suppliedTarget.origin || "https://flow.google.com",
+          ...(suppliedTarget.projectId !== undefined ? {} : { projectId: flowProjectIdFromUrl(targetTab.url) }),
+        },
+      };
+      if (signal?.aborted) throw Object.assign(new Error("The Flow queue operation was cancelled before it started."), { code: "FLOW_OPERATION_CANCELLED", outcome_unknown: false });
+      const cancelPageCommand = () => {
+        void chrome.tabs.sendMessage(tabId, { type: "flow-mcp:cancel", requestId }).catch(() => {});
+      };
+      signal?.addEventListener("abort", cancelPageCommand, { once: true });
+      if (signal?.aborted) cancelPageCommand();
+      try {
+        response = await sendFlowCommand(tabId, {
+          type: "flow-mcp:execute",
+          command: { ...guardedCommand, jobId: command.jobId ?? command.job_id },
+        });
+      } finally {
+        signal?.removeEventListener("abort", cancelPageCommand);
+      }
     } catch (error) {
       const message = String(error?.message || error);
       const definitelyNotDelivered = /Receiving end does not exist|Could not establish connection/i.test(message);
@@ -711,10 +736,40 @@ async function execute(_ws, method, args = [], { queueOwner = false, connectorOw
 function flowQueueSnapshot(snapshot) {
   return { ...snapshot, items: snapshot.jobs, queue: snapshot.jobs };
 }
+async function captureFlowTargetMetadata() {
+  try {
+    const tab = await chooseTab();
+    return { flowTabId: tab.id, flowProjectId: flowProjectIdFromUrl(tab.url) };
+  } catch {
+    return {};
+  }
+}
+async function cancelManualWait(job) {
+  if (job?.status !== "waiting_for_user" || job.operation !== "flow.generation.submit") return null;
+  const prepared = job.result?.prepared || job.result;
+  if (!prepared?.correlationAttemptId) {
+    const error = Object.assign(new Error("The prepared Flow submit receipt is missing. Inspect Flow before retrying."), { code: "FLOW_MANUAL_SUBMIT_SESSION_LOST", outcome_unknown: true });
+    return flowJobQueue.failManual(job.id, error);
+  }
+  const tabId = Number.isInteger(job.metadata?.flowTabId) ? job.metadata.flowTabId : selectedTabId;
+  try {
+    await execute(null, "flow.dom.execute", [{
+      op: "flowOperation", name: "flow.generation.manual.cancel",
+      payload: { attemptId: prepared.correlationAttemptId, expectedPrompt: prepared.prompt },
+      ...(Number.isInteger(tabId) ? { tabId } : {}),
+      id: `queue-${job.id}-manual-cancel-${crypto.randomUUID()}`,
+    }], { queueOwner: true });
+    return null;
+  } catch (error) {
+    if (error?.outcome_unknown || error?.outcomeUnknown) return flowJobQueue.failManual(job.id, error);
+    throw error;
+  }
+}
 async function retryExtensionFlowJob(id) {
   const previous = await flowJobQueue.get(id);
   const previousResult = previous?.result?.result || previous?.result || {};
-  if (previousResult.downloadError || previous?.metadata?.downloadError) {
+  const previousErrorCode = String(previous?.errorCode || "").toUpperCase();
+  if (previousResult.downloadError || previous?.metadata?.downloadError || previousErrorCode.includes("DOWNLOAD")) {
     throw Object.assign(new Error("This job generated media but its download failed. Download the existing Flow result; do not retry generation."), {
       code: "FLOW_QUEUE_DOWNLOAD_NOT_RETRYABLE", outcome_unknown: false,
     });
@@ -847,24 +902,42 @@ async function downloadQueueMedia(media, outputDir, fileStem, quality, invoke, h
 async function withQueueDownloads(job, payload, operationResult, invoke, hooks) {
   const params = payload?.params && typeof payload.params === "object" ? payload.params : {};
   const outputDir = job.metadata?.output_dir || payload.output_dir || params.output_dir;
-  const fileStem = job.metadata?.file_stem || payload.file_stem || params.file_stem;
+  const requestedFileStem = job.metadata?.file_stem || payload.file_stem || params.file_stem;
   const submitOnly = payload.submitOnly === true || payload.submit_only === true || params.submit_only === true;
-  if (submitOnly || typeof outputDir !== "string" || !outputDir || typeof fileStem !== "string" || !fileStem) return operationResult;
+  if (submitOnly) return operationResult;
   const media = flowResultMedia(operationResult);
   if (!media.length) return operationResult;
+  // Jobs created directly from the sidebar do not have a native output_dir or
+  // file_stem. They still need the same success -> download -> return flow as
+  // MCP jobs, so use a safe metadata stem while Chrome keeps the Flow title as
+  // the visible downloaded filename.
+  const kind = payload.type === "video" || params.type === "video" ? "video" : "image";
+  const fallbackLabel = job.label || payload.prompt || params.prompt || `flow-${kind}`;
+  const fallbackStem = String(fallbackLabel)
+    .normalize("NFKC")
+    .replace(/[<>:"/\\|?*\u0000-\u001F]+/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-.]+|[-.]+$/g, "")
+    .slice(0, 96);
+  const fileStem = typeof requestedFileStem === "string" && requestedFileStem.trim()
+    ? requestedFileStem.trim()
+    : (fallbackStem || `flow-${kind}-${String(job.id || crypto.randomUUID()).slice(0, 8)}`);
   try {
     const sceneNumbers = Array.isArray(operationResult?.sceneNumbers) && operationResult.sceneNumbers.length === media.length
       ? operationResult.sceneNumbers
       : [];
-    const browserDownloads = await downloadQueueMedia(media, outputDir, fileStem, params.download_quality || payload.download_quality || "original", invoke, hooks, sceneNumbers);
+    const browserDownloads = await downloadQueueMedia(media, outputDir || "", fileStem, params.download_quality || payload.download_quality || "original", invoke, hooks, sceneNumbers);
     return { ...operationResult, browserDownloads };
   } catch (error) {
-    return {
-      ...operationResult,
-      ...(Array.isArray(error?.browserDownloads) && error.browserDownloads.length ? { browserDownloads: error.browserDownloads } : {}),
-      downloadError: String(error?.message || error),
-      downloadErrorCode: String(error?.code || "FLOW_DOWNLOAD_FAILED"),
-    };
+    // The media already exists in Flow, but the requested hand-off did not
+    // complete. Let the queue mark this job failed so the UI cannot claim that
+    // generation succeeded while the file is still missing locally.
+    error.downloadError = String(error?.message || error);
+    error.downloadErrorCode = String(error?.code || "FLOW_DOWNLOAD_FAILED");
+    error.outcomeUnknown = false;
+    error.outcome_unknown = false;
+    throw error;
   }
 }
 async function runExtensionFlowJob(job, hooks) {
@@ -879,12 +952,26 @@ async function runExtensionFlowJob(job, hooks) {
       outcome_unknown: false,
     });
   }
-  const invoke = (name, body) => execute(null, "flow.dom.execute", [{
-    op: "flowOperation",
-    name,
-    payload: body,
-    id: `queue-${job.id}-${crypto.randomUUID()}`,
-  }], { queueOwner: true });
+  let pinnedTabId = Number.isInteger(job.metadata?.flowTabId) ? job.metadata.flowTabId : selectedTabId;
+  let pinnedProjectId = Object.prototype.hasOwnProperty.call(job.metadata || {}, "flowProjectId") ? job.metadata.flowProjectId : undefined;
+  if (!Number.isInteger(pinnedTabId)) pinnedTabId = (await chooseTab()).id;
+  const pinnedTab = await chrome.tabs.get(pinnedTabId).catch(() => null);
+  if (!pinnedTab || !flowUrl(pinnedTab.url)) throw new Error("The Flow tab pinned to this queue item is no longer open.");
+  if (pinnedProjectId === undefined) pinnedProjectId = flowProjectIdFromUrl(pinnedTab.url);
+  if (job.metadata?.flowTabId !== pinnedTabId || !Object.prototype.hasOwnProperty.call(job.metadata || {}, "flowProjectId")) {
+    await flowJobQueue.updateMetadata(job.id, { flowTabId: pinnedTabId, flowProjectId: pinnedProjectId });
+  }
+  const invoke = async (name, body) => {
+    return execute(null, "flow.dom.execute", [{
+      op: "flowOperation",
+      name,
+      payload: body,
+      tabId: pinnedTabId,
+      _flowTarget: { tabId: pinnedTabId, driverKey: "flow", origin: "https://flow.google.com", projectId: pinnedProjectId },
+      jobId: job.id,
+      id: `queue-${job.id}-${crypto.randomUUID()}`,
+    }], { queueOwner: true, signal: hooks.signal });
+  };
   while (selectedTabId !== undefined && tabOperationActive(selectedTabId)) {
     if (hooks.signal.aborted) throw Object.assign(new Error("Queue stopped before Flow accepted this task."), { outcomeUnknown: false });
     await hooks.progress({ phase: "waiting", message: "Waiting for the active Flow operation to finish…" });
@@ -938,12 +1025,29 @@ async function runExtensionFlowJob(job, hooks) {
   }
   let submitted;
   try {
-    submitted = await invoke(operation, payload);
+    if (job.metadata?.manualSubmitPhase === "confirm") {
+      const prepared = job.result?.prepared || job.result;
+      const confirmation = await invoke("flow.generation.manual.confirm", {
+        attemptId: prepared?.correlationAttemptId,
+        prepared,
+      });
+      if (confirmation?.waitingForUser === true) {
+        await hooks.progress({ phase: "waiting_for_user", message: "Click Create in the Flow tab, then choose Continue in the extension queue." });
+        return { waitingForUser: true, phase: "confirm", prepared, flowTabId: pinnedTabId };
+      }
+      submitted = confirmation;
+    } else {
+      submitted = await invoke(operation, payload);
+    }
   } catch (error) {
     throw Object.assign(error, {
       outcomeUnknown: Boolean(error?.outcomeUnknown || error?.outcome_unknown),
       requestDispatched: Boolean(error?.requestDispatched),
     });
+  }
+  if (submitted?.preparedForManualSubmit === true) {
+    await hooks.progress({ phase: "waiting_for_user", message: "Prompt and settings are ready in Flow. Click Create there, then choose Continue in the extension queue." });
+    return { waitingForUser: true, phase: "prepared", prepared: submitted, flowTabId: pinnedTabId };
   }
   if (submitted?.submitted === false) {
     throw Object.assign(new Error("Flow did not confirm the generation request; the task can be retried safely."), {
@@ -1204,31 +1308,46 @@ chrome.tabs.onRemoved.addListener((tabId, info) => {
   }).catch(() => {});
   if (tabId === selectedTabId) {
     selectedTabId = undefined;
-    void chrome.storage.session.remove("selectedFlowTabId");
+    void chrome.storage.session.remove(["selectedFlowTabId", "targetFlowContext"]);
     // Keep the WebSocket alive and attach it to another remaining Flow tab.
     void chooseTab().catch(error => { lastError = String(error?.message || error); });
   }
 });
 chrome.tabs.onActivated.addListener(({ tabId }) => {
-  void chrome.tabs.get(tabId).then(tab => adoptFlowTab(tab, true)).catch(() => {});
+  void (async () => {
+    const pinned = await pinnedFlowTabId();
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (tabId === pinned && flowUrl(tab?.url)) await prepareFlowTab(tabId);
+    else if (!Number.isInteger(pinned) && flowUrl(tab?.url)) await adoptFlowTab(tab, true);
+  })().catch(() => {});
 });
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.url && tabId === selectedTabId && !flowUrl(changeInfo.url)) {
     selectedTabId = undefined;
-    void chrome.storage.session.remove("selectedFlowTabId");
+    void chrome.storage.session.remove(["selectedFlowTabId", "targetFlowContext"]);
     void chooseTab().catch(error => { lastError = String(error?.message || error); });
     return;
   }
-  if (flowUrl(tab.url) && (tab.active || selectedTabId === undefined)) {
+  if (flowUrl(tab.url) && tabId === selectedTabId) {
+    void chrome.storage.session.set({ targetFlowContext: { tabId, projectId: flowProjectIdFromUrl(tab.url) } });
+    if (changeInfo.url) void prepareFlowTab(tabId).catch(error => { lastError = String(error?.message || error); });
+  } else if (flowUrl(tab.url) && selectedTabId === undefined) {
     // A Flow URL change may switch hl to a non-English locale. Prepare it at
     // once; prepareFlowTab/ensureFlowTabLocale guard active operations so an
     // in-flight submit is never interrupted. A later API call also prepares
     // the tab before acting if this update arrived during an operation.
-    void adoptFlowTab(tab, Boolean(changeInfo.url)).catch(error => { lastError = String(error?.message || error); });
+    void pinnedFlowTabId().then(pinned => {
+      if (!Number.isInteger(pinned)) return adoptFlowTab(tab, Boolean(changeInfo.url));
+      if (tabId === pinned && changeInfo.url) return prepareFlowTab(tabId);
+      return undefined;
+    }).catch(error => { lastError = String(error?.message || error); });
   }
 });
 chrome.tabs.onCreated.addListener(tab => {
-  if (tab.active && flowUrl(tab.url)) void adoptFlowTab(tab, true).catch(error => { lastError = String(error?.message || error); });
+  if (tab.active && flowUrl(tab.url)) void pinnedFlowTabId().then(pinned => {
+    if (!Number.isInteger(pinned)) return adoptFlowTab(tab, true);
+    return undefined;
+  }).catch(error => { lastError = String(error?.message || error); });
 });
 chrome.runtime.onInstalled.addListener(() => { chrome.alarms.create("flow-mcp-connect", { periodInMinutes: 0.5 }); void connect(); void checkDevExtensionReload(); });
 chrome.runtime.onStartup.addListener(() => { chrome.alarms.create("flow-mcp-connect", { periodInMinutes: 0.5 }); void connect(); void checkDevExtensionReload(); });
@@ -1246,25 +1365,36 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 chrome.runtime.onMessage.addListener((message, _sender, respond) => {
   if (typeof message?.type === "string" && message.type.startsWith("flow-queue:")) {
-    if (_sender?.id !== chrome.runtime.id || _sender?.tab) {
+    // The Flow page tracker needs a snapshot and a few queue controls so its
+    // compact panel can pause, stop, or remove a visible task. Keep job
+    // creation and all other queue mutations restricted to extension UI pages.
+    const readOnlyQueueState = message.type === "flow-queue:get";
+    const trackerQueueAction = ["flow-queue:pause", "flow-queue:stop", "flow-queue:remove"].includes(message.type);
+    if (_sender?.id !== chrome.runtime.id || (_sender?.tab && !readOnlyQueueState && !trackerQueueAction)) {
       respond({ ok: false, error: { code: "FLOW_QUEUE_FORBIDDEN", message: "Flow queue controls are available only from the extension UI." } });
       return;
     }
     void (async () => {
       await flowJobQueue.ready;
       let snapshot;
+      let addedJob;
       switch (message.type) {
         case "flow-queue:get":
           snapshot = await flowJobQueue.snapshot();
           break;
         case "flow-queue:add": {
           const source = message.job || {};
-          await flowJobQueue.add({
+          const beforeAdd = await flowJobQueue.snapshot();
+          addedJob = await flowJobQueue.add({
             operation: source.operation,
             payload: source.payload,
             label: source.label || source.name,
+            metadata: { source: "extension", ...await captureFlowTargetMetadata(), ...(source.metadata || {}) },
           });
-          snapshot = await flowJobQueue.snapshot();
+          // A normal Create/queue-panel action should start the queue for the
+          // newly staged item. Preserve an explicit user pause so adding a job
+          // does not unexpectedly resume work they stopped on purpose.
+          snapshot = beforeAdd.isPaused ? await flowJobQueue.snapshot() : await flowJobQueue.resume();
           break;
         }
         case "flow-queue:pause":
@@ -1274,6 +1404,20 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
         case "flow-queue:resume":
           snapshot = await flowJobQueue.resume();
           break;
+        case "flow-queue:manual-continue":
+          snapshot = await flowJobQueue.continueManual(String(message.id || message.taskId || ""));
+          if (!snapshot) throw Object.assign(new Error("This Flow job is not waiting for your manual submit."), { code: "FLOW_MANUAL_SUBMIT_NOT_WAITING" });
+          break;
+        case "flow-queue:cancel": {
+          const id = String(message.id || message.taskId || "");
+          const queuedJob = await flowJobQueue.get(id);
+          const failedManual = await cancelManualWait(queuedJob);
+          if (failedManual) { snapshot = failedManual; break; }
+          const result = await flowJobQueue.cancel(id);
+          if (!result) throw Object.assign(new Error(`No Flow job with id ${id}.`), { code: "FLOW_QUEUE_JOB_NOT_FOUND" });
+          snapshot = queuedJob?.status === "waiting_for_user" ? await flowJobQueue.resume() : await flowJobQueue.snapshot();
+          break;
+        }
         case "flow-queue:stop":
           snapshot = await flowJobQueue.stop();
           break;
@@ -1297,7 +1441,7 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
         default:
           throw Object.assign(new Error(`Unsupported Flow queue action: ${message.type}`), { code: "FLOW_QUEUE_ACTION_UNSUPPORTED" });
       }
-      return { ok: true, ...flowQueueSnapshot(snapshot) };
+      return { ok: true, ...(addedJob ? { job: addedJob } : {}), ...flowQueueSnapshot(snapshot) };
     })().then(respond).catch(error => respond({
       ok: false,
       error: { code: error?.code || "FLOW_QUEUE_FAILED", message: String(error?.message || error) },
@@ -1329,7 +1473,17 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
       progress: message.progress,
     }).catch(() => {});
 
-    if (String(requestId || "").startsWith("queue-") && flowUrl(_sender.tab?.url) && _sender.tab?.id === selectedTabId) {
+    if (String(requestId || "").startsWith("queue-") && flowUrl(_sender.tab?.url)) {
+      const queueJobId = String(message.jobId ?? message.job_id ?? "").trim();
+      if (queueJobId) {
+        const progressMessage = String(message.progress || "Flow đang xử lý…");
+        const progressPercent = progressMessage.match(/(?:^|\D)(\d{1,3})\s*%(?:\D|$)/)?.[1];
+        void flowJobQueue.updateProgress(queueJobId, {
+          phase: "render",
+          message: progressMessage,
+          ...(progressPercent !== undefined ? { percent: Math.max(0, Math.min(100, Number(progressPercent))) } : {}),
+        }).catch(() => {});
+      }
       respond({ ok: true, local: true });
       return;
     }
@@ -1409,7 +1563,11 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
   }
   if (message?.type === "flow-mcp:connect") {
     void (async () => {
-      await chrome.storage.session.remove("selectedFlowTabId");
+      const activeTabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      const flowTabs = await chrome.tabs.query({ url: "https://flow.google.com/*" });
+      const activeFlowTab = flowTabs.find(tab => activeTabs.some(active => active.id === tab.id));
+      if (activeFlowTab) await adoptFlowTab(activeFlowTab, true);
+      else await chooseTab();
       clearTimeout(reconnectTimer); reconnectTimer = undefined;
       stopHttpSession();
       bridgeTransport = "disconnected";
@@ -1419,7 +1577,7 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
       if (previousSocket) previousSocket.close(1000, "User reconnect");
       await connect();
       respond({ ok: true });
-    })();
+    })().catch(error => respond({ ok: false, error: String(error?.message || error) }));
     return true;
   }
 });

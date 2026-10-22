@@ -1,7 +1,7 @@
 import type { FlowErrorCategory } from "./flow-error-policy.js";
 import type { SafeFlowOperationDiagnostics, SafeUnknownSubmitDiagnostics } from "./flow-request-diagnostics.js";
 
-export type JobStatus = "queued" | "running" | "submitted" | "done" | "failed" | "cancelled";
+export type JobStatus = "queued" | "running" | "waiting_for_user" | "submitted" | "done" | "failed" | "cancelled";
 export type FrameAssetInput = string | { asset: string; id: string };
 
 export interface SceneParams {

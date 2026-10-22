@@ -95,9 +95,16 @@ export async function stageNativeMedia(
 export async function uploadFlowMediaToProject(filePath: string, job?: Job): Promise<{ name: string; kind: "image" | "video" }> {
   const type = uploadMimeType(filePath);
   const kind = type.startsWith("video/") ? "video" : "image";
-  const prefix = `fm-${randomUUID().replace(/-/g, "").slice(0, 12)}-upload`;
   const basename = filePath.split(/[\\/]/).pop() || "media";
-  const name = `${prefix}${extname(basename).toLowerCase()}`;
+  const extension = extname(basename).toLowerCase() || (kind === "video" ? ".mp4" : ".png");
+  const sourceStem = basename.slice(0, Math.max(0, basename.length - extname(basename).length))
+    .replace(/[\\/\0?%*:|"<>#]/g, "-")
+    .replace(/\s+/g, " ")
+    .replace(/[. ]+$/g, "")
+    .trim() || "reference";
+  const token = randomUUID().replace(/-/g, "").slice(0, 10).toLowerCase();
+  const prefix = `flow-${kind}-${sourceStem}`;
+  const name = `${prefix.slice(0, Math.max(1, 120 - token.length - 1))}-${token}${extension}`;
   const stagedDirs: string[] = [];
   let staged: { transferId: string; name: string } | undefined;
   const transferContext = job ?? ({} as Job);

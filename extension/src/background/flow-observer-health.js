@@ -33,7 +33,10 @@ export async function ensureCorrelationObserver(tabId, scripting = globalThis.ch
   await scripting.executeScript({
     target: { tabId },
     world: "MAIN",
-    files: ["content/bridge/flow-correlation-observer.js"],
+    files: [
+      "content/bridge/flow-v2-correlation-codec.js",
+      "content/bridge/flow-correlation-observer.js",
+    ],
   });
   health = await readHealth().catch(() => null);
   if (health?.ready !== true) {

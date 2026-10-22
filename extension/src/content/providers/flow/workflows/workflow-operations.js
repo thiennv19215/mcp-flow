@@ -87,7 +87,7 @@
       return result;
     }
     async submitAndConfirmDispatch({ editor, tiles, command, prompt, mediaType = "video", expectedQuantity = 1, expectedReferenceIds = [], expectedMediaReferenceIds = [], expectedCharacterIds = [], deadline, afterClick, checkConfirmation }) {
-      this.requireWorkflowTime(deadline, "arming the Flow request observer");
+      this.requireWorkflowTime(deadline, "arming the Flow request observer", false, command?.signal);
       const projectId = (root.ProviderRegistry || root.FlowDriverRegistry).describeUrl(location.href)?.projectId;
       const attemptId = await tiles.armNativeFlowCorrelation({
         projectId, mediaType, prompt, expectedQuantity,
@@ -100,7 +100,7 @@
       let clickDelivered = false;
       const beforeErrors = new Set(editor.currentFlowSubmitErrors?.() || []);
       try {
-        this.requireWorkflowTime(deadline, "activating the Flow submit button");
+        this.requireWorkflowTime(deadline, "activating the Flow submit button", false, command?.signal);
         const submit = await editor.waitForGenerationSubmitButton(prompt, Math.min(15_000, Math.max(1, deadline - Date.now())));
         if (!submit || submit.disabled || submit.getAttribute("aria-disabled") === "true") {
           throw this.error("FLOW_SUBMIT_DISABLED", "Flow's Start generation button is unavailable; nothing was submitted.", true, false);
@@ -122,7 +122,7 @@
         const dispatchDeadline = Math.min(deadline, Date.now() + 30_000);
       let confirmationEvidence;
         while (Date.now() < dispatchDeadline) {
-          this.requireWorkflowTime(dispatchDeadline, "waiting for Flow to dispatch the generation request", true);
+          this.requireWorkflowTime(dispatchDeadline, "waiting for Flow to dispatch the generation request", true, command?.signal);
           const entry = tiles.nativeFlowCorrelationMap().get(attemptId);
           if (!entry) throw this.error("FLOW_SUBMIT_CORRELATION_LOST", "Flow's request observer lost this submit before dispatch was observed. Inspect Flow before retrying.", false, true);
           if (entry.interfered) throw this.error("FLOW_SUBMIT_INTERFERENCE", "The composer changed before Flow's generation request was observed. The outcome is unknown; inspect Flow before retrying.", false, true);
@@ -140,7 +140,7 @@
             throw this.error(classified?.code || "FLOW_SUBMIT_REJECTED", classified?.message || `Flow reported an error before dispatch was observed: ${message}. Inspect Flow before retrying.`, false, true);
           }
           tiles.emitFlowProgress?.(command, "Waiting for Flow to dispatch the generation request");
-          await this.waitWorkflow(dispatchDeadline, 250, "waiting for Flow request dispatch", true);
+          await this.waitWorkflow(dispatchDeadline, 250, "waiting for Flow request dispatch", true, command?.signal);
         }
         if (!dispatched) {
           dispatched = tiles.nativeFlowCorrelationMap().get(attemptId)?.requestSeen === true;
@@ -224,16 +224,16 @@
         if (matches.length > 1) throw this.error("FLOW_AMBIGUOUS_ASSET", `${matches.length} videos begin with "${source}"; no edit was started. Use the full title from flow_assets.`, true, false);
         const found = matches[0];
         if (!found) throw this.error("FLOW_VIDEO_NOT_FOUND", `No video beginning "${source}" exists in the project. Use flow_assets to list titles.`, true);
-        if (root.scrollContainer?.()) root.scrollContainer().scrollTop = 0;
+        await tiles.stabilizeFlowResultViewport({ deadline, signal: command.signal });
         const before = tiles.collectNativeMedia().map(item => item.id || `title:${item.title}`);
         const tile = await tiles.findFlowTile(found.name);
         if (!tile || !tile.querySelector("flow-video-tile")) throw this.error("FLOW_VIDEO_NOT_FOUND", `Video "${found.name}" is no longer visible in the project.`, true);
         tile.scrollIntoView({ block: "center" }); tile.click();
         await nav.waitForFlowRoute(path => /\/edit\//i.test(path), Math.min(30_000, Math.max(1, deadline - Date.now())), "Flow did not open the video editor.");
-        const boxes = [...document.querySelectorAll(".ProseMirror")];
-        if (!boxes.length) throw this.error("FLOW_COMPOSER_MISSING", "Flow's edit prompt is not visible.", true);
+        const box = await editor.preflightGenerationPrompt(params, false);
+        if (!box) throw this.error("FLOW_COMPOSER_MISSING", "Flow's edit prompt is not visible.", true);
         const prompt = String(params.prompt || "").replace(/\s*\n+\s*/g, " ").trim();
-        if (!root.replaceNativeEditableText?.(boxes[boxes.length - 1], prompt)) throw this.error("FLOW_PROMPT_INPUT_UNCONFIRMED", "Flow did not accept the video edit prompt. Nothing was submitted.", true);
+        if (!await editor.insertNativeFlowPrompt(box, prompt)) throw this.error("FLOW_PROMPT_INPUT_UNCONFIRMED", "Flow did not accept the video edit prompt. Nothing was submitted.", true);
         await this.waitWorkflow(deadline, 500, "preparing the Flow edit prompt");
         let submitted = false;
         try {
@@ -250,7 +250,7 @@
           back.click();
           await nav.waitForFlowRoute(path => !/\/edit(?:\/|$)/i.test(path), 20000, "Flow finished the edit but did not return to the project.");
           await nav.ensureFlowLibrarySection("All media");
-          if (root.scrollContainer?.()) root.scrollContainer().scrollTop = 0;
+          await tiles.stabilizeFlowResultViewport({ deadline, signal: command.signal });
           const results = await tiles.waitForProgressResult(command, before, 1, "video", 90000);
           return { media: results, trustedGesture: false, ...evidence };
         } catch (error) {
@@ -271,7 +271,7 @@
         await agent.setNativeAgentMode(true);
         const agentSettingsEvidence = await agent.setNativeAgentSettings("Always", params.aspect_ratio || "16:9");
         await root.FlowSettings?.chooseNativeModel?.("Nano Banana", "image", { deadline });
-        const box = document.querySelector(".ProseMirror");
+        const box = agent.getNativeAgentPromptEditor();
         if (!box) throw this.error("FLOW_AGENT_COMPOSER_MISSING", "Flow's Agent composer is not visible.", true);
         const scenes = params.agent_scenes || [];
         const sceneText = scenes.map((scene, index) => `Scene ${index + 1}: ${String(scene).replace(/\s+/g, " ").trim()}`).join("\n");
@@ -301,7 +301,7 @@
         }
         const prompts = [];
         for (const item of media) {
-          const scroller = root.scrollContainer?.();
+          const scroller = tiles.flowMediaGridScrollContainer?.();
           if (scroller) scroller.scrollTop = 0;
           await root.wait?.(250);
           let targetTile;
@@ -323,7 +323,7 @@
           if (!reuse) { prompts.push(""); continue; }
           reuse.click();
           await root.wait?.(550);
-          prompts.push(document.querySelector(".ProseMirror")?.innerText || "");
+          prompts.push(agent.getNativeAgentPromptEditor()?.innerText || "");
           const close = root.flowButton?.("Close");
           if (close && root.flowButton?.("Start new session")) { close.click(); await root.wait?.(350); }
         }
@@ -354,6 +354,7 @@
           : scenes.map((_, index) => baseScene + index);
         const sceneMedia = new Map();
         let pending = scenes.map((_, index) => index);
+        await tiles.stabilizeFlowResultViewport({ deadline, signal: command.signal });
         let before = tiles.collectNativeMedia().map(item => item.id || `title:${item.title}`);
         let dispatchEvidence = {};
         let latestPreflight;
@@ -423,6 +424,7 @@
           }
           if (pending.length && pass < 2) {
             tiles.emitFlowProgress?.(command, `Flow Agent confirmed partial failure; retrying ${pending.length} unmatched scene(s), pass ${pass + 2}/3`);
+            await tiles.stabilizeFlowResultViewport({ deadline, signal: command.signal });
             before = tiles.collectNativeMedia().map(item => item.id || `title:${item.title}`);
           }
         }
@@ -518,7 +520,7 @@
         if (matches.length > 1) throw this.error("FLOW_AMBIGUOUS_ASSET", `${matches.length} videos begin with "${sourcePrefix}"; no continuation was started. Use the full title from flow_assets.`, true, false);
         const source = matches[0];
         if (!source) throw this.error("FLOW_VIDEO_NOT_FOUND", `No video beginning "${sourcePrefix}" exists in the project. Use flow_assets to list titles.`, true);
-        if (root.scrollContainer?.()) root.scrollContainer().scrollTop = 0;
+        await tiles.stabilizeFlowResultViewport({ deadline, signal: command.signal });
         const before = tiles.collectNativeMedia().map(item => item.id || `title:${item.title}`);
         let submitted = false;
         let outcomeUnknown = false;
@@ -541,7 +543,7 @@
           back.click();
           await nav.waitForFlowRoute(path => !/\/edit(?:\/|$)/i.test(path), Math.min(20_000, Math.max(1, deadline - Date.now())), "Flow did not return to the project after saving the last frame.", { deadline });
           await nav.ensureFlowLibrarySection("All media", { deadline });
-          if (root.scrollContainer?.()) root.scrollContainer().scrollTop = 0;
+          await tiles.stabilizeFlowResultViewport({ deadline, signal: command.signal });
 
           const frameTitle = `Saved frame from ${source.name}`;
           const frame = await tiles.findFlowTile(frameTitle, 200);
@@ -554,11 +556,18 @@
           const more = root.flowButton?.("More options", frame);
           if (!more) throw this.error("FLOW_TILE_MENU_MISSING", "Could not open the saved frame menu.", true);
           more.click(); await root.wait?.(350);
-          const animate = [...document.querySelectorAll('[role="menuitem"]')].find(el => root.visible?.(el) && /^(?:Animate|Tạo hiệu ứng động|Làm chuyển động)$/i.test((root.accessibleName?.(el) || el.innerText || "").trim()));
-          if (!animate) throw this.error("FLOW_ANIMATE_MISSING", "Flow did not show Animate for the saved frame.", true);
+          const animateAliases = root.I18n?.getPatterns?.("animate") || ["Animate", "Tạo hiệu ứng động", "Làm chuyển động"];
+          const animateOptions = [...document.querySelectorAll('[role="menuitem"],button,[role="button"]')].filter(el => {
+            if (!root.visible?.(el) || el.disabled || el.getAttribute?.("aria-disabled") === "true") return false;
+            const label = root.normalizeFlowUiText?.(root.accessibleName?.(el) || el.innerText || el.textContent || "") || "";
+            return animateAliases.some(alias => label === (root.normalizeFlowUiText?.(alias) || String(alias).toLowerCase()));
+          });
+          if (animateOptions.length !== 1) throw this.error(animateOptions.length ? "FLOW_ANIMATE_AMBIGUOUS" : "FLOW_ANIMATE_MISSING", "Flow did not show one unique Animate action for the saved frame.", true);
+          const animate = animateOptions[0];
           animate.click();
-          await root.waitForEnabledFlowButton?.("Start generation", 15000);
-          const box = document.querySelector(".ProseMirror");
+          const generationButton = await root.waitForEnabledFlowButton?.("Start generation", 15000);
+          if (!generationButton) throw this.error("FLOW_CONTINUATION_COMPOSER_NOT_READY", "Flow did not show its generation control after opening Animate for the saved frame.", true);
+          const box = agent.getNativeAgentPromptEditor();
           if (!box) throw this.error("FLOW_COMPOSER_MISSING", "Flow's continuation composer is not visible.", true);
 
           await agent.setNativeAgentMode(true);
@@ -577,7 +586,7 @@
           const prompt = `${exact
             ? `Use I2V, Flow's first frame animation tool. The attached frame is the FIRST FRAME of this clip: begin exactly on it, with the same framing, lighting, colours, wardrobe and set, and continue from there with no cut, as an unbroken continuation of the shot it came from. Do not use any other reference.`
             : `Use R2V, reference-to-video, with the attached frame and ${cast || "the attached reference"} both as references, so the look and the person stay consistent through the clip. Open as close to the attached frame as you can.`} ${params.prompt || ""}`;
-          const activeBox = document.querySelector(".ProseMirror");
+          const activeBox = agent.getNativeAgentPromptEditor();
           if (!activeBox || !root.replaceNativeEditableText?.(activeBox, prompt)) throw this.error("FLOW_PROMPT_INPUT_UNCONFIRMED", "Flow did not accept the continuation prompt. Nothing was submitted.", true);
           const expectedReferenceIds = this.validateContinuationReferenceIds(frameId, selectedReferenceIds, likeness ? (params.attach || []).length : 0);
           const evidence = await this.submitAndConfirmDispatch({

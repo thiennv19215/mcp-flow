@@ -4,7 +4,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { assemble } from "./assemble.js";
 import { clearFlowPrompt, createFlowProject, downloadAsset, renameAsset, trashAsset, getCorrelationObserverHealth, getFlowState, listAssets, listCharacters, listFlowProjects, listFlowVoiceOptions, openFlowProject, rememberCharacter, uploadFlowMediaToProject } from "./flow.js";
 import type { Job } from "./job-types.js";
-import { attachReferences, clearFlowReferences } from "./flow.js";
+import { attachReferences, clearFlowReferences, removeFlowReferenceKind } from "./flow.js";
 import { BIN, COMPUTER, IS_MAC, IS_WIN, moveToBin } from "./platform.js";
 import { TECHNIQUES, techniqueById } from "./techniques.js";
 import { OUTPUT_ROOT, castDirForContext, outputRootForContext, projectDir } from "./paths.js";
@@ -52,6 +52,7 @@ export interface Core {
   assets(a: Args<"assets">): Promise<unknown>;
   attach_references(a: Args<"attach_references">): Promise<unknown>;
   clear_references(a: Args<"clear_references">): Promise<unknown>;
+  remove_reference_kind(a: Args<"remove_reference_kind">): Promise<unknown>;
   upload_media(a: Args<"upload_media">): Promise<unknown>;
   projects(): Promise<unknown>;
   voice_options(): Promise<unknown>;
@@ -153,11 +154,11 @@ function extensionJobAsLegacy(job: ExtensionQueueJob): Job {
 }
 
 async function queueIsActive(core?: any): Promise<boolean> {
-  if (core?.queue?.busy || (Array.isArray(core?.queue?.list?.()) && core.queue.list().some((j: any) => ["pending", "running", "queued"].includes(j?.status)))) {
+  if (core?.queue?.busy || (Array.isArray(core?.queue?.list?.()) && core.queue.list().some((j: any) => ["pending", "running", "queued", "waiting_for_user"].includes(j?.status)))) {
     return true;
   }
   const snapshot = await extensionQueueSnapshot();
-  return snapshot.isRunning === true || snapshot.jobs.some(job => ["pending", "running"].includes(job.status));
+  return snapshot.isRunning === true || snapshot.jobs.some(job => ["pending", "running", "waiting_for_user"].includes(job.status));
 }
 
 async function materializeQueueJob(job: ExtensionQueueJob): Promise<ExtensionQueueJob> {
@@ -204,7 +205,10 @@ async function waitExtensionJob(id: string, timeoutMs: number): Promise<Extensio
     const result = await extensionQueueCall<{ job: ExtensionQueueJob | null }>("flow.queue.get", { id }, 20_000);
     const job = result.job;
     if (!job) throw new Error(`No Flow queue job with id ${id}.`);
-    if (["completed", "failed", "cancelled"].includes(job.status)) return materializeQueueJob(job);
+    // Manual submit jobs are deliberately paused after staging the prompt in
+    // the Flow tab. Return that state to Studio/MCP so callers can surface the
+    // extension action instead of waiting until the request times out.
+    if (["completed", "failed", "cancelled", "waiting_for_user"].includes(job.status)) return materializeQueueJob(job);
     await new Promise(resolve => setTimeout(resolve, 1_500));
   }
   throw Object.assign(new Error(`Timed out waiting for Flow queue job ${id}; check flow_status before retrying.`), { code: "FLOW_QUEUE_WAIT_TIMEOUT", outcome_unknown: true });
@@ -320,7 +324,7 @@ export class LocalCore implements Core {
       jobs.push(jobView(extensionJobAsLegacy(job)) as unknown as Job);
     }
     return {
-      finished: selected.every(job => !["pending", "running"].includes(job.status)),
+      finished: selected.every(job => !["pending", "running", "waiting_for_user"].includes(job.status)),
       pacing: queue.isPaused ? "paused" : undefined,
       jobs,
     };
@@ -337,7 +341,9 @@ export class LocalCore implements Core {
     for (const id of job_ids || []) {
       const job = queue.jobs.find(item => item.id === id);
       if (job?.outcomeUnknown) throw new Error(`Job ${id} may already have been submitted to Flow. Check the project before retrying to avoid duplicate generation or charges.`);
-      if (job?.metadata?.downloadError || (job?.result?.result || job?.result)?.downloadError) throw new Error(`Job ${id} generated media but could not download it. Do not retry generation; use flow_assets and flow_download for the existing result.`);
+      if (job?.metadata?.downloadError || (job?.result?.result || job?.result)?.downloadError || String(job?.errorCode || "").toUpperCase().includes("DOWNLOAD")) {
+        throw new Error(`Job ${id} generated media but could not download it. Do not retry generation; use flow_assets and flow_download for the existing result.`);
+      }
     }
     const ids = job_ids ?? queue.jobs.filter(job =>
       (job.status === "failed" && job.retrySafe === true) ||
@@ -378,6 +384,13 @@ export class LocalCore implements Core {
     finally { this.mediaUploadActive = false; }
   }
 
+  async remove_reference_kind({ kind }: Args<"remove_reference_kind">) {
+    if (this.mediaUploadActive || await queueIsActive(this)) throw new Error(BUSY);
+    this.mediaUploadActive = true;
+    try { return await removeFlowReferenceKind(kind); }
+    finally { this.mediaUploadActive = false; }
+  }
+
   async projects() {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     return listFlowProjects();
@@ -395,7 +408,7 @@ export class LocalCore implements Core {
     return createFlowProject();
   }
 
-  async open_project({ project_id, language = "en" }: Args<"open_project">) {
+  async open_project({ project_id, language }: Args<"open_project">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     if (await queueIsActive(this)) throw new Error(BUSY);
     return openFlowProject(project_id, language);

@@ -39,6 +39,25 @@
     return editor.querySelectorAll('[contenteditable="false"]').length;
   }
 
+  function visibleFlowPromptEditors(scope = document) {
+    const configured = typeof root.flowQueryAll === "function"
+      ? root.flowQueryAll("editor", scope, { checkVisible: false }) : [];
+    const candidates = [...new Set([...(configured || []), ...scope.querySelectorAll?.(".ProseMirror,[contenteditable='true']") || []])];
+    return candidates.filter(editor => editor?.isContentEditable && editor.isConnected !== false && root.visible?.(editor));
+  }
+
+  function getVisibleFlowPromptEditor(scope = document) {
+    const candidates = visibleFlowPromptEditors(scope);
+    const focused = document.activeElement;
+    if (candidates.includes(focused)) return focused;
+    return candidates.length === 1 ? candidates[0] : null;
+  }
+
+  function currentFlowPromptEditor(preferred, scope = document) {
+    if (preferred?.isContentEditable && preferred.isConnected !== false && root.visible?.(preferred) && (scope === document || scope === preferred || scope.contains?.(preferred))) return preferred;
+    return getVisibleFlowPromptEditor(scope);
+  }
+
   async function clearEditorTextPreservingChips(editor) {
     if (!editor?.isContentEditable) return false;
 
@@ -126,35 +145,54 @@
   async function insertNativeFlowPrompt(el, value) {
     const text = String(value || "");
     const expected = normalizeFlowPrompt(text);
-    if (!el?.isContentEditable) return false;
+    let editor = currentFlowPromptEditor(el);
+    if (!editor) return false;
 
-    // Xóa sạch prompt cũ nhưng bảo toàn các chip reference
-    await clearEditorTextPreservingChips(el);
+    const insertOnce = async target => {
+      if (!target?.isContentEditable || target.isConnected === false || !root.visible?.(target)) return false;
+      if (normalizeFlowPrompt(getEditorUserText(target)) === expected) return true;
+      // Xóa sạch prompt cũ nhưng bảo toàn các chip reference. Never append a
+      // replacement prompt when Flow failed to clear the previous text.
+      if (!await clearEditorTextPreservingChips(target)) return false;
+      if (target.isConnected === false || !root.visible?.(target)) return false;
 
-    el.focus();
-    const selection = window.getSelection?.();
-    const range = document.createRange?.();
-    range?.selectNodeContents(el);
-    range?.collapse(false);
-    selection?.removeAllRanges?.();
-    if (range) selection?.addRange?.(range);
+      target.focus();
+      const selection = window.getSelection?.();
+      const range = document.createRange?.();
+      range?.selectNodeContents(target);
+      range?.collapse(false);
+      selection?.removeAllRanges?.();
+      if (range) selection?.addRange?.(range);
 
-    let inserted = false;
-    if (expected && typeof DataTransfer === "function" && typeof ClipboardEvent === "function") {
-      try {
-        const clipboard = new DataTransfer();
-        clipboard.setData("text/plain", text);
-        const paste = new ClipboardEvent("paste", { clipboardData: clipboard, bubbles: true, cancelable: true });
-        el.dispatchEvent(paste);
-        inserted = paste.defaultPrevented || normalizeFlowPrompt(getEditorUserText(el)) === expected;
-      } catch {}
-    }
-    if (expected && !inserted) {
-      try { document.execCommand?.("insertText", false, text); } catch {}
-    }
-    await root.wait?.(150);
-    const actual = normalizeFlowPrompt(getEditorUserText(el));
-    return !expected || actual === expected || actual.endsWith(expected);
+      let inserted = false;
+      if (expected && typeof DataTransfer === "function" && typeof ClipboardEvent === "function") {
+        try {
+          const clipboard = new DataTransfer();
+          clipboard.setData("text/plain", text);
+          const paste = new ClipboardEvent("paste", { clipboardData: clipboard, bubbles: true, cancelable: true });
+          target.dispatchEvent(paste);
+          inserted = paste.defaultPrevented || normalizeFlowPrompt(getEditorUserText(target)) === expected;
+        } catch {}
+      }
+      if (expected && !inserted) {
+        try { document.execCommand?.("insertText", false, text); } catch {}
+      }
+      await root.wait?.(150);
+      return normalizeFlowPrompt(getEditorUserText(target)) === expected;
+    };
+
+    if (await insertOnce(editor)) return true;
+
+    // Flow can replace the contenteditable during a render. Reacquire once and
+    // retry only if the replacement is uniquely visible and still empty; this
+    // prevents duplicate or destructive insertion into a changed composer.
+    const replacement = currentFlowPromptEditor(editor);
+    if (!replacement || replacement === editor) return false;
+    const replacementText = normalizeFlowPrompt(getEditorUserText(replacement));
+    if (replacementText === expected) return true;
+    if (replacementText !== "") return false;
+    editor = replacement;
+    return insertOnce(editor);
   }
 
   async function preflightGenerationPrompt(payload, framesMode) {
@@ -165,8 +203,7 @@
     const deadline = Date.now() + 5000;
     let promptBox = null;
     while (Date.now() < deadline) {
-      promptBox = (typeof root.flowQuery === "function" ? root.flowQuery("editor") : null) ||
-        [...document.querySelectorAll(".ProseMirror")].find(el => root.visible?.(el) && el.isContentEditable);
+      promptBox = getVisibleFlowPromptEditor();
       if (promptBox) return promptBox;
       await root.wait?.(100);
     }
@@ -234,7 +271,7 @@
     // 4. Short "tạo" or "create" near composer or with credits
     if (name.includes("tạo") || text.includes("tạo") || name.includes("create") || text.includes("create")) {
       const isNearComposer = Boolean(el.closest?.(".flow-composer, flow-base-prompt-box, form, [class*='composer']")) ||
-        Boolean(document.querySelector(".ProseMirror"));
+        Boolean(getVisibleFlowPromptEditor());
       if (isNearComposer) return true;
     }
 
@@ -242,9 +279,7 @@
   }
 
   function getFlowComposerContainer() {
-    const editor = (typeof root.flowQuery === "function" ? root.flowQuery("editor") : null) ||
-      document.querySelector(".ProseMirror[contenteditable='true']") ||
-      document.querySelector(".ProseMirror");
+    const editor = getVisibleFlowPromptEditor();
     if (editor) {
       const explicit = editor.closest(".flow-composer, flow-base-prompt-box, form, [class*='composer'], [class*='prompt-box'], [class*='prompt-container'], [data-testid*='composer']");
       if (explicit) return explicit;
@@ -335,7 +370,7 @@
     if (docTypeSubmit) return docTypeSubmit;
 
     // 2.4 By short "tạo" or "create" near ProseMirror
-    const editor = document.querySelector(".ProseMirror");
+    const editor = getVisibleFlowPromptEditor();
     if (editor) {
       const eRect = editor.getBoundingClientRect();
       const docShortBtn = allButtons.find(b => {
@@ -663,8 +698,10 @@
     normalizeFlowPrompt,
     getEditorUserText,
     countInlineChips,
+    visibleFlowPromptEditors,
     clearEditorTextPreservingChips,
     insertNativeFlowPrompt,
+    getVisibleFlowPromptEditor,
     preflightGenerationPrompt,
     isSubmitButtonElement,
     getFlowSubmitButton,
@@ -683,6 +720,7 @@
   root.countInlineChips = countInlineChips;
   root.clearEditorTextPreservingChips = clearEditorTextPreservingChips;
   root.insertNativeFlowPrompt = insertNativeFlowPrompt;
+  root.getVisibleFlowPromptEditor = getVisibleFlowPromptEditor;
   root.preflightGenerationPrompt = preflightGenerationPrompt;
   root.getFlowSubmitButton = getFlowSubmitButton;
   root.waitForGenerationSubmitButton = waitForGenerationSubmitButton;

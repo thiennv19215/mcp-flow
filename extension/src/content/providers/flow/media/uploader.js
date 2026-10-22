@@ -281,6 +281,48 @@
     const isVisible = root.visible || (el => Boolean(el && el.isConnected));
     const getAria = root.accessibleName || (el => el.getAttribute("aria-label") || "");
     const fn = root.flowError || ((c, m, r, o) => Object.assign(new Error(m), { code: c, retryable: r, outcome_unknown: o }));
+    const confirmationConfig = root.flowGetConfig?.("video_upload_confirm") || root.FlowSelectors?.video_upload_confirm || {};
+    const configuredConfirmationLabels = [
+      ...(Array.isArray(confirmationConfig.textMatch) ? confirmationConfig.textMatch : confirmationConfig.textMatch ? [confirmationConfig.textMatch] : []),
+      ...(Array.isArray(confirmationConfig.text_match) ? confirmationConfig.text_match : confirmationConfig.text_match ? [confirmationConfig.text_match] : []),
+    ];
+    const confirmationLabels = [
+      ...configuredConfirmationLabels,
+      "upload", "continue", "confirm", "agree", "accept", "next", "done", "ok", "got it",
+      "upload video", "upload file", "upload media", "continue upload", "agree and continue",
+      "tải lên", "tiếp tục", "xác nhận", "đồng ý", "chấp nhận", "tải video", "tải video lên", "tiếp tục tải lên",
+    ].map(normalizeFlowUploadActionLabel).filter(Boolean);
+    const confirmationSelectors = [...new Set([
+      ...(Array.isArray(confirmationConfig.selectors) ? confirmationConfig.selectors : []),
+      "button", "[role=button]",
+    ])];
+    const confirmationControls = scope => {
+      const controls = [];
+      for (const selector of confirmationSelectors) {
+        try {
+          for (const element of scope.querySelectorAll(selector)) if (!controls.includes(element)) controls.push(element);
+          if (scope.matches?.(selector) && !controls.includes(scope)) controls.unshift(scope);
+        } catch {}
+      }
+      return controls;
+    };
+    const isConfirmationControl = element => {
+      if (!isVisible(element) || element.disabled || element.getAttribute("aria-disabled") === "true") return false;
+      const text = normalizeFlowUploadActionLabel(getAria(element) || element.innerText || element.textContent || "");
+      // Confirmation labels are actions with high impact. Match complete
+      // accessible labels from the locale profile (or the small action
+      // grammar below) so a destructive negative option such as "Do not
+      // upload" cannot match the generic word "upload" by substring.
+      return confirmationLabels.some(label => text === label) ||
+        /^(?:upload|continue|confirm|agree|accept|next|done|ok|got it|tải lên|tiếp tục|xác nhận|đồng ý|chấp nhận|tải video)(?:\s+(?:và\s+|and\s+)?(?:tiếp tục|upload|tải lên|video|file|media))?$/.test(text);
+    };
+    const summarizeControls = dialog => confirmationControls(dialog).filter(isVisible).slice(0, 12).map(element => ({
+      tag: String(element.tagName || "unknown").toLowerCase(),
+      role: element.getAttribute("role") || null,
+      label: String(getAria(element) || "").replace(/\s+/g, " ").trim().slice(0, 120) || null,
+      text: String(element.innerText || element.textContent || "").replace(/\s+/g, " ").trim().slice(0, 120) || null,
+      disabled: Boolean(element.disabled || element.getAttribute("aria-disabled") === "true"),
+    }));
     const result = { confirmationDialogSeen: false, confirmationButtonClicked: false, confirmationDialogUnrecognized: false };
     const ambiguous = (reason, dialogCount, controlCount) => {
       const error = fn("FLOW_UPLOAD_CONFIRMATION_AMBIGUOUS", `Flow displayed an ambiguous video upload confirmation (${reason}); no confirmation control was clicked. Inspect Flow before retrying.`, false, true);
@@ -291,14 +333,31 @@
         filePickerSelectionConfirmed: selection.filePickerSelectionConfirmed === true,
         pickerMethod: safeFlowPickerMethod(selection.pickerMethod),
         pickerType: safeFlowPickerType(selection.pickerType),
+        dialogs: [...document.querySelectorAll('[role="dialog"],mat-dialog-container')].filter(isVisible).slice(0, 4).map(dialog => ({
+          label: String(getAria(dialog) || "").replace(/\s+/g, " ").trim().slice(0, 180) || null,
+          text: String(dialog.innerText || dialog.textContent || "").replace(/\s+/g, " ").trim().slice(0, 500),
+          controls: summarizeControls(dialog),
+        })),
         uploadUi: inspectFlowUploadUiState(),
       };
       throw error;
     };
     for (let attempt = 0; attempt < 24; attempt++) {
       if (Date.now() >= deadline) throw fn("FLOW_OPERATION_TIMEOUT", "Timed out while confirming Flow's video upload. Inspect Flow before retrying.", false, true);
-      const matchingDialogs = [...document.querySelectorAll('[role="dialog"],mat-dialog-container')].filter(el =>
-        isVisible(el) && /video|upload|tải lên|tải video|tải tệp/i.test(String(el.innerText || el.textContent || "").slice(0, 1200)));
+      const matchingDialogs = [...document.querySelectorAll('[role="dialog"],mat-dialog-container')].filter(el => {
+        if (!isVisible(el)) return false;
+        const text = String(el.innerText || el.textContent || "").slice(0, 1200);
+        const configuredDialogRegex = confirmationConfig.dialogTextRegex || confirmationConfig.dialog_text_regex;
+        let configuredDialogMatch = false;
+        if (configuredDialogRegex) {
+          try {
+            const regex = configuredDialogRegex instanceof RegExp ? configuredDialogRegex : new RegExp(String(configuredDialogRegex), "i");
+            configuredDialogMatch = root.matchesFlowUiRegex?.(text, regex) ?? regex.test(text);
+          } catch {}
+        }
+        return configuredDialogMatch || /video|upload|tải lên|tải video|tải tệp/i.test(text) ||
+          ((selection.filePickerSelectionConfirmed === true || selection.dropReceiptConfirmed === true) && confirmationControls(el).some(isConfirmationControl));
+      });
       const specificDialogs = matchingDialogs.filter(dialog =>
         !matchingDialogs.some(other => other !== dialog && dialog.contains?.(other)));
       if (!specificDialogs.length) {
@@ -308,17 +367,17 @@
       result.confirmationDialogSeen = true;
       if (specificDialogs.length !== 1) ambiguous("multiple visible dialogs", specificDialogs.length, 0);
       const dialog = specificDialogs[0];
-      const confirms = [...dialog.querySelectorAll("button,[role=button]")].filter(el => {
-        if (!isVisible(el) || el.disabled || el.getAttribute("aria-disabled") === "true") return false;
-        const text = (getAria(el) || el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
-        return /^(?:upload|continue|confirm|agree|accept|next|done|ok|got it|tải lên|tiếp tục|xác nhận|đồng ý|chấp nhận|tải video|tải video lên)(?:\s+(?:và\s+|and\s+)?(?:tiếp tục|upload|tải lên|video|file|media))?$/i.test(text) ||
-          /^(?:upload\s+video|upload\s+file|upload\s+media|continue\s+upload|agree\s+and\s+continue|tiếp tục\s+tải lên)$/i.test(text);
-      });
+      const confirms = confirmationControls(dialog).filter(isConfirmationControl);
       if (confirms.length > 1) ambiguous("multiple enabled confirmation controls", 1, confirms.length);
       const confirm = confirms[0];
       if (confirm) { confirm.click(); result.confirmationButtonClicked = true; await root.FlowUiDeadline?.boundedWait(250, deadline, "confirming Flow's video upload", true, signal); return result; }
       await root.FlowUiDeadline?.boundedWait(300, deadline, "waiting for Flow's video upload confirmation", true, signal);
     }
+    // Flow does not show a consent dialog for every account or upload route.
+    // Toby treats that as the normal path and verifies the new tile afterward.
+    // Only fail closed when a relevant dialog was actually observed but its
+    // confirmation control could not be identified.
+    if (!result.confirmationDialogSeen) return result;
     result.confirmationDialogUnrecognized = true;
     const error = fn("FLOW_UPLOAD_CONFIRMATION_UNRECOGNIZED", "Flow displayed a video upload confirmation dialog, but no recognized Upload, Continue, or Confirm control appeared. No further upload actions were started; inspect Flow before retrying.", false, true);
     error.diagnostics = {
@@ -328,6 +387,13 @@
       pickerType: safeFlowPickerType(selection.pickerType),
       dropAttempted: selection.dropAttempted === true,
       dropReceiptConfirmed: selection.dropReceiptConfirmed === true,
+      configuredSelectorCount: confirmationSelectors.length,
+      configuredTextMatchCount: Array.isArray(configuredConfirmationLabels) ? configuredConfirmationLabels.length : Number(Boolean(configuredConfirmationLabels)),
+      dialogs: [...document.querySelectorAll('[role="dialog"],mat-dialog-container')].filter(isVisible).slice(0, 4).map(dialog => ({
+        label: String(getAria(dialog) || "").replace(/\s+/g, " ").trim().slice(0, 180) || null,
+        text: String(dialog.innerText || dialog.textContent || "").replace(/\s+/g, " ").trim().slice(0, 500),
+        controls: summarizeControls(dialog),
+      })),
       uploadUi: inspectFlowUploadUiState(),
     };
     throw error;
@@ -344,6 +410,8 @@
     const requireNewOwner = options.requireNewOwner === true;
     const expectedId = options.expectedId ? String(options.expectedId) : null;
     let ownerId = options.ownerId ? String(options.ownerId) : null;
+    let retryAttempted = false;
+    let tabActivationAttempted = false;
     let exactTileObserved = false;
     let lastScan = null;
     let lastScanErrorCode = null;
@@ -369,6 +437,19 @@
       const tile = newExactMatches[0] || null;
       if (tile) {
         if (tile.querySelector("flow-error-tile")) {
+          if (!retryAttempted && options.retryOnError !== false && root.FlowTiles?.retryNativeErrorTile) {
+            retryAttempted = true;
+            try {
+              await root.FlowTiles.retryNativeErrorTile({ id: getMediaId(tile), title: assetName, kind, element: tile }, {
+                deadline,
+                timeoutMs: Math.min(8_000, Math.max(1_000, deadline - Date.now())),
+                signal: options.signal,
+              });
+              continue;
+            } catch (retryError) {
+              if (retryError?.code === "FLOW_OPERATION_CANCELLED") throw retryError;
+            }
+          }
           throw fn("FLOW_UPLOAD_REJECTED", `Flow rejected uploaded ${kind} "${assetName}".`, false, true);
         }
         const identity = getMediaId(tile);
@@ -388,6 +469,15 @@
           // Pre-existing tile
         } else if (ready && kindMatches && identityMatchesOwner && hasPersistentIdentity && flowUploadTileNames(tile).some(name => flowUploadNameMatches(name, assetName))) {
           return { name: flowUploadTileNames(tile).find(name => flowUploadNameMatches(name, assetName)) || assetName, id: identity, kind };
+        }
+      }
+      if (!tabActivationAttempted && document.visibilityState === "hidden" && Date.now() - startedAt > 5000) {
+        tabActivationAttempted = true;
+        try {
+          const activated = await chrome.runtime.sendMessage({ type: "flow-mcp:ensure-active-tab" });
+          if (activated?.ok) await root.FlowUiDeadline?.boundedWait(300, deadline, "activating the Flow tab for upload confirmation", true, options.signal);
+        } catch (activationError) {
+          lastScanErrorCode = activationError?.code || "TAB_ACTIVATION_FAILED";
         }
       }
       if (libraryScans < maxLibraryScans && Date.now() >= nextLibraryScanAt && root.FlowMediaMenu?.scanNativeAssets) {
@@ -467,7 +557,7 @@
     const checkTime = (operation, outcomeUnknown = false) => root.FlowUiDeadline?.requireTime(deadline, operation, outcomeUnknown, options.signal);
     checkTime("starting the Flow media upload");
 
-    const scroller = typeof root.scrollContainer === "function" ? root.scrollContainer() : null;
+    const scroller = root.FlowTiles?.flowMediaGridScrollContainer?.() || root.flowMediaGridScrollContainer?.() || null;
     if (scroller && scroller.scrollTop > 5) {
       scroller.scrollTop = 0;
       await root.FlowUiDeadline?.boundedWait(150, deadline, "scrolling to the Flow composer", false, options.signal);
@@ -517,7 +607,18 @@
       throw fn("FLOW_UPLOAD_ID_UNAVAILABLE", `Flow has multiple tiles named "${file.name}", but their media IDs or types are not sufficient to choose an existing ${kind} asset safely. No duplicate upload was started.`, true, false);
     }
 
-    const baselineAssets = root.FlowMediaMenu?.collectAssets?.({ includeIncomplete: true });
+    let baselineAssets;
+    try {
+      baselineAssets = await root.FlowMediaMenu?.scanNativeAssets?.({
+        includeIncomplete: true,
+        requireComplete: true,
+        maxDurationMs: Math.min(15_000, Math.max(3_000, deadline - Date.now())),
+        deadline,
+        signal: options.signal,
+      });
+    } catch (error) {
+      throw fn(error?.code || "FLOW_UPLOAD_BASELINE_UNAVAILABLE", error?.message || "Could not capture a complete Flow media baseline. No file was selected; inspect the project before retrying.", error?.retryable ?? true, error?.outcome_unknown ?? false);
+    }
     if (!Array.isArray(baselineAssets)) {
       throw fn("FLOW_UPLOAD_BASELINE_UNAVAILABLE", "Could not capture Flow media IDs before upload. No file was selected; inspect the project before retrying.", false, false);
     }

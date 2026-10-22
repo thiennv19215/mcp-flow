@@ -116,7 +116,7 @@
     throw (root.flowError ? root.flowError("FLOW_NAVIGATION_TIMEOUT", message, true) : new Error(message));
   }
 
-  async function exitFlowMediaViewer() {
+  async function exitFlowMediaViewer(options = {}) {
     const isMediaViewer = () => {
       return /\/edit(?:\/|$)/i.test(location.pathname) || /\/project\/[^/]+\/edit/i.test(location.pathname);
     };
@@ -139,7 +139,7 @@
       try { backBtn.dispatchEvent(new PointerEvent("pointerup", eventInit)); } catch {}
       try { backBtn.dispatchEvent(new MouseEvent("mouseup", eventInit)); } catch {}
       try { backBtn.click(); } catch {}
-      const left = await waitForFlowRoute(path => !isMediaViewer(), 2000, "").catch(() => false);
+      const left = await waitForFlowRoute(path => !isMediaViewer(), 2000, "", options).catch(() => false);
       if (left) return true;
     }
 
@@ -147,7 +147,7 @@
     try {
       if (typeof history !== "undefined" && typeof history.back === "function") {
         history.back();
-        const left = await waitForFlowRoute(path => !isMediaViewer(), 2000, "").catch(() => false);
+        const left = await waitForFlowRoute(path => !isMediaViewer(), 2000, "", options).catch(() => false);
         if (left) return true;
       }
     } catch {}
@@ -199,6 +199,12 @@
       return explicitPickerTitle || (hasAssetSearch && hasMediaCategory) ||
         (/\b(?:album|anh tren flow|tai len)\b/.test(text) && /\b(?:chon|upload|tai len)\b/.test(text));
     };
+    const isKnownPopupMenu = el => {
+      const role = String(el?.getAttribute?.("role") || "").toLowerCase();
+      const marker = `${el?.className?.baseVal || el?.className || ""} ${el?.tagName || ""}`.toLowerCase();
+      return role === "menu" || role === "listbox" || /mat-menu-panel|mat-mdc-menu-panel|mat-select-panel/.test(marker);
+    };
+    const isKnownDismissibleSurface = el => isMediaPicker(el) || isKnownPopupMenu(el);
     const clickClose = surface => {
       const closeButton = [...(surface?.querySelectorAll?.('button, [role="button"]') || [])].find(button => {
         if (!visible(button) || button.disabled || button.getAttribute?.("aria-disabled") === "true") return false;
@@ -247,14 +253,33 @@
       }
 
       const surface = state.overlays.find(el => !isSettingsDialog(el));
+      if (surface && !isKnownDismissibleSurface(surface)) {
+        const error = root.flowError
+          ? root.flowError("FLOW_UNKNOWN_OVERLAY_BLOCKING", "An unrecognized Flow dialog is open. It was left untouched; close or inspect it before starting another operation.", false, false)
+          : new Error("An unrecognized Flow dialog is open and was left untouched.");
+        error.diagnostics = { ...publicSnapshot(state), blockingSurface: {
+          role: surface.getAttribute?.("role") || null,
+          tagName: surface.tagName || null,
+          label: normalize(root.accessibleName?.(surface) || surface.getAttribute?.("aria-label") || "").slice(0, 160),
+        } };
+        throw error;
+      }
+
       if (surface && clickClose(surface)) {
         dismissedAny = true;
         await pause(150, state.mediaPickerOpen || isMediaPicker(surface) ? "closing the Flow media picker" : "closing a Flow popup");
         continue;
       }
 
-      // Escape is sent only after a visible Flow popup/backdrop was detected.
-      // This avoids accidentally changing the composer when there is no popup.
+      // Escape may close a positively identified Flow picker/menu only. A
+      // backdrop by itself is ambiguous, so never send Escape in that case.
+      if (!surface || !isKnownDismissibleSurface(surface)) {
+        const error = root.flowError
+          ? root.flowError("FLOW_UNKNOWN_OVERLAY_BLOCKING", "A Flow overlay is visible but its type could not be identified. It was left untouched; inspect it before starting another operation.", false, false)
+          : new Error("An unidentified Flow overlay is visible and was left untouched.");
+        error.diagnostics = publicSnapshot(state);
+        throw error;
+      }
       root.dispatchEscapeKey?.();
       dismissedAny = true;
       await pause(150, "closing a Flow popup with Escape");
@@ -278,6 +303,7 @@
     const now = Date.now();
     const requestedDeadline = Number.isFinite(options.deadline) ? options.deadline : now + 6_000;
     const cleanupDeadline = Math.min(Math.max(requestedDeadline, now + 2_500), now + 8_000);
+    await leaveFlowDetailView({ deadline: cleanupDeadline, signal: options.signal });
     const before = await dismissBlockingOverlays({ deadline: cleanupDeadline });
     const referencePicker = (() => {
       try { return root.FlowReferenceActions?.inspectDiagnostics?.()?.pickerOpen === true; } catch { return false; }
@@ -299,29 +325,29 @@
       .some(radio => /image|video|9:16|16:9/i.test(root.accessibleName?.(radio) || ""));
   }
 
-  async function leaveFlowDetailView() {
+  async function leaveFlowDetailView(options = {}) {
     const target = root.ProviderRegistry?.describeUrl?.(location.href) || root.FlowDriverRegistry?.describeUrl?.(location.href);
     if (target?.projectId && !target.isProjectEditor) {
       if (/\/edit(?:\/|$)/i.test(location.pathname)) {
-        await exitFlowMediaViewer();
+        await exitFlowMediaViewer(options);
         return;
       }
       if (/\/character(?:\/|$)/i.test(location.pathname)) {
         const done = [...document.querySelectorAll("button,[role=button]")].find(el => root.visible?.(el) && /^(?:Done( editing)?|Xong|Hoàn tất)$/i.test(root.accessibleName?.(el).trim()));
         if (done) {
           done.click();
-          const left = await waitForFlowRoute(path => !/\/character(?:\/|$)/i.test(path), 2000, "").catch(() => false);
+          const left = await waitForFlowRoute(path => !/\/character(?:\/|$)/i.test(path), 2000, "", options).catch(() => false);
           if (left) return;
         }
         const goBack = root.flowButton?.("Go back") || root.flowButton?.("Back") || root.flowButton?.("Quay lại");
         if (goBack) {
           goBack.click();
-          const left = await waitForFlowRoute(path => !/\/character(?:\/|$)/i.test(path), 2000, "").catch(() => false);
+          const left = await waitForFlowRoute(path => !/\/character(?:\/|$)/i.test(path), 2000, "", options).catch(() => false);
           if (left) return;
         }
       }
 
-      await ensureFlowProjectEditor();
+      await ensureFlowProjectEditor(options);
     }
   }
 

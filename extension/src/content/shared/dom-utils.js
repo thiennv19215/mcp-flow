@@ -121,9 +121,11 @@ function flowError(code, message, retryable = false, outcomeUnknown = false) {
 function classifyFlowError(rawText) {
   if (!rawText || typeof rawText !== "string") return null;
   const text = rawText.trim();
+  const foldedText = normalizeFlowUiText(text);
+  const searchableText = `${text}\n${foldedText}`;
 
   // 1. Quota / Credits
-  if (/(?:PUBLIC_ERROR_USER_QUOTA_REACHED|quota_exceeded|per_model_daily|tier_restricted|credit limit|insufficient credits|not enough credits|out of credits|daily generation limit)/i.test(text)) {
+  if (/(?:PUBLIC_ERROR_USER_QUOTA_REACHED|quota_exceeded|per_model_daily|tier_restricted|credit limit|insufficient credits|not enough credits|out of credits|daily generation limit|khong du (?:credit|tin dung|diem tin dung)|het (?:han muc|tin dung|luot tao)|vuot(?: qua)? han muc(?: tao)?|gioi han tao hang ngay)/i.test(searchableText)) {
     return {
       category: "quota",
       code: "FLOW_QUOTA_EXCEEDED",
@@ -133,7 +135,7 @@ function classifyFlowError(rawText) {
   }
 
   // 2. Unusual Activity / Captcha / Bot Detection
-  if (/(?:PUBLIC_ERROR_UNUSUAL_ACTIVITY|UNUSUAL_ACTIVITY|bot_detected|captcha_failed|unusual activity|extensions that modify the page|suspicious activity|hoạt động bất thường|tiện ích trình duyệt sửa đổi trang)/i.test(text)) {
+  if (/(?:PUBLIC_ERROR_UNUSUAL_ACTIVITY|UNUSUAL_ACTIVITY|bot_detected|captcha_failed|unusual activity|extensions that modify the page|suspicious activity|hoạt động bất thường|tiện ích trình duyệt sửa đổi trang)/i.test(searchableText)) {
     return {
       category: "captcha",
       code: "FLOW_UNUSUAL_ACTIVITY",
@@ -143,7 +145,7 @@ function classifyFlowError(rawText) {
   }
 
   // 3. Safety / Policy Violation
-  if (/(?:SEXUALLY_EXPLICIT|CHILD_SAFETY|CONTENT_BLOCKED|policy violation|safety guidelines|harmful content|unable to generate this prompt)/i.test(text)) {
+  if (/(?:SEXUALLY_EXPLICIT|CHILD_SAFETY|CONTENT_BLOCKED|policy violation|safety guidelines|harmful content|unable to generate this prompt|vi pham (?:chinh sach|nguyen tac)|chinh sach an toan|noi dung khong an toan|khong the tao (?:noi dung|hinh anh|video) nay|cau lenh khong hop le)/i.test(searchableText)) {
     return {
       category: "policy",
       code: "FLOW_POLICY_VIOLATION",
@@ -153,7 +155,7 @@ function classifyFlowError(rawText) {
   }
 
   // 4. Rate limit
-  if (/(?:RATE_LIMIT|RESOURCE_EXHAUSTED|too many requests|try again in a few moments)/i.test(text)) {
+  if (/(?:RATE_LIMIT|RESOURCE_EXHAUSTED|too many requests|try again in a few moments|gioi han (?:tan suat|yeu cau)|qua nhieu yeu cau|thu lai sau(?: vai phut| it phut)?|he thong dang ban)/i.test(searchableText)) {
     return {
       category: "rate_limit",
       code: "FLOW_RATE_LIMIT",
@@ -164,7 +166,7 @@ function classifyFlowError(rawText) {
 
   // 5. Expired sign-in/session. This is recoverable after the user signs in again,
   // but automation must not keep retrying against an unavailable account.
-  if (/(?:UNAUTHENTICATED|AUTH_REQUIRED|login required|sign in to continue|session expired|not signed in|authentication required)/i.test(text)) {
+  if (/(?:UNAUTHENTICATED|AUTH_REQUIRED|login required|sign in to continue|session expired|not signed in|authentication required|vui long dang nhap|hay dang nhap|can dang nhap|phien dang nhap het han|chua dang nhap|yeu cau dang nhap)/i.test(searchableText)) {
     return {
       category: "session",
       code: "FLOW_SESSION_REQUIRED",

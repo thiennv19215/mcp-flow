@@ -1,6 +1,17 @@
 (function (root) {
   "use strict";
 
+  function armWatermarkDownload(meta = {}) {
+    try {
+      window.postMessage({
+        source: "flow-mcp-watermark-v1",
+        action: "arm",
+        requestId: `watermark-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        options: { ...meta, timeoutMs: Math.min(120_000, Math.max(5_000, Number(meta.timeoutMs) || 45_000)) },
+      }, location.origin);
+    } catch (_) {}
+  }
+
   function flowTileOptionsButton(tile) {
     const candidates = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("mediaMenu.triggerButton", tile, { checkVisible: false }) : null) ||
       [...tile.querySelectorAll('button,[role="button"]')];
@@ -38,7 +49,7 @@
     return items.find(item => !item.disabled && item.getAttribute("aria-disabled") !== "true" && wanted.test(flowMenuLabel(item)));
   }
 
-  async function revealFlowSubmenu(trigger, parentMenu, quality, kind) {
+  async function revealFlowSubmenu(trigger, parentMenu, quality, kind, options = {}) {
     const rect = trigger.getBoundingClientRect();
     const point = { bubbles: true, cancelable: true, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
     const pointer = { ...point, pointerId: 1, pointerType: "mouse", relatedTarget: parentMenu };
@@ -60,7 +71,7 @@
     for (const event of ["mouseover", "mouseenter", "mousemove"]) trigger.dispatchEvent(new MouseEvent(event, mouse));
     trigger.focus();
     for (let attempt = 0; attempt < 6; attempt++) {
-      await root.wait?.(150);
+      await options.wait?.(150, "opening Flow's download quality menu");
       const submenu = find();
       if (submenu) return submenu;
       if (attempt === 2) {
@@ -69,14 +80,14 @@
     }
     trigger.click();
     for (let attempt = 0; attempt < 6; attempt++) {
-      await root.wait?.(150);
+      await options.wait?.(150, "opening Flow's download quality menu");
       const submenu = find();
       if (submenu) return submenu;
     }
     return null;
   }
 
-  async function revealFlowTileOptions(tile) {
+  async function revealFlowTileOptions(tile, options = {}) {
     tile.scrollIntoView({ behavior: "instant", block: "center" });
     const target = tile.querySelector("img,video,[role=img]") || tile;
     const rect = target.getBoundingClientRect();
@@ -89,17 +100,19 @@
     if (button) return button;
     const deadline = Date.now() + 1800;
     while (Date.now() < deadline) {
+      options.checkActive?.("opening the Flow media menu");
       const revealed = flowTileOptionsButton(tile);
       if (revealed) return revealed;
-      await root.wait?.(100);
+      await options.wait?.(100, "opening the Flow media menu");
     }
     return null;
   }
 
-  async function waitForFlowTileMedia(tile, title, timeoutMs = 20000) {
+  async function waitForFlowTileMedia(tile, title, timeoutMs = 20000, options = {}) {
     const deadline = Date.now() + timeoutMs;
     let lastState = "media element missing";
     while (Date.now() < deadline) {
+      options.checkActive?.(`waiting for Flow media "${title}"`);
       if (!tile.isConnected) throw root.flowError("FLOW_ASSET_CHANGED", `The tile for "${title}" changed while preparing its download.`, true);
       const errorTile = (typeof root.flowQuery === "function" ? root.flowQuery("tiles.error", tile, { checkVisible: false }) : null) ||
         tile.querySelector("flow-error-tile");
@@ -148,7 +161,7 @@
         return tile;
       }
 
-      await root.wait?.(200);
+      await options.wait?.(200, `waiting for Flow media "${title}"`);
     }
 
     // Graceful fallback: If tile is connected and finished rendering (not failed, not busy), allow download
@@ -162,24 +175,42 @@
     throw root.flowError("FLOW_MEDIA_NOT_READY", `Flow has not finished loading media for "${title}" (${lastState}).`, true);
   }
 
-  function triggerFlowDownload(title, quality = "original", mediaHandle) {
+  function triggerFlowDownload(title, quality = "original", mediaHandle, operationOptions = {}) {
     return (async () => {
+      const deadline = Date.now() + Math.max(5000, Math.min(90_000, Number(operationOptions.timeoutMs) || 45_000));
+      let downloadMayHaveStarted = false;
+      const checkActive = operation => {
+        if (operationOptions.signal?.aborted) {
+          throw root.flowError("FLOW_OPERATION_CANCELLED", `The Flow queue stopped while ${operation}.${downloadMayHaveStarted ? " The download may already have started; check the browser downloads before retrying." : " No download was started."}`, false, downloadMayHaveStarted);
+        }
+        if (Date.now() >= deadline) throw root.flowError("FLOW_OPERATION_TIMEOUT", `Timed out while ${operation}.${downloadMayHaveStarted ? " The download may already have started; check the browser downloads before retrying." : " No download was started."}`, false, downloadMayHaveStarted);
+      };
+      const wait = async (ms, operation) => {
+        checkActive(operation);
+        const duration = Math.min(ms, Math.max(1, deadline - Date.now()));
+        if (root.FlowUiDeadline?.boundedWait) await root.FlowUiDeadline.boundedWait(duration, deadline, operation, downloadMayHaveStarted, operationOptions.signal);
+        else await root.wait?.(duration);
+        checkActive(operation);
+      };
+      const helpers = { checkActive, wait };
+      checkActive("preparing the Flow download");
       if (document.visibilityState === "hidden") {
         const activated = await chrome.runtime.sendMessage({ type: "flow-mcp:ensure-active-tab" });
         if (!activated?.ok) throw root.flowError("FLOW_TAB_ACTIVATION_FAILED", activated?.error || "Flow tab could not be activated for its download menu.", true);
-        await root.wait?.(300);
+        await wait(300, "activating the Flow tab");
       }
       let tile;
       if (mediaHandle) {
-        const scroller = root.scrollContainer?.();
+        const scroller = root.FlowTiles?.flowMediaGridScrollContainer?.() || root.flowMediaGridScrollContainer?.();
         if (scroller) scroller.scrollTop = 0;
         for (let step = 0; step < 180 && !tile; step++) {
+          checkActive("locating the selected Flow media");
           tile = [...document.querySelectorAll("flow-grid-tile-container")].find(candidate => root.mediaId?.(candidate) === mediaHandle);
           if (tile || !scroller) break;
           const top = scroller.scrollTop, max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
           if (top >= max - 2) break;
           scroller.scrollTop = Math.min(max, top + Math.max(200, scroller.clientHeight * 0.78));
-          await root.wait?.(300);
+          await wait(300, "locating the selected Flow media");
         }
         if (!tile) throw root.flowError("FLOW_ASSET_NOT_FOUND", `Could not find media id "${mediaHandle}" in the project library; refusing to substitute another tile named "${title}".`, true);
       }
@@ -187,7 +218,7 @@
       if (!tile) throw root.flowError("FLOW_ASSET_NOT_FOUND", `Could not find "${title}" in the project library.`, true);
       const scene = Boolean(typeof root.flowQuery === "function" ? root.flowQuery("tiles.scene", tile, { checkVisible: false }) : tile.querySelector("flow-scene-tile"));
       const kind = (typeof root.flowQuery === "function" ? root.flowQuery("tiles.video", tile, { checkVisible: false }) : tile.querySelector("flow-video-tile")) ? "video" : "image";
-      if (!scene) await waitForFlowTileMedia(tile, title);
+      if (!scene) await waitForFlowTileMedia(tile, title, 20_000, helpers);
       if (!tile.isConnected || mediaHandle && root.mediaId?.(tile) !== mediaHandle) {
         tile = mediaHandle
           ? ((typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", document, { checkVisible: false }) : null) ||
@@ -195,14 +226,17 @@
           : await root.findFlowTile?.(title);
         if (!tile) throw root.flowError("FLOW_ASSET_CHANGED", `The selected Flow tile for "${title}" changed before its menu opened.`, true);
         tile.scrollIntoView({ behavior: "instant", block: "center" });
-        if (!scene) await waitForFlowTileMedia(tile, title);
+        if (!scene) await waitForFlowTileMedia(tile, title, 20_000, helpers);
       }
       if (scene) {
         tile.click();
-        await root.wait?.(1200);
+        await wait(1200, "opening the Flow scene");
         const download = root.flowButton?.("Download scene") || root.flowButton?.("Tải xuống cảnh") || root.flowButton?.("Tải cảnh");
         if (!download) throw root.flowError("FLOW_SCENE_DOWNLOAD_MISSING", "Scene view opened but Download scene is unavailable.", true);
+        checkActive("starting the Flow scene download");
+        armWatermarkDownload({ title, kind: "video", quality });
         download.click();
+        downloadMayHaveStarted = true;
       } else {
         const isDownloadItem = el => {
           const lbl = flowMenuLabel(el);
@@ -211,11 +245,12 @@
             icon === "download" || icon === "file_download";
         };
 
-        const more = await revealFlowTileOptions(tile);
+        const more = await revealFlowTileOptions(tile, helpers);
         let entries;
         if (more) {
+          checkActive("opening the Flow media menu");
           more.click();
-          await root.wait?.(400);
+          await wait(400, "opening the Flow media menu");
           entries = flowMenuItems();
         } else {
           const media = tile.querySelector("img,video") || tile;
@@ -226,25 +261,32 @@
           }));
           const menuDeadline = Date.now() + 1800;
           do {
+            checkActive("opening the Flow media menu");
             entries = flowMenuItems();
             if (entries.some(isDownloadItem)) break;
-            await root.wait?.(100);
+            await wait(100, "opening the Flow media menu");
           } while (Date.now() < menuDeadline);
         }
         const download = entries.find(isDownloadItem);
         if (download) {
           if (download.getAttribute("aria-haspopup") === "menu") {
             const parentMenu = download.closest('[role="menu"],mat-menu-panel') || download.parentElement;
-            const submenu = await revealFlowSubmenu(download, parentMenu, quality, kind);
+            const submenu = await revealFlowSubmenu(download, parentMenu, quality, kind, helpers);
             if (!submenu) throw root.flowError("FLOW_DOWNLOAD_SUBMENU_MISSING", `Flow opened the media menu but did not reveal download choices for "${title}".`, true);
             const choice = flowDownloadChoice(flowMenuItems(submenu), quality, kind);
             if (!choice) {
               const available = flowMenuItems(submenu).map(flowMenuLabel).filter(Boolean).join(", ") || "none";
               throw root.flowError("FLOW_DOWNLOAD_QUALITY_MISSING", `Flow's download menu for "${title}" has no ${quality} option. Available: ${available}.`, true);
             }
+            checkActive("starting the Flow media download");
+            armWatermarkDownload({ title, kind, quality });
             choice.click();
+            downloadMayHaveStarted = true;
           } else {
+            checkActive("starting the Flow media download");
+            armWatermarkDownload({ title, kind, quality });
             download.click();
+            downloadMayHaveStarted = true;
           }
         } else throw root.flowError("FLOW_TILE_MENU_MISSING", `Could not open options for "${title}".`, true);
       }
@@ -264,18 +306,48 @@
       const name = (tile.getAttribute("aria-label") || tile.getAttribute("title") || tile.getAttribute("data-tile-name") ||
         tile.querySelector("img")?.getAttribute("alt") || tile.querySelector("img")?.getAttribute("aria-label") || "").trim();
       const imageElement = tile.querySelector("img");
-      let thumbnailUrl = imageElement?.currentSrc || imageElement?.getAttribute("src") || "";
+      const videoElement = tile.querySelector("video");
+      const mediaElement = imageElement || videoElement;
+      let thumbnailUrl = imageElement?.currentSrc || imageElement?.getAttribute("src") ||
+        videoElement?.getAttribute("poster") || videoElement?.poster || "";
       try {
         const parsedThumbnail = new URL(thumbnailUrl, location.href);
         thumbnailUrl = parsedThumbnail.protocol === "https:" ? parsedThumbnail.href : "";
       } catch { thumbnailUrl = ""; }
+      let mediaSrc = mediaElement?.currentSrc || mediaElement?.getAttribute?.("src") || "";
+      try {
+        const parsed = new URL(mediaSrc, location.href);
+        mediaSrc = parsed.protocol === "https:" || parsed.protocol === "blob:" ? parsed.href : "";
+      } catch { mediaSrc = ""; }
+      const videoUrl = videoElement ? (videoElement.currentSrc || videoElement.getAttribute("src") || "") : "";
+      const fileName = tile.getAttribute("data-file-name") || tile.getAttribute("data-filename") ||
+        mediaElement?.getAttribute?.("data-file-name") || mediaElement?.getAttribute?.("data-filename") || "";
+      const displayName = tile.getAttribute("data-display-name") || tile.getAttribute("data-title") || name;
+      const persistentMediaId = tile.getAttribute("data-persistent-media-id") || tile.getAttribute("data-media-id") ||
+        mediaElement?.getAttribute?.("data-media-id") || undefined;
       const rawId = root.mediaId?.(tile);
       const id = rawId && !rawId.startsWith("title:") ? rawId : undefined;
       if ((!kind || !name) && (!includeIncomplete || !id)) return null;
       const busy = Boolean(root.FlowTiles?.isTileBusy?.(tile) ?? root.isTileBusy?.(tile));
       const ready = Boolean(root.FlowTiles?.isTileMediaReady?.(tile) ?? (!busy && root.isTileMediaReady?.(tile)));
       const hasError = Boolean(typeof root.flowQuery === "function" ? root.flowQuery("tiles.error", tile, { checkVisible: false }) : tile.querySelector("flow-error-tile"));
-      return { ...(id ? { id } : {}), name, kind, ...(thumbnailUrl ? { thumbnailUrl } : {}), busy, ...(includeIncomplete ? { ready, error: hasError } : {}) };
+      return {
+        ...(id ? { id } : {}),
+        ...(persistentMediaId ? { persistentMediaId } : {}),
+        name,
+        displayName,
+        fileName: fileName || undefined,
+        kind,
+        type: kind,
+        ...(thumbnailUrl ? { thumbnailUrl, thumbnail: thumbnailUrl } : {}),
+        ...(mediaSrc ? { src: mediaSrc } : {}),
+        ...(videoUrl ? { videoUrl, video_url: videoUrl } : {}),
+        projectId: (root.ProviderRegistry || root.FlowDriverRegistry)?.describeUrl?.(location.href)?.projectId || undefined,
+        identityDurability: id ? "persistent" : "title_only",
+        fileId: id || undefined,
+        busy,
+        ...(includeIncomplete ? { ready, error: hasError } : {}),
+      };
     }).filter(Boolean);
   }
 
@@ -291,10 +363,15 @@
     else externalSignal?.addEventListener("abort", onExternalAbort, { once: true });
     const signal = controller.signal;
     const checkActive = () => {
-      if (signal.aborted || Date.now() >= deadline) {
+      if (externalSignal?.aborted) {
+        controller.abort(externalSignal.reason);
+        throw root.flowError?.("FLOW_OPERATION_CANCELLED", "The Flow queue stopped while scanning the media library.", false, false) || new Error("Flow media library scan was cancelled.");
+      }
+      if (Date.now() >= deadline) {
         controller.abort();
         throw root.flowError?.("FLOW_ASSET_SCAN_TIMEOUT", "Flow media library scan reached its time limit and was cancelled. No further assets were scanned.", true, false) || new Error("Flow media library scan timed out.");
       }
+      if (signal.aborted) throw root.flowError?.("FLOW_ASSET_SCAN_TIMEOUT", "Flow media library scan reached its time limit and was cancelled. No further assets were scanned.", true, false) || new Error("Flow media library scan timed out.");
     };
     const boundedWait = async ms => {
       checkActive();
@@ -310,7 +387,8 @@
       const kindMatches = !options.kind || (!asset?.kind && options.includeIncomplete) || (options.kind === "video" ? asset?.kind === "video" || asset?.kind === "scene" : asset?.kind === options.kind);
       return kindMatches && (name === full || name === stem);
     };
-    const originalContainer = root.scrollContainer?.();
+    const gridScroller = () => root.FlowTiles?.flowMediaGridScrollContainer?.() || root.flowMediaGridScrollContainer?.();
+    const originalContainer = gridScroller();
     const originalTop = originalContainer?.scrollTop ?? 0;
     const byIdentity = new Map();
     let targetFound = false;
@@ -321,7 +399,7 @@
     const ownerKindMatches = asset => !options.ownerKind || !asset.kind ||
       (options.ownerKind === "video" ? asset.kind === "video" || asset.kind === "scene" : asset.kind === options.ownerKind);
     const rememberVisible = () => {
-      const currentTop = root.scrollContainer?.()?.scrollTop ?? 0;
+      const currentTop = gridScroller()?.scrollTop ?? 0;
       for (const asset of collectAssets({ includeIncomplete: options.includeIncomplete })) {
         const key = asset.id ? `id:${asset.id}` : `name:${asset.kind}:${asset.name.toLowerCase()}`;
         const prior = byIdentity.get(key);
@@ -359,7 +437,7 @@
       if (!gridAfter) {
         throw new Error("Flow's All media grid is not visible. Open the project and try again.");
       }
-      const container = root.scrollContainer?.();
+      const container = gridScroller();
       if (!container) {
         if (options.requireComplete) {
           throw root.flowError?.("FLOW_ASSET_SCAN_INCOMPLETE", "Flow's media library has no scroll container, so a complete upload baseline cannot be proven; no upload was started.", true, false) || new Error("Flow media library scan was incomplete.");
@@ -424,7 +502,7 @@
     } finally {
       clearTimeout(timeout);
       externalSignal?.removeEventListener("abort", onExternalAbort);
-      const current = root.scrollContainer?.();
+      const current = gridScroller();
       if (current && originalContainer === current) {
         if (options.keepPositionOnMatch && targetFound && Number.isFinite(targetScrollTop)) current.scrollTop = targetScrollTop;
         else if (!(options.keepPositionOnMatch && targetFound)) current.scrollTop = originalTop;
@@ -432,9 +510,58 @@
     }
   }
 
+  // Toby's gallery scanner returns a stable, rich record instead of exposing
+  // only the currently mounted tile nodes.  Keep the existing array API for
+  // library workflows and expose this explicit DOM scanner for callers that
+  // need thumbnails, video URLs, and a completeness signal.
+  async function scanGalleryTiles(options = {}) {
+    const startedAt = Date.now();
+    const deep = options.deep === true || options.requireComplete === true;
+    const maxDurationMs = Math.max(1000, Math.min(30_000, Number(options.maxDurationMs) || (deep ? 25_000 : 12_000)));
+    const tiles = await scanNativeAssets({
+      ...options,
+      includeIncomplete: true,
+      requireComplete: deep,
+      maxDurationMs,
+    });
+    const normalized = (Array.isArray(tiles) ? tiles : []).map(tile => ({
+      ...tile,
+      fileId: tile.fileId || tile.id || null,
+      file_id: tile.fileId || tile.id || null,
+      persistentMediaId: tile.persistentMediaId || tile.id || null,
+      persistent_media_id: tile.persistentMediaId || tile.id || null,
+      identityDurability: tile.identityDurability || (tile.id ? "persistent" : "title_only"),
+      identity_durability: tile.identityDurability || (tile.id ? "persistent" : "title_only"),
+      type: tile.type || tile.kind || "image",
+      thumbnail: tile.thumbnail || tile.thumbnailUrl || null,
+      video_url: tile.video_url || tile.videoUrl || null,
+      src: tile.src || null,
+      display_name: tile.displayName || tile.name || "",
+      file_name: tile.fileName || tile.name || "",
+      project_id: tile.projectId || (root.ProviderRegistry || root.FlowDriverRegistry)?.describeUrl?.(location.href)?.projectId || null,
+    }));
+    return {
+      tiles: normalized,
+      images: normalized,
+      count: normalized.length,
+      deepScan: deep,
+      deepRequested: deep,
+      deepScanComplete: true,
+      timing: {
+        startedAt,
+        durationMs: Date.now() - startedAt,
+        totalMs: Date.now() - startedAt,
+        configMs: 0,
+        initialDomMs: 0,
+      },
+      mountedTileCount: ((typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", document, { checkVisible: false }) : null) || [...document.querySelectorAll("flow-grid-tile-container")]).length,
+      source: "flow_dom_gallery",
+    };
+  }
+
   let lastCharacterScanDiagnostics = null;
 
-  function characterLibrarySnapshot(container = root.scrollContainer?.()) {
+  function characterLibrarySnapshot(container = root.FlowCharacterActions?.characterLibraryScrollContainer?.()) {
     const pathname = location.pathname || "";
     const project = (root.ProviderRegistry || root.FlowDriverRegistry)?.describeUrl?.(location.href) || null;
     const tiles = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.characterTile", document, { checkVisible: false }) : null) ||
@@ -530,7 +657,7 @@
       requireTime("opening the Characters library");
       // Resolve the scroller only after navigation. The project editor's old
       // scroll element can be detached when the Characters surface mounts.
-      container = root.scrollContainer?.() || null;
+      container = root.FlowCharacterActions?.characterLibraryScrollContainer?.() || null;
       originalTop = container?.scrollTop ?? 0;
       if (container) container.scrollTop = 0;
       const readyDeadline = Math.min(deadline, Date.now() + 10_000);
@@ -760,6 +887,7 @@
   const FlowMediaMenu = Object.freeze({
     triggerFlowDownload,
     scanNativeAssets,
+    scanGalleryTiles,
     scanNativeProjects,
     scanNativeCharacters,
     collectAssets,
@@ -770,6 +898,7 @@
   root.FlowMediaMenu = FlowMediaMenu;
   root.triggerFlowDownload = triggerFlowDownload;
   root.scanNativeAssets = scanNativeAssets;
+  root.scanGalleryTiles = scanGalleryTiles;
   root.scanNativeProjects = scanNativeProjects;
   root.scanNativeCharacters = scanNativeCharacters;
   root.nativeRead = nativeRead;

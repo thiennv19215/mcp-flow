@@ -147,7 +147,7 @@
     const variantNum = variantMatch ? variantMatch[1] : null;
 
     const findIn = rootEl => {
-      const candidates = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.options", rootEl, { checkVisible: false }) : null) ||
+      const candidates = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.options", rootEl, { checkVisible: false, latestFirst: true }) : null) ||
         [...rootEl.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"]')];
       return candidates.find(el => {
         if (!root.visible?.(el) || isNavControl(el)) return false;
@@ -176,7 +176,7 @@
     if (scope) return findIn(scope);
 
     // Prioritize settings panel / dialog overlay / composer container
-    const panel = (typeof root.flowQuery === "function" ? root.flowQuery("settings.panel", document, { checkVisible: false }) : null) ||
+    const panel = (typeof root.flowQuery === "function" ? root.flowQuery("settings.panel", document, { latestFirst: true }) : null) ||
       document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane, mat-menu-panel');
     const composer = flowComposerRoot();
     if (panel) {
@@ -200,7 +200,7 @@
     const variantNum = variantMatch ? variantMatch[1] : null;
 
     const findIn = rootEl => {
-      const candidates = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", rootEl, { checkVisible: false }) : null) ||
+      const candidates = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", rootEl, { checkVisible: false, latestFirst: true }) : null) ||
         [...rootEl.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')];
       return candidates.find(el => {
         const label = foldLabel(root.accessibleName?.(el));
@@ -228,7 +228,7 @@
 
     if (scope) return findIn(scope);
 
-    const panel = (typeof root.flowQuery === "function" ? root.flowQuery("settings.panel", document, { checkVisible: false }) : null) ||
+    const panel = (typeof root.flowQuery === "function" ? root.flowQuery("settings.panel", document, { latestFirst: true }) : null) ||
       document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane, mat-menu-panel');
     const composer = flowComposerRoot();
     if (panel) {
@@ -265,8 +265,8 @@
     const openPanels = panelCandidates
       .filter(el => root.visible?.(el) && !isNavControl(el) &&
         el.querySelector?.('[role="radio"], mat-radio-button, button[id*="-trigger-"]'));
-    for (const openPanel of openPanels) {
-      const controls = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", openPanel, { checkVisible: false }) : null) ||
+    for (const openPanel of openPanels.reverse()) {
+      const controls = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", openPanel, { checkVisible: false, latestFirst: true }) : null) ||
         [...openPanel.querySelectorAll('[role="radio"], mat-radio-button, [role="tab"], button')];
       const names = controls.filter(r => root.visible?.(r)).map(r => {
         const name = root.accessibleName?.(r) || r.innerText || r.textContent || "";
@@ -343,7 +343,7 @@
     if (!isOpen()) return;
 
     if (isOpen()) {
-      ((typeof root.flowQuery === "function" ? root.flowQuery("editor") : null) || document.querySelector(".ProseMirror"))?.click();
+      (root.getVisibleFlowPromptEditor?.() || (typeof root.flowQuery === "function" ? root.flowQuery("editor") : null))?.click();
       const closeDeadline = Date.now() + 1500;
       while (Date.now() < Math.min(closeDeadline, Number.isFinite(options.deadline) ? options.deadline : Infinity) && isOpen()) await waitPreparation(options, 100, "closing Flow settings");
     }
@@ -356,7 +356,7 @@
     const str = `${num}s`;
 
     await openFlowSettings(options);
-    const panel = flowSettingsPanelVisible() ? ((typeof root.flowQuery === "function" ? root.flowQuery("settings.panel", document, { checkVisible: false }) : null) || document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane') || document) : document;
+    const panel = flowSettingsPanelVisible() ? ((typeof root.flowQuery === "function" ? root.flowQuery("settings.panel", document, { latestFirst: true }) : null) || document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane') || document) : document;
 
     const tryClickDuration = () => {
       const idBtn = panel.querySelector(`button[id$="-trigger-${num}"]`);
@@ -366,7 +366,7 @@
         }
         return true;
       }
-      const candidates = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", panel, { checkVisible: false }) : null) || panel.querySelectorAll('button[role="tab"], [role="radio"], mat-radio-button, button'))].filter(el => root.visible?.(el) && !isNavControl(el));
+      const candidates = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", panel, { checkVisible: false, latestFirst: true }) : null) || panel.querySelectorAll('button[role="tab"], [role="radio"], mat-radio-button, button'))].filter(el => root.visible?.(el) && !isNavControl(el));
       const match = candidates.find(el => {
         const txt = foldLabel(el.innerText || el.textContent || "");
         const aria = foldLabel(root.accessibleName?.(el));
@@ -399,7 +399,7 @@
     await openFlowSettings(options);
     const panel = flowSettingsPanelVisible() ? ((typeof root.flowQuery === "function" ? root.flowQuery("settings.panel", document, { checkVisible: false }) : null) || document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane') || document) : document;
 
-    const candidates = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", panel, { checkVisible: false }) : null) || panel.querySelectorAll('[role="radio"], mat-radio-button, [role="tab"], [role="option"], button, [role="button"]'))].filter(el => root.visible?.(el) && !isNavControl(el));
+    const candidates = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", panel, { checkVisible: false, latestFirst: true }) : null) || panel.querySelectorAll('[role="radio"], mat-radio-button, [role="tab"], [role="option"], button, [role="button"]'))].filter(el => root.visible?.(el) && !isNavControl(el));
     const match = candidates.find(el => {
       const label = foldLabel(root.accessibleName?.(el));
       const txt = foldLabel(el.innerText || el.textContent || "");
@@ -427,9 +427,9 @@
     if (!resolution) return;
     const wanted = String(resolution).trim().toLowerCase().replace(/\s+/g, "");
     await openFlowSettings(options);
-    const panel = flowSettingsPanelVisible() ? ((typeof root.flowQuery === "function" ? root.flowQuery("settings.panel", document, { checkVisible: false }) : null) || document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog') || document) : document;
+    const panel = flowSettingsPanelVisible() ? ((typeof root.flowQuery === "function" ? root.flowQuery("settings.panel", document, { latestFirst: true }) : null) || document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog') || document) : document;
 
-    const candidates = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", panel, { checkVisible: false }) : null) || panel.querySelectorAll('button[role="tab"], [role="radio"], mat-radio-button, button'))].filter(el => root.visible?.(el) && !isNavControl(el));
+    const candidates = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", panel, { checkVisible: false, latestFirst: true }) : null) || panel.querySelectorAll('button[role="tab"], [role="radio"], mat-radio-button, button'))].filter(el => root.visible?.(el) && !isNavControl(el));
     const match = candidates.find(el => {
       const txt = (el.innerText || el.textContent || "").trim().toLowerCase().replace(/\s+/g, "");
       return txt === wanted || txt === `${wanted}p` || `${txt}p` === wanted;
@@ -470,7 +470,7 @@
       // the settings panel). Only search the panel whose controls prove that it
       // is Flow's settings panel; never let an earlier global overlay mask it.
       const panel = getVisibleFlowSettingsPanel() || document;
-      const candidates = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", panel, { checkVisible: false }) : null) ||
+      const candidates = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", panel, { checkVisible: false, latestFirst: true }) : null) ||
         [...panel.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')];
       return candidates
         .find(element => root.visible?.(element) && !isNavControl(element) && matches(element)) || null;
@@ -516,7 +516,7 @@
       while (Date.now() < Math.min(openedBy, Number.isFinite(options.deadline) ? options.deadline : Infinity) && !radio) { await waitPreparation(options, 100, `finding Flow ${name} mode`); radio = findOption(); }
     }
     if (!radio) {
-      const optionElements = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", document, { checkVisible: false }) : null) ||
+      const optionElements = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", document, { checkVisible: false, latestFirst: true }) : null) ||
         [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')];
       const options = optionElements
         .filter(el => root.visible?.(el)).map(el => (root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim()).filter(Boolean);
@@ -556,7 +556,7 @@
       const currentName = normalizeModelLabel(modelButton?.innerText || modelButton?.textContent || root.accessibleName?.(modelButton) || "");
       const currentCount = currentName.match(/(?:^|\s)x([1-4])(?:\s|$)/)?.[1];
       if (currentCount === String(variants)) return variants;
-      const composerCandidates = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", composer, { checkVisible: false }) : null) ||
+      const composerCandidates = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", composer, { checkVisible: false, latestFirst: true }) : null) ||
         [...composer.querySelectorAll('[role="radio"],[role="option"],[role="tab"],button,[role="button"]')];
       const countControl = composerCandidates
         .find(el => root.visible?.(el) && !isNavControl(el) &&
@@ -715,7 +715,7 @@
     if (button) return button;
 
     const panel = scope === document && flowSettingsPanelVisible()
-      ? ((typeof root.flowQuery === "function" ? root.flowQuery("settings.panel", document, { checkVisible: false }) : null) || document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane') || document)
+      ? ((typeof root.flowQuery === "function" ? root.flowQuery("settings.panel", document, { latestFirst: true }) : null) || document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane') || document)
       : scope;
     const candidates = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("common.buttons", panel, { checkVisible: false }) : null) || panel.querySelectorAll('button, [role="button"], [role="combobox"]'))].filter(el => root.visible?.(el) && !isNavControl(el));
 
@@ -774,7 +774,7 @@
     const menuDeadline = Math.min(Date.now() + 4000, Number.isFinite(options.deadline) ? options.deadline : Infinity);
     while (Date.now() < menuDeadline) {
       checkPreparation(options, "loading Flow model choices");
-      items = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.dropdownItems", document, { checkVisible: false }) : null) || document.querySelectorAll('[role="menuitem"], [role="menuitemradio"], mat-option, [role="option"]'))].filter(el => root.visible?.(el));
+      items = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.dropdownItems", document, { checkVisible: false, latestFirst: true }) : null) || document.querySelectorAll('[role="menuitem"], [role="menuitemradio"], mat-option, [role="option"]'))].filter(el => root.visible?.(el));
       if (!items.length) {
         const activeMenu = (typeof root.flowQuery === "function" ? root.flowQuery("settings.activeMenu", document, { checkVisible: false }) : null) ||
           document.querySelector('[role="menu"]:last-of-type, [data-radix-popper-content-wrapper]:last-of-type, .cdk-overlay-pane:last-of-type');
@@ -842,7 +842,7 @@
   async function restoreNativeFramesMode(options = {}) {
     await openFlowSettings(options);
     const findFrames = () => {
-      const candidates = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", document, { checkVisible: false }) : null) ||
+      const candidates = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", document, { checkVisible: false, latestFirst: true }) : null) ||
         [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')];
       return candidates.find(el => root.visible?.(el) && !isNavControl(el) &&
         /^(?:frames|khung hinh|khung|khung anh)$/.test(foldLabel((root.accessibleName?.(el) || "").replace(/^(?:accessibility_new|dashboard|face)\s*/i, ""))));

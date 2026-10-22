@@ -336,16 +336,23 @@
   }
 
   function referenceComposerScope() {
-    const editor = (typeof root.flowQuery === "function" ? root.flowQuery("editor", document, { checkVisible: false }) : null) ||
-      document.querySelector?.(".ProseMirror[contenteditable='true'],.ProseMirror,flow-base-prompt-box [contenteditable='true']") || null;
+    const configuredEditors = typeof root.flowQueryAll === "function" ? root.flowQueryAll("editor", document, { checkVisible: false }) : [];
+    const editors = [...new Set([...(configuredEditors || []), ...(document.querySelectorAll?.(".ProseMirror[contenteditable='true'],flow-base-prompt-box [contenteditable='true']") || [])])]
+      .filter(el => el.isContentEditable && el.isConnected !== false && visible(el));
+    const focused = document.activeElement;
+    const editor = editors.includes(focused) ? focused : editors.length === 1 ? editors[0] : null;
     const composerSelector = "flow-base-prompt-box,.flow-composer,form,[class*='composer'],[class*='prompt-box'],[class*='prompt-container'],[data-testid*='composer']";
     const explicitComposer = editor?.closest?.(composerSelector);
     if (explicitComposer) return explicitComposer;
-    const configuredComposer = typeof root.flowQuery === "function" ? root.flowQuery("composerRoot", document, { checkVisible: false }) : null;
-    return configuredComposer && (!editor || configuredComposer.contains?.(editor)) ? configuredComposer : document;
+    if (!editor && editors.length > 1) throw flowError("FLOW_COMPOSER_AMBIGUOUS", "Flow has multiple visible prompt editors and none is active; reference chips could not be scoped safely.", true, false);
+    const configuredComposers = typeof root.flowQueryAll === "function" ? root.flowQueryAll("composerRoot", document) : [];
+    const configuredComposer = configuredComposers?.length === 1 ? configuredComposers[0] : null;
+    if (configuredComposer && (!editor || configuredComposer.contains?.(editor))) return configuredComposer;
+    if (editor) return editor;
+    throw flowError("FLOW_COMPOSER_UNVERIFIED", "Flow's visible prompt editor could not be verified; reference chips were not read or changed.", true, false);
   }
   function referenceChipBoundary(button) {
-    const explicit = button?.closest?.("flow-character-ingredient-chip,[data-chip],[data-ingredient-type='image'],[data-ingredient-type='character']");
+    const explicit = button?.closest?.("flow-character-ingredient-chip,[data-chip],[data-ingredient-type='image'],[data-ingredient-type='video'],[data-ingredient-type='character'],[data-kind='image'],[data-kind='video'],[data-kind='character']");
     if (explicit) return explicit;
     const kindOwner = button?.closest?.("[data-kind='image'],[data-kind='character']");
     if (!kindOwner) return null;
@@ -365,6 +372,8 @@
     const viChips = [...(scope.querySelectorAll?.('button[aria-label="Thành phần"],button[aria-label="Nguyên liệu"]') || [])];
     const dynamicButtons = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("common.buttons", scope, { checkVisible: false }) : null) ||
       [...(scope.querySelectorAll?.('button,[role="button"]') || [])];
+    const videoChips = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.videoChip", scope, { checkVisible: false }) : null) ||
+      [...(scope.querySelectorAll?.('[data-ingredient-type="video"],[data-kind="video"],[class*="ingredient-video" i],[class*="video-chip" i]') || [])];
     const isIngredientChipControl = btn => {
       if (!visible(btn)) return false;
       // The shipped chips selector includes generic `button` and
@@ -379,7 +388,7 @@
         /(?:^|\b)(?:ingredient|thanh phan|nguyen lieu)(?:\b|$)/i.test(alt);
     };
     // Selector fallbacks include generic buttons; count only actual ingredient controls.
-    const candidates = [...new Set([...configuredChips, ...viChips, ...dynamicButtons])].filter(isIngredientChipControl);
+    const candidates = [...new Set([...configuredChips, ...viChips, ...dynamicButtons, ...videoChips])].filter(isIngredientChipControl);
     const score = button => {
       const aria = (accessibleName(button) || button.getAttribute?.("aria-label") || "").toLowerCase();
       return (/(?:^|\b)(?:ingredient|thành phần|nguyên liệu)(?:\b|$)/i.test(aria) ? 100 : 0) +
@@ -397,8 +406,12 @@
       const explicitKind = button.getAttribute?.("data-ingredient-type") || button.getAttribute?.("data-kind") ||
         button.closest?.("[data-ingredient-type], [data-kind]")?.getAttribute?.("data-ingredient-type") ||
         button.closest?.("[data-kind]")?.getAttribute?.("data-kind");
-      const kind = button.closest?.("flow-character-ingredient-chip") || /^(?:character|nhân vật)$/i.test(String(explicitKind || "").trim()) ? "character" : "image";
-      return { element: button, owner: referenceChipBoundary(button) || button, kind, source: identity(image?.getAttribute?.("src")), ...metadata.get(button) };
+      const kindText = String(explicitKind || "").trim();
+      const owner = referenceChipBoundary(button) || button;
+      const kind = /voice|giọng/i.test(kindText) || /voice-chip|ingredient-voice/i.test(String(owner.className?.baseVal || owner.className || "")) ? "voice" :
+        /video|clip/i.test(kindText) || /video-chip|ingredient-video/i.test(String(owner.className?.baseVal || owner.className || "")) || Boolean(owner.querySelector?.("video,flow-video-tile")) ? "video" :
+        button.closest?.("flow-character-ingredient-chip") || /^(?:character|nhân vật)$/i.test(kindText) ? "character" : "image";
+      return { element: button, owner, kind, source: identity(image?.getAttribute?.("src")), ...metadata.get(button) };
     });
   }
   function chipAttachEvidence(before, current, added, stage) {
@@ -450,9 +463,9 @@
     return undefined;
   }
   function picker() {
-    return (typeof root.flowQueryVisible === "function" ? root.flowQueryVisible("components.listBox", document) : null) ||
-      (typeof root.flowQuery === "function" ? root.flowQuery("components.listBox") : null) ||
-      [...document.querySelectorAll('[role="listbox"]')].find(visible);
+    return (typeof root.flowQueryVisible === "function" ? root.flowQueryVisible("components.listBox", document, { latestFirst: true }) : null) ||
+      (typeof root.flowQuery === "function" ? root.flowQuery("components.listBox", document, { latestFirst: true }) : null) ||
+      [...document.querySelectorAll('[role="listbox"]')].reverse().find(visible);
   }
   function isReferencePickerSurface(list = picker()) {
     if (!list || !visible(list)) return false;
@@ -1548,9 +1561,15 @@
       await waitForFlowRoute(path => !isCharacterRoute(path), 15_000, "Flow did not close the character editor.");
     }
     if (isCharacterRoute(location.pathname)) throw flowError("FLOW_CHARACTER_ROUTE_UNEXPECTED", "Flow is still on a character page; the character picker cannot be opened safely.", true, true);
-    const hasComposer = (typeof root.flowQuery === "function" && root.flowQuery("editor")) || document.querySelector(".ProseMirror");
+    const agentMode = root.FlowAgent?.findNativeAgentModeControl?.();
+    if (agentMode?.pressed === true || agentMode?.control?.getAttribute?.("aria-pressed") === "true" || root.FlowAgent?.isNativeAgentSessionOpen?.()) {
+      throw flowError("FLOW_AGENT_COMPOSER_ACTIVE", "The Agent composer is active. Close or switch off Agent before opening the project character picker.", true, false);
+    }
+    const hasComposer = (typeof root.flowQuery === "function" && root.flowQuery("editor")) ||
+      [...document.querySelectorAll(".ProseMirror[contenteditable='true'],flow-base-prompt-box [contenteditable='true']")].some(el => el.isContentEditable && visible(el));
     if (!hasComposer) await ensureFlowLibrarySection("All media");
-    const hasComposerAfter = (typeof root.flowQuery === "function" && root.flowQuery("editor")) || document.querySelector(".ProseMirror");
+    const hasComposerAfter = (typeof root.flowQuery === "function" && root.flowQuery("editor")) ||
+      [...document.querySelectorAll(".ProseMirror[contenteditable='true'],flow-base-prompt-box [contenteditable='true']")].some(el => el.isContentEditable && visible(el));
     if (!hasComposerAfter) throw flowError("FLOW_COMPOSER_MISSING", "Flow's project composer is not visible after returning from the character page.", true);
   }
   async function listCharacters(config = {}) {
@@ -1772,7 +1791,74 @@
       }
     }
   }
-  globalThis.FlowReferenceActions = Object.freeze({ attach, listCharacters, chips, parse, exactOption, closePicker, inspectPicker, inspectDiagnostics: inspectReferenceActionDiagnostics });
+  async function removeKind(kind, config = {}) {
+    const normalizedKind = String(kind || "").trim().toLowerCase();
+    if (!["image", "video", "character", "voice"].includes(normalizedKind)) {
+      throw flowError("FLOW_INVALID_ARGUMENT", "Reference kind must be image, video, character, or voice.", false, false);
+    }
+    const deadline = Number.isFinite(config.deadline) ? config.deadline : makeDeadline(config.command, 20_000, 5_000);
+    const composer = referenceComposerScope();
+    const editor = root.getVisibleFlowPromptEditor?.();
+    if (!editor || typeof root.getEditorUserText !== "function") {
+      throw flowError("FLOW_PROMPT_PRESERVATION_UNVERIFIABLE", "Flow's prompt text could not be read, so reference removal was not started.", false, false);
+    }
+    const promptBefore = root.getEditorUserText(editor);
+    const isVoice = normalizedKind === "voice";
+    const list = () => isVoice
+      ? root.FlowVoiceActions?.chips?.(composer) || []
+      : chips().filter(chip => chip.kind === normalizedKind && composer.contains?.(chip.owner || chip.element));
+    const countKind = kind => kind === "voice"
+      ? (root.FlowVoiceActions?.chips?.(composer) || []).length
+      : chips().filter(chip => chip.kind === kind && composer.contains?.(chip.owner || chip.element)).length;
+    const otherKindsBefore = Object.fromEntries(["image", "video", "character", "voice"]
+      .filter(kind => kind !== normalizedKind).map(kind => [kind, countKind(kind)]));
+    const initial = list().length;
+    let removed = 0;
+    while (removed < initial) {
+      root.FlowUiDeadline?.requireTime(deadline, `removing Flow ${normalizedKind} reference chips`, false, config.signal);
+      const matches = list();
+      if (!matches.length) break;
+      const chip = matches[0];
+      const owner = chip.owner || chip.element;
+      const chipLabel = normalizeChipLabel(root.accessibleName?.(chip.element) || chip.element?.getAttribute?.("aria-label") || "");
+      const directIngredientButton = chip.element?.matches?.("button") && /^(?:ingredient|thanh phan|nguyen lieu)(?:\b|$)/i.test(chipLabel);
+      const removeKey = normalizedKind === "voice" ? "components.voiceRemoveButton" : "components.referenceRemoveButton";
+      const configured = typeof root.flowQueryAll === "function" ? root.flowQueryAll(removeKey, owner, { checkVisible: false }) : [];
+      const semanticIconRemove = typeof root.flowFindSemantic === "function"
+        ? root.flowFindSemantic(removeKey, owner, { checkVisible: false, latestFirst: true, requireIcon: true })
+        : null;
+      const controls = [...new Set([...configured, ...(owner.matches?.('button,[role="button"]') ? [owner] : []), ...(owner.querySelectorAll?.('button,[role="button"]') || [])])].filter(root.visible);
+      const labelsRemove = control => /(?:remove|delete|clear|close|xóa|gỡ|loại bỏ|bỏ khỏi)/i.test(root.accessibleName?.(control) || control.getAttribute?.("aria-label") || control.getAttribute?.("title") || control.innerText || control.textContent || "");
+      const iconName = control => String(root.flowFindIcon?.(control)?.getAttribute?.("fonticon") || root.flowFindIcon?.(control)?.textContent || "").trim().toLowerCase();
+      const iconRemove = semanticIconRemove && controls.includes(semanticIconRemove) ? semanticIconRemove :
+        controls.find(control => ["close", "clear", "cancel"].includes(iconName(control)));
+      const remove = directIngredientButton ? chip.element : controls.find(labelsRemove) || iconRemove;
+      if (!remove || remove.disabled || remove.getAttribute("aria-disabled") === "true") {
+        throw flowError("FLOW_REFERENCE_REMOVE_CONTROL_MISSING", `Flow's ${normalizedKind} reference chip has no verified remove control; no further chips were changed.`, false, false);
+      }
+      const beforeCount = matches.length;
+      remove.click();
+      const until = Math.min(Date.now() + 1_500, deadline);
+      while (Date.now() < until && list().length >= beforeCount) {
+        await (root.FlowUiDeadline?.boundedWait(100, deadline, `confirming removal of a Flow ${normalizedKind} chip`, false, config.signal) || root.wait?.(100));
+      }
+      const afterCount = list().length;
+      if (afterCount >= beforeCount) throw flowError("FLOW_REFERENCE_REMOVE_UNCONFIRMED", `Flow did not confirm removal of a ${normalizedKind} reference chip; inspect the composer before retrying.`, false, false);
+      removed += beforeCount - afterCount;
+    }
+    const remaining = list().length;
+    const promptAfter = root.getEditorUserText(editor);
+    if (promptAfter !== promptBefore) {
+      throw flowError("FLOW_PROMPT_CHANGED_DURING_REFERENCE_REMOVE", "Flow's prompt text changed while reference chips were removed; inspect the composer before retrying.", false, false);
+    }
+    const otherKindsAfter = Object.fromEntries(Object.keys(otherKindsBefore).map(kind => [kind, countKind(kind)]));
+    const otherKindsPreserved = Object.keys(otherKindsBefore).every(kind => otherKindsAfter[kind] === otherKindsBefore[kind]);
+    if (!otherKindsPreserved) {
+      throw flowError("FLOW_REFERENCE_KIND_SCOPE_CHANGED", "Flow changed another kind of reference chip during removal; inspect the composer before retrying.", false, false);
+    }
+    return { kind: normalizedKind, removed, remaining, confirmed: remaining === 0, prompt_preserved: promptAfter === promptBefore, other_kinds_preserved: otherKindsPreserved };
+  }
+  globalThis.FlowReferenceActions = Object.freeze({ attach, removeKind, listCharacters, chips, parse, exactOption, closePicker, inspectPicker, inspectDiagnostics: inspectReferenceActionDiagnostics });
   globalThis.FlowReferencePickerInternals = Object.freeze({ picker, open, category, closeAfterOperation, exactOption, options, findPickerCategoryTab });
   globalThis.listOptions = listOptions;
 })();

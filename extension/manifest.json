@@ -53,8 +53,11 @@
         "https://flow.google.com/*"
       ],
       "js": [
+        "content/bridge/flow-v2-correlation-codec.js",
         "content/bridge/flow-upload-main.js",
         "content/bridge/flow-correlation-observer.js",
+        "content/bridge/WatermarkRemover.js",
+        "content/bridge/media-interceptor.js",
         "content/bridge/slate-bridge.js"
       ],
       "run_at": "document_start",
@@ -76,6 +79,7 @@
         "content/providers/flow/core/navigation.js",
         "content/providers/flow/composer/flow-editor.js",
         "content/providers/flow/core/settings.js",
+        "content/providers/flow/library/page-settings.js",
         "content/providers/flow/generation/image-settings.js",
         "content/providers/flow/generation/video-settings.js",
         "content/providers/flow/composer/reference-actions.js",
@@ -94,7 +98,9 @@
         "content/providers/flow/generation/generation-operations.js",
         "content/providers/flow/library/library-operations.js",
         "content/providers/flow/workflows/workflow-operations.js",
+        "content/providers/flow/core/dom-operations.js",
         "content/providers/flow/core/flow-driver.js",
+        "content/bridge/watermark-config.js",
         "content/dom-actions.js",
         "content/floating-tracker-flow.js"
       ],
