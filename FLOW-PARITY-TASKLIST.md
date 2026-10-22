@@ -4,7 +4,7 @@ This tasklist compares the current extension with `C:\Users\nguye\Downloads\1.3.
 
 ## P0 — Recover safe Flow dialogs before the next queued task
 
-**Status:** Partially implemented; P0 remains open pending the live popup signature and controls. `extension/src/content/providers/flow/core/navigation.js` handles identified Agent-instruction and safe informational dialogs, and no longer mistakes a recognized Settings panel's sole CDK backdrop for an unknown dialog. An unknown non-dialog overlay is only auto-closed when its content is not risky and exactly one visible, enabled control has an exact Close/Dismiss name (including I18n patterns) or a recognized close icon; the extension clicks that control through DOM and verifies the owning surface disappears. Other cases remain `FLOW_UNKNOWN_OVERLAY_BLOCKING`. The user screenshot shows only the queue error row, not the actual Flow popup or its controls, so it does not confirm the reported error is resolved or that the popup has a safely dismissible control. Do not add a generic unknown-overlay auto-click.
+**Status:** Partially implemented; P0 remains open pending the live popup signature and controls. `extension/src/content/providers/flow/core/navigation.js` handles identified Agent-instruction and safe informational dialogs, and no longer mistakes a recognized Settings panel's sole CDK backdrop for an unknown dialog. An unknown non-dialog overlay is only auto-closed when its content is not risky and exactly one visible, enabled Close/Dismiss or recognized close-icon candidate exists; unrelated buttons on the same surface do not by themselves block that unique candidate. The extension clicks the candidate through DOM and verifies the owning surface disappears. Other cases remain `FLOW_UNKNOWN_OVERLAY_BLOCKING`. The user screenshot shows only the queue error row, not the actual Flow popup or its controls, so it does not confirm the reported error is resolved or that the popup has a safely dismissible control. Do not add a generic unknown-overlay auto-click.
 
 **Reference:** `src/core/flow/FlowPageDriver.js` preflight and the dedicated Agent instruction dialog handler in `content.js`. The 1.3.103 reference has known Agent cleanup and its legacy queue proceeds after terminal failures, but there is no universal unknown-dialog handler. Do not copy that queue-skip behavior into shared DOM: later jobs would touch the same blocked Flow page. `src/core/FlowWebRecovery.js` includes request/replay paths; those are out of scope.
 
@@ -12,9 +12,9 @@ This tasklist compares the current extension with `C:\Users\nguye\Downloads\1.3.
 
 **Observed gap:** the native extension still pauses on `FLOW_UNKNOWN_OVERLAY_BLOCKING` when an unknown surface does not pass the narrow safe-close guard. The screenshot shows “An unrecognized Flow dialog is open. It was left …” on the queue error row, but not the underlying popup's text, role, DOM attributes, or buttons. It therefore cannot confirm that this specific popup has one safe Close/Dismiss button or recognized close icon; do not claim the user's reported error is resolved, arbitrary dialogs auto-dismiss, or unknown overlays are clicked generically.
 
-**Implement:** identify only dialogs with a stable, specific Flow signature and one unambiguous, non-destructive dismissal control. For unknown non-dialog surfaces, attempt only one exact visible/enabled Close/Dismiss control or recognized close icon when there is exactly one such control and the surface is not risky. Click through DOM and verify the same owning surface disappears before continuing the original not-yet-submitted operation. Keep bounded waits and honor task deadlines. A missing/ambiguous control, risky content, or failed verification remains `FLOW_UNKNOWN_OVERLAY_BLOCKING`; unknown dialogs, confirmations, delete/submit/payment actions, and any control that could save or dispatch work must remain untouched and explain the needed user action.
+**Implement:** identify only dialogs with a stable, specific Flow signature and one unambiguous, non-destructive dismissal control. For unknown non-dialog surfaces, consider visible/enabled controls and proceed only when exactly one candidate has an exact Close/Dismiss name or recognized close icon and the surface is not risky; this means exactly one safe candidate, not exactly one total button. Click through DOM and verify the same owning surface disappears before continuing the original not-yet-submitted operation. Keep bounded waits and honor task deadlines. A missing/ambiguous candidate, risky content, or failed verification remains `FLOW_UNKNOWN_OVERLAY_BLOCKING`; unknown dialogs, confirmations, delete/submit/payment actions, and any control that could save or dispatch work must remain untouched and explain the needed user action.
 
-**Acceptance:** a recognized informational dialog closes and the same pre-submit task proceeds. An unknown non-dialog surface closes only through exactly one visible/enabled safe Close/Dismiss control or recognized close icon, and only after its owner is confirmed gone. If that guard fails, the surface remains open and `FLOW_UNKNOWN_OVERLAY_BLOCKING` pauses the queue; the task is not dispatched. The screenshot alone does not confirm that the user's underlying popup meets the safe-close guard. No API or request replay is introduced.
+**Acceptance:** a recognized informational dialog closes and the same pre-submit task proceeds. An unknown non-dialog surface closes only when exactly one visible/enabled safe Close/Dismiss or recognized close-icon candidate exists (other controls may be present), its content passes the non-risky guard, and its owner is confirmed gone. If any guard fails, the surface remains open and `FLOW_UNKNOWN_OVERLAY_BLOCKING` pauses the queue; the task is not dispatched. The screenshot is only the queue error row and does not confirm the underlying popup meets the safe-close guard. No API or request replay is introduced.
 
 ## P1 — Keep queue progress isolated and actionable
 
@@ -58,7 +58,7 @@ The current queue pauses on page blockers and unknown outcomes, bounds retries t
 
 ## P4 — Verify voice, character, Frames, and chaining combinations
 
-**Status:** Core paths exist; model combination verification remains pending.
+**Status:** No further safe static fix was identified in this audit. DOM paths exist for chain dependencies, Frames, character identity, the global voice chip, and sequential reference assignment, but no live DOM verification was performed. Per-prompt `@voice`/`@character` parity from the reference depends on model-registry flags and the exact labels exposed by Flow's live picker, so it remains pending rather than being inferred. The existing chain x1 lock/restore/submit guard and voice picker placement remain implemented. No API route was added.
 
 **Reference:** `src/shared/VoiceSelectModal.js`, `src/shared/CharacterSelectModal.js`, `src/shared/CharacterPicker.js`, and `src/prompts/GenTab.js`.
 
@@ -70,7 +70,7 @@ The current queue pauses on page blockers and unknown outcomes, bounds retries t
 
 ## P5 — Finish remaining native Flow actions
 
-**Status:** Most operation families are present; a focused DOM gap inventory remains pending.
+**Status:** Most operation families are present. `flow.components.select` now normalizes non-voice references in `dom-operations.js` to the `assetName`/`kind` shape consumed by `FlowReferenceActions.parse/attach`, mapping object `name` aliases while preserving slot and expected ID checks. The focused audit found no broader unproven gap to add; other feature claims remain limited to verified DOM behavior.
 
 **Reference:** operation inventory in `src/core/flow/FlowPageDriver.js` and DOM-backed `src/core/flow/drivers/FlowV2Driver.js`.
 

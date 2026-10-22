@@ -214,6 +214,24 @@
 
       if (name === "flow.components.select") {
         const kind = String(payload.kind || "image").trim().toLowerCase();
+        const normalizeReference = (value, referenceKind) => {
+          const source = typeof value === "object" && value !== null ? value : null;
+          const assetName = source ? (source.assetName ?? source.name ?? "") : String(value ?? "");
+          return { ...(source || {}), assetName, kind: source?.kind || referenceKind };
+        };
+        const resolveExpectedId = (explicitExpectedId, reference) => {
+          const nestedExpectedId = reference?.expectedId;
+          if (explicitExpectedId != null && nestedExpectedId != null) {
+            const explicitId = String(explicitExpectedId).trim();
+            const nestedId = String(nestedExpectedId).trim();
+            const isUuid = value => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+            const matches = isUuid(explicitId) && isUuid(nestedId)
+              ? explicitId.toLowerCase() === nestedId.toLowerCase()
+              : explicitId === nestedId;
+            if (!matches) throw this.error("FLOW_INVALID_ARGUMENT", "Conflicting expected IDs were provided for the Flow reference.", false, false);
+          }
+          return explicitExpectedId ?? nestedExpectedId;
+        };
         const selections = Array.isArray(payload.selections) ? payload.selections : null;
         if (selections) {
           if (!selections.length || selections.length > 3) throw this.error("FLOW_INVALID_ARGUMENT", "Provide one to three component selections.", false, false);
@@ -226,8 +244,9 @@
               selected.push(await root.FlowVoiceActions.select(String(value), { deadline, signal: command.signal, command }));
             } else {
               if (typeof root.FlowReferenceActions?.attach !== "function") throw this.error("FLOW_REFERENCE_ATTACH_UNAVAILABLE", "Flow's reference picker is unavailable.", false, false);
-              const reference = typeof value === "object" ? { ...value, kind: value.kind || selection?.kind || kind } : { name: String(value), kind: selection?.kind || kind };
-              selected.push(await root.FlowReferenceActions.attach(reference, selection?.slot, { deadline, signal: command.signal, command, expectedId: selection?.expectedId }));
+              const reference = normalizeReference(value, selection?.kind || kind);
+              const expectedId = resolveExpectedId(selection?.expectedId, reference);
+              selected.push(await root.FlowReferenceActions.attach(reference, selection?.slot, { deadline, signal: command.signal, command, expectedId }));
             }
           }
           return { selected, count: selected.length, submitted: false };
@@ -239,8 +258,9 @@
           return root.FlowVoiceActions.select(String(value), { deadline, signal: command.signal, command });
         }
         if (typeof root.FlowReferenceActions?.attach !== "function") throw this.error("FLOW_REFERENCE_ATTACH_UNAVAILABLE", "Flow's reference picker is unavailable.", false, false);
-        const reference = typeof value === "object" ? { ...value, kind: value.kind || kind } : { name: String(value), kind };
-        return root.FlowReferenceActions.attach(reference, payload.slot, { deadline, signal: command.signal, command, expectedId: payload.expectedId });
+        const reference = normalizeReference(value, kind);
+        const expectedId = resolveExpectedId(payload.expectedId, reference);
+        return root.FlowReferenceActions.attach(reference, payload.slot, { deadline, signal: command.signal, command, expectedId });
       }
 
       if (name === "flow.generation.preflight") {

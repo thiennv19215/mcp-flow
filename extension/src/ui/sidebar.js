@@ -13,6 +13,7 @@
   let flowModelCapabilities = null;
   let flowModelCapabilitiesPromise = null;
   let lastFlowVideoModel = null;
+  let lastVideoChainEnabled = false;
   let lastVideoFramesMode = false;
   const flowVideoModelSelections = new Map();
 
@@ -180,6 +181,12 @@
       hint.textContent = t("sidebar.videoChainHint");
     }
     if (label) label.textContent = t("sidebar.videoChainToggle");
+    if (enabled && !lastVideoChainEnabled) {
+      const model = document.querySelector("#selectModelVideo")?.value;
+      rememberVideoQuantity(model, getFlowModelRule("video", model), document.querySelector("#selectCountVideo")?.value);
+    }
+    applyVideoChainQuantityState(enabled, !enabled && lastVideoChainEnabled);
+    lastVideoChainEnabled = enabled;
     if (enabled && document.querySelector("#selectModeVideo")?.value === "frames") renderVideoFrameAssignments();
   }
 
@@ -187,10 +194,19 @@
     return String(value || "").normalize("NFKC").trim().toLowerCase().replace(/\s+/g, " ");
   }
 
+  function isTieredVeo31Model(value) {
+    const normalized = normalizeModelValue(value).replace(/[^\p{L}\p{N}.]+/gu, " ").replace(/\s+/g, " ").trim();
+    return /^veo\s+3\.1(?:\s|$)/.test(normalized) && /\b(lite|fast|quality)\b/.test(normalized);
+  }
+
   function getFlowModelRule(type, model) {
     const normalized = normalizeModelValue(model);
-    return flowModelCapabilities?.models?.find(rule =>
-      rule.types?.includes(type) && rule.match?.some(alias => normalized.includes(normalizeModelValue(alias)))) || null;
+    const tieredVeo31 = isTieredVeo31Model(normalized);
+    return flowModelCapabilities?.models?.find(rule => rule.types?.includes(type) && rule.match?.some(alias => {
+      const normalizedAlias = normalizeModelValue(alias);
+      if (tieredVeo31 && normalizedAlias === "veo 3.1") return false;
+      return normalized.includes(normalizedAlias);
+    })) || null;
   }
 
   function getValidVideoQuantities(rule) {
@@ -205,6 +221,45 @@
     const defaultQuantity = Number(rule?.defaultQuantity);
     if (quantities.includes(defaultQuantity)) return defaultQuantity;
     return 1;
+  }
+
+  function rememberVideoQuantity(model, rule, value) {
+    if (!model) return false;
+    const quantity = Number(value);
+    if (!getValidVideoQuantities(rule).includes(quantity)) return false;
+    const remembered = flowVideoModelSelections.get(model) || {};
+    flowVideoModelSelections.set(model, { ...remembered, quantity });
+    return true;
+  }
+
+  function getValidVideoQuantitySelection(rule, preferredValue) {
+    const quantities = getValidVideoQuantities(rule);
+    const preferred = Number(preferredValue);
+    if (quantities.includes(preferred)) return preferred;
+    const defaultQuantity = Number(rule?.defaultQuantity);
+    if (quantities.includes(defaultQuantity)) return defaultQuantity;
+    return quantities.includes(1) ? 1 : (quantities[0] ?? 1);
+  }
+
+  function applyVideoChainQuantityState(enabled, restoreSelection = false) {
+    const quantitySelect = document.querySelector("#selectCountVideo");
+    if (!quantitySelect) return;
+    const model = document.querySelector("#selectModelVideo")?.value;
+    const rule = getFlowModelRule("video", model);
+    const quantities = getValidVideoQuantities(rule);
+    if (enabled) {
+      quantitySelect.value = quantities.includes(1) ? "1" : "";
+      quantitySelect.disabled = true;
+      return;
+    }
+    if (restoreSelection && quantities.length) {
+      const remembered = flowVideoModelSelections.get(model)?.quantity;
+      const restored = getValidVideoQuantitySelection(rule, remembered ?? rule?.defaultQuantity ?? 1);
+      quantitySelect.value = String(restored);
+    } else if (!quantities.length) {
+      quantitySelect.value = "";
+    }
+    quantitySelect.disabled = quantities.length === 0;
   }
 
   function replaceSelectOptions(select, values, labelForValue, preferredValue, preferPreferredValue = false) {
@@ -259,14 +314,17 @@
     const resolutionSelect = document.querySelector("#selectResolutionVideo");
     const ratioSelect = document.querySelector("#selectRatioVideo");
     const quantitySelect = document.querySelector("#selectCountVideo");
+    const chainEnabled = document.querySelector("#chainVideoFromPrevious")?.checked === true;
     const videoModelChanged = Boolean(lastFlowVideoModel && lastFlowVideoModel !== videoModel);
     if (videoModelChanged) {
+      const previousSelection = flowVideoModelSelections.get(lastFlowVideoModel) || {};
       flowVideoModelSelections.set(lastFlowVideoModel, {
+        ...previousSelection,
         duration: durationSelect?.value,
         resolution: resolutionSelect?.value,
         aspectRatio: ratioSelect?.value,
-        quantity: quantitySelect?.value,
       });
+      if (!chainEnabled) rememberVideoQuantity(lastFlowVideoModel, getFlowModelRule("video", lastFlowVideoModel), quantitySelect?.value);
     }
     const rememberedSelection = videoModelChanged ? (flowVideoModelSelections.get(videoModel) || {}) : {};
     lastFlowVideoModel = videoModel || null;
@@ -296,7 +354,7 @@
     const quantityGroup = document.querySelector("#videoCountGroup");
     const quantities = getValidVideoQuantities(videoRule);
     if (quantityGroup) quantityGroup.hidden = quantities.length === 0;
-    const quantityDefault = getVideoQuantity(videoRule, rememberedSelection.quantity ?? videoRule.defaultQuantity);
+    const quantityDefault = getValidVideoQuantitySelection(videoRule, rememberedSelection.quantity ?? videoRule.defaultQuantity);
     replaceSelectOptions(quantitySelect, quantities, value => String(value), quantityDefault, videoModelChanged);
 
     if (videoRule.aspectRatios?.length) {
@@ -310,6 +368,7 @@
         updateVideoFrameInputs();
       }
     }
+    updateVideoChainUI();
   }
 
   async function loadFlowModelCapabilities() {
@@ -414,6 +473,7 @@
     document.querySelector("#lblRatioVideo").textContent = t("sidebar.aspectRatio") + ":";
     document.querySelector("#lblDurationVideo").textContent = t("sidebar.videoDuration") + ":";
     document.querySelector("#lblModelVideo").textContent = t("sidebar.videoModel") + ":";
+    document.querySelector("#lblQtyVideo").textContent = t("sidebar.quantity") + ":";
     document.querySelector("#lblResolutionVideo").textContent = t("sidebar.videoResolution") + ":";
     document.querySelector("#lblModeVideo").textContent = t("sidebar.videoMode") + ":";
     document.querySelector("#lblCharVideo").textContent = t("sidebar.characterSelect") + ":";
@@ -1375,6 +1435,10 @@
     const selectedCharacter = document.querySelector("#selectCharVideo").value;
     const character = mode === "frames" ? "" : selectedCharacter;
     const chainVideo = document.querySelector("#chainVideoFromPrevious")?.checked === true;
+    if (chainVideo && count !== 1) {
+      setFeedback(t("sidebar.videoChainNeedsSingleVariant"), false);
+      return;
+    }
     let prompts;
     try { prompts = promptsForGeneration(prompt, document.querySelector("#multiPromptVideo")?.checked === true); }
     catch (error) { setFeedback(error.message, false); return; }

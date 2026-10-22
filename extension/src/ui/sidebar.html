@@ -1203,7 +1203,7 @@
             </div>
             <div id="videoCountGroup" hidden>
               <div class="form-group">
-                <label class="form-label" for="selectCountVideo">Số lượng video:</label>
+                <label class="form-label" id="lblQtyVideo" for="selectCountVideo">Số lượng video:</label>
                 <select class="form-select" id="selectCountVideo">
                   <option value="1" selected>1</option>
                   <option value="2">2</option>
@@ -1229,6 +1229,11 @@
               <option value="">Không chọn</option>
             </select>
           </div>
+        </div>
+
+        <div class="form-group" id="flowVoicePickerGroup">
+          <button type="button" class="btn btn-secondary" id="btnLoadVoices" data-i18n="sidebar.libraryVoices">Xem tùy chọn giọng nói</button>
+          <select class="form-select" id="flowVoiceSelect" style="margin-top:8px"><option value="" data-i18n="sidebar.libraryNoVoice">Không dùng giọng nói</option></select>
         </div>
 
         <div class="form-group" id="videoFrameNamesGroup" hidden>
@@ -1350,10 +1355,6 @@
           <button type="button" class="btn btn-secondary" id="btnUploadMedia" style="margin-top:8px" data-i18n="sidebar.libraryUploadFile">Tải tệp lên</button>
         </div>
 
-        <div class="form-group" id="flowVoicePickerGroup">
-          <button type="button" class="btn btn-secondary" id="btnLoadVoices" data-i18n="sidebar.libraryVoices">Xem tùy chọn giọng nói</button>
-          <select class="form-select" id="flowVoiceSelect" style="margin-top:8px"><option value="" data-i18n="sidebar.libraryNoVoice">Không dùng giọng nói</option></select>
-        </div>
         <pre id="flowLibraryResult" style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;color:var(--text-muted);margin:8px 0 0"></pre>
       </details>
     </div>

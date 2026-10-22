@@ -316,7 +316,6 @@
       ].map(normalize);
       const controls = [...(surface.querySelectorAll?.('button,[role="button"]') || [])].filter(button =>
         visible(button) && button.disabled !== true && !button.hasAttribute?.("disabled") && button.getAttribute?.("aria-disabled") !== "true");
-      if (controls.length !== 1) return null;
       const labelsFor = button => [
         root.accessibleName?.(button), button.innerText, button.textContent,
         button.getAttribute?.("aria-label"), button.getAttribute?.("title"),
@@ -404,44 +403,48 @@
 
       const surface = state.overlays.find(el => !isSettingsDialog(el));
       const isDialog = surface && isDialogSurface(surface);
-      const explicitDialogButton = isDialog ? clickExplicitDialogClose(surface) : null;
+      let explicitDialogButton = isDialog ? clickExplicitDialogClose(surface) : null;
       if (surface && !isKnownDismissibleSurface(surface) && !explicitDialogButton) {
         if (await waitForOverlayTransition(surface)) continue;
         // Some Flow dialogs mount their accessible action after the dialog
         // shell. Re-check the same surface once after the bounded settle wait.
-        if (isDialogSurface(surface) && clickExplicitDialogClose(surface)) continue;
-        if (!isDialogSurface(surface)) {
-          const closeButton = clickExplicitNonDialogClose(surface);
-          if (closeButton) {
-            try {
-              closeButton.click();
-              if (await waitForNonDialogOwnerToClose(surface)) {
-                dismissedAny = true;
-                await pause(100, "finishing Flow popup dismissal");
-                continue;
-              }
-            } catch { /* Keep the unknown-surface blocker if safe dismissal is not confirmed. */ }
-          }
+        if (isDialogSurface(surface)) {
+          explicitDialogButton = clickExplicitDialogClose(surface);
         }
-        const message = isDialogSurface(surface)
-          ? "Flow left a dialog open without one unique safe Close or acknowledgement control. The queue paused to protect later tasks; resolve the dialog and resume the queue to retry this task first."
-          : "Flow left an unidentified overlay open. The queue paused to protect later tasks; inspect and dismiss the overlay, then resume the queue to retry this task first.";
-        const error = root.flowError
-          ? root.flowError("FLOW_UNKNOWN_OVERLAY_BLOCKING", message, false, false)
-          : new Error(message);
-        error.diagnostics = { ...publicSnapshot(state), blockingSurface: {
-          role: surface.getAttribute?.("role") || null,
-          tagName: surface.tagName || null,
-          label: normalize(root.accessibleName?.(surface) || surface.getAttribute?.("aria-label") || "").slice(0, 160),
-          dismissControlCount: [...(surface.querySelectorAll?.('button,[role="button"]') || [])].filter(button => {
-            if (!visible(button) || button.disabled || button.getAttribute?.("aria-disabled") === "true") return false;
-            const label = normalize(`${root.accessibleName?.(button) || ""} ${button.innerText || button.textContent || ""} ${button.getAttribute?.("aria-label") || ""} ${button.getAttribute?.("title") || ""}`);
-            const closeIcon = [...(button.querySelectorAll?.('mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined') || [])]
-              .some(icon => /^(?:close|clear)$/.test(normalize(icon.innerText || icon.textContent)));
-            return closeIcon || /^(?:got it|dong)$/.test(label) || /\b(?:close|dismiss)\b/.test(label);
-          }).length,
-        } };
-        throw error;
+        if (!explicitDialogButton) {
+          if (!isDialogSurface(surface)) {
+            const closeButton = clickExplicitNonDialogClose(surface);
+            if (closeButton) {
+              try {
+                closeButton.click();
+                if (await waitForNonDialogOwnerToClose(surface)) {
+                  dismissedAny = true;
+                  await pause(100, "finishing Flow popup dismissal");
+                  continue;
+                }
+              } catch { /* Keep the unknown-surface blocker if safe dismissal is not confirmed. */ }
+            }
+          }
+          const message = isDialogSurface(surface)
+            ? "Flow left a dialog open without one unique safe Close or acknowledgement control. The queue paused to protect later tasks; resolve the dialog and resume the queue to retry this task first."
+            : "Flow left an unidentified overlay open. The queue paused to protect later tasks; inspect and dismiss the overlay, then resume the queue to retry this task first.";
+          const error = root.flowError
+            ? root.flowError("FLOW_UNKNOWN_OVERLAY_BLOCKING", message, false, false)
+            : new Error(message);
+          error.diagnostics = { ...publicSnapshot(state), blockingSurface: {
+            role: surface.getAttribute?.("role") || null,
+            tagName: surface.tagName || null,
+            label: normalize(root.accessibleName?.(surface) || surface.getAttribute?.("aria-label") || "").slice(0, 160),
+            dismissControlCount: [...(surface.querySelectorAll?.('button,[role="button"]') || [])].filter(button => {
+              if (!visible(button) || button.disabled || button.getAttribute?.("aria-disabled") === "true") return false;
+              const label = normalize(`${root.accessibleName?.(button) || ""} ${button.innerText || button.textContent || ""} ${button.getAttribute?.("aria-label") || ""} ${button.getAttribute?.("title") || ""}`);
+              const closeIcon = [...(button.querySelectorAll?.('mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined') || [])]
+                .some(icon => /^(?:close|clear)$/.test(normalize(icon.innerText || icon.textContent)));
+              return closeIcon || /^(?:got it|dong)$/.test(label) || /\b(?:close|dismiss)\b/.test(label);
+            }).length,
+          } };
+          throw error;
+        }
       }
 
       if (surface && explicitDialogButton) {
