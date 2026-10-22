@@ -2,6 +2,21 @@ export interface FlowState {
   url: string;
   signedIn: boolean;
   inProject: boolean;
+  screen?: {
+    state: "signed_out" | "project_error" | "agent_blocked" | "media_viewer" | "ready" | "unknown";
+    reason?: string;
+    projectId?: string | null;
+    isProjectEditor?: boolean;
+    composerVisible?: boolean;
+    agentModeActive?: boolean;
+    agentPanelOpen?: boolean;
+    signInControlCount?: number;
+    configuredSignedOutIndicatorCount?: number;
+    configuredProjectErrorIndicatorCount?: number;
+    projectHomeRecoveryLinkCount?: number;
+    visibleAlertCount?: number;
+    errorMessage?: string;
+  };
   plan?: string;
   credits_remaining?: number;
   composer?: string;

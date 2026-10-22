@@ -2,6 +2,8 @@ export type FlowErrorCategory =
   | "quota"
   | "rate_limit"
   | "session"
+  | "captcha"
+  | "policy"
   | "download"
   | "generation"
   | "extension"
@@ -35,8 +37,17 @@ export function classifyFlowFailure(error: unknown): FlowErrorPolicy {
     const safe = !outcomeUnknown;
     return { category: "rate_limit", retryable: safe, autoRetry: safe, cooldownMs, outcomeUnknown };
   }
-  if (/auth|sign.?in|login|session expired|not signed in|flow_not_ready|flow_project_required/.test(text)) {
+  if (/auth|sign.?in|login|session expired|not signed in|flow_session_required|flow_not_ready|flow_project_required/.test(text)) {
     return { category: "session", retryable: !outcomeUnknown, autoRetry: false, cooldownMs: 0, outcomeUnknown };
+  }
+  if (/flow_unusual_activity|bot.?detected|captcha|unusual activity|suspicious activity/.test(text)) {
+    return { category: "captcha", retryable: false, autoRetry: false, cooldownMs: 0, outcomeUnknown };
+  }
+  if (/flow_policy_violation|content.?blocked|policy violation|safety guidelines|sexually_explicit|child_safety/.test(text)) {
+    return { category: "policy", retryable: false, autoRetry: false, cooldownMs: 0, outcomeUnknown };
+  }
+  if (/flow_project_load_failed|flow_media_viewer_open|flow_screen_not_ready/.test(text)) {
+    return { category: "generation", retryable: value?.retryable === true && !outcomeUnknown, autoRetry: false, cooldownMs: 0, outcomeUnknown };
   }
   if (/download|chrome download|media remains in flow/.test(text) || code.includes("DOWNLOAD")) {
     return { category: "download", retryable: !outcomeUnknown, autoRetry: false, cooldownMs: 0, outcomeUnknown };
@@ -52,7 +63,7 @@ export function classifyFlowFailure(error: unknown): FlowErrorPolicy {
     return { category: "generation", retryable: value?.retryable === true || safeAgentRetry, autoRetry: safeAgentRetry, cooldownMs: 0, outcomeUnknown };
   }
   return {
-    category: (typeof value?.category === "string" && ["quota", "rate_limit", "session", "download", "generation", "extension", "unsupported"].includes(value.category)
+    category: (typeof value?.category === "string" && ["quota", "rate_limit", "session", "captcha", "policy", "download", "generation", "extension", "unsupported"].includes(value.category)
       ? value.category as FlowErrorCategory : "unknown"),
     retryable: value?.retryable === true && !outcomeUnknown,
     autoRetry: false,

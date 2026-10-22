@@ -25,6 +25,7 @@ export interface SafeUnknownSubmitDiagnostics {
 }
 
 export interface SafeFlowOperationDiagnostics {
+  screen?: SafeFlowScreenDiagnostics;
   locale: "en" | "vi" | "unknown";
   activeCategory: "all" | "characters" | "voices" | "uploads" | "ingredients" | "unknown";
   categoriesScanned: Array<"all" | "uploads">;
@@ -52,6 +53,19 @@ export interface SafeFlowOperationDiagnostics {
   };
 }
 
+export interface SafeFlowScreenDiagnostics {
+  state: "signed_out" | "project_error" | "agent_blocked" | "media_viewer" | "ready" | "unknown";
+  reason: "sign_in_surface_detected" | "project_error_message_detected" | "media_viewer_route_active" | "agent_mode_active" | "agent_panel_open" | "project_editor_and_composer_visible" | "composer_not_detected" | "screen_inspector_unavailable" | "unknown";
+  projectIdPresent: boolean;
+  isProjectEditor: boolean;
+  composerVisible: boolean;
+  agentModeActive: boolean;
+  agentPanelOpen: boolean;
+  signInControlCount: number;
+  projectHomeRecoveryLinkCount: number;
+  visibleAlertCount: number;
+}
+
 /** Keep pre-dispatch picker diagnostics small and free of user asset data. */
 export function sanitizeFlowOperationDiagnostics(value: unknown): SafeFlowOperationDiagnostics | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
@@ -59,11 +73,28 @@ export function sanitizeFlowOperationDiagnostics(value: unknown): SafeFlowOperat
   const source = input.operationDiagnostics && typeof input.operationDiagnostics === "object" && !Array.isArray(input.operationDiagnostics)
     ? input.operationDiagnostics as Record<string, unknown>
     : input;
+  const boundedCount = (entry: unknown, max: number): number => Number.isSafeInteger(entry) && Number(entry) >= 0 && Number(entry) <= max ? Number(entry) : 0;
+  const rawScreen = input.screen && typeof input.screen === "object" && !Array.isArray(input.screen)
+    ? input.screen as Record<string, unknown>
+    : source.screen && typeof source.screen === "object" && !Array.isArray(source.screen)
+      ? source.screen as Record<string, unknown>
+      : null;
+  const screen: SafeFlowScreenDiagnostics | undefined = rawScreen ? {
+    state: enumValue(rawScreen.state, ["signed_out", "project_error", "agent_blocked", "media_viewer", "ready", "unknown"] as const, "unknown"),
+    reason: enumValue(rawScreen.reason, ["sign_in_surface_detected", "project_error_message_detected", "media_viewer_route_active", "agent_mode_active", "agent_panel_open", "project_editor_and_composer_visible", "composer_not_detected", "screen_inspector_unavailable"] as const, "unknown"),
+    projectIdPresent: Boolean(rawScreen.projectId),
+    isProjectEditor: rawScreen.isProjectEditor === true,
+    composerVisible: rawScreen.composerVisible === true,
+    agentModeActive: rawScreen.agentModeActive === true,
+    agentPanelOpen: rawScreen.agentPanelOpen === true,
+    signInControlCount: boundedCount(rawScreen.signInControlCount, 100),
+    projectHomeRecoveryLinkCount: boundedCount(rawScreen.projectHomeRecoveryLinkCount, 100),
+    visibleAlertCount: boundedCount(rawScreen.visibleAlertCount, 100),
+  } : undefined;
   const labels = new Set(["search assets", "tìm kiếm nội dung nghe nhìn", "tìm kiếm nội dung", "tìm kiếm", "search"]);
   const errorCode = typeof source.errorCode === "string" && /^FLOW_[A-Z0-9_]{1,80}$/.test(source.errorCode)
     ? source.errorCode
     : null;
-  const boundedCount = (entry: unknown, max: number): number => Number.isSafeInteger(entry) && Number(entry) >= 0 && Number(entry) <= max ? Number(entry) : 0;
   const rawQuote = input.quoteDiagnostics && typeof input.quoteDiagnostics === "object" && !Array.isArray(input.quoteDiagnostics)
     ? input.quoteDiagnostics as Record<string, unknown>
     : source.quoteDiagnostics && typeof source.quoteDiagnostics === "object" && !Array.isArray(source.quoteDiagnostics)
@@ -77,6 +108,7 @@ export function sanitizeFlowOperationDiagnostics(value: unknown): SafeFlowOperat
       : [],
   } : undefined;
   return {
+    ...(screen ? { screen } : {}),
     locale: source.locale === "en" || source.locale === "vi" ? source.locale : "unknown",
     activeCategory: source.activeCategory === "all" || source.activeCategory === "characters" || source.activeCategory === "voices" || source.activeCategory === "uploads" || source.activeCategory === "ingredients"
       ? source.activeCategory : "unknown",

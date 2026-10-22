@@ -678,10 +678,12 @@
     if (name === "flowState") {
       const url = location.href;
       const desc = root.ProviderRegistry?.describeUrl?.(url) || root.FlowDriverRegistry?.describeUrl?.(url) || null;
-      const signedIn = !/\/about|accounts\.google\.com/.test(url);
+      const screen = root.FlowScreenState?.inspect?.() || null;
+      const signedIn = screen?.state === "signed_out" ? false : !/accounts\.google\.com/.test(url);
       const inProject = Boolean(desc?.projectId);
       const isProjectEditor = Boolean(desc?.isProjectEditor);
       const state = { url, signedIn, inProject, isProjectEditor, projectId: desc?.projectId || null };
+      if (screen) state.screen = screen;
       // Read-only audit data helps distinguish a stale content-script bundle,
       // an unrecognized V2 trigger, and a disabled control before upload code
       // is allowed to open the picker or select a file.

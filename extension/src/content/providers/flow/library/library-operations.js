@@ -89,6 +89,7 @@
 
       if (name === "flow.state") {
         const state = menu.nativeRead("flowState");
+        state.screen ||= { state: "unknown", reason: "screen_inspector_unavailable" };
         if (payload.progressDiagnosticsPing) await tiles.emitFlowProgress(command, "Flow progress telemetry check");
         const settingsButton = root.flowButton?.("Settings trigger");
         if (settingsButton) state.composer = (settingsButton.innerText || root.accessibleName?.(settingsButton)).replace(/\s+/g, " ").trim();

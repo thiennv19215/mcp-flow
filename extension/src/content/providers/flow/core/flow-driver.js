@@ -76,6 +76,7 @@
       // surfaces before every DOM operation; transfer chunks and the passive
       // generation observer do not interact with the page UI.
       const pageUiOperation = ![
+        "flow.state",
         "flow.file.upload.begin",
         "flow.file.upload.chunk",
         "flow.file.upload.finish",

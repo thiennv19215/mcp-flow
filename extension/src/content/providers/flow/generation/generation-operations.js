@@ -91,12 +91,25 @@
           requireFlowTime(label, outcomeUnknown);
           return result;
         };
+        const initialScreen = root.FlowScreenState?.inspect?.();
+        if (["signed_out", "project_error"].includes(initialScreen?.state)) {
+          root.FlowScreenState.assertGenerationReady();
+        }
         await runFlowStage("opening the project editor", ({ deadline, signal }) => nav.ensureFlowProjectEditor({ deadline, signal }));
+        root.FlowScreenState?.assertGenerationReady?.();
         const state = menu.nativeRead("flowState");
         if (!state.signedIn || !state.inProject) throw this.error("FLOW_NOT_READY", state.hint || "Open a signed-in Flow project first.", true);
         await runFlowStage("checking blocking dialogs", ({ deadline, signal }) => nav.dismissBlockingOverlays({ deadline, signal }));
         const creditAlert = root.checkFlowCreditLimitAlert?.();
-        if (creditAlert) console.warn(`[FlowSubmit] Credit alert detected but bypassed: "${creditAlert}". Proceeding anyway.`);
+        if (creditAlert) {
+          const classified = root.classifyFlowError?.(creditAlert);
+          throw this.error(
+            classified?.code || "FLOW_QUOTA_EXCEEDED",
+            classified?.message || `Flow reports that the available credit limit has been reached: ${creditAlert}. No generation was submitted.`,
+            false,
+            false,
+          );
+        }
         await runFlowStage("closing any Agent session", ({ signal }) => agent.closeNativeAgentSession({ signal, deadline: flowDeadline }));
         await runFlowStage("opening All media", ({ deadline, signal }) => nav.ensureFlowLibrarySection("All media", { deadline, signal }));
         const attachments = Array.isArray(payload.attachments) ? payload.attachments : [];

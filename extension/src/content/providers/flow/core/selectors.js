@@ -11,6 +11,14 @@
         "textarea[aria-label*='prompt']"
       ]
     },
+    signed_out_indicator: {
+      selectors: ["main button", "main a[href]", "[role='main'] button", "[role='main'] a[href]"],
+      textRegex: /^(?:sign in|log in|continue to sign in|sign in with google|đăng nhập|tiếp tục đăng nhập)(?:\s+.*)?$/i
+    },
+    project_error_indicator: {
+      selectors: ["[role='alert']", "mat-error", "flow-error", "[class*='project-error']", "[data-error]", "main h1", "main h2", "[role='main'] h1", "[role='main'] h2"],
+      textRegex: /(?:project (?:not found|unavailable|could not be loaded)|(?:we )?couldn['’]?t find (?:this )?project|unable to load (?:this )?project|failed to load project|dự án (?:không tồn tại|không khả dụng)|không thể tải (?:dự án|project)|không tìm thấy dự án)/i
+    },
     composerRoot: {
       selectors: [
         ".flow-composer",

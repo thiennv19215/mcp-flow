@@ -87,6 +87,7 @@
         "content/providers/flow/generation/tiles.js",
         "content/providers/flow/media/media-menu.js",
         "content/providers/flow/agent/flow-agent.js",
+        "content/providers/flow/core/screen-state.js",
         "content/providers/flow/composer/prompt-operations.js",
         "content/providers/flow/composer/reference-operations.js",
         "content/providers/flow/media/upload-operations.js",

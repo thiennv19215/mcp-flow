@@ -185,11 +185,24 @@
     }
   }
 
-  async function closeNativeAgentSession() {
-    if (!root.flowButton?.("Start new session")) return;
+  async function closeNativeAgentSession(options = {}) {
+    if (!isNativeAgentSessionOpen()) return { wasOpen: false, closed: true };
     const close = root.flowButton?.("Close");
-    if (close) close.click();
-    await root.wait?.(700);
+    if (!close) throw root.flowError("FLOW_AGENT_SESSION_CLOSE_UNAVAILABLE", "Flow's Agent session is open, but its Close control could not be identified. No generation was submitted.", false, false);
+    close.click();
+    const deadline = Number.isFinite(options.deadline) ? options.deadline : Date.now() + 2_000;
+    while (Date.now() < deadline) {
+      root.FlowUiDeadline?.requireTime(deadline, "closing the Flow Agent session", false, options.signal);
+      if (!isNativeAgentSessionOpen()) return { wasOpen: true, closed: true };
+      const waitMs = Math.min(100, Math.max(1, deadline - Date.now()));
+      if (root.FlowUiDeadline?.boundedWait) await root.FlowUiDeadline.boundedWait(waitMs, deadline, "closing the Flow Agent session", false, options.signal);
+      else await root.wait?.(waitMs);
+    }
+    throw root.flowError("FLOW_AGENT_SESSION_CLOSE_UNCONFIRMED", "Flow did not confirm that the Agent session closed. No generation was submitted.", true, false);
+  }
+
+  function isNativeAgentSessionOpen() {
+    return Boolean(root.flowButton?.("Start new session"));
   }
 
   async function resetNativeAgentWorkflow() {
@@ -245,6 +258,7 @@
     setNativeAgentSettings,
     inspectAgentRunConfirmation,
     findNativeAgentModeControl,
+    isNativeAgentSessionOpen,
     setNativeAgentMode,
     closeNativeAgentSession,
     resetNativeAgentWorkflow,
