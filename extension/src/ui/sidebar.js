@@ -10,6 +10,11 @@
   let flowPhotosScanned = false;
   let localUiHistory = [];
   let savedPrompts = [];
+  let flowModelCapabilities = null;
+  let flowModelCapabilitiesPromise = null;
+  let lastFlowVideoModel = null;
+  let lastVideoFramesMode = false;
+  const flowVideoModelSelections = new Map();
 
   const UI_HISTORY_KEY = "flowMcpUiHistory";
   const SAVED_PROMPTS_KEY = "flowMcpSavedPrompts";
@@ -70,6 +75,264 @@
 
   function t(key, params) {
     return typeof I18n !== "undefined" ? I18n.t(key, params) : key;
+  }
+
+  function confirmImageGeneration({ prompts, model, aspectRatio, count, references, character, submitButton }) {
+    const dialog = document.querySelector("#imageConfirmDialog");
+    const ratioSelect = document.querySelector("#imageConfirmRatio");
+    const countSelect = document.querySelector("#imageConfirmCount");
+    const sourceRatio = document.querySelector("#selectRatioImage");
+    const sourceCount = document.querySelector("#selectQtyImage");
+    if (!dialog || typeof dialog.showModal !== "function" || !ratioSelect || !countSelect || !sourceRatio || !sourceCount) {
+      throw new Error("Không thể mở bước xác nhận tạo ảnh trong extension.");
+    }
+    if (dialog.open) return Promise.resolve(null);
+
+    ratioSelect.replaceChildren(...[...sourceRatio.options].map(option => option.cloneNode(true)));
+    countSelect.replaceChildren(...[...sourceCount.options].map(option => option.cloneNode(true)));
+    ratioSelect.value = aspectRatio;
+    countSelect.value = String(count);
+
+    const promptCount = Array.isArray(prompts) ? prompts.length : 0;
+    const promptSummary = document.querySelector("#imageConfirmPromptCount");
+    const modelSummary = document.querySelector("#imageConfirmModel");
+    const quantitySummary = document.querySelector("#imageConfirmQuantity");
+    const referencesSummary = document.querySelector("#imageConfirmReferences");
+    const characterSummary = document.querySelector("#imageConfirmCharacter");
+    const updateQuantitySummary = () => {
+      const perPrompt = Math.max(1, Number(countSelect.value) || 1);
+      if (quantitySummary) quantitySummary.textContent = t("sidebar.imageConfirmQuantityDetail", { total: promptCount * perPrompt, count: perPrompt });
+    };
+    if (promptSummary) promptSummary.textContent = promptCount === 1
+      ? t("sidebar.imageConfirmSinglePrompt")
+      : t("sidebar.imageConfirmBatchPrompts", { count: promptCount });
+    if (modelSummary) modelSummary.textContent = document.querySelector("#selectModelImage")?.selectedOptions?.[0]?.textContent?.trim() || model;
+    if (referencesSummary) referencesSummary.textContent = String(Array.isArray(references) ? references.length : 0);
+    if (characterSummary) characterSummary.textContent = character
+      ? document.querySelector("#selectCharImage")?.selectedOptions?.[0]?.textContent?.trim() || character
+      : t("sidebar.imageConfirmNone");
+    updateQuantitySummary();
+
+    return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        dialog.removeEventListener("close", onClose);
+        dialog.removeEventListener("click", onDialogClick);
+        document.querySelector("#imageConfirmCancel")?.removeEventListener("click", onCancel);
+        document.querySelector("#imageConfirmRun")?.removeEventListener("click", onConfirm);
+        countSelect.removeEventListener("change", updateQuantitySummary);
+      };
+      const onClose = () => {
+        const result = dialog.returnValue === "confirm"
+          ? { aspect_ratio: ratioSelect.value, count: Math.max(1, Number(countSelect.value) || 1) }
+          : null;
+        cleanup();
+        submitButton?.focus();
+        resolve(result);
+      };
+      const onDialogClick = event => {
+        if (event.target === dialog) dialog.close("cancel");
+      };
+      const onCancel = () => dialog.close("cancel");
+      const onConfirm = () => dialog.close("confirm");
+      dialog.returnValue = "";
+      dialog.addEventListener("close", onClose, { once: true });
+      dialog.addEventListener("click", onDialogClick);
+      document.querySelector("#imageConfirmCancel")?.addEventListener("click", onCancel);
+      document.querySelector("#imageConfirmRun")?.addEventListener("click", onConfirm);
+      countSelect.addEventListener("change", updateQuantitySummary);
+      try {
+        dialog.showModal();
+        document.querySelector("#imageConfirmCancel")?.focus();
+      } catch (error) {
+        cleanup();
+        reject(error);
+      }
+    });
+  }
+
+  function updateVideoFrameInputs() {
+    const framesMode = document.querySelector("#selectModeVideo")?.value === "frames";
+    const group = document.querySelector("#videoFrameNamesGroup");
+    if (group) group.hidden = !framesMode;
+    for (const selector of ["#videoReferenceOptionsGroup", "#videoReferenceSection", "#videoCharacterGroup"]) {
+      const control = document.querySelector(selector);
+      if (control) control.hidden = framesMode;
+    }
+    const voiceGroup = document.querySelector("#flowVoicePickerGroup");
+    if (voiceGroup) voiceGroup.hidden = framesMode;
+    if (framesMode && !lastVideoFramesMode) {
+      const voiceSelect = document.querySelector("#flowVoiceSelect");
+      if (voiceSelect) voiceSelect.value = "";
+    }
+    lastVideoFramesMode = framesMode;
+    updateVideoChainUI();
+  }
+
+  function updateVideoChainUI() {
+    const multiPrompt = document.querySelector("#multiPromptVideo")?.checked === true;
+    const enabled = document.querySelector("#chainVideoFromPrevious")?.checked === true;
+    const option = document.querySelector("#videoChainOption");
+    const hint = document.querySelector("#videoChainHint");
+    const label = document.querySelector("#videoChainLabel");
+    if (option) option.hidden = !multiPrompt;
+    if (hint) {
+      hint.hidden = !multiPrompt || !enabled;
+      hint.textContent = t("sidebar.videoChainHint");
+    }
+    if (label) label.textContent = t("sidebar.videoChainToggle");
+    if (enabled && document.querySelector("#selectModeVideo")?.value === "frames") renderVideoFrameAssignments();
+  }
+
+  function normalizeModelValue(value) {
+    return String(value || "").normalize("NFKC").trim().toLowerCase().replace(/\s+/g, " ");
+  }
+
+  function getFlowModelRule(type, model) {
+    const normalized = normalizeModelValue(model);
+    return flowModelCapabilities?.models?.find(rule =>
+      rule.types?.includes(type) && rule.match?.some(alias => normalized.includes(normalizeModelValue(alias)))) || null;
+  }
+
+  function getValidVideoQuantities(rule) {
+    if (!Array.isArray(rule?.quantities)) return [];
+    return [...new Set(rule.quantities.map(Number).filter(value => Number.isInteger(value) && value >= 1 && value <= 4))];
+  }
+
+  function getVideoQuantity(rule, selectedValue) {
+    const quantities = getValidVideoQuantities(rule);
+    const selected = Number(selectedValue);
+    if (quantities.includes(selected)) return selected;
+    const defaultQuantity = Number(rule?.defaultQuantity);
+    if (quantities.includes(defaultQuantity)) return defaultQuantity;
+    return 1;
+  }
+
+  function replaceSelectOptions(select, values, labelForValue, preferredValue, preferPreferredValue = false) {
+    if (!select) return "";
+    const previous = select.value;
+    select.replaceChildren();
+    for (const value of values) {
+      const option = document.createElement("option");
+      option.value = String(value);
+      option.textContent = labelForValue(value);
+      select.appendChild(option);
+    }
+    const allowed = values.map(String);
+    const selected = preferPreferredValue && allowed.includes(String(preferredValue)) ? String(preferredValue)
+      : allowed.includes(previous) ? previous
+        : allowed.includes(String(preferredValue)) ? String(preferredValue)
+        : (allowed[0] || "");
+    select.value = selected;
+    return selected;
+  }
+
+  function applyFlowModelControls() {
+    const registry = flowModelCapabilities;
+    if (!registry) return;
+    const locale = typeof I18n !== "undefined" ? I18n.getLocale() : "vi";
+    for (const type of ["image", "video"]) {
+      const select = document.querySelector(type === "image" ? "#selectModelImage" : "#selectModelVideo");
+      const models = registry.uiModels?.[type];
+      if (!select || !Array.isArray(models) || !models.length) continue;
+      const previous = select.value;
+      select.replaceChildren();
+      for (const model of models) {
+        if (!model?.value) continue;
+        const option = document.createElement("option");
+        option.value = String(model.value);
+        option.textContent = String(model.labels?.[locale] || model.label || model.value);
+        select.appendChild(option);
+      }
+      select.value = models.some(model => String(model.value) === previous)
+        ? previous : String(models[0]?.value || "");
+    }
+
+    const imageModel = document.querySelector("#selectModelImage")?.value;
+    const imageRule = getFlowModelRule("image", imageModel);
+    if (imageRule?.aspectRatios?.length) {
+      replaceSelectOptions(document.querySelector("#selectRatioImage"), imageRule.aspectRatios, value => value, "9:16");
+    }
+
+    const videoModelSelect = document.querySelector("#selectModelVideo");
+    const videoModel = videoModelSelect?.value;
+    const durationSelect = document.querySelector("#selectDurationVideo");
+    const resolutionSelect = document.querySelector("#selectResolutionVideo");
+    const ratioSelect = document.querySelector("#selectRatioVideo");
+    const quantitySelect = document.querySelector("#selectCountVideo");
+    const videoModelChanged = Boolean(lastFlowVideoModel && lastFlowVideoModel !== videoModel);
+    if (videoModelChanged) {
+      flowVideoModelSelections.set(lastFlowVideoModel, {
+        duration: durationSelect?.value,
+        resolution: resolutionSelect?.value,
+        aspectRatio: ratioSelect?.value,
+        quantity: quantitySelect?.value,
+      });
+    }
+    const rememberedSelection = videoModelChanged ? (flowVideoModelSelections.get(videoModel) || {}) : {};
+    lastFlowVideoModel = videoModel || null;
+    const videoRule = getFlowModelRule("video", videoModel);
+    if (!videoRule) return;
+    const durationGroup = document.querySelector("#videoDurationGroup");
+    const durationLabel = document.querySelector("#lblDurationVideo");
+    const fixedDuration = Number.isFinite(Number(videoRule.fixedDuration)) ? Number(videoRule.fixedDuration) : null;
+    const durations = fixedDuration !== null ? [fixedDuration] : (videoRule.durations || []);
+    const durationDefault = fixedDuration ?? videoRule.defaultDuration ?? durations[0];
+    if (durationGroup) durationGroup.hidden = !durations.length;
+    if (durationLabel) durationLabel.textContent = fixedDuration !== null
+      ? `${t("sidebar.videoDurationFixed", { seconds: fixedDuration })}:`
+      : `${t("sidebar.videoDuration")}:`;
+    replaceSelectOptions(durationSelect, durations, value => `${value} ${locale === "en" ? "seconds" : "giây"}`, rememberedSelection.duration ?? durationDefault, videoModelChanged);
+    if (durationSelect) durationSelect.disabled = fixedDuration !== null;
+
+    const resolutionGroup = document.querySelector("#videoResolutionGroup");
+    const resolutions = Array.isArray(videoRule.resolutions) ? videoRule.resolutions : [];
+    if (resolutionGroup) resolutionGroup.hidden = resolutions.length === 0;
+    if (resolutionGroup && !resolutions.length) {
+      resolutionGroup.querySelector("#lblResolutionVideo").textContent = `${t("sidebar.videoResolution")}:`;
+    }
+    replaceSelectOptions(resolutionSelect, resolutions, value => String(value), rememberedSelection.resolution ?? videoRule.defaultResolution, videoModelChanged);
+    if (resolutionSelect) resolutionSelect.disabled = resolutions.length === 0;
+
+    const quantityGroup = document.querySelector("#videoCountGroup");
+    const quantities = getValidVideoQuantities(videoRule);
+    if (quantityGroup) quantityGroup.hidden = quantities.length === 0;
+    const quantityDefault = getVideoQuantity(videoRule, rememberedSelection.quantity ?? videoRule.defaultQuantity);
+    replaceSelectOptions(quantitySelect, quantities, value => String(value), quantityDefault, videoModelChanged);
+
+    if (videoRule.aspectRatios?.length) {
+      replaceSelectOptions(ratioSelect, videoRule.aspectRatios, value => value, rememberedSelection.aspectRatio ?? "9:16", videoModelChanged);
+    }
+    const framesOption = document.querySelector('#selectModeVideo option[value="frames"]');
+    if (framesOption) {
+      framesOption.disabled = videoRule.supportsFrames !== true;
+      if (framesOption.disabled && document.querySelector("#selectModeVideo")?.value === "frames") {
+        document.querySelector("#selectModeVideo").value = "ingredients";
+        updateVideoFrameInputs();
+      }
+    }
+  }
+
+  async function loadFlowModelCapabilities() {
+    if (flowModelCapabilities) return flowModelCapabilities;
+    if (!flowModelCapabilitiesPromise) {
+      flowModelCapabilitiesPromise = fetch(chrome.runtime.getURL("flow-model-capabilities.json"))
+        .then(response => {
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return response.json();
+        })
+        .then(registry => {
+          if (!Array.isArray(registry?.models) || !registry?.uiModels) throw new Error("The local model capability file is invalid.");
+          flowModelCapabilities = registry;
+          applyFlowModelControls();
+          return registry;
+        })
+        .catch(error => {
+          flowModelCapabilitiesPromise = null;
+          console.warn("[Flow UI] local model capabilities could not be loaded:", error?.message || error);
+          return null;
+        });
+    }
+    return flowModelCapabilitiesPromise;
   }
 
   function applyLanguage() {
@@ -136,18 +399,33 @@
     document.querySelector("#lblPromptImage").textContent = t("sidebar.promptLabel") + ":";
     document.querySelector("#inputPromptImage").placeholder = t("sidebar.promptPlaceholder");
     document.querySelector("#lblRatioImage").textContent = t("sidebar.aspectRatio") + ":";
+    document.querySelector("#lblModelImage").textContent = t("sidebar.imageModel") + ":";
     document.querySelector("#lblQtyImage").textContent = t("sidebar.quantity") + ":";
     document.querySelector("#lblCharImage").textContent = t("sidebar.characterSelect") + ":";
+    document.querySelector("#btnImportPromptsImage").textContent = t("sidebar.multiPromptImport");
+    document.querySelector("#promptBatchHintImage").textContent = t("sidebar.multiPromptHint");
     document.querySelector("#txtBtnSubmitImage").textContent = t("sidebar.btnGenerateImage");
 
     // Form Video
     document.querySelector("#lblPromptVideo").textContent = t("sidebar.promptLabel") + ":";
     document.querySelector("#inputPromptVideo").placeholder = t("sidebar.promptPlaceholderVideo");
+    document.querySelector("#btnImportPromptsVideo").textContent = t("sidebar.multiPromptImport");
+    document.querySelector("#promptBatchHintVideo").textContent = t("sidebar.multiPromptHint");
     document.querySelector("#lblRatioVideo").textContent = t("sidebar.aspectRatio") + ":";
     document.querySelector("#lblDurationVideo").textContent = t("sidebar.videoDuration") + ":";
+    document.querySelector("#lblModelVideo").textContent = t("sidebar.videoModel") + ":";
+    document.querySelector("#lblResolutionVideo").textContent = t("sidebar.videoResolution") + ":";
     document.querySelector("#lblModeVideo").textContent = t("sidebar.videoMode") + ":";
     document.querySelector("#lblCharVideo").textContent = t("sidebar.characterSelect") + ":";
+    document.querySelector("#videoFrameNamesHint").textContent = t("sidebar.videoFrameNamesHint");
+    updateVideoChainUI();
+    renderVideoFrameSources();
+    renderVideoFrameAssignments();
+    updateVideoFrameInputs();
+    applyFlowModelControls();
     document.querySelector("#txtBtnSubmitVideo").textContent = t("sidebar.btnGenerateVideo");
+    updatePromptFormFeedback("image");
+    updatePromptFormFeedback("video");
 
     // Form Character
     document.querySelector("#lblCharName").textContent = t("sidebar.charNameLabel") + ":";
@@ -381,16 +659,26 @@
   });
 
   // Mode Segments switching (Image / Video / Character)
+  function selectCreationMode(mode = "image") {
+    const selected = document.querySelector(`.mode-segment-btn[data-mode="${mode}"]`);
+    if (!selected) return;
+    document.querySelectorAll(".mode-segment-btn").forEach(button => button.classList.toggle("active", button === selected));
+    document.querySelector("#formImage").style.display = mode === "image" ? "flex" : "none";
+    document.querySelector("#formVideo").style.display = mode === "video" ? "flex" : "none";
+    document.querySelector("#formCharacter").style.display = mode === "character" ? "flex" : "none";
+    setFeedback("");
+  }
   document.querySelectorAll(".mode-segment-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      document.querySelectorAll(".mode-segment-btn").forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
-      const mode = btn.getAttribute("data-mode");
-      document.querySelector("#formImage").style.display = mode === "image" ? "flex" : "none";
-      document.querySelector("#formVideo").style.display = mode === "video" ? "flex" : "none";
-      document.querySelector("#formCharacter").style.display = mode === "character" ? "flex" : "none";
-      setFeedback("");
-    });
+    btn.addEventListener("click", () => selectCreationMode(btn.getAttribute("data-mode")));
+  });
+  const resetCreationView = () => {
+    const createTab = document.querySelector("#navCreate");
+    if (createTab) activateTab(createTab);
+    selectCreationMode("image");
+  };
+  resetCreationView();
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") resetCreationView();
   });
 
   function syncWorkflowFields() {
@@ -428,11 +716,7 @@
     const result = await chrome.runtime.sendMessage({ type: "flow-queue:add", job: { operation, payload, label } });
     if (!result?.ok) throw new Error(result?.error?.message || "Could not add workflow to the Flow queue.");
     rememberSubmittedQueueJob(result);
-    if (result.isPaused === true && result.isRunning !== true) {
-      setFeedback("Đã xếp quy trình vào hàng chờ. Hàng đợi đang tạm dừng.", true);
-    } else if (result.isRunning !== true) {
-      throw new Error("Đã thêm quy trình nhưng hàng đợi Flow chưa khởi động.");
-    } else setFeedback(t("sidebar.workflowQueued"), true);
+    setFeedback(t("sidebar.workflowQueued"), true);
     addLog(operation, label, true);
     document.querySelector("#workflowScenes").value = "";
     document.querySelector("#workflowAsset").value = "";
@@ -489,6 +773,9 @@
   function rememberSubmittedQueueJob(result) {
     const id = result?.job?.id;
     if (id) submittedQueueJobIds.add(String(id));
+    for (const job of Array.isArray(result?.addedJobs) ? result.addedJobs : []) {
+      if (job?.id) submittedQueueJobIds.add(String(job.id));
+    }
   }
 
   function queueJobType(job) {
@@ -549,7 +836,7 @@
     }
   });
 
-  async function executeGenerationTask({ type, prompt, aspect_ratio, count = 1, model, attachments = [], video_settings, btn, btnTextEl, defaultTextKey }) {
+  async function executeGenerationTask({ type, prompt, prompts, aspect_ratio, count = 1, model, attachments = [], attachmentsPerPrompt, firstFramesPerPrompt, lastFramesPerPrompt, video_settings, chainVideo = false, btn, btnTextEl, defaultTextKey }) {
     if (isGenerating) {
       setFeedback("Đang có tác vụ đang chạy, vui lòng đợi!", false);
       return;
@@ -558,36 +845,40 @@
     if (btn) btn.disabled = true;
 
     try {
-      const payload = {
+      const promptList = Array.isArray(prompts) && prompts.length ? prompts : [prompt];
+      chainVideo = type === "video" && chainVideo;
+      const chainIds = chainVideo ? promptList.map(() => `flow-video-chain-${crypto.randomUUID()}`) : [];
+      const jobs = promptList.map((itemPrompt, index) => ({
+        ...(chainVideo ? { id: chainIds[index] } : {}),
+        ...(chainVideo && index > 0 ? { metadata: { dependsOnId: chainIds[index - 1], dependencyType: "chain_previous" } } : {}),
+        operation: "flow.generation.submit",
+        payload: {
           type,
-          prompt,
+          prompt: itemPrompt,
           ...(model ? { model } : {}),
           aspectRatio: aspect_ratio,
           aspect_ratio,
           variants: count,
           count,
-          attachments,
+          attachments: attachmentsPerPrompt?.[index] || attachments,
+          ...((!chainVideo || index === 0) && firstFramesPerPrompt?.[index] ? { firstFrame: typeof firstFramesPerPrompt[index] === "string" ? { assetName: firstFramesPerPrompt[index] } : firstFramesPerPrompt[index] } : {}),
+          ...(!chainVideo && lastFramesPerPrompt?.[index] ? { lastFrame: typeof lastFramesPerPrompt[index] === "string" ? { assetName: lastFramesPerPrompt[index] } : lastFramesPerPrompt[index] } : {}),
           ...(video_settings || {})
-      };
-      const addResult = await chrome.runtime.sendMessage({
-        type: "flow-queue:add",
-        job: { operation: "flow.generation.submit", payload, label: `[${type.toUpperCase()}] ${prompt.slice(0, 96)}` }
-      });
+        },
+        label: `[${type.toUpperCase()}] ${itemPrompt.slice(0, 96)}`,
+      }));
+      const addResult = await chrome.runtime.sendMessage(jobs.length > 1
+        ? { type: "flow-queue:add-batch", jobs, batchLabel: `${type === "video" ? "Video" : "Image"} batch` }
+        : { type: "flow-queue:add", job: jobs[0] });
       if (!addResult?.ok) throw new Error(addResult?.error?.message || "Không thể thêm tác vụ vào hàng đợi Flow");
       rememberSubmittedQueueJob(addResult);
-      if (addResult.isPaused === true && addResult.isRunning !== true) {
-        setFeedback("Đã xếp vào hàng chờ. Hàng đợi đang tạm dừng; hãy bấm Chạy tiếp để tạo.", true);
-        addLog("flow.queue.add", `[${type.toUpperCase()}] ${prompt.slice(0, 96)}`, true);
-        return;
-      }
-      if (addResult.isRunning !== true && addResult.snapshot?.isRunning !== true) {
-        throw new Error("Đã thêm tác vụ nhưng hàng đợi Flow chưa khởi động. Hãy mở tab Tác vụ và bấm Chạy tiếp.");
-      }
-      setFeedback("Đã xếp vào hàng chờ. Hàng đợi đang tự tạo nội dung…", true);
-      addLog("flow.queue.add", `[${type.toUpperCase()}] ${prompt.slice(0, 96)}`, true);
+      setFeedback(t("sidebar.workflowQueued"), true);
+      addLog("flow.queue.add", `${jobs.length > 1 ? t("sidebar.multiPromptQueued", { count: jobs.length }) : `[${type.toUpperCase()}] ${prompt.slice(0, 96)}`}`, true);
+      return true;
     } catch (err) {
       setFeedback(`❌ ${err.message}`, false);
       addLog("flow.queue.error", err.message, false);
+      return false;
     } finally {
       isGenerating = false;
       if (btn) btn.disabled = false;
@@ -596,6 +887,345 @@
   }
 
   const referencePicker = window.createFlowReferencePicker({ dispatchFlowOperation, setFeedback });
+  let videoFrameSources = referencePicker.getFrameSources();
+  let videoFrameAssignments = [];
+  let activeVideoFrameSlot = null;
+
+  function currentVideoPromptsForFrames() {
+    const prompt = document.querySelector("#inputPromptVideo")?.value.trim() || "";
+    if (!prompt) return [];
+    try { return promptsForGeneration(prompt, document.querySelector("#multiPromptVideo")?.checked === true); }
+    catch { return []; }
+  }
+
+  function renderVideoFrameSources() {
+    const grid = document.querySelector("#videoFrameSourceGrid");
+    const summary = document.querySelector("#videoFrameSourceSummary");
+    if (!grid) return;
+    grid.replaceChildren();
+    if (summary) summary.textContent = t("sidebar.frameSourceCount", { count: videoFrameSources.length });
+    for (const source of videoFrameSources) {
+      const card = document.createElement("div");
+      card.className = "video-frame-source-card";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "video-frame-source";
+      button.title = t("sidebar.frameAssignSourceTitle", { name: source.name || source.file?.name || "" });
+      const imageUrl = source.source === "flow" ? source.thumbnailUrl : source.previewUrl;
+      if (imageUrl) {
+        const image = document.createElement("img");
+        image.src = imageUrl;
+        image.alt = "";
+        image.loading = "lazy";
+        image.onerror = () => image.remove();
+        button.append(image);
+      } else {
+        const placeholder = document.createElement("span");
+        placeholder.className = "video-frame-source__placeholder";
+        placeholder.textContent = "▧";
+        button.append(placeholder);
+      }
+      const name = document.createElement("span");
+      name.className = "video-frame-source__name";
+      name.textContent = source.name || source.file?.name || t("sidebar.frameImage");
+      button.append(name);
+      button.onclick = () => {
+        if (!activeVideoFrameSlot || !videoFrameAssignments[activeVideoFrameSlot.index]) {
+          setFeedback(t("sidebar.frameChooseSlot"), false);
+          return;
+        }
+        videoFrameAssignments[activeVideoFrameSlot.index][activeVideoFrameSlot.key] = source;
+        activeVideoFrameSlot = null;
+        renderVideoFrameAssignments();
+      };
+      const actions = document.createElement("div");
+      actions.className = "video-frame-source-actions";
+      const makeSourceAction = (labelKey, symbol, action) => {
+        const control = document.createElement("button");
+        control.type = "button";
+        control.className = "video-frame-source-action";
+        control.title = t(labelKey);
+        control.setAttribute("aria-label", t(labelKey));
+        control.textContent = symbol;
+        control.onclick = event => {
+          event.stopPropagation();
+          action();
+        };
+        return control;
+      };
+      const sourceIndex = videoFrameSources.indexOf(source);
+      actions.append(
+        makeSourceAction("sidebar.frameMoveSourceUp", "↑", () => {
+          videoFrameSources = referencePicker.moveFrameSource(source, -1);
+          renderVideoFrameSources();
+        }),
+        makeSourceAction("sidebar.frameMoveSourceDown", "↓", () => {
+          videoFrameSources = referencePicker.moveFrameSource(source, 1);
+          renderVideoFrameSources();
+        }),
+        makeSourceAction("sidebar.frameRemoveSource", "×", () => {
+          videoFrameSources = referencePicker.removeFrameSource(source);
+          videoFrameAssignments.forEach(assignment => {
+            if (assignment.first === source) assignment.first = null;
+            if (assignment.last === source) assignment.last = null;
+          });
+          renderVideoFrameSources();
+          renderVideoFrameAssignments();
+        }),
+      );
+      actions.children[0].disabled = sourceIndex <= 0;
+      actions.children[1].disabled = sourceIndex < 0 || sourceIndex >= videoFrameSources.length - 1;
+      card.append(button, actions);
+      grid.append(card);
+    }
+  }
+
+  function syncVideoFrameAssignmentCount() {
+    const prompts = currentVideoPromptsForFrames();
+    while (videoFrameAssignments.length < prompts.length) videoFrameAssignments.push({ first: null, last: null });
+    if (activeVideoFrameSlot && activeVideoFrameSlot.index >= prompts.length) activeVideoFrameSlot = null;
+    renderVideoFrameAssignments();
+  }
+
+  function renderVideoFrameAssignments() {
+    const container = document.querySelector("#videoFrameAssignments");
+    if (!container) return;
+    const prompts = currentVideoPromptsForFrames();
+    container.replaceChildren();
+    while (videoFrameAssignments.length < prompts.length) videoFrameAssignments.push({ first: null, last: null });
+    const chainVideo = document.querySelector("#chainVideoFromPrevious")?.checked === true &&
+      document.querySelector("#selectModeVideo")?.value === "frames";
+    prompts.forEach((prompt, index) => {
+      if (chainVideo && index > 0) return;
+      const row = document.createElement("section");
+      row.className = "video-frame-assignment";
+      const promptLabel = document.createElement("div");
+      promptLabel.className = "video-frame-assignment__prompt";
+      promptLabel.textContent = t("sidebar.framePromptLabel", { index: index + 1, prompt: prompt.replace(/\s+/g, " ").slice(0, 72) });
+      const slots = document.createElement("div");
+      slots.className = "video-frame-assignment__slots";
+      const slotsToRender = chainVideo ? [["first", "sidebar.frameStart"]] : [["first", "sidebar.frameStart"], ["last", "sidebar.frameEnd"]];
+      for (const [key, labelKey] of slotsToRender) {
+        const wrap = document.createElement("div");
+        wrap.className = "video-frame-slot-wrap";
+        const source = videoFrameAssignments[index]?.[key] || null;
+        const slot = document.createElement("button");
+        slot.type = "button";
+        slot.className = `video-frame-slot${activeVideoFrameSlot?.index === index && activeVideoFrameSlot?.key === key ? " is-active" : ""}`;
+        slot.title = source?.name || source?.file?.name || t(labelKey);
+        if (source?.thumbnailUrl || source?.previewUrl) {
+          const image = document.createElement("img");
+          image.src = source.thumbnailUrl || source.previewUrl;
+          image.alt = "";
+          slot.append(image);
+        } else {
+          const empty = document.createElement("span");
+          empty.className = "video-frame-slot__empty";
+          empty.textContent = "▧";
+          slot.append(empty);
+        }
+        const slotLabel = document.createElement("span");
+        slotLabel.className = "video-frame-slot__label";
+        slotLabel.textContent = source?.name || source?.file?.name || t(labelKey);
+        slot.append(slotLabel);
+        slot.onclick = () => {
+          activeVideoFrameSlot = { index, key };
+          renderVideoFrameAssignments();
+        };
+        wrap.append(slot);
+        if (source) {
+          const clear = document.createElement("button");
+          clear.type = "button";
+          clear.className = "video-frame-slot-clear";
+          clear.title = t("sidebar.frameClearSlot");
+          clear.setAttribute("aria-label", t("sidebar.frameClearSlot"));
+          clear.textContent = "×";
+          clear.onclick = () => {
+            videoFrameAssignments[index][key] = null;
+            renderVideoFrameAssignments();
+          };
+          wrap.append(clear);
+        }
+        slots.append(wrap);
+      }
+      row.append(promptLabel, slots);
+      container.append(row);
+    });
+  }
+
+  function applyVideoFrameAssignment(mode) {
+    const prompts = currentVideoPromptsForFrames();
+    while (videoFrameAssignments.length < prompts.length) videoFrameAssignments.push({ first: null, last: null });
+    if (mode === "clear") {
+      for (let index = 0; index < prompts.length; index++) videoFrameAssignments[index] = { first: null, last: null };
+      activeVideoFrameSlot = null;
+      renderVideoFrameAssignments();
+      return;
+    }
+    prompts.forEach((_, index) => {
+      const assignment = videoFrameAssignments[index];
+      if (mode === "start" && videoFrameSources[index] && !assignment.first) assignment.first = videoFrameSources[index];
+      if (mode === "chain") {
+        if (videoFrameSources[index] && !assignment.first) assignment.first = videoFrameSources[index];
+        if (videoFrameSources[index + 1] && !assignment.last) assignment.last = videoFrameSources[index + 1];
+      }
+      if (mode === "pairs") {
+        if (videoFrameSources[index * 2] && !assignment.first) assignment.first = videoFrameSources[index * 2];
+        if (videoFrameSources[index * 2 + 1] && !assignment.last) assignment.last = videoFrameSources[index * 2 + 1];
+      }
+    });
+    activeVideoFrameSlot = null;
+    renderVideoFrameAssignments();
+  }
+
+  document.querySelector("#btnChooseVideoFrameSources")?.addEventListener("click", () => {
+    referencePicker.openFrames(sources => {
+      videoFrameSources = sources;
+      renderVideoFrameSources();
+    });
+  });
+  document.querySelector("#btnAssignVideoFrames")?.addEventListener("click", () => {
+    applyVideoFrameAssignment(document.querySelector("#videoFrameAssignmentMode")?.value || "start");
+  });
+  document.querySelector("#inputPromptVideo")?.addEventListener("input", syncVideoFrameAssignmentCount);
+  document.querySelector("#multiPromptVideo")?.addEventListener("change", () => {
+    if (!document.querySelector("#multiPromptVideo")?.checked) {
+      const chainToggle = document.querySelector("#chainVideoFromPrevious");
+      if (chainToggle) chainToggle.checked = false;
+    }
+    syncVideoFrameAssignmentCount();
+    updateVideoChainUI();
+  });
+  document.querySelector("#chainVideoFromPrevious")?.addEventListener("change", () => {
+    updateVideoChainUI();
+    renderVideoFrameAssignments();
+  });
+  renderVideoFrameSources();
+  renderVideoFrameAssignments();
+
+  document.querySelector("#selectModeVideo")?.addEventListener("change", updateVideoFrameInputs);
+  document.querySelector("#selectModelImage")?.addEventListener("change", applyFlowModelControls);
+  document.querySelector("#selectModelVideo")?.addEventListener("change", applyFlowModelControls);
+
+  function promptsForGeneration(prompt, enabled) {
+    const prompts = enabled ? prompt.split(/\n\s*\n/).map(value => value.trim()).filter(Boolean) : [prompt];
+    if (prompts.length > 100) throw new Error(t("sidebar.multiPromptLimit"));
+    return prompts;
+  }
+
+  function updatePromptFormFeedback(type) {
+    const prompt = document.querySelector(type === "image" ? "#inputPromptImage" : "#inputPromptVideo");
+    const enabled = document.querySelector(type === "image" ? "#multiPromptImage" : "#multiPromptVideo")?.checked === true;
+    const countElement = document.querySelector(type === "image" ? "#promptCountImage" : "#promptCountVideo");
+    const hint = document.querySelector(type === "image" ? "#promptBatchHintImage" : "#promptBatchHintVideo");
+    if (!prompt) return;
+    const value = prompt.value.trim();
+    const count = value ? (enabled ? value.split(/\n\s*\n/).map(item => item.trim()).filter(Boolean).length : 1) : 0;
+    if (countElement) countElement.textContent = t("sidebar.multiPromptCount", { count });
+    if (hint) hint.hidden = !enabled;
+  }
+
+  function bindPromptImport(type) {
+    const prompt = document.querySelector(type === "image" ? "#inputPromptImage" : "#inputPromptVideo");
+    const multi = document.querySelector(type === "image" ? "#multiPromptImage" : "#multiPromptVideo");
+    const button = document.querySelector(type === "image" ? "#btnImportPromptsImage" : "#btnImportPromptsVideo");
+    const fileInput = document.querySelector(type === "image" ? "#inputImportPromptsImage" : "#inputImportPromptsVideo");
+    if (!prompt || !multi || !button || !fileInput) return;
+    prompt.addEventListener("input", () => updatePromptFormFeedback(type));
+    multi.addEventListener("change", () => updatePromptFormFeedback(type));
+    button.addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", async () => {
+      const file = fileInput.files?.[0];
+      fileInput.value = "";
+      if (!file) return;
+      try {
+        const lines = (await file.text()).split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith("#"));
+        if (!lines.length) throw new Error(t("sidebar.multiPromptEmptyFile"));
+        const imported = lines.join("\n\n");
+        prompt.value = prompt.value.trim() ? `${prompt.value.trim()}\n\n${imported}` : imported;
+        if (lines.length > 1) multi.checked = true;
+        prompt.dispatchEvent(new Event("input", { bubbles: true }));
+        updatePromptFormFeedback(type);
+      } catch (error) {
+        setFeedback(error.message || t("sidebar.multiPromptImportFailed"), false);
+      }
+    });
+  }
+
+  bindPromptImport("image");
+  bindPromptImport("video");
+
+  function assignBatchReferences(prompts, mode, common, selectedReferences, referencesPerPrompt = 1) {
+    if (mode === "none") return prompts.map(() => [...common]);
+    if (prompts.length < 2 || mode !== "sequential") {
+      const attachments = [...common, ...selectedReferences];
+      return prompts.map(() => attachments);
+    }
+    const count = Math.max(1, Math.min(3, Number(referencesPerPrompt) || 1));
+    if (selectedReferences.length < prompts.length * count) throw new Error(t("sidebar.multiPromptRefsMissing"));
+    return prompts.map((_, index) => [...common, ...selectedReferences.slice(index * count, (index + 1) * count)]);
+  }
+
+  function resolveMentionReferences(prompts, selectedReferences) {
+    const normalizeName = value => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/[đĐ]/g, "d").trim().toLowerCase();
+    const aliases = new Map();
+    const addAlias = (value, reference) => {
+      const clean = String(value || "").replace(/^asset:/i, "").trim();
+      if (!clean) return;
+      const names = [clean, clean.replace(/\.[^.]+$/, "")];
+      for (const name of names) {
+        const key = normalizeName(name);
+        if (!key) continue;
+        if (!aliases.has(key)) aliases.set(key, new Set());
+        aliases.get(key).add(reference);
+      }
+    };
+    for (const reference of selectedReferences) {
+      addAlias(reference.name, reference);
+      addAlias(reference.file?.name, reference);
+      addAlias(reference.assetName, reference);
+    }
+
+    const assignments = [];
+    const unresolvedNames = new Set();
+    const pattern = /@(?:\[([^\]]+)\]|([\p{L}\p{N}_]+))/gu;
+    for (const prompt of prompts) {
+      const assigned = [];
+      const seen = new Set();
+      pattern.lastIndex = 0;
+      let match;
+      while ((match = pattern.exec(prompt)) !== null) {
+        // Namespaced tokens such as @voice:soft belong to other Flow controls.
+        if (prompt[pattern.lastIndex] === ":") continue;
+        const name = String(match[1] || match[2] || "").trim();
+        const key = normalizeName(name);
+        if (!key) continue;
+        const matches = [...(aliases.get(key) || [])];
+        if (matches.length > 1) throw new Error(t("sidebar.multiPromptMentionAmbiguous", { name }));
+        if (matches.length === 0) {
+          unresolvedNames.add(name);
+          continue;
+        }
+        const reference = matches[0];
+        if (!seen.has(reference)) {
+          seen.add(reference);
+          assigned.push(reference);
+        }
+      }
+      assignments.push(assigned);
+    }
+    const usedReferences = [...new Set(assignments.flat())];
+    return { assignments, usedReferences, unresolvedNames: [...unresolvedNames] };
+  }
+
+  function showUnresolvedMentionWarning(type, names, queued) {
+    if (!names?.length) return;
+    const warning = t("sidebar.multiPromptMentionUnresolved", { names: names.map(name => `@${name}`).join(", ") });
+    addLog("flow.reference.mention.unresolved", warning, true);
+    if (queued) setFeedback(`${t("sidebar.workflowQueued")} · ${warning}`, true);
+    console.warn(`[Flow ${type}] unresolved reference mentions:`, names);
+  }
 
   async function uploadReferenceImage(file, onProgress, referenceIndex) {
     if (window.FlowUploadClient) {
@@ -606,8 +1236,8 @@
 
   async function assertQueueIdleForReferenceUpload() {
     const state = await chrome.runtime.sendMessage({ type: "flow-queue:get" });
-    if (!state?.ok || state.isRunning) {
-      throw new Error("Hàng đợi Flow đang chạy. Hãy đợi tác vụ hiện tại hoàn tất rồi tải ảnh tham chiếu.");
+    if (!state?.ok || state.isRunning || Number(state.waitingForUser) > 0) {
+      throw new Error(t("sidebar.referenceUploadQueueBusy"));
     }
   }
 
@@ -621,29 +1251,64 @@
       setFeedback("Vui lòng nhập câu lệnh prompt cho ảnh!", false);
       return;
     }
-    const aspect_ratio = document.querySelector("#selectRatioImage").value;
-    const count = Number(document.querySelector("#selectQtyImage").value) || 1;
+    let aspect_ratio = document.querySelector("#selectRatioImage").value;
+    let count = Number(document.querySelector("#selectQtyImage").value) || 1;
     const model = document.querySelector("#selectModelImage")?.value || "nano banana";
+    let prompts;
+    try { prompts = promptsForGeneration(prompt, document.querySelector("#multiPromptImage")?.checked === true); }
+    catch (error) { setFeedback(error.message, false); return; }
+    const referenceMode = document.querySelector("#multiRefModeImage")?.value || "all";
+    const referencesPerPrompt = Number(document.querySelector("#multiRefCountImage")?.value) || 1;
+    let mentionResolution = null;
+    if (referenceMode === "mention") {
+      try { mentionResolution = resolveMentionReferences(prompts, refFilesImage); }
+      catch (error) { setFeedback(error.message, false); return; }
+    }
+    if (prompts.length > 1 && referenceMode === "sequential" && refFilesImage.length < prompts.length * referencesPerPrompt) {
+      setFeedback(t("sidebar.multiPromptRefsMissing"), false);
+      return;
+    }
     const character = document.querySelector("#selectCharImage").value;
 
-    const attachments = [];
+    const commonAttachments = [];
+    const referenceAttachments = [];
+    const activeImageReferences = referenceMode === "none" ? []
+      : referenceMode === "mention" ? mentionResolution.usedReferences
+        : refFilesImage;
     if (character) {
-      attachments.push({ assetName: `character:${character}` });
+      commonAttachments.push({ assetName: `character:${character}` });
     }
 
     try {
       if (btn) btn.disabled = true;
+      const confirmation = await confirmImageGeneration({
+        prompts,
+        model,
+        aspectRatio: aspect_ratio,
+        count,
+        references: activeImageReferences,
+        character,
+        submitButton: btn,
+      });
+      if (!confirmation) return;
+      aspect_ratio = confirmation.aspect_ratio;
+      count = confirmation.count;
+      document.querySelector("#selectRatioImage").value = aspect_ratio;
+      document.querySelector("#selectQtyImage").value = String(count);
       // Reuse selected Flow media IDs; only newly chosen local files are uploaded.
-      const localImageReferences = refFilesImage.filter(reference => reference.source === "local");
+      const attachmentByReference = new Map();
+      const localImageReferences = activeImageReferences.filter(reference => reference.source === "local");
       if (localImageReferences.length > 0) {
         try { await assertQueueIdleForReferenceUpload(); }
         catch (error) { setFeedback(error.message, false); return; }
       }
       let uploadedImageCount = 0;
-      for (let i = 0; i < refFilesImage.length; i++) {
-        const reference = refFilesImage[i];
+      for (let i = 0; i < activeImageReferences.length; i++) {
+        const reference = activeImageReferences[i];
         if (reference.source === "flow") {
-          attachments.push({ assetName: reference.assetName, expectedId: reference.expectedId });
+          const attachment = { assetName: reference.assetName, expectedId: reference.expectedId };
+          referenceAttachments.push(attachment);
+          attachmentByReference.set(reference, attachment);
           continue;
         }
         uploadedImageCount++;
@@ -651,20 +1316,27 @@
         const uploaded = await uploadReferenceImage(reference.file, undefined, i + 1);
         const uploadedName = typeof uploaded === "string" ? uploaded : (uploaded?.name || uploaded?.title || String(uploaded));
         const uploadedId = typeof uploaded === "object" ? (uploaded?.id || uploaded?.mediaId) : undefined;
-        attachments.push({ assetName: `asset:${uploadedName}`, ...(uploadedId ? { expectedId: uploadedId } : {}) });
+        const attachment = { assetName: `asset:${uploadedName}`, ...(uploadedId ? { expectedId: uploadedId } : {}) };
+        referenceAttachments.push(attachment);
+        attachmentByReference.set(reference, attachment);
       }
 
-      await executeGenerationTask({
+      const attachmentsPerPrompt = referenceMode === "mention"
+        ? mentionResolution.assignments.map(references => [...commonAttachments, ...references.map(reference => attachmentByReference.get(reference)).filter(Boolean)])
+        : assignBatchReferences(prompts, referenceMode, commonAttachments, referenceAttachments, referencesPerPrompt);
+      const queued = await executeGenerationTask({
         type: "image",
         prompt,
+        prompts,
         aspect_ratio,
         count,
         model,
-        attachments,
+        attachmentsPerPrompt,
         btn,
         btnTextEl,
         defaultTextKey: "sidebar.btnGenerateImage"
       });
+      showUnresolvedMentionWarning("image", mentionResolution?.unresolvedNames, queued);
     } catch (err) {
       setFeedback(`❌ ${err.message}`, false);
     } finally {
@@ -683,31 +1355,87 @@
       setFeedback("Vui lòng nhập câu lệnh prompt cho video!", false);
       return;
     }
+    const capabilityRegistry = await loadFlowModelCapabilities();
+    if (!capabilityRegistry) {
+      setFeedback("Không đọc được cấu hình model cục bộ của extension. Hãy tải lại extension rồi thử lại.", false);
+      return;
+    }
     const aspect_ratio = document.querySelector("#selectRatioVideo").value;
-    const duration = Number(document.querySelector("#selectDurationVideo").value) || 8;
     const model = document.querySelector("#selectModelVideo")?.value || "veo 3.1";
-    const resolution = document.querySelector("#selectResolutionVideo")?.value || "1080p";
+    const modelRule = getFlowModelRule("video", model);
+    if (!modelRule) {
+      setFeedback("Model video chưa có capability DOM được xác nhận trong cấu hình local.", false);
+      return;
+    }
+    const duration = Number(modelRule.fixedDuration ?? document.querySelector("#selectDurationVideo").value) || undefined;
+    const resolution = modelRule.resolutions?.includes(document.querySelector("#selectResolutionVideo")?.value)
+      ? document.querySelector("#selectResolutionVideo").value : undefined;
+    const count = getVideoQuantity(modelRule, document.querySelector("#selectCountVideo")?.value);
     const mode = document.querySelector("#selectModeVideo").value || "ingredients";
-    const character = document.querySelector("#selectCharVideo").value;
+    const selectedCharacter = document.querySelector("#selectCharVideo").value;
+    const character = mode === "frames" ? "" : selectedCharacter;
+    const chainVideo = document.querySelector("#chainVideoFromPrevious")?.checked === true;
+    let prompts;
+    try { prompts = promptsForGeneration(prompt, document.querySelector("#multiPromptVideo")?.checked === true); }
+    catch (error) { setFeedback(error.message, false); return; }
+    const selectedReferenceMode = document.querySelector("#multiRefModeVideo")?.value || "all";
+    const referenceMode = mode === "frames" ? "none" : selectedReferenceMode;
+    const referencesPerPrompt = Number(document.querySelector("#multiRefCountVideo")?.value) || 1;
+    syncVideoFrameAssignmentCount();
+    const hasFrames = mode === "frames";
+    const selectedFrameAssignments = videoFrameAssignments.slice(0, prompts.length);
+    if (chainVideo && prompts.length < 2) {
+      setFeedback(t("sidebar.videoChainNeedsPrompts"), false);
+      return;
+    }
+    const selectedVoice = document.querySelector("#flowVoiceSelect")?.value || "";
+    if (chainVideo && mode !== "frames" && (refFilesVideo.length > 0 || character || selectedVoice)) {
+      setFeedback(t("sidebar.videoChainReferencesConflict"), false);
+      return;
+    }
+    if (hasFrames && !videoFrameSources.length) {
+      setFeedback(t("sidebar.videoFramesNeedInput"), false);
+      return;
+    }
+    if (hasFrames && selectedFrameAssignments.slice(0, chainVideo ? 1 : prompts.length).some(assignment => !assignment?.first)) {
+      setFeedback(chainVideo ? t("sidebar.videoChainNeedsStart") : t("sidebar.videoFramesNeedStart"), false);
+      return;
+    }
+    if (!hasFrames && prompts.length > 1 && referenceMode === "sequential" && refFilesVideo.length < prompts.length * referencesPerPrompt) {
+      setFeedback(t("sidebar.multiPromptRefsMissing"), false);
+      return;
+    }
+    let mentionResolution = null;
+    if (referenceMode === "mention") {
+      try { mentionResolution = resolveMentionReferences(prompts, refFilesVideo); }
+      catch (error) { setFeedback(error.message, false); return; }
+    }
 
-    const attachments = [];
+    const commonAttachments = [];
+    const referenceAttachments = [];
     if (character) {
-      attachments.push({ assetName: `character:${character}` });
+      commonAttachments.push({ assetName: `character:${character}` });
     }
 
     try {
       if (btn) btn.disabled = true;
       // Reuse selected Flow media IDs; only newly chosen local files are uploaded.
-      const localVideoReferences = refFilesVideo.filter(reference => reference.source === "local");
+      const activeVideoReferences = referenceMode === "none" || hasFrames ? []
+        : referenceMode === "mention" ? mentionResolution.usedReferences
+          : refFilesVideo;
+      const attachmentByReference = new Map();
+      const localVideoReferences = activeVideoReferences.filter(reference => reference.source === "local");
       if (localVideoReferences.length > 0) {
         try { await assertQueueIdleForReferenceUpload(); }
         catch (error) { setFeedback(error.message, false); return; }
       }
       let uploadedVideoCount = 0;
-      for (let i = 0; i < refFilesVideo.length; i++) {
-        const reference = refFilesVideo[i];
+      for (let i = 0; i < activeVideoReferences.length; i++) {
+        const reference = activeVideoReferences[i];
         if (reference.source === "flow") {
-          attachments.push({ assetName: reference.assetName, expectedId: reference.expectedId });
+          const attachment = { assetName: reference.assetName, expectedId: reference.expectedId };
+          referenceAttachments.push(attachment);
+          attachmentByReference.set(reference, attachment);
           continue;
         }
         uploadedVideoCount++;
@@ -715,26 +1443,69 @@
         const uploaded = await uploadReferenceImage(reference.file, undefined, i + 1);
         const uploadedName = typeof uploaded === "string" ? uploaded : (uploaded?.name || uploaded?.title || String(uploaded));
         const uploadedId = typeof uploaded === "object" ? (uploaded?.id || uploaded?.mediaId) : undefined;
-        attachments.push({ assetName: `asset:${uploadedName}`, ...(uploadedId ? { expectedId: uploadedId } : {}) });
+        const attachment = { assetName: `asset:${uploadedName}`, ...(uploadedId ? { expectedId: uploadedId } : {}) };
+        referenceAttachments.push(attachment);
+        attachmentByReference.set(reference, attachment);
       }
 
-      await executeGenerationTask({
+      const firstFramesPerPrompt = [];
+      const lastFramesPerPrompt = [];
+      if (hasFrames) {
+        const usedFrameAssignments = chainVideo
+          ? selectedFrameAssignments.slice(0, 1).map(assignment => ({ first: assignment?.first || null, last: null }))
+          : selectedFrameAssignments;
+        const usedFrameSources = [...new Set(usedFrameAssignments.flatMap(assignment => [assignment?.first, assignment?.last]).filter(Boolean))];
+        const localFrameSources = usedFrameSources.filter(source => source.source === "local");
+        if (localFrameSources.length) {
+          try { await assertQueueIdleForReferenceUpload(); }
+          catch (error) { setFeedback(error.message, false); return; }
+        }
+        let uploadedFrameCount = 0;
+        for (const source of usedFrameSources) {
+          if (source.source === "flow") {
+            attachmentByReference.set(source, { assetName: source.assetName, expectedId: source.expectedId });
+            continue;
+          }
+          uploadedFrameCount++;
+          setFeedback(t("sidebar.frameUploading", { n: uploadedFrameCount, total: localFrameSources.length, name: source.name || source.file?.name || "" }), true);
+          const uploaded = await uploadReferenceImage(source.file, undefined, uploadedFrameCount);
+          const uploadedName = typeof uploaded === "string" ? uploaded : (uploaded?.name || uploaded?.title || String(uploaded));
+          const uploadedId = typeof uploaded === "object" ? (uploaded?.id || uploaded?.mediaId) : undefined;
+          attachmentByReference.set(source, { assetName: `asset:${uploadedName}`, ...(uploadedId ? { expectedId: uploadedId } : {}) });
+        }
+        for (let index = 0; index < selectedFrameAssignments.length; index++) {
+          const assignment = selectedFrameAssignments[index];
+          firstFramesPerPrompt.push((!chainVideo || index === 0) && assignment.first ? attachmentByReference.get(assignment.first) : null);
+          lastFramesPerPrompt.push(!chainVideo && assignment.last ? attachmentByReference.get(assignment.last) : null);
+        }
+      }
+
+      const attachmentsPerPrompt = hasFrames
+        ? prompts.map(() => [])
+        : referenceMode === "mention"
+          ? mentionResolution.assignments.map(references => [...commonAttachments, ...references.map(reference => attachmentByReference.get(reference)).filter(Boolean)])
+          : assignBatchReferences(prompts, referenceMode, commonAttachments, referenceAttachments, referencesPerPrompt);
+      const queued = await executeGenerationTask({
         type: "video",
         prompt,
+        prompts,
         aspect_ratio,
-        count: 1,
+        count,
         video_settings: {
           mode,
-          duration,
           model,
-          resolution,
-          ...(document.querySelector("#flowVoiceSelect")?.value ? { voice: document.querySelector("#flowVoiceSelect").value } : {})
+          ...(duration != null ? { duration } : {}),
+          ...(resolution ? { resolution } : {}),
+          ...(mode !== "frames" && selectedVoice ? { voice: selectedVoice } : {})
         },
-        attachments,
+        attachmentsPerPrompt,
+        ...(hasFrames ? { firstFramesPerPrompt, lastFramesPerPrompt } : {}),
+        chainVideo,
         btn,
         btnTextEl,
         defaultTextKey: "sidebar.btnGenerateVideo"
       });
+      showUnresolvedMentionWarning("video", mentionResolution?.unresolvedNames, queued);
     } catch (err) {
       setFeedback(`❌ ${err.message}`, false);
     } finally {
@@ -762,9 +1533,7 @@
       });
       if (!res?.ok) throw new Error(res?.error?.message || "Không thể thêm tác vụ tạo nhân vật vào hàng đợi");
       rememberSubmittedQueueJob(res);
-      if (res.isRunning === true) setFeedback("Đã xếp tác vụ tạo nhân vật vào hàng chờ và queue đang tự chạy.", true);
-      else if (res.isPaused === true) setFeedback("Đã xếp tác vụ tạo nhân vật vào hàng chờ. Hàng đợi đang tạm dừng.", true);
-      else throw new Error("Đã thêm tác vụ nhưng hàng đợi Flow chưa khởi động.");
+      setFeedback(t("sidebar.workflowQueued"), true);
       document.querySelector("#inputCharName").value = "";
       document.querySelector("#inputCharDesc").value = "";
     } catch (err) {
@@ -1029,7 +1798,6 @@
       }});
       if (!response?.ok) throw new Error(response?.error?.message || "Không thể thêm chỉnh sửa vào hàng đợi.");
       rememberSubmittedQueueJob(response);
-      if (response.isRunning !== true && response.isPaused !== true) throw new Error("Đã thêm chỉnh sửa nhưng hàng đợi Flow chưa khởi động.");
       document.querySelector("#flowCharacterNewName").value = "";
       document.querySelector("#flowCharacterChange").value = "";
       setFeedback("Đã đưa chỉnh sửa nhân vật vào hàng đợi Flow.", true);
@@ -1157,7 +1925,8 @@
     libraryPage.append(libraryTools);
   }
   if (queueContainer && window.FlowQueuePanel) flowQueuePanel = new window.FlowQueuePanel(queueContainer).mount();
-  initLocale.then(() => {
+  initLocale.then(async () => {
+    await loadFlowModelCapabilities();
     applyLanguage();
     return loadLocalUiState();
   }).then(() => {

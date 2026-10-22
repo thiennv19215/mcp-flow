@@ -21,6 +21,7 @@
       // this widget. Flow itself contains many unrelated tiles and emits
       // correlation events for those tiles as well.
       this.jobs = new Map(); // queue job id -> job object
+      this.queueSnapshot = null;
       this.minimized = false;
       this.positionLocked = false;
       this.isDragging = false;
@@ -344,18 +345,18 @@
         }
         /* Queue panel layout: compact summary + Auto Gen groups. */
         #flow-mcp-tracker-root {
-          width: 525px;
-          max-height: min(620px, calc(100vh - 40px));
-          border-radius: 18px;
+          width: min(500px, calc(100vw - 24px));
+          max-height: min(470px, calc(100vh - 32px));
+          border-radius: 14px;
           background: linear-gradient(180deg, rgba(25, 29, 37, 0.94), rgba(11, 14, 20, 0.97));
         }
         #flow-mcp-tracker-root.expanded {
-          width: min(680px, calc(100vw - 32px));
-          max-height: min(760px, calc(100vh - 32px));
+          width: min(620px, calc(100vw - 24px));
+          max-height: min(640px, calc(100vh - 24px));
         }
         .flow-ft-header {
           gap: 8px;
-          padding: 10px 12px;
+          padding: 7px 9px;
           background: rgba(255, 255, 255, 0.045);
         }
         .flow-ft-icon {
@@ -381,11 +382,16 @@
           font-weight: 700;
         }
         .flow-ft-auto::before { content: "↗"; font-size: 12px; }
+        .flow-ft-queue-state { display: inline-flex; align-items: center; padding: 3px 7px; border-radius: 10px; background: rgba(148,163,184,.14); color: #cbd5e1; font-size: 10px; font-weight: 700; white-space: nowrap; }
+        .flow-ft-queue-state.running { color: #d9ff5f; background: rgba(204,255,0,.13); }
+        .flow-ft-queue-state.paused { color: #facc15; background: rgba(250,204,21,.13); }
+        .flow-ft-queue-state.waiting { color: #93c5fd; background: rgba(96,165,250,.14); }
+        .flow-ft-resume-btn { color: #d9ff5f; }
         .flow-ft-summary {
           display: flex;
           align-items: center;
-          gap: 11px;
-          padding: 8px 16px 7px;
+          gap: 9px;
+          padding: 6px 12px 5px;
           color: #9ca3af;
           font-size: 11px;
           border-bottom: 1px solid rgba(255, 255, 255, 0.07);
@@ -402,15 +408,15 @@
         .flow-ft-summary-item.failed strong { color: #fb7185; }
         .flow-ft-group {
           border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-          padding: 8px 0 6px;
+          padding: 5px 0 4px;
         }
         .flow-ft-group:last-child { border-bottom: 0; }
         .flow-ft-group-header {
           display: flex;
           align-items: center;
           gap: 8px;
-          min-height: 25px;
-          padding: 0 4px 6px;
+          min-height: 22px;
+          padding: 0 4px 4px;
         }
         .flow-ft-group-dot { width: 8px; height: 8px; border-radius: 50%; background: #60a5fa; flex: 0 0 auto; }
         .flow-ft-group-name { color: #f3f4f6; font-weight: 700; }
@@ -441,8 +447,8 @@
           display: flex;
           align-items: center;
           gap: 9px;
-          min-height: 47px;
-          padding: 5px 4px;
+          min-height: 39px;
+          padding: 3px 4px;
           border-radius: 8px;
         }
         .flow-ft-task:hover { background: rgba(255,255,255,0.05); }
@@ -464,7 +470,12 @@
         .flow-ft-task-meta { display: flex; align-items: center; gap: 8px; min-height: 16px; color: #8b95a5; font-size: 10px; }
         .flow-ft-task-remove { opacity: .7; }
         .flow-ft-task-remove:hover { opacity: 1; color: #fb7185; }
-        .flow-ft-status-tag.queued { color: #facc15; }
+        .flow-ft-status-tag { display: inline-flex; align-items: center; padding: 2px 6px; border-radius: 5px; background: rgba(148,163,184,.12); font-weight: 700; line-height: 1.2; }
+        .flow-ft-status-tag.queued { color: #facc15; background: rgba(250,204,21,.13); }
+        .flow-ft-status-tag.rendering { color: #d9ff5f; background: rgba(204,255,0,.13); }
+        .flow-ft-status-tag.completed { color: #34d399; background: rgba(52,211,153,.13); }
+        .flow-ft-status-tag.failed { color: #fb7185; background: rgba(251,113,133,.14); }
+        .flow-ft-status-tag.awaiting-user { color: #93c5fd; background: rgba(96,165,250,.14); }
         .flow-ft-task .flow-ft-thumb { width: 28px; height: 28px; border-radius: 6px; }
         .flow-ft-task .flow-ft-spinner { width: 15px; height: 15px; }
         .flow-ft-task .flow-ft-action-btn { padding: 3px 7px; }
@@ -486,12 +497,14 @@
           </div>
           <div class="flow-ft-title">TobyFlow</div>
           <div class="flow-ft-auto">Auto</div>
+          <div class="flow-ft-queue-state" id="flow-ft-queue-state">Sẵn sàng</div>
           <div class="flow-ft-controls">
             <button class="flow-ft-btn" data-ft-action="expand" title="Mở rộng/thu gọn">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
             </button>
             <button class="flow-ft-btn" data-ft-action="lock" title="Khóa vị trí">🔒</button>
             <button class="flow-ft-btn" data-ft-action="clear" title="Xóa các task đã xong">🗑</button>
+            <button class="flow-ft-btn flow-ft-resume-btn" data-ft-action="resume" title="Chạy tiếp hàng chờ" style="display:none">▶</button>
             <button class="flow-ft-btn" data-ft-action="pause" title="Tạm dừng hàng chờ">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="4" width="5" height="16" rx="1"/><rect x="14" y="4" width="5" height="16" rx="1"/></svg>
             </button>
@@ -533,6 +546,7 @@
       this.completedEl = rootEl.querySelector("#flow-ft-completed");
       this.failedEl = rootEl.querySelector("#flow-ft-failed");
       this.progressFillEl = rootEl.querySelector("#flow-ft-progress-fill");
+      this.queueStateEl = rootEl.querySelector("#flow-ft-queue-state");
     }
 
     createLauncher() {
@@ -571,6 +585,9 @@
       });
       this.rootEl?.querySelector('[data-ft-action="pause"]')?.addEventListener("click", () => {
         void this.sendQueueAction("flow-queue:pause");
+      });
+      this.rootEl?.querySelector('[data-ft-action="resume"]')?.addEventListener("click", () => {
+        void this.sendQueueAction("flow-queue:resume");
       });
       this.rootEl?.querySelector('[data-ft-action="stop"]')?.addEventListener("click", () => {
         void this.sendQueueAction("flow-queue:stop");
@@ -651,10 +668,12 @@
       if (status === "running") return "rendering";
       if (status === "completed") return "completed";
       if (status === "failed" || status === "cancelled") return "failed";
+      if (status === "waiting_for_user") return "awaiting-user";
       return "queued";
     }
 
     syncQueueSnapshot(snapshot) {
+      this.queueSnapshot = snapshot || null;
       const queueJobs = Array.isArray(snapshot?.jobs)
         ? snapshot.jobs
         : Array.isArray(snapshot?.items) ? snapshot.items : [];
@@ -896,6 +915,20 @@
       if (this.completedEl) this.completedEl.textContent = String(completedCount);
       if (this.failedEl) this.failedEl.textContent = String(failedCount);
 
+      const pendingCount = Number(this.queueSnapshot?.pending ?? this.queueSnapshot?.pendingCount ?? queuedCount);
+      const waitingForUser = Number(this.queueSnapshot?.waitingForUser) > 0 || jobList.some(job => job.status === "awaiting-user");
+      const isRunning = this.queueSnapshot?.isRunning === true || activeCount > 0;
+      const isPaused = this.queueSnapshot?.isPaused === true;
+      const stateText = isRunning ? "Đang chạy" : waitingForUser ? "Chờ bạn thao tác" : isPaused ? "Tạm dừng" : pendingCount > 0 ? `Chờ chạy · ${pendingCount}` : jobList.length && completedCount + failedCount === jobList.length ? "Đã xong" : "Sẵn sàng";
+      if (this.queueStateEl) {
+        this.queueStateEl.textContent = stateText;
+        this.queueStateEl.className = `flow-ft-queue-state ${isRunning ? "running" : isPaused ? "paused" : waitingForUser ? "waiting" : pendingCount ? "stopped" : ""}`;
+      }
+      const resumeButton = this.rootEl?.querySelector('[data-ft-action="resume"]');
+      const pauseButton = this.rootEl?.querySelector('[data-ft-action="pause"]');
+      if (resumeButton) resumeButton.style.display = !isRunning && !waitingForUser && (pendingCount > 0 || isPaused) ? "inline-flex" : "none";
+      if (pauseButton) pauseButton.style.display = isRunning ? "inline-flex" : "none";
+
       // Update progress bar
       if (this.progressFillEl) {
         const ratio = jobList.length ? completedCount / jobList.length : 0;
@@ -988,12 +1021,13 @@
 
     renderTask(job, index) {
       const isQueued = job.status === "queued";
+      const isAwaitingUser = job.status === "awaiting-user";
       const isRendering = job.status === "rendering";
       const isCompleted = job.status === "completed";
       const isFailed = job.status === "failed";
       const typeLabel = job.title || (job.type === "video" ? "Tạo video" : job.type === "character" ? "Tạo nhân vật" : "Tạo ảnh");
-      const statusLabel = isQueued ? "Chờ" : isRendering ? "Đang tạo" : isCompleted ? "Xong" : isFailed ? "Lỗi" : "Đang xử lý";
-      const statusClass = isQueued ? "queued" : isRendering ? "rendering" : isCompleted ? "completed" : isFailed ? "failed" : "";
+      const statusLabel = isQueued ? "Chờ chạy" : isAwaitingUser ? "Chờ bạn bấm Tạo" : isRendering ? "Đang tạo" : isCompleted ? "Xong" : isFailed ? "Thất bại" : "Đang xử lý";
+      const statusClass = isQueued ? "queued" : isAwaitingUser ? "awaiting-user" : isRendering ? "rendering" : isCompleted ? "completed" : isFailed ? "failed" : "";
       const elapsed = this.formatDuration((job.completedAt || Date.now()) - job.createdAt);
       const percent = Number.isFinite(Number(job.progress?.percent)) ? `${Math.max(0, Math.min(100, Number(job.progress.percent)))}%` : elapsed;
       const prompt = job.detailPrompt || String(job.prompt || "").replace(/^(Tạo ảnh|Tạo video|Tạo nhân vật):\s*/i, "");

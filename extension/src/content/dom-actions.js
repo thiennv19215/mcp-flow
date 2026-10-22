@@ -63,6 +63,8 @@
               message: String(error?.message || error),
               retryable: Boolean(error?.retryable),
               outcome_unknown: Boolean(error?.outcome_unknown),
+              noRetry: error?.noRetry === true,
+              noReplay: error?.noReplay === true,
               ...(error?.diagnostics ? { diagnostics: error.diagnostics } : {}),
             },
           });

@@ -189,8 +189,14 @@
       '[role="menu"]', '[role="listbox"]', 'mat-menu-panel', '.mat-mdc-menu-panel', 'mat-select-panel',
       '.cdk-overlay-pane',
     ].join(",");
-    const visibleOverlays = () => [...new Set(document.querySelectorAll(overlaySelector))]
-      .filter(el => visible(el) && !isSettingsDialog(el));
+    const visibleOverlayOwners = () => {
+      const overlays = [...new Set(document.querySelectorAll(overlaySelector))].filter(visible);
+      // Angular Flow surfaces can expose both the CDK pane and the dialog or
+      // menu mounted inside it. Inspect only the innermost visible surface so
+      // one dialog is not mistaken for several competing blockers.
+      return overlays.filter(el => !overlays.some(other => other !== el && el.contains(other)));
+    };
+    const visibleOverlays = () => visibleOverlayOwners().filter(el => !isSettingsDialog(el));
     const isMediaPicker = el => {
       const text = normalize(`${root.accessibleName?.(el) || ""} ${el.getAttribute?.("aria-label") || ""} ${el.innerText || el.textContent || ""}`);
       const hasAssetSearch = /search assets|tim kiem noi dung|tim kiem tai nguyen/.test(text);
@@ -204,6 +210,22 @@
       const marker = `${el?.className?.baseVal || el?.className || ""} ${el?.tagName || ""}`.toLowerCase();
       return role === "menu" || role === "listbox" || /mat-menu-panel|mat-mdc-menu-panel|mat-select-panel/.test(marker);
     };
+    const isDialogSurface = el => {
+      const marker = `${el?.getAttribute?.("role") || ""} ${el?.tagName || ""} ${el?.getAttribute?.("aria-modal") || ""}`.toLowerCase();
+      return /dialog|modal|mat-dialog-container|flow-dialog/.test(marker) || Boolean(el?.querySelector?.('[role="dialog"],mat-dialog-container,flow-dialog,[aria-modal="true"]'));
+    };
+    const isAgentInstructionDialog = surface => {
+      const text = normalize(`${root.accessibleName?.(surface) || ""} ${surface?.getAttribute?.("aria-label") || ""} ${surface?.innerText || surface?.textContent || ""}`);
+      // Mirror the reference extension's dedicated Agent-instructions
+      // recovery. A generic dialog with a Done button is not enough evidence
+      // to dismiss it automatically.
+      if (/(?:agent|assistant|tro ly).{0,160}(?:instruction|instructions|welcome|huong dan|chi dan)|(?:instruction|instructions|huong dan).{0,160}(?:agent|assistant|tro ly)/i.test(text)) return true;
+      const knownDialogs = root.FlowAgent?.visibleAgentInstructionDialogs?.() || [];
+      return knownDialogs.some(dialog => dialog === surface || surface?.contains?.(dialog) || dialog?.contains?.(surface));
+    };
+    const dialogSelector = '[role="dialog"],mat-dialog-container,flow-dialog,[aria-modal="true"]';
+    const isRiskyConfirmationDialog = surface => /\b(?:are you sure|confirm(?:ation)?|delete|remove|discard|overwrite|unsaved changes|cancel generation|stop generation|submit|purchase|billing|payment|xoa|huy tao|gui lenh|xac nhan)\b/i
+      .test(normalize(`${root.accessibleName?.(surface) || ""} ${surface?.innerText || surface?.textContent || ""}`));
     const isKnownDismissibleSurface = el => isMediaPicker(el) || isKnownPopupMenu(el);
     const clickClose = surface => {
       const closeButton = [...(surface?.querySelectorAll?.('button, [role="button"]') || [])].find(button => {
@@ -217,19 +239,145 @@
       closeButton.click();
       return true;
     };
+    const clickExplicitDialogClose = surface => {
+      const agentInstructionDialog = isAgentInstructionDialog(surface);
+      const controls = [...(surface?.querySelectorAll?.('button, [role="button"]') || [])].filter(button => {
+        if (!visible(button) || button.disabled || button.getAttribute?.("aria-disabled") === "true") return false;
+        return true;
+      });
+      const controlLabels = button => [...new Set([
+        root.accessibleName?.(button), button.innerText, button.textContent,
+        button.getAttribute?.("aria-label"), button.getAttribute?.("title"),
+      ].map(normalize).filter(Boolean))];
+      const isExplicitCloseLabel = label => {
+        const localizedClose = (root.I18n?.getPatterns?.("Close") || []).map(normalize);
+        if (localizedClose.includes(label)) return true;
+        return /^(?:close|dismiss)(?: this)? (?:dialog|modal|window|popup)$/.test(label) ||
+          /^(?:close|dismiss) (?:the )?(?:dialog|modal|window|popup)$/.test(label) ||
+          /^(?:dong|dong hop thoai|dong cua so|dong cua so nay|dong cua so dialog|fermer|fermer la fenetre|fermer la boite de dialogue|cerrar|cerrar dialogo|cerrar ventana|schliessen|dialog schliessen|chiudi|chiudi finestra|关闭对话框|닫기)$/.test(label);
+      };
+      const doneControls = controls.filter(button => {
+        const labels = controlLabels(button);
+        const donePatterns = (root.I18n?.getPatterns?.("Done") || []).map(normalize);
+        return labels.some(label => /^(?:done|xong|hoan tat)$/.test(label) || donePatterns.includes(label));
+      });
+      // The reference Flow extension closes this exact dialog through its
+      // dedicated Done action. Prefer it over a generic X/Close control when
+      // both are present, and never treat another dialog's Done as safe.
+      if (agentInstructionDialog) {
+        let configuredDone = null;
+        try { configuredDone = root.flowFindSemantic?.("agent_instruction_done", surface) || null; } catch {}
+        const candidates = new Set(doneControls);
+        if (configuredDone && controls.includes(configuredDone)) candidates.add(configuredDone);
+        if (candidates.size !== 1) return false;
+        return [...candidates][0];
+      }
+      // A close icon is not enough to dismiss a confirmation or unsaved-work
+      // prompt: closing those surfaces can itself discard or confirm work.
+      // The exact Agent-instruction dialog above has its own verified Done
+      // control; every generic dialog must pass this guard before any close or
+      // acknowledgement action is considered.
+      if (isRiskyConfirmationDialog(surface)) return false;
+      const closeIcons = controls.filter(button => {
+        const labels = controlLabels(button);
+        const iconLabels = [...(button.querySelectorAll?.('mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined,[aria-label],[data-icon]') || [])]
+          .flatMap(icon => [icon.innerText, icon.textContent, icon.getAttribute?.("aria-label"), icon.getAttribute?.("data-icon")])
+          .map(normalize).filter(Boolean);
+        return labels.some(isExplicitCloseLabel) ||
+          iconLabels.some(label => /^(?:close|clear|close_fullscreen)$/.test(label));
+      });
+      if (closeIcons.length === 1) return closeIcons[0];
+      if (closeIcons.length > 1) return false;
+
+      const safeActions = controls.filter(button => controlLabels(button).some(label =>
+        /^(?:got it|okay|ok|understood|not now|later|done|xong|hoan tat|dong|bo qua)$/.test(label)));
+      if (safeActions.length !== 1) return false;
+      const labels = controlLabels(safeActions[0]);
+      const isDedicatedDismiss = labels.some(label => /^(?:got it|okay|ok|understood|not now|later|dong|bo qua)$/.test(label));
+      // "Done" can submit or save a form. Only treat it as a dismiss action
+      // when it is the dialog's sole enabled control.
+      if (!isDedicatedDismiss && controls.length !== 1) return false;
+      return safeActions[0];
+    };
+    const waitForDialogToClose = async (surface, button) => {
+      const owner = button?.closest?.(dialogSelector) || surface;
+      const deadline = Math.min(Number.isFinite(options.deadline) ? options.deadline : Date.now() + 2_000, Date.now() + 2_000);
+      while (Date.now() < deadline) {
+        if (!owner?.isConnected || !visible(owner)) return true;
+        await pause(100, "confirming the Flow dialog closed");
+      }
+      return !owner?.isConnected || !visible(owner);
+    };
+    const clickExplicitNonDialogClose = surface => {
+      if (!surface || isDialogSurface(surface) || isRiskyConfirmationDialog(surface)) return null;
+      const localizedClose = [
+        ...(root.I18n?.getPatterns?.("Close") || []),
+        ...(root.I18n?.getPatterns?.("Dismiss") || []),
+      ].map(normalize);
+      const controls = [...(surface.querySelectorAll?.('button,[role="button"]') || [])].filter(button =>
+        visible(button) && button.disabled !== true && !button.hasAttribute?.("disabled") && button.getAttribute?.("aria-disabled") !== "true");
+      if (controls.length !== 1) return null;
+      const labelsFor = button => [
+        root.accessibleName?.(button), button.innerText, button.textContent,
+        button.getAttribute?.("aria-label"), button.getAttribute?.("title"),
+      ].map(normalize).filter(Boolean);
+      const candidates = controls.filter(button => {
+        const labels = labelsFor(button);
+        const explicitlyNamedClose = labels.some(label => label === "close" || label === "dismiss" || localizedClose.includes(label));
+        const recognizedCloseIcon = [button, ...(button.querySelectorAll?.('mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined,[aria-label],[data-icon]') || [])]
+          .flatMap(icon => [icon.innerText, icon.textContent, icon.getAttribute?.("aria-label"), icon.getAttribute?.("data-icon")])
+          .map(normalize).some(label => /^(?:close|close_fullscreen)$/.test(label));
+        return explicitlyNamedClose || recognizedCloseIcon;
+      });
+      return candidates.length === 1 ? candidates[0] : null;
+    };
+    const waitForNonDialogOwnerToClose = async surface => {
+      const owner = surface?.closest?.(".cdk-overlay-pane") || surface;
+      const deadline = Math.min(Number.isFinite(options.deadline) ? options.deadline : Date.now() + 2_000, Date.now() + 2_000);
+      while (Date.now() < deadline) {
+        if (!owner?.isConnected || !visible(owner)) return true;
+        try { await pause(100, "confirming the Flow popup closed"); }
+        catch { return false; }
+      }
+      return !owner?.isConnected || !visible(owner);
+    };
     const snapshot = () => {
+      const overlayOwners = visibleOverlayOwners();
       const overlays = visibleOverlays();
+      const settingsOwners = overlayOwners.filter(isSettingsDialog);
       const referencePicker = (() => {
         try { return root.FlowReferenceActions?.inspectDiagnostics?.() || null; } catch { return null; }
       })();
       const backdrops = [...document.querySelectorAll('.cdk-overlay-backdrop.cdk-overlay-backdrop-showing')].filter(visible);
+      const backdropOpen = backdrops.length > 0;
+      const settingsOwnsOnlyOverlay = !referencePicker?.pickerOpen && overlayOwners.length === 1 && settingsOwners.length === 1 && overlays.length === 0 &&
+        (!backdropOpen || backdrops.length === 1);
       return {
         overlays,
+        overlayOwnerCount: overlayOwners.length,
         referencePickerOpen: referencePicker?.pickerOpen === true,
         mediaPickerOpen: overlays.some(isMediaPicker),
-        backdropOpen: backdrops.length > 0,
-        settingsOpen: overlays.some(isSettingsDialog),
+        backdropOpen,
+        blockingBackdrop: backdropOpen && !settingsOwnsOnlyOverlay,
+        settingsOpen: settingsOwners.length > 0,
       };
+    };
+    const waitForOverlayTransition = async surface => {
+      // Flow can keep an overlay node mounted while its exit animation runs,
+      // or replace a generic shell with its real dialog after preflight. Give
+      // that DOM transition a bounded window before classifying it as
+      // an unknown blocker; otherwise a just-finished job can spuriously fail
+      // the next queued operation during teardown.
+      const deadline = Math.min(Number.isFinite(options.deadline) ? options.deadline : Date.now() + 2_000, Date.now() + 2_000);
+      while (Date.now() < deadline) {
+        await pause(100, "waiting for the Flow overlay to settle");
+        const current = snapshot();
+        const hasBlockingPopup = current.referencePickerOpen || current.overlays.length > 0 || current.blockingBackdrop;
+        if (!hasBlockingPopup) return true;
+        const currentSurface = current.overlays.find(el => !isSettingsDialog(el));
+        if (currentSurface !== surface) return true;
+      }
+      return false;
     };
     const publicSnapshot = state => ({
       dialogCount: state.overlays.filter(el => /dialog|modal/i.test(`${el.getAttribute?.("role") || ""} ${el.tagName || ""}`)).length,
@@ -237,12 +385,14 @@
       referencePickerOpen: state.referencePickerOpen,
       mediaPickerOpen: state.mediaPickerOpen,
       backdropOpen: state.backdropOpen,
+      blockingBackdrop: state.blockingBackdrop,
+      settingsOpen: state.settingsOpen,
     });
 
     for (let attempt = 0; attempt < 4; attempt++) {
       checkTime("checking Flow popups before the next operation");
       const state = snapshot();
-      const hasBlockingPopup = state.referencePickerOpen || state.overlays.length > 0 || state.backdropOpen;
+      const hasBlockingPopup = state.referencePickerOpen || state.overlays.length > 0 || state.blockingBackdrop;
       if (!hasBlockingPopup) return dismissedAny;
 
       if (state.referencePickerOpen && typeof root.FlowReferenceActions?.closePicker === "function") {
@@ -253,30 +403,80 @@
       }
 
       const surface = state.overlays.find(el => !isSettingsDialog(el));
-      if (surface && !isKnownDismissibleSurface(surface)) {
+      const isDialog = surface && isDialogSurface(surface);
+      const explicitDialogButton = isDialog ? clickExplicitDialogClose(surface) : null;
+      if (surface && !isKnownDismissibleSurface(surface) && !explicitDialogButton) {
+        if (await waitForOverlayTransition(surface)) continue;
+        // Some Flow dialogs mount their accessible action after the dialog
+        // shell. Re-check the same surface once after the bounded settle wait.
+        if (isDialogSurface(surface) && clickExplicitDialogClose(surface)) continue;
+        if (!isDialogSurface(surface)) {
+          const closeButton = clickExplicitNonDialogClose(surface);
+          if (closeButton) {
+            try {
+              closeButton.click();
+              if (await waitForNonDialogOwnerToClose(surface)) {
+                dismissedAny = true;
+                await pause(100, "finishing Flow popup dismissal");
+                continue;
+              }
+            } catch { /* Keep the unknown-surface blocker if safe dismissal is not confirmed. */ }
+          }
+        }
+        const message = isDialogSurface(surface)
+          ? "Flow left a dialog open without one unique safe Close or acknowledgement control. The queue paused to protect later tasks; resolve the dialog and resume the queue to retry this task first."
+          : "Flow left an unidentified overlay open. The queue paused to protect later tasks; inspect and dismiss the overlay, then resume the queue to retry this task first.";
         const error = root.flowError
-          ? root.flowError("FLOW_UNKNOWN_OVERLAY_BLOCKING", "An unrecognized Flow dialog is open. It was left untouched; close or inspect it before starting another operation.", false, false)
-          : new Error("An unrecognized Flow dialog is open and was left untouched.");
+          ? root.flowError("FLOW_UNKNOWN_OVERLAY_BLOCKING", message, false, false)
+          : new Error(message);
         error.diagnostics = { ...publicSnapshot(state), blockingSurface: {
           role: surface.getAttribute?.("role") || null,
           tagName: surface.tagName || null,
           label: normalize(root.accessibleName?.(surface) || surface.getAttribute?.("aria-label") || "").slice(0, 160),
+          dismissControlCount: [...(surface.querySelectorAll?.('button,[role="button"]') || [])].filter(button => {
+            if (!visible(button) || button.disabled || button.getAttribute?.("aria-disabled") === "true") return false;
+            const label = normalize(`${root.accessibleName?.(button) || ""} ${button.innerText || button.textContent || ""} ${button.getAttribute?.("aria-label") || ""} ${button.getAttribute?.("title") || ""}`);
+            const closeIcon = [...(button.querySelectorAll?.('mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined') || [])]
+              .some(icon => /^(?:close|clear)$/.test(normalize(icon.innerText || icon.textContent)));
+            return closeIcon || /^(?:got it|dong)$/.test(label) || /\b(?:close|dismiss)\b/.test(label);
+          }).length,
         } };
         throw error;
       }
 
-      if (surface && clickClose(surface)) {
+      if (surface && explicitDialogButton) {
+        explicitDialogButton.click();
         dismissedAny = true;
-        await pause(150, state.mediaPickerOpen || isMediaPicker(surface) ? "closing the Flow media picker" : "closing a Flow popup");
+        if (!await waitForDialogToClose(surface, explicitDialogButton)) {
+          const error = root.flowError
+            ? root.flowError("FLOW_DIALOG_DISMISS_UNCONFIRMED", "Flow did not confirm that its dialog closed. The queue paused to protect later tasks; resolve the dialog and resume the queue to retry this task first.", false, false)
+            : new Error("Flow did not confirm that its dialog closed.");
+          error.diagnostics = { ...publicSnapshot(state), blockingSurface: {
+            role: surface.getAttribute?.("role") || null,
+            tagName: surface.tagName || null,
+            label: normalize(root.accessibleName?.(surface) || surface.getAttribute?.("aria-label") || "").slice(0, 160),
+          } };
+          throw error;
+        }
+        await pause(100, "finishing Flow dialog dismissal");
+        continue;
+      }
+
+      if (surface && (isKnownDismissibleSurface(surface) ? clickClose(surface) : true)) {
+        dismissedAny = true;
+        await pause(150, state.mediaPickerOpen || isMediaPicker(surface) ? "closing the Flow media picker" : "closing a Flow dialog or popup");
         continue;
       }
 
       // Escape may close a positively identified Flow picker/menu only. A
       // backdrop by itself is ambiguous, so never send Escape in that case.
-      if (!surface || !isKnownDismissibleSurface(surface)) {
+      if (state.settingsOpen || !surface || !isKnownDismissibleSurface(surface)) {
+        const message = state.settingsOpen
+          ? "A Flow settings panel remains open alongside another popup. It was not dismissed with Escape; close the other popup in Flow before starting another operation."
+          : "A Flow overlay is visible but its type could not be identified. The queue paused to protect later tasks; inspect and dismiss it, then resume the queue.";
         const error = root.flowError
-          ? root.flowError("FLOW_UNKNOWN_OVERLAY_BLOCKING", "A Flow overlay is visible but its type could not be identified. It was left untouched; inspect it before starting another operation.", false, false)
-          : new Error("An unidentified Flow overlay is visible and was left untouched.");
+          ? root.flowError("FLOW_UNKNOWN_OVERLAY_BLOCKING", message, false, false)
+          : new Error(message);
         error.diagnostics = publicSnapshot(state);
         throw error;
       }
@@ -286,7 +486,7 @@
     }
 
     const remaining = snapshot();
-    if (remaining.referencePickerOpen || remaining.overlays.length || remaining.backdropOpen) {
+    if (remaining.referencePickerOpen || remaining.overlays.length || remaining.blockingBackdrop) {
       const error = root.flowError
         ? root.flowError("FLOW_BLOCKING_OVERLAY_UNRESOLVED", "A Flow media/library popup is still open after cleanup. The next operation was stopped before it could change the composer or submit generation.", true, false)
         : new Error("A Flow popup is still open after cleanup; the next operation was not started.");

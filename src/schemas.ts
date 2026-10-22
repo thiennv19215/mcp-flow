@@ -67,7 +67,7 @@ export const sceneSchema = z.object({
 
 // Raw shapes double as MCP input schemas and, wrapped in z.object, as HTTP body validators.
 export const shapes = {
-  status: { detailed: z.boolean().default(true).describe("false skips the plan/credits readout, which briefly opens Flow's account panel.") },
+  status: { detailed: z.boolean().default(true).describe("Includes detailed Flow diagnostics and the visible generation credit quote; does not open the account menu.") },
   observer_health: {},
   clear_prompt: {
     expected_prompt: z.string().min(1).max(20_000).describe("Exact text currently shown in Flow's prompt editor. The operation clears only if the active project and prompt still match."),

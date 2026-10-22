@@ -58,7 +58,7 @@
     return getVisibleFlowPromptEditor(scope);
   }
 
-  async function clearEditorTextPreservingChips(editor) {
+  async function clearEditorTextPreservingChipsOnce(editor) {
     if (!editor?.isContentEditable) return false;
 
     const chipCount = countInlineChips(editor);
@@ -140,6 +140,29 @@
       editor.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }));
     } catch {}
     return !getEditorUserText(editor);
+  }
+
+  async function clearEditorTextPreservingChips(editor) {
+    if (!editor?.isContentEditable) return false;
+    const initialText = getEditorUserText(editor);
+    const initialChipCount = countInlineChips(editor);
+    if (!initialText) return true;
+
+    const cleared = await clearEditorTextPreservingChipsOnce(editor);
+    let current = currentFlowPromptEditor(editor);
+    if (current === editor && editor.isConnected !== false) {
+      return cleared && !getEditorUserText(editor) && countInlineChips(editor) === initialChipCount;
+    }
+    if (!current) return false;
+
+    const replacementText = getEditorUserText(current);
+    if (!replacementText) return countInlineChips(current) === initialChipCount;
+    // Flow can replace the composer while clearing. Retry only while the new
+    // editor still contains the same prompt; preserve any changed user text.
+    if (replacementText !== initialText || countInlineChips(current) !== initialChipCount) return false;
+    const retried = await clearEditorTextPreservingChipsOnce(current);
+    current = currentFlowPromptEditor(current);
+    return retried && current && !getEditorUserText(current) && countInlineChips(current) === initialChipCount;
   }
 
   async function insertNativeFlowPrompt(el, value) {

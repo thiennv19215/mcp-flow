@@ -76,7 +76,7 @@
     "flow.file.upload.finish", "flow.file.upload.abort", "flow.media.upload",
     "flow.generation.submit", "flow.generation.observe", "flow.generation.manual.confirm", "flow.generation.manual.cancel", "flow.references.attach", "flow.references.clear", "flow.references.remove", "flow.prompt.clear", "flow.voices.options", "flow.asset.download",
     "flow.asset.rename", "flow.asset.trash", "flow.character.create", "flow.character.edit",
-    "flow.edit.run", "flow.agent.batch", "flow.continue.run",
+    "flow.edit.run", "flow.agent.batch", "flow.continue.run", "flow.frame.extract_last",
     // Explicit Toby-compatible DOM primitives. Workflow operations compose
     // these helpers, while callers can also inspect or drive one page step.
     "flow.editor.get", "flow.editor.clear", "flow.prompt.insert",

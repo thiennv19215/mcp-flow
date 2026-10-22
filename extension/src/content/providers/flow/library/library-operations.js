@@ -100,57 +100,6 @@
           state.generation_credit_quote = quoteInspection.quote;
           state.generation_credit_quote_candidates = quoteInspection.candidates;
         }
-        if (payload.detailed && state.signedIn) {
-          const account = root.flowButton?.("Account details");
-          if (account) {
-            account.click();
-            let creditLink = null;
-            try {
-              await root.wait?.(500);
-              creditLink = [...document.querySelectorAll("a")].find(a => /(?:Google Flow credits|credits?|tín dụng)/i.test(root.accessibleName?.(a) || a.innerText || "") && root.visible?.(a));
-              const creditText = creditLink ? (root.accessibleName?.(creditLink) || creditLink.innerText || "") : "";
-              const n = Number(creditText.replace(/[^\d]/g, ""));
-              state.credits_remaining = Number.isFinite(n) && creditText ? n : undefined;
-              state.plan = [...document.querySelectorAll("button")].find(b => /(?:Account details|Chi tiết tài khoản|Tài khoản)/i.test(root.accessibleName?.(b) || b.innerText || ""))?.innerText?.split("\n")[0];
-            } finally {
-              // Flow's account control can open Google's account/credits popover,
-              // whose close button is labeled simply "Close" (or only has an X
-              // icon). Always clean up this surface, including when reading its
-              // contents throws, so the next generation is not blocked by it.
-              const closeButton = (() => {
-                const anchors = [];
-                let current = creditLink;
-                for (let depth = 0; current && depth < 7; depth++, current = current.parentElement) anchors.push(current);
-                const scopes = [...anchors, ...[...document.querySelectorAll('[role="dialog"],[aria-modal="true"], [role="menu"], .cdk-overlay-pane')].filter(el => root.visible?.(el))];
-                for (const scope of scopes) {
-                  const button = [...(scope.querySelectorAll?.('button,[role="button"]') || [])].find(candidate => {
-                    if (!root.visible?.(candidate) || candidate.disabled || candidate.getAttribute?.("aria-disabled") === "true") return false;
-                    const label = `${root.accessibleName?.(candidate) || ""} ${candidate.getAttribute?.("aria-label") || ""} ${candidate.getAttribute?.("title") || ""} ${candidate.innerText || candidate.textContent || ""}`.trim();
-                    const icon = [...(candidate.querySelectorAll?.("mat-icon,.mat-icon,.google-symbols,svg") || [])].map(node => node.textContent || "").join(" ");
-                    return /^(?:close|dismiss|закрыть|đóng|x)$/i.test(label) || /(?:close|dismiss|закрыть|đóng)/i.test(label) || /^(?:close|cancel|x)$/i.test(icon.trim());
-                  });
-                  if (button) return button;
-                }
-                return null;
-              })();
-              const closePanel = root.flowButton?.("Close account panel");
-              if (closeButton) closeButton.click();
-              else if (closePanel) closePanel.click();
-              else account.click();
-              await root.wait?.(150);
-              // Confirm that the account content disappeared. Some Flow builds
-              // expose a Google-owned popup with no Flow close-panel selector.
-              if (creditLink && root.visible?.(creditLink)) {
-                // The account trigger itself is a reliable toggle for this
-                // surface; use Escape only as a final fallback because this
-                // operation opened and therefore owns the popup.
-                account.click();
-                await root.wait?.(100);
-                if (root.visible?.(creditLink)) root.dispatchEscapeKey?.();
-              }
-            }
-          }
-        }
         if (payload.includeProgressDiagnostics && chrome.runtime?.sendMessage) {
           const progress = await chrome.runtime.sendMessage({ type: "flow-mcp:progress-diagnostics" }).catch(() => null);
           state.progress_diagnostics = progress?.diagnostic || null;
@@ -170,7 +119,11 @@
         try { await root.FlowPageSettings?.ensureApplied?.({ timeoutMs: 3500 }); } catch (error) {
           console.debug("[FlowPageSettings] Library scan will continue without normalized layout:", error?.message || error);
         }
-        return menu.scanNativeAssets({ includeIncomplete: payload.includeIncomplete === true, signal: command.signal });
+        return menu.scanNativeAssets({
+          includeIncomplete: payload.includeIncomplete === true,
+          maxItems: payload.maxItems,
+          signal: command.signal,
+        });
       }
       if (name === "flow.characters.list") {
         if (typeof menu?.scanNativeCharacters !== "function") {

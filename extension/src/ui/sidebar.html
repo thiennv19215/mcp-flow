@@ -263,6 +263,12 @@
       gap: 6px;
     }
 
+    #videoFrameNamesGroup[hidden] { display: none !important; }
+    #videoDurationGroup[hidden], #videoResolutionGroup[hidden] { display: none !important; }
+    #videoReferenceOptionsGroup[hidden], #videoReferenceSection[hidden], #videoCharacterGroup[hidden], #flowVoicePickerGroup[hidden] { display: none !important; }
+    #videoChainOption[hidden] { display: none !important; }
+    #videoFrameNamesGroup textarea { min-height: 54px; }
+
     .form-label {
       font-size: 12px;
       font-weight: 600;
@@ -291,6 +297,11 @@
     .form-textarea:focus {
       border-color: var(--primary);
     }
+
+    .multi-prompt-tools { display:flex; align-items:center; justify-content:space-between; gap:8px; color:var(--text-muted); font-size:11px; }
+    .multi-prompt-tools .btn { width:auto; padding:6px 9px; }
+    .multi-prompt-hint { color:var(--text-muted); font-size:11px; }
+    .multi-prompt-hint[hidden] { display:none !important; }
 
     .form-input {
       background: #181818;
@@ -511,6 +522,7 @@
 
     .ref-picker-dialog {
       width: min(620px, 100%);
+      height: min(760px, 92vh);
       max-height: min(760px, 92vh);
       display: flex;
       flex-direction: column;
@@ -553,7 +565,7 @@
 
     .ref-picker-tab.active { color: var(--text-primary); border-bottom-color: var(--primary); }
 
-    .ref-picker-content { min-height: 0; overflow: auto; padding: 14px 18px; }
+    .ref-picker-content { flex: 1 1 0; min-height: 0; overflow: auto; padding: 14px 18px; }
     .ref-picker-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
     .ref-picker-results { display:flex; justify-content:space-between; align-items:center; gap:10px; margin:0 0 10px; color:var(--text-muted); font-size:11px; }
     .ref-picker-search {
@@ -591,6 +603,29 @@
     .ref-picker-local-row { display: flex; align-items: center; gap: 10px; padding: 7px; background: #171717; border-radius: 8px; font-size: 11px; }
     .ref-picker-local-row img { width: 42px; height: 42px; object-fit: cover; border-radius: 6px; }
     .ref-picker-local-row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .video-frame-source-head,.video-frame-assignment-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px}
+    .video-frame-source-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(82px,1fr));gap:8px;margin-top:10px}
+    .video-frame-source-card{position:relative;min-width:0}
+    .video-frame-source{width:100%;min-width:0;padding:4px;background:#181818;border:1px solid #3a3a3a;border-radius:8px;color:var(--text-primary);cursor:pointer;text-align:left}
+    .video-frame-source:hover,.video-frame-source.is-target{border-color:var(--primary)}
+    .video-frame-source img,.video-frame-source__placeholder{display:grid;width:100%;height:64px;object-fit:cover;place-items:center;border-radius:5px;background:#252525;color:#888}
+    .video-frame-source__name{display:block;overflow:hidden;margin-top:4px;font-size:10px;text-overflow:ellipsis;white-space:nowrap}
+    .video-frame-source-actions{position:absolute;top:7px;right:7px;display:flex;gap:3px}
+    .video-frame-source-action{width:22px;height:22px;padding:0;border:0;border-radius:50%;background:#111d;color:#fff;cursor:pointer;font-size:12px}
+    .video-frame-source-action:hover{background:#333}
+    .video-frame-source-action:disabled{opacity:.4;cursor:not-allowed}
+    .video-frame-assignment-toolbar{margin:12px 0 8px}
+    .video-frame-assignment-toolbar .form-select{flex:1;min-width:0}
+    .video-frame-assignment-list{display:grid;gap:8px}
+    .video-frame-assignment{padding:8px;border:1px solid #343434;border-radius:8px;background:#191919}
+    .video-frame-assignment__prompt{overflow:hidden;margin-bottom:7px;color:var(--text-muted);font-size:11px;text-overflow:ellipsis;white-space:nowrap}
+    .video-frame-assignment__slots{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .video-frame-slot-wrap{display:flex;min-width:0;gap:4px}
+    .video-frame-slot{display:flex;flex:1;align-items:center;min-width:0;gap:6px;padding:5px;background:#222;border:1px dashed #505050;border-radius:6px;color:var(--text-primary);cursor:pointer;text-align:left}
+    .video-frame-slot.is-active{border-color:var(--primary);box-shadow:0 0 0 1px var(--primary)}
+    .video-frame-slot img,.video-frame-slot__empty{flex:0 0 34px;width:34px;height:34px;object-fit:cover;border-radius:4px;background:#303030;color:#aaa}
+    .video-frame-slot__label{overflow:hidden;font-size:10px;text-overflow:ellipsis;white-space:nowrap}
+    .video-frame-slot-clear{width:24px;padding:0;border:0;background:transparent;color:#999;cursor:pointer}
 
     @media (max-width: 420px) {
       .ref-picker-overlay { padding: 8px; }
@@ -782,6 +817,52 @@
       font-weight: 600;
       transition: all 0.2s ease;
     }
+
+    .image-confirm-dialog {
+      width: min(440px, calc(100vw - 28px));
+      max-height: min(90vh, 720px);
+      margin: auto;
+      padding: 0;
+      overflow: auto;
+      color: var(--text);
+      background: var(--card-elevated);
+      border: 1px solid var(--border-hover);
+      border-radius: 12px;
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+    }
+
+    .image-confirm-dialog::backdrop {
+      background: rgba(5, 7, 10, 0.74);
+      backdrop-filter: blur(2px);
+    }
+
+    .image-confirm-content { padding: 20px; }
+    .image-confirm-title { color: var(--text-primary); font-size: 17px; margin-bottom: 4px; }
+    .image-confirm-description { color: var(--text-muted); font-size: 12px; margin-bottom: 16px; }
+    .image-confirm-summary {
+      display: grid;
+      gap: 1px;
+      margin-bottom: 16px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--border);
+    }
+    .image-confirm-summary-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 38px;
+      padding: 8px 10px;
+      background: var(--card);
+    }
+    .image-confirm-summary-row span { color: var(--text-muted); }
+    .image-confirm-summary-row strong { color: var(--text-primary); text-align: right; overflow-wrap: anywhere; }
+    .image-confirm-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .image-confirm-fields .form-group { min-width: 0; }
+    .image-confirm-actions { display: grid; grid-template-columns: 1fr 1.35fr; gap: 8px; margin-top: 18px; }
+    .image-confirm-actions .btn { min-width: 0; padding: 9px 10px; }
   </style>
   <link rel="stylesheet" href="tobyflow-ui.css">
 </head>
@@ -914,6 +995,24 @@
         <div class="form-group">
           <label class="form-label" id="lblPromptImage">Câu lệnh Prompt:</label>
           <textarea class="form-textarea" id="inputPromptImage" placeholder="Mô tả bức ảnh bạn muốn tạo..."></textarea>
+          <div class="multi-prompt-tools">
+            <span id="promptCountImage" aria-live="polite">0 prompt</span>
+            <button class="btn btn-secondary" type="button" id="btnImportPromptsImage">Nhập .txt/.csv</button>
+            <input type="file" id="inputImportPromptsImage" accept=".txt,.csv,text/plain,text/csv" hidden>
+          </div>
+          <small class="multi-prompt-hint" id="promptBatchHintImage" hidden>Mỗi đoạn cách nhau bằng một dòng trống sẽ thành một tác vụ.</small>
+        </div>
+        <div class="form-group">
+          <label><input type="checkbox" id="multiPromptImage"> <span data-i18n="sidebar.multiPromptToggle">Chia prompt theo đoạn trống và xếp hàng tuần tự</span></label>
+          <label class="form-label" for="multiRefModeImage" data-i18n="sidebar.multiPromptRefs">Gán tham chiếu</label>
+          <select class="form-select" id="multiRefModeImage">
+            <option value="none" data-i18n="sidebar.multiPromptRefsNone">Không dùng tham chiếu</option>
+            <option value="all" selected data-i18n="sidebar.multiPromptRefsAll">Dùng chung cho mỗi prompt</option>
+            <option value="sequential" data-i18n="sidebar.multiPromptRefsSequential">Chia lần lượt, một tham chiếu mỗi prompt</option>
+            <option value="mention" data-i18n="sidebar.multiPromptRefsMention">Theo @tên trong prompt</option>
+          </select>
+          <label class="form-label" for="multiRefCountImage" data-i18n="sidebar.multiPromptRefCount">Số tham chiếu mỗi prompt</label>
+          <select class="form-select" id="multiRefCountImage"><option value="1">1</option><option value="2">2</option><option value="3">3</option></select>
         </div>
 
         <!-- Khung Tải Ảnh Tham Chiếu (Reference Images) -->
@@ -969,7 +1068,7 @@
 
         <div class="grid-2">
           <div class="form-group">
-            <label class="form-label">Mô hình AI:</label>
+            <label class="form-label" id="lblModelImage">Mô hình AI:</label>
             <select class="form-select" id="selectModelImage">
               <option value="nano banana">Nano Banana 2.1 (Tối ưu)</option>
               <option value="imagen 3">Imagen 3</option>
@@ -991,15 +1090,59 @@
         </button>
       </div>
 
+      <dialog id="imageConfirmDialog" class="image-confirm-dialog" aria-labelledby="imageConfirmTitle" aria-describedby="imageConfirmDescription">
+        <div class="image-confirm-content">
+          <h2 class="image-confirm-title" id="imageConfirmTitle" data-i18n="sidebar.imageConfirmTitle">Xác nhận tạo ảnh</h2>
+          <p class="image-confirm-description" id="imageConfirmDescription" data-i18n="sidebar.imageConfirmDescription">Kiểm tra thiết lập trước khi thêm vào hàng đợi Flow.</p>
+          <div class="image-confirm-summary">
+            <div class="image-confirm-summary-row"><span data-i18n="sidebar.imageConfirmPrompts">Số prompt</span><strong id="imageConfirmPromptCount">1</strong></div>
+            <div class="image-confirm-summary-row"><span data-i18n="sidebar.imageConfirmModel">Mô hình</span><strong id="imageConfirmModel">Nano Banana</strong></div>
+            <div class="image-confirm-summary-row"><span data-i18n="sidebar.imageConfirmQuantity">Số ảnh</span><strong id="imageConfirmQuantity">1 ảnh</strong></div>
+            <div class="image-confirm-summary-row"><span data-i18n="sidebar.imageConfirmReferences">Ảnh tham chiếu</span><strong id="imageConfirmReferences">0</strong></div>
+            <div class="image-confirm-summary-row"><span data-i18n="sidebar.imageConfirmCharacter">Nhân vật</span><strong id="imageConfirmCharacter">Không chọn</strong></div>
+          </div>
+          <div class="image-confirm-fields">
+            <label class="form-group"><span class="form-label" data-i18n="sidebar.aspectRatio">Tỷ lệ khung hình</span><select class="form-select" id="imageConfirmRatio"></select></label>
+            <label class="form-group"><span class="form-label" data-i18n="sidebar.quantity">Số lượng</span><select class="form-select" id="imageConfirmCount"></select></label>
+          </div>
+          <div class="image-confirm-actions">
+            <button type="button" class="btn btn-secondary" id="imageConfirmCancel" data-i18n="sidebar.imageConfirmCancel">Hủy</button>
+            <button type="button" class="btn btn-primary" id="imageConfirmRun" data-i18n="sidebar.imageConfirmRun">Xác nhận và thêm hàng đợi</button>
+          </div>
+        </div>
+      </dialog>
+
       <!-- FORM TẠO VIDEO (VIDEO) -->
       <div class="section-card" id="formVideo" style="display: none;">
         <div class="form-group">
           <label class="form-label" id="lblPromptVideo">Câu lệnh Prompt Video:</label>
           <textarea class="form-textarea" id="inputPromptVideo" placeholder="Mô tả chuyển động video, góc quay, hành động..."></textarea>
+          <div class="multi-prompt-tools">
+            <span id="promptCountVideo" aria-live="polite">0 prompt</span>
+            <button class="btn btn-secondary" type="button" id="btnImportPromptsVideo">Nhập .txt/.csv</button>
+            <input type="file" id="inputImportPromptsVideo" accept=".txt,.csv,text/plain,text/csv" hidden>
+          </div>
+          <small class="multi-prompt-hint" id="promptBatchHintVideo" hidden>Mỗi đoạn cách nhau bằng một dòng trống sẽ thành một tác vụ.</small>
+        </div>
+        <div class="form-group">
+          <label><input type="checkbox" id="multiPromptVideo"> <span data-i18n="sidebar.multiPromptToggle">Chia prompt theo đoạn trống và xếp hàng tuần tự</span></label>
+          <label class="form-label" id="videoChainOption" hidden><input type="checkbox" id="chainVideoFromPrevious"> <span id="videoChainLabel">Nối mỗi video từ khung cuối của video trước</span></label>
+          <small class="multi-prompt-hint" id="videoChainHint" hidden></small>
+          <div class="form-group" id="videoReferenceOptionsGroup">
+            <label class="form-label" for="multiRefModeVideo" data-i18n="sidebar.multiPromptRefs">Gán tham chiếu</label>
+            <select class="form-select" id="multiRefModeVideo">
+              <option value="none" data-i18n="sidebar.multiPromptRefsNone">Không dùng tham chiếu</option>
+              <option value="all" selected data-i18n="sidebar.multiPromptRefsAll">Dùng chung cho mỗi prompt</option>
+              <option value="sequential" data-i18n="sidebar.multiPromptRefsSequential">Chia lần lượt, một tham chiếu mỗi prompt</option>
+              <option value="mention" data-i18n="sidebar.multiPromptRefsMention">Theo @tên trong prompt</option>
+            </select>
+            <label class="form-label" for="multiRefCountVideo" data-i18n="sidebar.multiPromptRefCount">Số tham chiếu mỗi prompt</label>
+            <select class="form-select" id="multiRefCountVideo"><option value="1">1</option><option value="2">2</option><option value="3">3</option></select>
+          </div>
         </div>
 
         <!-- Khung Tải Ảnh Tham Chiếu Cho Video (Reference Images) -->
-        <div class="ref-section">
+        <div class="ref-section" id="videoReferenceSection">
           <div class="ref-section-header">
             <span class="ref-section-title">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1035,33 +1178,40 @@
               <option value="16:9">16:9 (Ngang YouTube)</option>
             </select>
           </div>
-          <div class="form-group">
+          <div class="form-group" id="videoDurationGroup">
             <label class="form-label" id="lblDurationVideo">Thời lượng (Duration):</label>
             <select class="form-select" id="selectDurationVideo">
-              <option value="2">2 giây</option>
-              <option value="4">4 giây</option>
-              <option value="5">5 giây</option>
               <option value="8" selected>8 giây</option>
-              <option value="10">10 giây</option>
             </select>
           </div>
         </div>
 
         <div class="grid-2">
           <div class="form-group">
-            <label class="form-label">Mô hình Video:</label>
+            <label class="form-label" id="lblModelVideo">Mô hình Video:</label>
             <select class="form-select" id="selectModelVideo">
               <option value="veo 3.1">Veo 3.1 (Mới nhất)</option>
-              <option value="veo 2">Veo 2</option>
-              <option value="omni">Omni Video</option>
+              <option value="omni 1.1 flash">Omni 1.1 Flash</option>
             </select>
           </div>
-          <div class="form-group">
-            <label class="form-label">Độ phân giải:</label>
-            <select class="form-select" id="selectResolutionVideo">
-              <option value="720p">720p (HD)</option>
-              <option value="1080p" selected>1080p (Full HD)</option>
-            </select>
+          <div>
+            <div class="form-group" id="videoResolutionGroup" hidden>
+              <label class="form-label" id="lblResolutionVideo">Độ phân giải:</label>
+              <select class="form-select" id="selectResolutionVideo">
+                <option value="720p" selected>720p</option>
+              </select>
+            </div>
+            <div id="videoCountGroup" hidden>
+              <div class="form-group">
+                <label class="form-label" for="selectCountVideo">Số lượng video:</label>
+                <select class="form-select" id="selectCountVideo">
+                  <option value="1" selected>1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                  <option value="4">4</option>
+                </select>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1073,12 +1223,31 @@
               <option value="frames">Khung hình (Frames)</option>
             </select>
           </div>
-          <div class="form-group">
+          <div class="form-group" id="videoCharacterGroup">
             <label class="form-label" id="lblCharVideo">Nhân vật:</label>
             <select class="form-select" id="selectCharVideo">
               <option value="">Không chọn</option>
             </select>
           </div>
+        </div>
+
+        <div class="form-group" id="videoFrameNamesGroup" hidden>
+          <div class="video-frame-source-head">
+            <div><label class="form-label" data-i18n="sidebar.frameSourcesTitle">Nguồn ảnh Frames</label><small id="videoFrameSourceSummary">Chưa chọn ảnh nguồn.</small></div>
+            <button type="button" class="btn btn-secondary" id="btnChooseVideoFrameSources" data-i18n="sidebar.frameChooseSources">Chọn ảnh</button>
+          </div>
+          <div class="video-frame-source-grid" id="videoFrameSourceGrid"></div>
+          <div class="video-frame-assignment-toolbar">
+            <select class="form-select" id="videoFrameAssignmentMode" aria-label="Cách gán ảnh Frames">
+              <option value="start" data-i18n="sidebar.frameAssignStart">Gán ảnh đầu làm khung bắt đầu</option>
+              <option value="chain" data-i18n="sidebar.frameAssignChain">Nối khung liên tiếp</option>
+              <option value="pairs" data-i18n="sidebar.frameAssignPairs">Gán theo cặp</option>
+              <option value="clear" data-i18n="sidebar.frameAssignClear">Xóa gán khung</option>
+            </select>
+            <button type="button" class="btn btn-secondary" id="btnAssignVideoFrames" data-i18n="sidebar.frameApplyAssignment">Áp dụng</button>
+          </div>
+          <div class="video-frame-assignment-list" id="videoFrameAssignments"></div>
+          <small id="videoFrameNamesHint" data-i18n="sidebar.videoFrameNamesHint">Chọn khung đầu cho mỗi prompt. Khung cuối không bắt buộc. Không kết hợp với Ingredients.</small>
         </div>
 
         <button class="btn btn-primary" id="btnSubmitVideo">
@@ -1181,7 +1350,7 @@
           <button type="button" class="btn btn-secondary" id="btnUploadMedia" style="margin-top:8px" data-i18n="sidebar.libraryUploadFile">Tải tệp lên</button>
         </div>
 
-        <div class="form-group">
+        <div class="form-group" id="flowVoicePickerGroup">
           <button type="button" class="btn btn-secondary" id="btnLoadVoices" data-i18n="sidebar.libraryVoices">Xem tùy chọn giọng nói</button>
           <select class="form-select" id="flowVoiceSelect" style="margin-top:8px"><option value="" data-i18n="sidebar.libraryNoVoice">Không dùng giọng nói</option></select>
         </div>
@@ -1376,7 +1545,7 @@
           <input class="ref-picker-search" id="refPickerSearch" type="search" placeholder="Tìm ảnh trên Flow..." aria-label="Tìm ảnh trên Flow">
           <button type="button" class="btn btn-secondary" id="refPickerRefresh" style="width:auto;white-space:nowrap">Quét lại</button>
         </div>
-        <div class="ref-picker-results"><span id="refPickerAssetCount">Tìm thấy 0 ảnh</span><span>Tối đa 3 ảnh tham chiếu</span></div>
+        <div class="ref-picker-results"><span id="refPickerAssetCount">Tìm thấy 0 ảnh</span><span id="refPickerLimitHint">Tối đa 3 ảnh tham chiếu</span></div>
         <div class="ref-picker-grid" id="refPickerFlowGrid"></div>
         <button type="button" class="ref-picker-more" id="refPickerMore" hidden></button>
         <div class="ref-picker-message" id="refPickerFlowMessage">Đang tìm ảnh trong thư viện Flow...</div>
@@ -1386,7 +1555,7 @@
           <span>Chọn ảnh từ máy hoặc kéo thả ảnh vào đây</span>
           <button type="button" class="btn btn-secondary" id="refPickerChooseFiles" style="width:auto">Chọn ảnh</button>
           <input type="file" id="refPickerFileInput" accept="image/*" multiple hidden>
-          <small>Ảnh sẽ được tải lên Flow khi bạn bấm Tạo ảnh hoặc Tạo video.</small>
+          <small id="refPickerUploadHint">Ảnh sẽ được tải lên Flow khi bạn bấm Tạo ảnh hoặc Tạo video.</small>
         </div>
         <div class="ref-picker-local-list" id="refPickerLocalList"></div>
       </div>

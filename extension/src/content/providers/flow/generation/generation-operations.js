@@ -504,6 +504,24 @@
         const retriedTiles = new Set();
         const observeStartedAt = Date.now();
         let renderObservedInFlight = false;
+        let apiResultReceipt = correlationEntry?.receipts
+          ? [...correlationEntry.receipts].reverse().find(receipt => receipt?.stage === "result_seen") || null
+          : null;
+        let resolveApiResult;
+        const apiResultSignal = correlationEntry ? new Promise(resolve => { resolveApiResult = resolve; }) : null;
+        const onApiResult = event => {
+          const receipt = event?.detail;
+          if (receipt?.schemaVersion !== 1 || receipt?.attemptId !== correlationAttemptId || receipt?.stage !== "result_seen") return;
+          if (receipt.projectId !== correlationEntry?.projectId || receipt.mediaType !== correlationEntry?.mediaType) return;
+          apiResultReceipt = receipt;
+          resolveApiResult?.(receipt);
+        };
+        if (correlationEntry) {
+          window.addEventListener("TOBY_FLOW_CORRELATION_RECEIPT", onApiResult);
+          window.addEventListener("TOBY_FLOW_V2_CORRELATION_RECEIPT", onApiResult);
+        }
+        let lastMediaScanAt = 0;
+        let allMedia = [];
 
         try {
           while (Date.now() < deadline) {
@@ -553,7 +571,15 @@
               ...(receipt?.children || []).flatMap(c => [c?.mediaId, c?.operationId]),
             ].filter(id => typeof id === "string").map(id => id.toLowerCase()));
 
-            const allMedia = tiles.collectNativeMedia();
+            // Flow's main-world observer follows the submit and subsequent API
+            // poll responses. Use its terminal receipt as the primary signal;
+            // only rescan the media grid occasionally to resolve display names
+            // and loaded media needed by the result/download path.
+            const mediaScanInterval = apiResultReceipt ? 1_000 : 5_000;
+            if (!lastMediaScanAt || Date.now() - lastMediaScanAt >= mediaScanInterval) {
+              allMedia = tiles.collectNativeMedia();
+              lastMediaScanAt = Date.now();
+            }
             const fresh = allMedia.filter(item =>
               !before.includes(item.id || `title:${item.title}`) &&
               !item.title.startsWith("fm-") &&
@@ -643,10 +669,19 @@
               continue;
             }
 
-            await root.wait?.(2000);
+            const waitMs = Math.min(apiResultReceipt ? 1_000 : 5_000, Math.max(1, deadline - Date.now()));
+            if (apiResultSignal && !apiResultReceipt) {
+              await Promise.race([apiResultSignal, root.wait?.(waitMs) || new Promise(resolve => setTimeout(resolve, waitMs))]);
+            } else {
+              await root.wait?.(waitMs);
+            }
           }
           throw this.error("FLOW_GENERATION_TIMEOUT", "Hết thời gian chờ Flow render. Lệnh có thể đã được tiếp nhận; vui lòng kiểm tra giao diện Flow trước khi thử lại.", false, true);
         } finally {
+          if (correlationEntry) {
+            window.removeEventListener("TOBY_FLOW_CORRELATION_RECEIPT", onApiResult);
+            window.removeEventListener("TOBY_FLOW_V2_CORRELATION_RECEIPT", onApiResult);
+          }
           if (correlationAttemptId) tiles.disarmNativeFlowCorrelation(correlationAttemptId);
         }
       }

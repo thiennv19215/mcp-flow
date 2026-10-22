@@ -18,6 +18,8 @@ type CapabilityRegistry = {
     durations: number[];
     resolutions: string[];
     aspectRatios: string[];
+    quantities?: number[];
+    defaultQuantity?: number;
     maxReferences: number;
     supportsFrames: boolean;
     framesAndReferencesMutuallyExclusive: boolean;
@@ -35,7 +37,12 @@ function normalize(value: unknown): string {
 export function flowModelCapability(model?: string) {
   const wanted = normalize(model);
   if (!wanted) return undefined;
-  return registry.models.find(rule => rule.match.some(alias => wanted.includes(normalize(alias))));
+  const isTieredVeo31 = /^veo\s+3\.1(?:\s|$)/.test(wanted) && /\b(lite|fast|quality)\b/.test(wanted);
+  return registry.models.find(rule => rule.match.some(alias => {
+    const normalizedAlias = normalize(alias);
+    if (isTieredVeo31 && normalizedAlias === "veo 3.1") return false;
+    return wanted.includes(normalizedAlias);
+  }));
 }
 
 export function validateFlowSceneCapabilities(scene: {
@@ -44,6 +51,7 @@ export function validateFlowSceneCapabilities(scene: {
   aspect_ratio?: string;
   duration?: number;
   resolution?: string;
+  variants?: number;
   first_frame?: string | { asset: string; id: string };
   last_frame?: string | { asset: string; id: string };
   reference_images?: string[];
@@ -88,6 +96,12 @@ export function validateFlowSceneCapabilities(scene: {
   if (frames && rule && !rule.supportsFrames) reject(`Model "${scene.model}" does not support first/last frame inputs.`);
   if (!rule) return; // Unknown/new Flow models remain UI-authoritative until added to this registry.
   if (!rule.types.includes(scene.type)) reject(`Model "${scene.model}" does not support ${scene.type} generation.`);
+  if (scene.type === "video" && Array.isArray(rule.quantities)) {
+    const variants = scene.variants ?? 1;
+    if (!rule.quantities.includes(variants)) {
+      reject(`Model "${scene.model}" does not support ${variants} video variants; allowed: ${rule.quantities.join(", ")}.`);
+    }
+  }
   if (scene.aspect_ratio && !rule.aspectRatios.includes(scene.aspect_ratio)) {
     reject(`Model "${scene.model}" does not support ${scene.aspect_ratio}; allowed: ${rule.aspectRatios.join(", ")}.`);
   }

@@ -113,7 +113,7 @@ Developed and tested with Claude. Codex and Antigravity speak the same protocol,
 same way, but neither has been tried yet, so please report how it goes. Running two of them at once is safe:
 the first one started drives Flow, and the others pass their requests to it.
 
-Restart the app, then ask it: *"check my Flow session"*. You should get your plan and credit balance
+Restart the app, then ask it: *"check my Flow session"*. You should get your sign-in and project state, plus the generation credit quote when Flow displays one.
 back. Everything after that is plain English; you never type tool names.
 
 ---
@@ -122,7 +122,7 @@ back. Everything after that is plain English; you never type tool names.
 
 Nothing below costs a credit until step 4, and the assistant asks before spending.
 
-1. **Check the session.** *"Check my Flow session."* This confirms sign-in, plan and credits.
+1. **Check the session.** *"Check my Flow session."* This confirms sign-in and project state without opening the account menu.
 2. **Make a character.** *"Create a character called Pip, a small lamplighter in a flat cartoon style."*
    Flow draws the portrait. Free.
 3. **Draw the key frames.** *"Draw three stills with Pip: a dark rooftop, him lighting a lamp, the
@@ -188,7 +188,7 @@ authentication service is not in this Flow command path.
 
 | Tool | Purpose |
 |---|---|
-| `flow_status` | Session state (signed in, project open, plan, credits left), queue, pacing, prompt playbook |
+| `flow_status` | Session state (signed in, project open, visible generation credit quote), queue, pacing, prompt playbook |
 | `flow_generate` | Queue scenes: prompt, image or video, model, aspect, duration, resolution, variants, first/last frame, reference images. Videos use a `max_credits` cap; image generation skips the quote check |
 | `flow_wait` | Wait for jobs, or for the task id of a slow call; returns file paths and results. Answers within about 40 s, so call again until `finished` is true |
 | `flow_cancel` | Cancel a job that has not started |

@@ -1,9 +1,58 @@
 const STORAGE_KEY = "flowMcpJobQueueV1";
+const AUTO_RETRY_MAX = 2;
+const PAGE_BLOCKER_ERROR_CODES = new Set([
+  "FLOW_UNKNOWN_OVERLAY_BLOCKING",
+  "FLOW_DIALOG_DISMISS_UNCONFIRMED",
+  "FLOW_BLOCKING_OVERLAY_UNRESOLVED",
+  "FLOW_OPERATION_PREFLIGHT_FAILED",
+  "FLOW_OPERATION_PREFLIGHT_UNAVAILABLE",
+  "FLOW_AGENT_PREFLIGHT_UNAVAILABLE",
+  "FLOW_SCREEN_PREFLIGHT_UNAVAILABLE",
+  "FLOW_SESSION_REQUIRED",
+  "FLOW_PROJECT_NAVIGATING",
+  "FLOW_PROJECT_LOAD_FAILED",
+  "FLOW_PROJECT_REQUIRED",
+  "FLOW_EXECUTION_TARGET_CHANGED",
+  "FLOW_MEDIA_VIEWER_OPEN",
+  "FLOW_SCREEN_NOT_READY",
+  "FLOW_NOT_READY",
+  "FLOW_AGENT_PANEL_AMBIGUOUS",
+  "FLOW_AGENT_PANEL_CLOSE_AMBIGUOUS",
+  "FLOW_AGENT_PANEL_CLOSE_UNAVAILABLE",
+  "FLOW_AGENT_SESSION_CLOSE_UNAVAILABLE",
+  "FLOW_AGENT_SESSION_CLOSE_UNCONFIRMED",
+  "FLOW_AGENT_INSTRUCTION_AMBIGUOUS",
+  "FLOW_AGENT_INSTRUCTION_DISMISS_UNAVAILABLE",
+  "FLOW_AGENT_INSTRUCTION_DISMISS_UNCONFIRMED",
+  "FLOW_AGENT_MODE_AMBIGUOUS",
+  "FLOW_AGENT_PREFLIGHT_UNCONFIRMED",
+  "FLOW_AGENT_CONFIRMATION_UNVERIFIED",
+  "FLOW_TRASH_CONFIRM_UNVERIFIED",
+  "FLOW_TRASH_CONFIRM_AMBIGUOUS",
+]);
+const PAGE_BLOCKER_NO_AUTO_RETRY_ERROR_CODES = new Set([
+  // A user may resolve these prompts directly in Flow while the queue is
+  // paused. Keep the job retryable by explicit choice, but never submit or
+  // confirm the destructive action a second time automatically on Resume.
+  "FLOW_AGENT_CONFIRMATION_UNVERIFIED",
+  "FLOW_TRASH_CONFIRM_UNVERIFIED",
+  "FLOW_TRASH_CONFIRM_AMBIGUOUS",
+]);
 
 const clone = value => structuredClone(value);
-const asError = value => value instanceof Error ? value : new Error(String(value));
-const mayHaveDispatched = value => value?.outcomeUnknown === true ||
-  value?.requestDispatched === true || value?.possiblyDispatched === true ||
+const asError = value => {
+  if (value instanceof Error) return value;
+  const error = new Error(String(value?.message || value || "Flow queue operation failed."));
+  if (value && typeof value === "object") {
+    for (const key of ["name", "code", "retryable", "outcomeUnknown", "outcome_unknown", "requestDispatched", "request_dispatched", "possiblyDispatched", "possibly_dispatched", "mayHaveSubmitted", "noRetry", "noReplay", "downloadError", "diagnostics"]) {
+      if (value[key] !== undefined) error[key] = value[key];
+    }
+  }
+  return error;
+};
+const mayHaveDispatched = value => value?.outcomeUnknown === true || value?.outcome_unknown === true ||
+  value?.requestDispatched === true || value?.request_dispatched === true ||
+  value?.possiblyDispatched === true || value?.possibly_dispatched === true ||
   value?.mayHaveSubmitted === true;
 
 /**
@@ -22,11 +71,13 @@ export class FlowJobQueue {
     this.maxDelayMs = Math.max(this.minDelayMs, Number(maxDelayMs) || this.minDelayMs);
     this.jobs = [];
     this.paused = false;
+    this.attention = null;
     this.running = false;
     this.stopped = true;
     this.currentJobId = null;
     this.controller = null;
     this.stopRequested = false;
+    this.restartRequested = false;
     this.listeners = new Set();
     this.writeChain = Promise.resolve();
     this.ready = this.#restore();
@@ -49,6 +100,18 @@ export class FlowJobQueue {
     // A worker restart is a pause boundary. Never resume queued operations in the
     // background; require an explicit user action after recovering the active item.
     this.paused = state.paused === true || state.running === true || interrupted.length > 0;
+    this.attention = state.attention && typeof state.attention === "object" ? clone(state.attention) : null;
+    if (interrupted.length > 0) {
+      const job = interrupted[0];
+      this.attention = {
+        type: "flow-outcome-unknown",
+        jobId: job.id,
+        code: job.errorCode,
+        message: job.error,
+        occurredAt: Date.now(),
+        retryOnResume: false,
+      };
+    }
     this.running = false;
     this.stopped = state.stopRequested === true || (state.stopped === true && interrupted.length === 0);
     this.currentJobId = null;
@@ -68,6 +131,7 @@ export class FlowJobQueue {
       cancelled: jobs.filter(job => job.status === "cancelled").length,
       isRunning: this.running,
       isPaused: this.paused,
+      attention: this.attention ? clone(this.attention) : null,
       isStopped: this.stopped,
       currentJobId: this.currentJobId,
     };
@@ -85,13 +149,14 @@ export class FlowJobQueue {
       version: 1,
       jobs: this.jobs.map(job => clone(job)),
       paused: this.paused,
+      attention: this.attention ? clone(this.attention) : null,
       running: this.running,
       stopped: this.stopped,
       stopRequested: this.stopRequested,
       currentJobId: this.currentJobId,
       updatedAt: Date.now(),
     };
-    this.writeChain = this.writeChain.then(() => this.storage.set({ [this.storageKey]: value }));
+    this.writeChain = this.writeChain.catch(() => {}).then(() => this.storage.set({ [this.storageKey]: value }));
     await this.writeChain;
   }
 
@@ -103,11 +168,52 @@ export class FlowJobQueue {
 
   async add(input) {
     await this.ready;
+    const job = this.#makeJob(input);
+    if (this.jobs.some(existing => existing.id === job.id)) throw new Error(`Flow job already exists: ${job.id}`);
+    this.jobs.push(job);
+    await this.#persist();
+    this.#emit("added");
+    return clone(job);
+  }
+
+  async addBatch(inputs, { batchId = crypto.randomUUID(), batchLabel = "Flow batch" } = {}) {
+    await this.ready;
+    if (!Array.isArray(inputs) || inputs.length < 2 || inputs.length > 100) {
+      throw Object.assign(new Error("A Flow batch must contain between 2 and 100 jobs."), { code: "FLOW_QUEUE_BATCH_SIZE_INVALID" });
+    }
+    const id = String(batchId || "").trim();
+    if (!id || id.length > 120) throw Object.assign(new Error("The Flow batch id is invalid."), { code: "FLOW_QUEUE_BATCH_ID_INVALID" });
+    if (this.jobs.some(job => job.batch?.batchId === id)) throw Object.assign(new Error(`Flow batch already exists: ${id}`), { code: "FLOW_QUEUE_BATCH_EXISTS" });
+    const label = String(batchLabel || "Flow batch").trim().slice(0, 160) || "Flow batch";
+    const addedAt = Date.now();
+    const jobs = inputs.map((input, index) => this.#makeJob(input, {
+      batchId: id,
+      batchLabel: label,
+      batchIndex: index,
+      batchCount: inputs.length,
+    }, addedAt));
+    const ids = new Set(this.jobs.map(job => job.id));
+    for (const job of jobs) {
+      if (ids.has(job.id)) throw new Error(`Flow job already exists: ${job.id}`);
+      ids.add(job.id);
+    }
+    this.jobs.push(...jobs);
+    try {
+      await this.#persist();
+    } catch (error) {
+      this.jobs.splice(this.jobs.length - jobs.length, jobs.length);
+      throw error;
+    }
+    this.#emit("batch-added");
+    return jobs.map(job => clone(job));
+  }
+
+  #makeJob(input, batch = null, addedAt = Date.now()) {
     const operation = String(input?.operation || input?.data?.operation || "flow.generation.submit");
     const payload = clone(input?.payload ?? input?.data?.payload ?? {});
     const metadata = input?.metadata ?? input?.data?.metadata;
     const label = String(input?.label || input?.name || payload?.prompt || input?.data?.prompt || "Flow job").slice(0, 160);
-    const job = {
+    return {
       id: input?.id || crypto.randomUUID(),
       type: "flow",
       operation,
@@ -116,16 +222,34 @@ export class FlowJobQueue {
       name: label,
       data: { operation, payload },
       ...(metadata === undefined ? {} : { metadata: clone(metadata) }),
+      ...(batch ? { batch: clone(batch) } : {}),
       status: "pending",
       outcomeUnknown: false,
-      addedAt: Date.now(),
+      addedAt,
       attempts: 0,
+      autoRetryCount: 0,
     };
-    if (this.jobs.some(existing => existing.id === job.id)) throw new Error(`Flow job already exists: ${job.id}`);
-    this.jobs.push(job);
-    await this.#persist();
-    this.#emit("added");
-    return clone(job);
+  }
+
+  #restoreDependencyDescendants(parentIds) {
+    const readyParents = new Set(parentIds);
+    let restored = true;
+    while (restored) {
+      restored = false;
+      for (const job of this.jobs) {
+        if (job.status !== "cancelled" || job.errorCode !== "FLOW_SCENE_DEPENDENCY_SKIPPED" ||
+            !readyParents.has(job.metadata?.dependsOnId)) continue;
+        job.status = "pending";
+        job.error = undefined;
+        job.errorCode = undefined;
+        job.finishedAt = undefined;
+        job.retrySafe = false;
+        job.progress = undefined;
+        job.result = undefined;
+        readyParents.add(job.id);
+        restored = true;
+      }
+    }
   }
 
   async list() {
@@ -223,10 +347,29 @@ export class FlowJobQueue {
 
   async start() {
     await this.ready;
-    if (this.running) return this.#snapshot();
+    if (this.running) {
+      // A new item may arrive after #drain has checked for pending work but
+      // before its finally block marks the queue idle. Remember that start
+      // request so the finalizer can launch another drain instead of stranding it.
+      if (!this.stopRequested) {
+        if (this.paused) {
+          this.paused = false;
+          this.stopped = false;
+          this.attention = null;
+          this.restartRequested = true;
+          await this.#persist();
+          this.#emit("resumed");
+        } else {
+          this.restartRequested = true;
+        }
+      }
+      return this.#snapshot();
+    }
     this.paused = false;
     this.stopped = false;
     this.stopRequested = false;
+    this.restartRequested = false;
+    this.attention = null;
     this.running = true;
     await this.#persist();
     this.#emit("started");
@@ -245,15 +388,50 @@ export class FlowJobQueue {
 
   async resume() {
     await this.ready;
-    if (!this.paused && this.running) return this.#snapshot();
+    if (this.paused && this.attention?.type === "flow-page-blocked") {
+      const blockedJob = this.jobs.find(job => job.id === this.attention.jobId);
+      if (blockedJob?.status === "failed" && this.attention.retryOnResume !== false && blockedJob.retrySafe === true && blockedJob.outcomeUnknown !== true) {
+        blockedJob.status = "pending";
+        blockedJob.error = undefined;
+        blockedJob.errorCode = undefined;
+        blockedJob.finishedAt = undefined;
+        blockedJob.retrySafe = false;
+        blockedJob.autoRetryCount = 0;
+        blockedJob.overlayRecheckCount = 0;
+        blockedJob.progress = undefined;
+        blockedJob.result = undefined;
+      }
+      if (blockedJob?.status === "pending") {
+        const currentIndex = this.jobs.indexOf(blockedJob);
+        const firstPendingIndex = this.jobs.findIndex(job => job.status === "pending");
+        if (currentIndex >= 0 && firstPendingIndex >= 0 && currentIndex !== firstPendingIndex) {
+          this.jobs.splice(currentIndex, 1);
+          const nextPendingIndex = this.jobs.findIndex(job => job.status === "pending");
+          this.jobs.splice(nextPendingIndex < 0 ? this.jobs.length : nextPendingIndex, 0, blockedJob);
+        }
+      }
+      // Resume is the user's confirmation that the shared Flow page has been
+      // repaired. Retry this known pre-submit failure before later jobs.
+      this.attention = null;
+    } else if (this.paused && this.attention?.type === "flow-outcome-unknown") {
+      // Resume acknowledges that the user inspected Flow. Keep the uncertain
+      // job failed and continue only with later independent pending jobs.
+      this.attention = null;
+    }
+    if (!this.paused && this.running) {
+      if (!this.stopRequested) this.restartRequested = true;
+      return this.#snapshot();
+    }
     return this.start();
   }
 
   async stop() {
     await this.ready;
     this.stopRequested = true;
+    this.restartRequested = false;
     this.paused = false;
     this.stopped = true;
+    this.attention = null;
     if (this.controller) this.controller.abort(new Error("Queue stopped by user."));
     if (!this.controller) this.running = false;
     await this.#persist();
@@ -272,9 +450,39 @@ export class FlowJobQueue {
     job.errorCode = undefined;
     job.finishedAt = undefined;
     job.retrySafe = false;
+    job.autoRetryCount = 0;
+    job.overlayRecheckCount = 0;
+    job.progress = undefined;
+    job.result = undefined;
+    this.#restoreDependencyDescendants([job.id]);
     await this.#persist();
     this.#emit("retried");
     return clone(job);
+  }
+
+  async retryBatch(batchId) {
+    await this.ready;
+    const id = String(batchId || "");
+    const jobs = this.jobs.filter(item => item.batch?.batchId === id);
+    if (!jobs.length) return { retried: [], skipped: 0 };
+    const retryable = jobs.filter(job => job.status === "failed" && job.retrySafe === true && job.outcomeUnknown !== true);
+    for (const job of retryable) {
+      job.status = "pending";
+      job.error = undefined;
+      job.errorCode = undefined;
+      job.finishedAt = undefined;
+      job.retrySafe = false;
+      job.autoRetryCount = 0;
+      job.overlayRecheckCount = 0;
+      job.progress = undefined;
+      job.result = undefined;
+    }
+    if (retryable.length) {
+      this.#restoreDependencyDescendants(retryable.map(job => job.id));
+      await this.#persist();
+      this.#emit("batch-retried");
+    }
+    return { retried: retryable.map(job => clone(job)), skipped: jobs.filter(job => job.status === "failed" && !retryable.includes(job)).length };
   }
 
   async cancel(id) {
@@ -339,6 +547,14 @@ export class FlowJobQueue {
     job.finishedAt = Date.now();
     this.paused = true;
     this.stopped = false;
+    this.attention = {
+      type: "flow-outcome-unknown",
+      jobId: job.id,
+      code: job.errorCode,
+      message: job.error,
+      occurredAt: Date.now(),
+      retryOnResume: false,
+    };
     await this.#persist();
     this.#emit("manual-submit-outcome-unknown");
     return this.#snapshot();
@@ -361,6 +577,7 @@ export class FlowJobQueue {
     if (this.running || this.controller || this.jobs.some(job => job.status === "waiting_for_user")) throw new Error("Cancel the active or waiting Flow operation before clearing the queue.");
     this.jobs = [];
     this.paused = false;
+    this.attention = null;
     this.stopped = true;
     this.currentJobId = null;
     await this.#persist();
@@ -392,11 +609,53 @@ export class FlowJobQueue {
 
   async #drain() {
     let completedOne = false;
+    let bypassNextInterJobDelay = false;
     try {
       while (this.running && !this.paused && !this.stopRequested) {
         const job = this.jobs.find(item => item.status === "pending");
         if (!job) break;
-        if (completedOne && this.maxDelayMs > 0) {
+        if (job.metadata?.dependsOnId) {
+          const dependency = this.jobs.find(item => item.id === job.metadata.dependsOnId);
+          if (!dependency || ["failed", "cancelled"].includes(dependency.status)) {
+            job.status = "cancelled";
+            job.outcomeUnknown = false;
+            job.retrySafe = false;
+            job.errorCode = "FLOW_SCENE_DEPENDENCY_SKIPPED";
+            job.error = `Skipped because previous task ${job.metadata.dependsOnId} did not complete.`;
+            job.progress = { phase: "dependency_skipped", message: "Skipped because the required previous Flow task did not complete." };
+            job.finishedAt = Date.now();
+            await this.#persist();
+            this.#emit("dependency-skipped");
+            completedOne = true;
+            continue;
+          }
+          if (dependency.status === "pending") {
+            const dependencyIndex = this.jobs.indexOf(dependency);
+            const jobIndex = this.jobs.indexOf(job);
+            if (dependencyIndex > jobIndex) {
+              this.jobs.splice(dependencyIndex, 1);
+              this.jobs.splice(jobIndex, 0, dependency);
+              continue;
+            }
+          } else if (dependency.status !== "completed") {
+            this.paused = true;
+            this.stopped = false;
+            this.attention = {
+              type: "flow-dependency-blocked",
+              jobId: dependency.id,
+              code: "FLOW_SCENE_DEPENDENCY_WAITING",
+              message: "A dependent Flow task is waiting for its previous task.",
+              occurredAt: Date.now(),
+              retryOnResume: false,
+            };
+            await this.#persist();
+            this.#emit("attention-required");
+            break;
+          }
+        }
+        const skipInterJobDelay = bypassNextInterJobDelay;
+        bypassNextInterJobDelay = false;
+        if (completedOne && this.maxDelayMs > 0 && !skipInterJobDelay) {
           const delay = this.minDelayMs + Math.random() * (this.maxDelayMs - this.minDelayMs);
           await new Promise(resolve => setTimeout(resolve, delay));
           if (!this.running || this.paused || this.stopRequested) break;
@@ -405,6 +664,7 @@ export class FlowJobQueue {
         this.controller = new AbortController();
         job.status = "running";
         job.attempts = (job.attempts || 0) + 1;
+        if (job.progress?.phase === "auto_retry") job.progress = undefined;
         job.startedAt = Date.now();
         await this.#persist();
         this.#emit("job-started");
@@ -417,6 +677,9 @@ export class FlowJobQueue {
           },
         };
         let waitingForUser = false;
+        let pageBlocked = false;
+        let outcomeBlocked = false;
+        let autoRetryQueued = false;
         try {
           const result = await this.runner(clone(job), hooks);
           if (result?.waitingForUser === true) {
@@ -432,8 +695,20 @@ export class FlowJobQueue {
           } else if (mayHaveDispatched(result) && result?.completed !== true) {
             job.status = "failed";
             job.outcomeUnknown = true;
+            job.retrySafe = false;
             job.error = String(result?.error || "Flow may have accepted this operation; inspect the project before retrying.");
             job.errorCode = result?.errorCode || "FLOW_SUBMIT_OUTCOME_UNKNOWN";
+            this.paused = true;
+            this.stopped = false;
+            outcomeBlocked = true;
+            this.attention = {
+              type: "flow-outcome-unknown",
+              jobId: job.id,
+              code: job.errorCode,
+              message: job.error,
+              occurredAt: Date.now(),
+              retryOnResume: false,
+            };
           } else {
             job.status = "completed";
             job.result = clone(result);
@@ -444,25 +719,116 @@ export class FlowJobQueue {
           const explicitlySafe = error?.outcomeUnknown === false || error?.outcome_unknown === false;
           const unknown = mayHaveDispatched(error) || (!explicitlySafe && this.stopRequested && this.controller?.signal.aborted);
           const downloadFailure = Boolean(error?.downloadError) || String(error?.code || "").toUpperCase().includes("DOWNLOAD");
+          pageBlocked = !unknown && PAGE_BLOCKER_ERROR_CODES.has(String(error?.code || ""));
           job.status = "failed";
           job.outcomeUnknown = unknown;
-          job.retrySafe = !unknown && !downloadFailure;
+          const explicitlyRetryable = error.retryable === true && error.noRetry !== true && error.noReplay !== true;
+          job.retrySafe = pageBlocked || (!unknown && !downloadFailure && explicitlyRetryable);
           if (error?.requestDispatched === true || error?.request_dispatched === true) job.requestDispatched = true;
           if (error?.serverAcceptanceObserved === true) job.serverAcceptanceObserved = true;
           if (typeof error?.credits === "number") job.credits = error.credits;
           if (typeof error?.creditQuoteVerified === "boolean") job.creditQuoteVerified = error.creditQuoteVerified;
-          job.error = error.message.slice(0, 2000);
+          job.error = String(error.message || error).slice(0, 2000);
           job.errorCode = error.code || (unknown ? "FLOW_SUBMIT_OUTCOME_UNKNOWN" : "FLOW_JOB_FAILED");
+          const canAutoRetry = explicitlyRetryable &&
+            !downloadFailure && !unknown && !this.stopRequested && !this.controller?.signal.aborted &&
+            (job.autoRetryCount || 0) < AUTO_RETRY_MAX;
+          const canRecheckUnknownOverlay = error.code === "FLOW_UNKNOWN_OVERLAY_BLOCKING" && explicitlySafe &&
+            !unknown && !downloadFailure && !this.stopRequested && !this.controller?.signal.aborted &&
+            error.noRetry !== true && error.noReplay !== true && !mayHaveDispatched(job) &&
+            (job.overlayRecheckCount || 0) < 1;
+          if (unknown) {
+            // A timed-out page action can still finish after the service worker
+            // stops waiting. Do not let the next queued task touch Flow until
+            // the user has checked whether the current request was accepted.
+            this.paused = true;
+            this.stopped = false;
+            outcomeBlocked = true;
+            this.attention = {
+              type: "flow-outcome-unknown",
+              jobId: job.id,
+              code: job.errorCode,
+              message: job.error,
+              occurredAt: Date.now(),
+              retryOnResume: false,
+            };
+          } else if (canRecheckUnknownOverlay) {
+            // The unknown overlay is a confirmed pre-submit blocker. Recheck
+            // this same job once immediately so a closing Flow dialog can
+            // settle, but never let later jobs enter the shared page if it
+            // remains blocked.
+            job.overlayRecheckCount = (job.overlayRecheckCount || 0) + 1;
+            job.status = "pending";
+            job.outcomeUnknown = false;
+            job.retrySafe = false;
+            job.error = undefined;
+            job.errorCode = undefined;
+            job.finishedAt = undefined;
+            job.result = undefined;
+            job.progress = {
+              phase: "auto_retry",
+              attempt: job.overlayRecheckCount,
+              maxAttempts: 1,
+              errorCode: error.code,
+              reason: String(error.message || error).slice(0, 500),
+              message: "Rechecking the Flow page once before submit.",
+            };
+            bypassNextInterJobDelay = true;
+            autoRetryQueued = true;
+          } else if (pageBlocked && !canAutoRetry) {
+            // The Flow page is shared by every pending job. Stop on this
+            // pre-submit blocker after bounded recovery attempts so the same
+            // broken page state cannot fail the rest of the batch one item at
+            // a time.
+            this.paused = true;
+            this.stopped = false;
+            this.attention = {
+              type: "flow-page-blocked",
+              jobId: job.id,
+              code: job.errorCode,
+              message: job.error,
+              occurredAt: Date.now(),
+              retryOnResume: !PAGE_BLOCKER_NO_AUTO_RETRY_ERROR_CODES.has(String(job.errorCode || "")),
+            };
+          } else if (canAutoRetry) {
+            // Retry explicitly transient, pre-submit errors within a bounded
+            // budget. Never replay an ambiguous submit, a download, or a
+            // deterministic failure. A shared-page blocker stays in place so
+            // this task is repaired before later tasks touch the same tab.
+            job.autoRetryCount = (job.autoRetryCount || 0) + 1;
+            job.status = "pending";
+            job.outcomeUnknown = false;
+            job.retrySafe = false;
+            job.error = undefined;
+            job.errorCode = undefined;
+            job.finishedAt = undefined;
+            job.result = undefined;
+            job.progress = {
+              phase: "auto_retry",
+              attempt: job.autoRetryCount,
+              maxAttempts: AUTO_RETRY_MAX,
+              errorCode: error.code || "FLOW_JOB_RETRYABLE_ERROR",
+              reason: String(error.message || error).slice(0, 500),
+            };
+            const failedIndex = this.jobs.indexOf(job);
+            if (!pageBlocked && failedIndex >= 0) {
+              this.jobs.splice(failedIndex, 1);
+              this.jobs.push(job);
+            }
+            autoRetryQueued = true;
+          }
         }
-        if (!waitingForUser) job.finishedAt = Date.now();
+        if (!waitingForUser && !autoRetryQueued) job.finishedAt = Date.now();
         this.controller = null;
         this.currentJobId = null;
         await this.#persist();
-        this.#emit(waitingForUser ? "waiting-for-user" : "job-finished");
-        if (waitingForUser) break;
-        completedOne = true;
+        this.#emit(waitingForUser ? "waiting-for-user" : autoRetryQueued ? "auto-retry-queued" : pageBlocked || outcomeBlocked ? "attention-required" : this.paused ? "paused" : "job-finished");
+        if (waitingForUser || this.paused) break;
+        completedOne = !pageBlocked || autoRetryQueued;
       }
     } finally {
+      const restartRequested = this.restartRequested && !this.stopRequested;
+      this.restartRequested = false;
       this.controller = null;
       this.currentJobId = null;
       this.running = false;
@@ -470,6 +836,9 @@ export class FlowJobQueue {
       this.stopped = !this.paused;
       await this.#persist();
       this.#emit(this.paused ? "paused" : "drained");
+      if (restartRequested && !this.paused && this.jobs.some(job => job.status === "pending")) {
+        void this.start().catch(error => console.error("[FlowJobQueue] requested restart failed", error));
+      }
     }
   }
 }

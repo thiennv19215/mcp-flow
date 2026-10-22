@@ -92,7 +92,7 @@ server.registerTool(
   {
     title: "Flow status",
     description:
-      "Check the Flow Chrome session (signed in, project open, plan, credits left) and the generation queue. Call this first; it says what the user must fix before generating, and returns the prompt playbook.",
+      "Check the Flow Chrome session (signed in, project open, visible generation credit quote) and the generation queue. Call this first; it says what the user must fix before generating, and returns the prompt playbook. It does not open the account menu to read the remaining credit balance.",
     inputSchema: shapes.status,
     annotations: { readOnlyHint: true, openWorldHint: true },
   },

@@ -6,7 +6,8 @@
   const finishVideoPreparationDiagnostics = typeof settings?.finishVideoPreparationDiagnostics === "function"
     ? settings.finishVideoPreparationDiagnostics
     : () => console.warn("[FlowVideoSettings] Video preparation diagnostics are unavailable in this content-script build.");
-  const { emitImagePreparationProgress, assertNativeModelCapabilities, flowSettingsPanelVisible, openFlowSettings, chooseRadio, chooseVideoOption, chooseNativeModel, findModelPickerButton, normalizeModelLabel, getModelAliases, chooseNativeVariantCount, nativeRadioSelected, closeOwnedSettingsSurface, safeCreditQuoteDiagnostics, checkPreparation, waitPreparation, isNavControl, foldLabel } = settings || {};
+  const { emitImagePreparationProgress, assertNativeModelCapabilities, flowSettingsPanelVisible, openFlowSettings, chooseRadio, chooseVideoOption, chooseNativeModel, findModelPickerButton, normalizeModelLabel, chooseNativeVariantCount, nativeRadioSelected, closeOwnedSettingsSurface, safeCreditQuoteDiagnostics, checkPreparation, waitPreparation, isNavControl, foldLabel } = settings || {};
+  const modelLabelMatchesRequest = settings?.modelLabelMatchesRequest || root.modelLabelMatchesRequest;
   const MODE_ALIASES = {
     ingredients: ["ingredients", "thành phần", "nguyên liệu", "ingredient"],
     frames: ["frames", "khung hình", "khung", "frame"],
@@ -25,14 +26,22 @@
       });
   }
 
+  function isDisabledModeControl(control) {
+    return Boolean(control && (control.disabled === true || control.hasAttribute?.("disabled") || control.getAttribute?.("aria-disabled") === "true"));
+  }
+
   async function selectAndConfirmMode(name, framesMode, options = {}) {
     checkPreparation(options, `selecting Flow ${name} mode`);
+    const unavailableCode = framesMode ? "FLOW_FRAMES_MODE_UNAVAILABLE" : "FLOW_VIDEO_MODE_UNAVAILABLE";
+    const unavailableError = message => root.flowError(unavailableCode, message, true, false);
     let control = exactModeControl(name);
+    if (isDisabledModeControl(control)) {
+      throw unavailableError(`Flow's exact ${name} mode control is visible but disabled. Nothing was submitted.`);
+    }
     if (!control) {
       const hasFrameControls = () => Boolean(root.flowButton?.("Start") && root.flowButton?.("End"));
       if (framesMode && hasFrameControls()) return;
-      const code = framesMode ? "FLOW_FRAMES_MODE_UNAVAILABLE" : "FLOW_VIDEO_MODE_UNAVAILABLE";
-      throw root.flowError(code, `Flow does not offer the exact ${name} mode for the selected model. Nothing was submitted.`, true, false);
+      throw unavailableError(`Flow does not offer the exact ${name} mode for the selected model. Nothing was submitted.`);
     }
     if (!nativeRadioSelected(control) && control.getAttribute("aria-selected") !== "true") control.click();
     const hasFrameControls = () => Boolean(root.flowButton?.("Start") && root.flowButton?.("End"));
@@ -41,11 +50,18 @@
     while (Date.now() < deadline) {
       checkPreparation(options, `confirming Flow ${name} mode`);
       control = exactModeControl(name);
+      if (isDisabledModeControl(control)) {
+        throw unavailableError(`Flow's exact ${name} mode control became disabled before selection could be confirmed. Nothing was submitted.`);
+      }
       if (control && (nativeRadioSelected(control) || control.getAttribute("aria-selected") === "true" || (framesMode && hasFrameControls()))) { confirmed = true; break; }
       if (!flowSettingsPanelVisible()) await openFlowSettings(options);
       await waitPreparation(options, 100, `confirming Flow ${name} mode`);
     }
     if (!confirmed) {
+      control = exactModeControl(name);
+      if (isDisabledModeControl(control)) {
+        throw unavailableError(`Flow's exact ${name} mode control is disabled. Nothing was submitted.`);
+      }
       if (framesMode && hasFrameControls()) confirmed = true;
       else {
         const code = framesMode ? "FLOW_FRAMES_MODE_UNCONFIRMED" : "FLOW_VIDEO_MODE_UNCONFIRMED";
@@ -98,10 +114,8 @@
       await chooseNativeModel(requestedModel, type, options);
       const selectedModel = findModelPickerButton();
       const selectedModelName = normalizeModelLabel(selectedModel?.innerText || selectedModel?.textContent || root.accessibleName?.(selectedModel) || "");
-      const requestedModelMatched = getModelAliases(requestedModel).some(alias => {
-        const normalizedAlias = normalizeModelLabel(alias);
-        return selectedModelName === normalizedAlias || (normalizedAlias.length >= 3 && selectedModelName.includes(normalizedAlias));
-      });
+      const requestedModelMatched = typeof modelLabelMatchesRequest === "function" &&
+        modelLabelMatchesRequest(requestedModel, selectedModelName);
       if (!requestedModelMatched) {
         throw root.flowError("FLOW_VIDEO_MODEL_UNCONFIRMED", `Flow did not confirm requested video model "${requestedModel}" (current: ${selectedModelName || "unknown"}). Nothing was submitted.`, true, false);
       }

@@ -230,6 +230,17 @@ async function sendFlowCommand(tabId, message) {
     return await chrome.tabs.sendMessage(tabId, message);
   }
 }
+function flowCommandResponseTimeoutMs(operation, command) {
+  const payload = command?.payload && typeof command.payload === "object" ? command.payload : {};
+  if (operation === "flow.generation.observe") {
+    const requested = Number(payload.timeoutMs ?? payload.timeout_ms);
+    const budget = Number.isFinite(requested) && requested > 0 ? requested : 300_000;
+    return Math.min(12 * 60_000, Math.max(45_000, budget + 30_000));
+  }
+  if (["flow.generation.submit", "flow.generation.manual.confirm"].includes(operation)) return 150_000;
+  if (["flow.edit.run", "flow.continue.run", "flow.agent.batch", "flow.character.create", "flow.character.edit"].includes(operation)) return 35 * 60_000;
+  return 2 * 60_000;
+}
 async function waitForTabComplete(tabId, timeoutMs = 45_000) {
   const existing = await chrome.tabs.get(tabId).catch(() => null);
   if (existing?.status === "complete") return existing;
@@ -245,6 +256,39 @@ async function waitForTabComplete(tabId, timeoutMs = 45_000) {
       resolve(tab);
     };
     chrome.tabs.onUpdated.addListener(onUpdated);
+  });
+}
+async function waitForFlowProjectReady(tabId, projectId, signal, timeoutMs = 20_000) {
+  const deadline = Date.now() + timeoutMs;
+  const expectedProjectId = String(projectId || "").toLowerCase();
+  while (Date.now() < deadline) {
+    if (signal?.aborted) {
+      throw Object.assign(new Error("Queue stopped while Flow was returning to the project editor."), {
+        code: "FLOW_OPERATION_CANCELLED", outcome_unknown: false,
+      });
+    }
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (!tab || !flowUrl(tab.url)) {
+      throw Object.assign(new Error("The Flow tab closed while returning to the project editor."), {
+        code: "FLOW_SESSION_REQUIRED", outcome_unknown: false,
+      });
+    }
+    const currentProjectId = flowProjectIdFromUrl(tab.url);
+    const projectRoot = (() => {
+      try { return /^\/project\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/?$/i.test(new URL(tab.url).pathname); }
+      catch { return false; }
+    })();
+    const projectMatches = expectedProjectId ? currentProjectId === expectedProjectId : Boolean(currentProjectId);
+    if (tab.status === "complete" && projectRoot && projectMatches) {
+      // Let Flow rehydrate its editor and content scripts after the route load.
+      await new Promise(resolve => setTimeout(resolve, 400));
+      const settled = await chrome.tabs.get(tabId).catch(() => null);
+      if (settled?.status === "complete" && flowProjectIdFromUrl(settled.url) === currentProjectId && /^\/project\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/?$/i.test(new URL(settled.url).pathname)) return settled;
+    }
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
+  throw Object.assign(new Error("Flow did not finish returning to the queued project. The task was not submitted; resume after the project editor is ready."), {
+    code: "FLOW_PROJECT_LOAD_FAILED", retryable: true, outcome_unknown: false,
   });
 }
 async function listFlowProjects() {
@@ -545,7 +589,13 @@ async function execute(_ws, method, args = [], { queueOwner = false, connectorOw
             label: source.label || source.name, metadata,
           }));
         }
-        const snapshot = payload.autoStart === false ? await flowJobQueue.snapshot() : await flowJobQueue.resume();
+        // Match the extension UI: adding work must not implicitly clear a
+        // queue pause caused by an unresolved Flow page blocker or a manual
+        // submit. Only an explicit Resume command may continue that queue.
+        const beforeStart = await flowJobQueue.snapshot();
+        const snapshot = payload.autoStart === false || beforeStart.isPaused || beforeStart.waitingForUser > 0
+          ? beforeStart
+          : await flowJobQueue.resume();
         const plannedOutputDir = plannedJobs[0]?.payload?.output_dir ?? plannedJobs[0]?.payload?.params?.output_dir ?? payload.output_dir;
         return { jobs: added, job: added.length === 1 ? added[0] : undefined, output_dir: plannedOutputDir, batchId, snapshot: flowQueueSnapshot(snapshot) };
       }
@@ -679,23 +729,60 @@ async function execute(_ws, method, args = [], { queueOwner = false, connectorOw
       };
       signal?.addEventListener("abort", cancelPageCommand, { once: true });
       if (signal?.aborted) cancelPageCommand();
+      let responseTimer;
+      let cancelGraceTimer;
+      let rejectCancelled;
+      const cancelledPromise = new Promise((_, reject) => { rejectCancelled = reject; });
+      void cancelledPromise.catch(() => {});
+      const onSignalAbort = () => rejectCancelled(Object.assign(new Error("Flow command was cancelled by the queue."), {
+        code: "FLOW_OPERATION_CANCELLED",
+        outcome_unknown: maybeSubmittedOperations.has(operation),
+      }));
+      signal?.addEventListener("abort", onSignalAbort, { once: true });
+      if (signal?.aborted) onSignalAbort();
       try {
-        response = await sendFlowCommand(tabId, {
+        if (signal?.aborted) throw Object.assign(new Error("The Flow queue operation was cancelled before it started."), {
+          code: "FLOW_OPERATION_CANCELLED",
+          outcome_unknown: false,
+        });
+        const message = {
           type: "flow-mcp:execute",
           command: { ...guardedCommand, jobId: command.jobId ?? command.job_id },
-        });
+        };
+        const responsePromise = sendFlowCommand(tabId, message);
+        response = await Promise.race([
+          responsePromise,
+          cancelledPromise,
+          new Promise((_, reject) => {
+            responseTimer = setTimeout(() => {
+              cancelPageCommand();
+              cancelGraceTimer = setTimeout(() => {
+                reject(Object.assign(new Error(`Flow did not return a response for ${operation} within its deadline, even after cancellation. The operation stopped waiting so the queue can continue.`), {
+                  code: "FLOW_COMMAND_RESPONSE_TIMEOUT",
+                  outcome_unknown: maybeSubmittedOperations.has(operation),
+                }));
+              }, 5_000);
+            }, flowCommandResponseTimeoutMs(operation, command));
+          }),
+        ]);
       } finally {
+        clearTimeout(responseTimer);
+        clearTimeout(cancelGraceTimer);
+        signal?.removeEventListener("abort", onSignalAbort);
         signal?.removeEventListener("abort", cancelPageCommand);
       }
     } catch (error) {
       const message = String(error?.message || error);
       const definitelyNotDelivered = /Receiving end does not exist|Could not establish connection/i.test(message);
-      if (maybeSubmittedOperations.has(operation) && !definitelyNotDelivered) {
+      const explicitlySafe = error?.outcome_unknown === false || error?.outcomeUnknown === false;
+      if (maybeSubmittedOperations.has(operation) && !definitelyNotDelivered && !explicitlySafe) {
         throw Object.assign(new Error(message), {
           name: error?.name || "Error",
           code: error?.code,
           retryable: Boolean(error?.retryable),
           outcome_unknown: true,
+          noRetry: error?.noRetry === true,
+          noReplay: error?.noReplay === true,
         });
       }
       throw error;
@@ -708,6 +795,8 @@ async function execute(_ws, method, args = [], { queueOwner = false, connectorOw
       error.code = response?.error?.code || "FLOW_DOM_FAILED";
       error.retryable = Boolean(response?.error?.retryable);
       error.outcome_unknown = Boolean(response?.error?.outcome_unknown);
+      error.noRetry = response?.error?.noRetry === true;
+      error.noReplay = response?.error?.noReplay === true;
       // Preserve page-side diagnostics through the extension relay. The native
       // queue applies its own narrow allowlist before storing any receipt.
       if (response?.error?.diagnostics && typeof response.error.diagnostics === "object") {
@@ -806,7 +895,13 @@ async function retryExtensionFlowJob(id) {
   return { job, snapshot: flowQueueSnapshot(snapshot) };
 }
 function broadcastFlowQueue(snapshot, reason) {
-  chrome.runtime.sendMessage({ type: "flow-queue:changed", snapshot: flowQueueSnapshot(snapshot), reason }).catch(() => {});
+  const message = { type: "flow-queue:changed", snapshot: flowQueueSnapshot(snapshot), reason };
+  // runtime.sendMessage updates extension pages, but does not deliver to content
+  // scripts. The floating tracker lives in the Flow tab, so broadcast there too.
+  chrome.runtime.sendMessage(message).catch(() => {});
+  void chrome.tabs.query({ url: "https://flow.google.com/*" }).then(tabs => Promise.allSettled(
+    tabs.filter(tab => Number.isInteger(tab.id)).map(tab => chrome.tabs.sendMessage(tab.id, message)),
+  )).catch(() => {});
 }
 function flowResultMedia(value) {
   if (!value || typeof value !== "object") return [];
@@ -961,8 +1056,7 @@ async function runExtensionFlowJob(job, hooks) {
   if (job.metadata?.flowTabId !== pinnedTabId || !Object.prototype.hasOwnProperty.call(job.metadata || {}, "flowProjectId")) {
     await flowJobQueue.updateMetadata(job.id, { flowTabId: pinnedTabId, flowProjectId: pinnedProjectId });
   }
-  const invoke = async (name, body) => {
-    return execute(null, "flow.dom.execute", [{
+  const invokeOnce = (name, body) => execute(null, "flow.dom.execute", [{
       op: "flowOperation",
       name,
       payload: body,
@@ -971,10 +1065,24 @@ async function runExtensionFlowJob(job, hooks) {
       jobId: job.id,
       id: `queue-${job.id}-${crypto.randomUUID()}`,
     }], { queueOwner: true, signal: hooks.signal });
+  const invoke = async (name, body) => {
+    try {
+      return await invokeOnce(name, body);
+    } catch (error) {
+      // navigation.js throws this exact pre-submit signal after requesting a
+      // return to the pinned project root. Wait for Flow to reload, then retry
+      // that DOM command once so a route transition does not strand the queue.
+      const wasNotDispatched = error?.outcomeUnknown !== true && error?.outcome_unknown !== true &&
+        error?.requestDispatched !== true && error?.request_dispatched !== true;
+      if (error?.code !== "FLOW_PROJECT_NAVIGATING" || !wasNotDispatched || error?.noRetry === true || error?.noReplay === true) throw error;
+      await hooks.progress({ phase: "recovering", message: "Flow is returning to this queue's project; waiting before retrying the current DOM step…" });
+      await waitForFlowProjectReady(pinnedTabId, pinnedProjectId, hooks.signal);
+      return invokeOnce(name, body);
+    }
   };
-  while (selectedTabId !== undefined && tabOperationActive(selectedTabId)) {
+  while (tabOperationActive(pinnedTabId)) {
     if (hooks.signal.aborted) throw Object.assign(new Error("Queue stopped before Flow accepted this task."), { outcomeUnknown: false });
-    await hooks.progress({ phase: "waiting", message: "Waiting for the active Flow operation to finish…" });
+    await hooks.progress({ phase: "waiting", message: "Waiting for the active operation in this task's Flow tab to finish…" });
     await new Promise(resolve => setTimeout(resolve, 1_000));
   }
   if (hooks.signal.aborted) throw Object.assign(new Error("Queue stopped before Flow accepted this task."), { outcomeUnknown: false });
@@ -1101,7 +1209,9 @@ async function runExtensionFlowJob(job, hooks) {
   await hooks.progress({ phase: "complete", message: "Flow generation completed.", percent: 100 });
   return { completed: true, requestDispatched: true, ...quoteFields, result: operationResult };
 }
-const flowJobQueue = new FlowJobQueue(runExtensionFlowJob);
+// Keep a small cooldown between generations to avoid hammering Flow while
+// removing most of the previous 5–10 second idle wait between queued jobs.
+const flowJobQueue = new FlowJobQueue(runExtensionFlowJob, { minDelayMs: 1_000, maxDelayMs: 2_000 });
 flowJobQueue.subscribe((snapshot, reason) => broadcastFlowQueue(snapshot, reason));
 async function fetchBackend(url, token, body, timeoutMs = 15_000) {
   const controller = new AbortController();
@@ -1149,7 +1259,7 @@ function dispatchCommand(command, sendResult) {
   // Keep the receive loop responsive while a page operation waits.
   void execute(null, command.method, command.args, { connectorOwner: true }).then(
     value => sendResult({ type: "result", id: commandId, result: { ok: true, value } }),
-    error => sendResult({ type: "result", id: commandId, result: { ok: false, error: { code: error?.code || "EXTENSION_COMMAND_FAILED", message: String(error?.message || error), retryable: Boolean(error?.retryable), outcome_unknown: Boolean(error?.outcome_unknown), ...(error?.diagnostics ? { diagnostics: error.diagnostics } : {}) } } }),
+    error => sendResult({ type: "result", id: commandId, result: { ok: false, error: { code: error?.code || "EXTENSION_COMMAND_FAILED", message: String(error?.message || error), retryable: Boolean(error?.retryable), outcome_unknown: Boolean(error?.outcome_unknown), noRetry: error?.noRetry === true, noReplay: error?.noReplay === true, ...(error?.diagnostics ? { diagnostics: error.diagnostics } : {}) } } }),
   );
 }
 async function pollHttp(session) {
@@ -1366,10 +1476,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
 chrome.runtime.onMessage.addListener((message, _sender, respond) => {
   if (typeof message?.type === "string" && message.type.startsWith("flow-queue:")) {
     // The Flow page tracker needs a snapshot and a few queue controls so its
-    // compact panel can pause, stop, or remove a visible task. Keep job
+    // compact panel can pause, resume, stop, or remove a visible task. Keep job
     // creation and all other queue mutations restricted to extension UI pages.
     const readOnlyQueueState = message.type === "flow-queue:get";
-    const trackerQueueAction = ["flow-queue:pause", "flow-queue:stop", "flow-queue:remove"].includes(message.type);
+    const trackerQueueAction = ["flow-queue:pause", "flow-queue:resume", "flow-queue:stop", "flow-queue:remove"].includes(message.type);
     if (_sender?.id !== chrome.runtime.id || (_sender?.tab && !readOnlyQueueState && !trackerQueueAction)) {
       respond({ ok: false, error: { code: "FLOW_QUEUE_FORBIDDEN", message: "Flow queue controls are available only from the extension UI." } });
       return;
@@ -1384,17 +1494,37 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
           break;
         case "flow-queue:add": {
           const source = message.job || {};
-          const beforeAdd = await flowJobQueue.snapshot();
           addedJob = await flowJobQueue.add({
             operation: source.operation,
             payload: source.payload,
             label: source.label || source.name,
             metadata: { source: "extension", ...await captureFlowTargetMetadata(), ...(source.metadata || {}) },
           });
-          // A normal Create/queue-panel action should start the queue for the
-          // newly staged item. Preserve an explicit user pause so adding a job
-          // does not unexpectedly resume work they stopped on purpose.
-          snapshot = beforeAdd.isPaused ? await flowJobQueue.snapshot() : await flowJobQueue.resume();
+          // Adding from the create form always enqueues first, then starts or
+          // resumes the sequential worker. Keep a manual-submit pause intact so
+          // the user can finish that confirmation before later jobs proceed.
+          const beforeStart = await flowJobQueue.snapshot();
+          snapshot = message.autoStart === false || beforeStart.isPaused || beforeStart.waitingForUser > 0
+            ? beforeStart
+            : await flowJobQueue.resume();
+          break;
+        }
+        case "flow-queue:add-batch": {
+          const source = Array.isArray(message.jobs) ? message.jobs : [];
+          const metadata = { source: "extension", ...await captureFlowTargetMetadata() };
+          addedJob = await flowJobQueue.addBatch(source.map(job => ({
+            operation: job?.operation,
+            payload: job?.payload,
+            label: job?.label || job?.name,
+            metadata: { ...metadata, ...(job?.metadata || {}) },
+          })), {
+            batchId: message.batchId,
+            batchLabel: message.batchLabel,
+          });
+          const beforeStart = await flowJobQueue.snapshot();
+          snapshot = message.autoStart === false || beforeStart.isPaused || beforeStart.waitingForUser > 0
+            ? beforeStart
+            : await flowJobQueue.resume();
           break;
         }
         case "flow-queue:pause":
@@ -1431,6 +1561,14 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
         case "flow-queue:retry":
           snapshot = (await retryExtensionFlowJob(String(message.id || message.taskId || ""))).snapshot;
           break;
+        case "flow-queue:retry-batch": {
+          const result = await flowJobQueue.retryBatch(String(message.batchId || ""));
+          const beforeStart = await flowJobQueue.snapshot();
+          snapshot = !result.retried.length || beforeStart.isPaused || beforeStart.waitingForUser > 0
+            ? beforeStart
+            : await flowJobQueue.resume();
+          return { ok: true, retried: result.retried, skipped: result.skipped, ...flowQueueSnapshot(snapshot) };
+        }
         case "flow-queue:reorder": {
           const jobs = await flowJobQueue.list();
           const id = String(message.id || message.taskId || jobs[Number(message.fromIndex)]?.id || "");
@@ -1441,7 +1579,7 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
         default:
           throw Object.assign(new Error(`Unsupported Flow queue action: ${message.type}`), { code: "FLOW_QUEUE_ACTION_UNSUPPORTED" });
       }
-      return { ok: true, ...(addedJob ? { job: addedJob } : {}), ...flowQueueSnapshot(snapshot) };
+      return { ok: true, ...(addedJob ? (Array.isArray(addedJob) ? { addedJobs: addedJob } : { job: addedJob }) : {}), ...flowQueueSnapshot(snapshot) };
     })().then(respond).catch(error => respond({
       ok: false,
       error: { code: error?.code || "FLOW_QUEUE_FAILED", message: String(error?.message || error) },

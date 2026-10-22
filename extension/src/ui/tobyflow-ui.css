@@ -255,7 +255,7 @@ textarea:disabled {
 }
 .flow-mcp-sidebar .form-textarea { min-height: 92px; line-height: 1.55; }
 .flow-mcp-sidebar #inputPromptImage,
-.flow-mcp-sidebar #inputPromptVideo { min-height: 150px; }
+.flow-mcp-sidebar #inputPromptVideo { min-height: 96px; max-height: 180px; }
 .flow-mcp-sidebar .form-textarea:hover,
 .flow-mcp-sidebar .form-input:hover,
 .flow-mcp-sidebar .form-select:hover { border-color: var(--border-light) !important; }
@@ -271,7 +271,10 @@ textarea:disabled {
   background: #1b1b1b;
 }
 .flow-mcp-sidebar .ref-upload-slot,
-.flow-mcp-sidebar .ref-card { width: 68px; height: 68px; }
+.flow-mcp-sidebar .ref-card { width: 56px; height: 56px; }
+.flow-mcp-sidebar .ref-section { gap: 7px; padding: 8px; }
+.flow-mcp-sidebar .ref-container { gap: 6px; }
+.flow-mcp-sidebar .ref-dropzone-hint { padding: 5px; font-size: 10px; }
 
 .flow-mcp-sidebar .btn {
   min-height: 34px;

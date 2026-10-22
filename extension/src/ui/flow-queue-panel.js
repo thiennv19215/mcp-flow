@@ -4,6 +4,7 @@
   const MESSAGE = Object.freeze({
     get: "flow-queue:get",
     add: "flow-queue:add",
+    addBatch: "flow-queue:add-batch",
     pause: "flow-queue:pause",
     resume: "flow-queue:resume",
     manualContinue: "flow-queue:manual-continue",
@@ -13,6 +14,7 @@
     remove: "flow-queue:remove",
     reorder: "flow-queue:reorder",
     retry: "flow-queue:retry",
+    retryBatch: "flow-queue:retry-batch",
   });
 
   const RETRYABLE_OPERATIONS = new Set([
@@ -22,6 +24,7 @@
     "flow.agent.batch",
     "flow.character.create",
     "flow.character.edit",
+    "flow.asset.trash",
   ]);
 
   const TEXT = Object.freeze({
@@ -31,14 +34,31 @@
       promptAria: "Prompt thêm vào hàng đợi Flow", promptPlaceholder: "Nhập prompt để thêm vào hàng đợi Flow…",
       typeAria: "Loại nội dung Flow", image: "Tạo ảnh", video: "Tạo video", edit: "Chỉnh sửa video", continue: "Nối tiếp video", agent: "Flow Agent batch",
       assetPlaceholder: "Tên video có sẵn trong project (cho edit/continue)", assetAria: "Tên video trong Flow",
-      ratioAria: "Tỷ lệ khung hình", auto: "Tự động", submit: "Xếp hàng & chạy",
+      ratioAria: "Tỷ lệ khung hình", auto: "Tự động", submit: "Thêm vào hàng đợi",
+      batchLabel: "Mỗi đoạn cách nhau một dòng trống là một tác vụ trong batch",
+      batchName: "Batch Flow", batchItem: "Tác vụ {n}/{total}", batchLimit: "Batch tối đa 100 prompt.",
+      batchComplete: "{n}/{total} hoàn tất",
+      referenceNames: "Tên ảnh/video tham chiếu trong project, mỗi dòng một mục",
+      referenceModeAria: "Cách gán tham chiếu cho prompt",
+      referenceNone: "Không dùng tham chiếu", referenceAll: "Dùng tất cả cho mỗi prompt", referenceSequential: "Chia lần lượt theo prompt",
+      referenceCountAria: "Số tham chiếu cho mỗi prompt", referenceCountLabel: "tham chiếu/prompt",
+      referenceTooMany: "Flow chỉ nhận tối đa 3 tham chiếu cho mỗi prompt.", referencePoolShort: "Không đủ tham chiếu cho cách chia lần lượt đã chọn.",
+      firstFrameNames: "Frame đầu video (mỗi dòng một prompt; một dòng dùng chung)", lastFrameNames: "Frame cuối video (mỗi dòng một prompt; một dòng dùng chung)",
+      frameCountMismatch: "Frame cần có một mục dùng chung hoặc một mục cho mỗi prompt.", frameReferenceConflict: "Flow Frames không dùng kèm tham chiếu ingredients.",
+      autoRetrying: "Tự thử lại lần {n}/{max} sau lỗi {code}: {error}",
       tasks: "tác vụ", completed: "hoàn tất", paused: "đã tạm dừng", running: "đang chạy", empty: "Hàng đợi đang trống.",
+      pageBlockedAttentionRetry: "Flow đang có trạng thái cản trở thao tác. Hàng đợi đã tự tạm dừng và giữ nguyên các tác vụ sau. Khắc phục trạng thái Flow rồi bấm Chạy tiếp; tác vụ chưa gửi sẽ được thử lại trước.",
+      pageBlockedAttentionContinue: "Flow vẫn có trạng thái cần xử lý. Hàng đợi đã tạm dừng và giữ nguyên các tác vụ sau. Xử lý trạng thái đó rồi bấm Chạy tiếp để chạy các tác vụ sau. Tác vụ hiện tại vẫn báo lỗi để tránh gửi hoặc xác nhận trùng.",
+      outcomeUnknownAttention: "Flow chưa xác nhận task hiện tại đã gửi hay chưa. Hàng đợi đã tạm dừng và giữ các task sau ở trạng thái chờ. Kiểm tra Flow trước; nếu lệnh đã chạy, đừng gửi lại. Sau khi xác định trạng thái, bấm Chạy tiếp để chạy task sau. Task hiện tại sẽ không tự gửi lại.",
+      dependencyBlockedAttention: "Tác vụ này đang chờ một tác vụ Flow trước đó. Xử lý hoặc thử lại tác vụ trước, rồi bấm Chạy tiếp để nối lại chuỗi.",
       mcp: "AI · MCP", manual: "THỦ CÔNG", moveUp: "Chuyển tác vụ {n} lên", moveDown: "Chuyển tác vụ {n} xuống", retry: "Thử lại", remove: "Xóa",
       pending: "Đang chờ", runningStatus: "Đang chạy", completedStatus: "Hoàn tất", failed: "Thất bại", cancelled: "Đã hủy",
+      needsAttention: "Cần xử lý",
       waitingForUser: "Chờ bạn bấm Tạo", continueManual: "Đã bấm Tạo · tiếp tục", cancelManual: "Bỏ qua", manualSubmitLabel: "Tôi sẽ tự bấm Tạo trên Flow",
       noConnection: "Không thể kết nối với tiện ích Flow.", updateFailed: "Không thể cập nhật hàng đợi Flow.",
       assetRequired: "Nhập tên video cần chỉnh sửa hoặc nối tiếp.", scenesRequired: "Nhập ít nhất một cảnh, mỗi cảnh trên một dòng.",
       editLabel: "Sửa", continueLabel: "Nối tiếp", agentLabel: "Agent", scenes: "cảnh",
+      retryBatch: "Thử lại {n} tác vụ lỗi an toàn",
     },
     en: {
       aria: "Flow task queue", title: "Flow queue", loading: "Loading…",
@@ -46,14 +66,31 @@
       promptAria: "Prompt to add to the Flow queue", promptPlaceholder: "Enter a prompt to add to the Flow queue…",
       typeAria: "Flow content type", image: "Generate image", video: "Generate video", edit: "Edit video", continue: "Continue video", agent: "Flow Agent batch",
       assetPlaceholder: "Existing video name in the project (for edit/continue)", assetAria: "Video name in Flow",
-      ratioAria: "Aspect ratio", auto: "Auto", submit: "Queue & run",
+      ratioAria: "Aspect ratio", auto: "Auto", submit: "Add to queue",
+      batchLabel: "Each paragraph separated by a blank line is one batch task",
+      batchName: "Flow batch", batchItem: "Task {n}/{total}", batchLimit: "A batch can contain at most 100 prompts.",
+      batchComplete: "{n}/{total} complete",
+      referenceNames: "Flow project reference image/video names, one per line",
+      referenceModeAria: "How references are assigned to prompts",
+      referenceNone: "No references", referenceAll: "Use all for every prompt", referenceSequential: "Assign in order per prompt",
+      referenceCountAria: "References per prompt", referenceCountLabel: "refs/prompt",
+      referenceTooMany: "Flow accepts at most 3 references per prompt.", referencePoolShort: "There are not enough references for this sequential assignment.",
+      firstFrameNames: "Video first frame (one line per prompt; one line applies to all)", lastFrameNames: "Video last frame (one line per prompt; one line applies to all)",
+      frameCountMismatch: "Frames need one shared entry or one entry per prompt.", frameReferenceConflict: "Flow Frames cannot be combined with ingredient references.",
+      autoRetrying: "Automatically retrying {n}/{max} after {code}: {error}",
       tasks: "tasks", completed: "completed", paused: "paused", running: "running", empty: "The queue is empty.",
+      pageBlockedAttentionRetry: "Flow has a page state that is blocking work. The queue paused automatically and kept later tasks pending. Resolve the Flow state, then select Resume; the task that was not submitted will be retried first.",
+      pageBlockedAttentionContinue: "Flow still has a state that needs attention. The queue paused automatically and kept later tasks pending. Resolve it, then select Resume to continue with later tasks. The current task remains failed to prevent a duplicate confirmation or submission.",
+      outcomeUnknownAttention: "Flow did not confirm whether the current task was submitted. The queue paused and kept later tasks pending. Check Flow first; if the request is running, do not submit it again. After you confirm its state, select Resume to run the next task. The current task will not be retried automatically.",
+      dependencyBlockedAttention: "This task is waiting for an earlier Flow task. Resolve or retry that task, then select Resume to continue the chain.",
       mcp: "AI · MCP", manual: "MANUAL", moveUp: "Move task {n} up", moveDown: "Move task {n} down", retry: "Retry", remove: "Remove",
       pending: "Pending", runningStatus: "Running", completedStatus: "Completed", failed: "Failed", cancelled: "Cancelled",
+      needsAttention: "Needs attention",
       waitingForUser: "Waiting for your submit", continueManual: "I clicked Create · continue", cancelManual: "Skip", manualSubmitLabel: "I will click Create in Flow",
       noConnection: "Cannot connect to the Flow extension.", updateFailed: "Could not update the Flow queue.",
       assetRequired: "Enter the video name to edit or continue.", scenesRequired: "Enter at least one scene, one per line.",
       editLabel: "Edit", continueLabel: "Continue", agentLabel: "Agent", scenes: "scenes",
+      retryBatch: "Retry {n} safe failed tasks",
     },
   });
 
@@ -64,6 +101,8 @@
     .flow-queue-panel__heading,.flow-queue-panel__item-head{justify-content:space-between}
     .flow-queue-panel__title{font-weight:700;font-size:14px}
     .flow-queue-panel__summary,.flow-queue-panel__muted{color:var(--text-muted,#8b8b92);font-size:12px}
+    .flow-queue-panel__status--attention{color:#fbbf24}
+    .flow-queue-panel__attention{padding:8px 10px;border:1px solid rgba(245,158,11,.35);border-radius:6px;background:rgba(245,158,11,.08);color:#fbbf24;font-size:12px}
     .flow-queue-panel__toolbar{flex-wrap:wrap}
     .flow-queue-panel button{font:inherit;color:inherit;background:var(--card,#292929);border:1px solid var(--border,rgba(255,255,255,.12));border-radius:6px;padding:5px 9px;cursor:pointer}
     .flow-queue-panel button:hover:not(:disabled){border-color:var(--primary,#ccff00)}
@@ -201,6 +240,10 @@
       heading.append(makeElement("span", "flow-queue-panel__title", text.title));
       this.summary = makeElement("span", "flow-queue-panel__summary", text.loading);
       heading.append(this.summary);
+      this.attentionBanner = makeElement("div", "flow-queue-panel__attention");
+      this.attentionBanner.setAttribute("role", "status");
+      this.attentionBanner.setAttribute("aria-live", "polite");
+      this.attentionBanner.hidden = true;
 
       const toolbar = makeElement("div", "flow-queue-panel__toolbar");
       toolbar.append(
@@ -230,6 +273,47 @@
         type.append(option);
       }
       this.typeInput = type;
+      const refsInput = makeElement("textarea", "flow-queue-panel__input");
+      refsInput.name = "references";
+      refsInput.maxLength = 3000;
+      refsInput.rows = 2;
+      refsInput.setAttribute("aria-label", text.referenceNames);
+      refsInput.placeholder = text.referenceNames;
+      this.referencesInput = refsInput;
+      const refMode = makeElement("select", "flow-queue-panel__input");
+      refMode.name = "reference_mode";
+      refMode.setAttribute("aria-label", text.referenceModeAria);
+      for (const [value, label] of [["none", text.referenceNone], ["all", text.referenceAll], ["sequential", text.referenceSequential]]) {
+        const option = makeElement("option", "", label);
+        option.value = value;
+        refMode.append(option);
+      }
+      this.referenceModeInput = refMode;
+      const refCountWrap = makeElement("label", "flow-queue-panel__manual");
+      const refCount = makeElement("select", "flow-queue-panel__input");
+      refCount.name = "reference_count";
+      refCount.setAttribute("aria-label", text.referenceCountAria);
+      for (const value of ["1", "2", "3"]) {
+        const option = makeElement("option", "", value);
+        option.value = value;
+        refCount.append(option);
+      }
+      refCountWrap.append(refCount, makeElement("span", "", text.referenceCountLabel));
+      this.referenceCountInput = refCount;
+      const firstFramesInput = makeElement("textarea", "flow-queue-panel__input");
+      firstFramesInput.name = "first_frames";
+      firstFramesInput.rows = 2;
+      firstFramesInput.maxLength = 3000;
+      firstFramesInput.placeholder = text.firstFrameNames;
+      firstFramesInput.setAttribute("aria-label", text.firstFrameNames);
+      this.firstFramesInput = firstFramesInput;
+      const lastFramesInput = makeElement("textarea", "flow-queue-panel__input");
+      lastFramesInput.name = "last_frames";
+      lastFramesInput.rows = 2;
+      lastFramesInput.maxLength = 3000;
+      lastFramesInput.placeholder = text.lastFrameNames;
+      lastFramesInput.setAttribute("aria-label", text.lastFrameNames);
+      this.lastFramesInput = lastFramesInput;
       this.assetInput = makeElement("input", "flow-queue-panel__input");
       this.assetInput.name = "asset";
       this.assetInput.type = "text";
@@ -250,7 +334,12 @@
       manualCheckbox.type = "checkbox";
       manualCheckbox.name = "manual_submit";
       manualLabel.append(manualCheckbox, makeElement("span", "", text.manualSubmitLabel));
-      form.append(input, type, this.assetInput, ratio, submit, manualLabel);
+      const batchLabel = makeElement("label", "flow-queue-panel__manual");
+      const batchCheckbox = makeElement("input");
+      batchCheckbox.type = "checkbox";
+      batchCheckbox.name = "batch_mode";
+      batchLabel.append(batchCheckbox, makeElement("span", "", text.batchLabel));
+      form.append(input, type, this.assetInput, ratio, refsInput, refMode, refCountWrap, firstFramesInput, lastFramesInput, submit, manualLabel, batchLabel);
 
       this.error = makeElement("div", "flow-queue-panel__error");
       this.error.setAttribute("role", "alert");
@@ -258,7 +347,7 @@
       this.itemsElement = makeElement("div", "flow-queue-panel__items");
       this.itemsElement.setAttribute("aria-live", "polite");
 
-      panel.append(heading, toolbar, form, this.error, this.itemsElement);
+      panel.append(heading, toolbar, this.attentionBanner, form, this.error, this.itemsElement);
       this.container.replaceChildren(panel);
       this.panel = panel;
       this._syncFields();
@@ -280,6 +369,12 @@
         asset: this.assetInput?.value || "",
         ratio: this.panel?.querySelector('[name="aspect_ratio"]')?.value || "",
         manualSubmit: this.panel?.querySelector('[name="manual_submit"]')?.checked === true,
+        batchMode: this.panel?.querySelector('[name="batch_mode"]')?.checked === true,
+        references: this.referencesInput?.value || "",
+        referenceMode: this.referenceModeInput?.value || "none",
+        referenceCount: this.referenceCountInput?.value || "1",
+        firstFrames: this.firstFramesInput?.value || "",
+        lastFrames: this.lastFramesInput?.value || "",
       };
       this.locale = next;
       this._buildShell();
@@ -288,6 +383,12 @@
       this.assetInput.value = previous.asset;
       this.panel.querySelector('[name="aspect_ratio"]').value = previous.ratio;
       this.panel.querySelector('[name="manual_submit"]').checked = previous.manualSubmit;
+      this.panel.querySelector('[name="batch_mode"]').checked = previous.batchMode;
+      this.referencesInput.value = previous.references;
+      this.referenceModeInput.value = previous.referenceMode;
+      this.referenceCountInput.value = previous.referenceCount;
+      this.firstFramesInput.value = previous.firstFrames;
+      this.lastFramesInput.value = previous.lastFrames;
       this._syncFields();
       this.render();
     }
@@ -339,10 +440,17 @@
       const items = normalizeItems(this.snapshot);
       const running = Boolean(this.snapshot.running ?? this.snapshot.isRunning ?? this.snapshot.state?.running);
       const paused = Boolean(this.snapshot.paused ?? this.snapshot.isPaused ?? this.snapshot.state?.paused);
+      const attention = this.snapshot.attention ?? this.snapshot.state?.attention;
       const active = Number(this.snapshot.activeCount ?? this.snapshot.active ?? this.snapshot.state?.activeCount ?? 0);
       const counts = this.snapshot.counts || {};
       const completed = Number(counts.completed ?? this.snapshot.completed ?? items.filter(item => this._status(item) === "completed").length);
-      this.summary.textContent = `${items.length} ${this._text("tasks")} · ${completed} ${this._text("completed")}${running ? (paused ? ` · ${this._text("paused")}` : ` · ${this._text("running")}${active ? ` (${active})` : ""}`) : ""}`;
+      this.summary.textContent = `${items.length} ${this._text("tasks")} · ${completed} ${this._text("completed")}${paused ? ` · ${this._text("paused")}` : running ? ` · ${this._text("running")}${active ? ` (${active})` : ""}` : ""}`;
+      this.attentionBanner.hidden = !["flow-page-blocked", "flow-outcome-unknown", "flow-dependency-blocked"].includes(attention?.type);
+      this.attentionBanner.textContent = this.attentionBanner.hidden ? "" : attention?.type === "flow-dependency-blocked"
+        ? this._text("dependencyBlockedAttention")
+        : attention?.type === "flow-outcome-unknown"
+          ? this._text("outcomeUnknownAttention")
+          : this._text(attention?.retryOnResume === false ? "pageBlockedAttentionContinue" : "pageBlockedAttentionRetry");
       this.itemsElement.replaceChildren();
       if (!items.length) {
         this.itemsElement.append(makeElement("div", "flow-queue-panel__empty", this._text("empty")));
@@ -367,9 +475,29 @@
       const labelContainer = makeElement("span", "flow-queue-panel__label-container");
       labelContainer.style.cssText = "display:flex;align-items:center;min-width:0;overflow:hidden";
       labelContainer.append(sourceBadge, makeElement("span", "flow-queue-panel__label", label));
-      head.append(labelContainer, makeElement("span", "flow-queue-panel__status", this._status(task)));
+      const attention = this.snapshot?.attention ?? this.snapshot?.state?.attention;
+      const isBlockedTask = ["flow-page-blocked", "flow-outcome-unknown", "flow-dependency-blocked"].includes(attention?.type) && String(attention.jobId || "") === id && String(task?.status || "").toLowerCase() === "failed";
+      const status = makeElement("span", `flow-queue-panel__status${isBlockedTask ? " flow-queue-panel__status--attention" : ""}`, isBlockedTask ? this._text("needsAttention") : this._status(task));
+      head.append(labelContainer, status);
       item.append(head);
-      const detail = task?.progress?.message ?? task?.progressText ?? task?.message ?? task?.error ?? "";
+      if (task?.batch && Number.isInteger(task.batch.batchIndex) && Number.isInteger(task.batch.batchCount)) {
+        const siblings = normalizeItems(this.snapshot).filter(candidate => candidate?.batch?.batchId === task.batch.batchId);
+        const completedCount = siblings.filter(candidate => ["completed", "done"].includes(String(candidate.status || "").toLowerCase())).length;
+        const batchText = `${task.batch.batchLabel || this._text("batchName")} · ${this._text("batchItem", { n: task.batch.batchIndex + 1, total: task.batch.batchCount })} · ${this._text("batchComplete", { n: completedCount, total: task.batch.batchCount })}`;
+        item.append(makeElement("div", "flow-queue-panel__detail", batchText));
+      }
+      const failed = ["failed", "error", "rejected"].includes(String(task?.status ?? task?.state ?? "").toLowerCase());
+      const autoRetry = String(task?.status || "").toLowerCase() === "pending" && task?.progress?.phase === "auto_retry";
+      const detail = autoRetry
+        ? this._text("autoRetrying", {
+          n: Number(task.progress.attempt) || 1,
+          max: Number(task.progress.maxAttempts) || 2,
+          code: String(task.progress.errorCode || "FLOW_RETRYABLE_ERROR"),
+          error: String(task.progress.reason || "").slice(0, 240),
+        })
+        : failed
+        ? [task?.errorCode, task?.error].filter(Boolean).join(": ")
+        : task?.progress?.message ?? task?.progressText ?? task?.message ?? task?.error ?? "";
       if (detail) item.append(makeElement("div", "flow-queue-panel__detail", detail));
       const percent = progressPercent(task);
       if (percent !== null) {
@@ -406,6 +534,17 @@
         retry.dataset.index = String(index);
         actions.append(retry);
       }
+      const batchId = task?.batch?.batchId;
+      if (batchId) {
+        const siblings = normalizeItems(this.snapshot).filter(candidate => candidate?.batch?.batchId === batchId);
+        const firstVisibleIndex = normalizeItems(this.snapshot).findIndex(candidate => candidate?.batch?.batchId === batchId);
+        const retryableCount = siblings.filter(candidate => this._isKnownSafeRetry(candidate) && String(candidate.status).toLowerCase() === "failed").length;
+        if (index === firstVisibleIndex && retryableCount > 0) {
+          const retryBatch = this._button(this._text("retryBatch", { n: retryableCount }), "retry-batch");
+          retryBatch.dataset.batchId = String(batchId);
+          actions.append(retryBatch);
+        }
+      }
       const remove = this._button(this._text("remove"), "remove");
       remove.dataset.itemId = id;
       actions.append(remove);
@@ -437,32 +576,73 @@
       const prompt = String(input?.value || "").trim();
       if (!prompt) return;
       const type = String(form.elements.namedItem("type")?.value || "image");
+      const batchMode = form.elements.namedItem("batch_mode")?.checked === true && type !== "agent";
+      const prompts = batchMode ? prompt.split(/\n\s*\n/).map(value => value.trim()).filter(Boolean) : [prompt];
+      if (prompts.length > 100) { this._showError(this._text("batchLimit")); return; }
       const aspectRatio = String(form.elements.namedItem("aspect_ratio")?.value || "");
       const asset = String(form.elements.namedItem("asset")?.value || "").trim();
       let operation = "flow.generation.submit";
-      let payload = { type, prompt, aspect_ratio: aspectRatio, variants: 1, attachments: [], video_settings: {} };
-      let label = prompt.slice(0, 96);
+      const referenceNames = String(form.elements.namedItem("references")?.value || "").split(/[\r\n,]+/).map(value => value.trim()).filter(Boolean);
+      const referenceMode = String(form.elements.namedItem("reference_mode")?.value || "none");
+      const referenceCount = Math.max(1, Math.min(3, Number(form.elements.namedItem("reference_count")?.value) || 1));
+      const readFrames = name => String(form.elements.namedItem(name)?.value || "").trimEnd().split(/\r?\n/).map(value => value.trim());
+      const firstFrames = readFrames("first_frames");
+      const lastFrames = readFrames("last_frames");
+      const hasFrames = firstFrames.some(Boolean) || lastFrames.some(Boolean);
+      if (hasFrames && type !== "video") { this._showError(this._text("frameCountMismatch")); return; }
+      if (hasFrames && [firstFrames, lastFrames].some(values => values.some(Boolean) && values.length !== 1 && values.length !== prompts.length)) {
+        this._showError(this._text("frameCountMismatch")); return;
+      }
+      if (hasFrames && referenceMode !== "none") { this._showError(this._text("frameReferenceConflict")); return; }
+      if (type === "image" || type === "video") {
+        const neededReferences = referenceMode === "all" ? referenceNames.length : prompts.length * referenceCount;
+        if (referenceMode === "all" && referenceNames.length > 3) { this._showError(this._text("referenceTooMany")); return; }
+        if (referenceMode === "sequential" && referenceNames.length < neededReferences) { this._showError(this._text("referencePoolShort")); return; }
+      }
+      const attachmentsForPrompt = itemIndex => {
+        const names = referenceMode === "all" ? referenceNames
+          : referenceMode === "sequential" ? referenceNames.slice(itemIndex * referenceCount, (itemIndex + 1) * referenceCount)
+          : [];
+        return names.map(assetName => ({ assetName }));
+      };
+      let makePayload = (itemPrompt, itemIndex) => ({
+        type, prompt: itemPrompt, aspect_ratio: aspectRatio, variants: 1,
+        attachments: hasFrames ? [] : attachmentsForPrompt(itemIndex),
+        ...(hasFrames ? {
+          ...(firstFrames[itemIndex] ? { firstFrame: { assetName: firstFrames.length === 1 ? firstFrames[0] : firstFrames[itemIndex] } } : {}),
+          ...(lastFrames[itemIndex] ? { lastFrame: { assetName: lastFrames.length === 1 ? lastFrames[0] : lastFrames[itemIndex] } } : {}),
+        } : {}),
+        video_settings: {},
+      });
+      let makeLabel = itemPrompt => itemPrompt.slice(0, 96);
       if (type === "edit" || type === "continue") {
         if (!asset) { this._showError(this._text("assetRequired")); return; }
         operation = type === "edit" ? "flow.edit.run" : "flow.continue.run";
-        payload = { params: type === "edit" ? { edit_asset: asset, prompt } : { continue_from: asset, prompt, continue_mode: "exact", aspect_ratio: aspectRatio || "16:9" } };
-        label = `${type === "edit" ? this._text("editLabel") : this._text("continueLabel")}: ${asset}`;
+        makePayload = itemPrompt => ({ params: type === "edit" ? { edit_asset: asset, prompt: itemPrompt } : { continue_from: asset, prompt: itemPrompt, continue_mode: "exact", aspect_ratio: aspectRatio || "16:9" } });
+        makeLabel = () => `${type === "edit" ? this._text("editLabel") : this._text("continueLabel")}: ${asset}`;
       } else if (type === "agent") {
         const scenes = prompt.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
         if (!scenes.length) { this._showError(this._text("scenesRequired")); return; }
         operation = "flow.agent.batch";
-        payload = { params: { agent_scenes: scenes, aspect_ratio: aspectRatio || "16:9" } };
-        label = `${this._text("agentLabel")}: ${scenes.length} ${this._text("scenes")}`;
+        makePayload = () => ({ params: { agent_scenes: scenes, aspect_ratio: aspectRatio || "16:9" } });
+        makeLabel = () => `${this._text("agentLabel")}: ${scenes.length} ${this._text("scenes")}`;
       } else {
-        payload.type = type;
-        payload.manualSubmit = form.elements.namedItem("manual_submit")?.checked === true;
+        const manualSubmit = form.elements.namedItem("manual_submit")?.checked === true;
+        const original = makePayload;
+        makePayload = itemPrompt => ({ ...original(itemPrompt), manualSubmit });
       }
-      const response = await this.add({ operation, payload, label });
+      if (batchMode && prompts.length > 1) {
+        const jobs = prompts.map((itemPrompt, index) => ({ operation, payload: makePayload(itemPrompt, index), label: makeLabel(itemPrompt) }));
+        const response = await this._send(MESSAGE.addBatch, { jobs, batchLabel: this._text("batchName") });
+        if (response?.ok !== false && !response?.error && input) input.value = "";
+        return;
+      }
+      const response = await this.add({ operation, payload: makePayload(prompts[0], 0), label: makeLabel(prompts[0]) });
       if (response?.ok !== false && !response?.error && input) input.value = "";
     }
 
     _handleChange(event) {
-      if (event.target === this.typeInput) this._syncFields();
+      if (event.target === this.typeInput || event.target === this.referenceModeInput) this._syncFields();
     }
 
     _syncFields() {
@@ -472,6 +652,12 @@
       this.assetInput.required = needsAsset;
       const manualLabel = this.panel?.querySelector(".flow-queue-panel__manual");
       if (manualLabel) manualLabel.hidden = needsAsset || this.typeInput.value === "agent";
+      const batchLabel = this.panel?.querySelector('[name="batch_mode"]')?.closest("label");
+      if (batchLabel) batchLabel.hidden = this.typeInput.value === "agent";
+      const referenceControls = [this.referencesInput, this.referenceModeInput, this.referenceCountInput?.closest("label")];
+      referenceControls.forEach(control => { if (control) control.hidden = !["image", "video"].includes(this.typeInput.value); });
+      [this.firstFramesInput, this.lastFramesInput].forEach(control => { if (control) control.hidden = this.typeInput.value !== "video"; });
+      if (this.referenceCountInput) this.referenceCountInput.disabled = this.referenceModeInput?.value !== "sequential";
     }
 
     async _handleClick(event) {
@@ -498,6 +684,7 @@
         if (!this._isKnownSafeRetry(task)) return;
         return this._send(MESSAGE.retry, { id: taskIdentity(task, index), taskId: taskIdentity(task, index) });
       }
+      if (action === "retry-batch") return this._send(MESSAGE.retryBatch, { batchId: button.dataset.batchId });
     }
 
     _setBusy(value) {

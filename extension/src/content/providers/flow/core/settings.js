@@ -395,31 +395,58 @@
 
   async function chooseAspectRatio(aspectRatio, options = {}) {
     if (!aspectRatio) return;
-    const normalized = root.normalizeAspectRatio?.(aspectRatio) || String(aspectRatio).trim();
+    const wanted = String(aspectRatio).trim();
+    const normalized = foldLabel(root.normalizeAspectRatio?.(wanted) || wanted);
+    const escapedRatio = normalized.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const ratioPattern = new RegExp(`(?:^|[^\\d])${escapedRatio}(?:$|[^\\d])`);
+    const localizedAliases = {
+      "9:16": ["doc", "portrait", "vertical"],
+      "16:9": ["ngang", "landscape", "horizontal", "widescreen"],
+      "1:1": ["vuong", "square"],
+    }[normalized] || [];
+    const matches = element => [root.accessibleName?.(element), element.innerText, element.textContent]
+      .map(value => foldLabel(value).trim()).filter(Boolean)
+      .some(value => ratioPattern.test(value) || localizedAliases.includes(value));
+    const find = () => {
+      const panel = getVisibleFlowSettingsPanel() || document;
+      const candidates = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", panel, { checkVisible: false, latestFirst: true }) : null) ||
+        [...panel.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')];
+      return candidates.find(element => root.visible?.(element) && !isNavControl(element) && matches(element)) || null;
+    };
+    const isDisabled = element => element?.disabled === true || element?.getAttribute?.("aria-disabled") === "true";
+    const selected = element => nativeRadioSelected(element) || element?.getAttribute?.("aria-selected") === "true" || element?.getAttribute?.("data-state") === "active";
+
     await openFlowSettings(options);
-    const panel = flowSettingsPanelVisible() ? ((typeof root.flowQuery === "function" ? root.flowQuery("settings.panel", document, { checkVisible: false }) : null) || document.querySelector('[role="menu"], [role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane') || document) : document;
-
-    const candidates = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", panel, { checkVisible: false, latestFirst: true }) : null) || panel.querySelectorAll('[role="radio"], mat-radio-button, [role="tab"], [role="option"], button, [role="button"]'))].filter(el => root.visible?.(el) && !isNavControl(el));
-    const match = candidates.find(el => {
-      const label = foldLabel(root.accessibleName?.(el));
-      const txt = foldLabel(el.innerText || el.textContent || "");
-
-      if (label === normalized || txt === normalized || label.endsWith(` ${normalized}`) || txt.endsWith(` ${normalized}`)) return true;
-      if (label.includes(normalized) || txt.includes(normalized)) return true;
-
-      // Hỗ trợ từ khóa định dạng tiếng Việt
-      if (normalized === "9:16" && (/^(?:doc|portrait|vertical)$/i.test(label) || /^(?:doc|portrait|vertical)$/i.test(txt))) return true;
-      if (normalized === "16:9" && (/^(?:ngang|landscape|horizontal|widescreen)$/i.test(label) || /^(?:ngang|landscape|horizontal|widescreen)$/i.test(txt))) return true;
-      if (normalized === "1:1" && (/^(?:vuong|square)$/i.test(label) || /^(?:vuong|square)$/i.test(txt))) return true;
-
-      return false;
-    });
-
-    if (match) {
-      if (!nativeRadioSelected(match) && match.getAttribute("aria-selected") !== "true" && match.getAttribute("data-state") !== "active") {
-        match.click();
-        await waitPreparation(options, 300, "selecting Flow aspect ratio");
+    let target = find();
+    if (target && isDisabled(target)) {
+      throw root.flowError("FLOW_ASPECT_RATIO_UNAVAILABLE", `Flow's requested aspect ratio (${normalized}) is disabled. Nothing was submitted.`, true, false);
+    }
+    if (!target) {
+      const deadline = Math.min(Date.now() + 2000, Number.isFinite(options.deadline) ? options.deadline : Infinity);
+      while (Date.now() < deadline && !target) {
+        checkPreparation(options, "finding requested Flow aspect ratio");
+        await waitPreparation(options, 100, "finding requested Flow aspect ratio");
+        target = find();
+        if (target && isDisabled(target)) {
+          throw root.flowError("FLOW_ASPECT_RATIO_UNAVAILABLE", `Flow's requested aspect ratio (${normalized}) is disabled. Nothing was submitted.`, true, false);
+        }
       }
+    }
+    if (!target) {
+      throw root.flowError("FLOW_ASPECT_RATIO_UNAVAILABLE", `Flow does not expose the requested aspect ratio (${normalized}). Nothing was submitted.`, true, false);
+    }
+
+    if (!selected(target)) target.click();
+    const verifyDeadline = Math.min(Date.now() + 2500, Number.isFinite(options.deadline) ? options.deadline : Infinity);
+    let confirmed = false;
+    while (Date.now() < verifyDeadline) {
+      checkPreparation(options, "confirming the Flow aspect ratio");
+      const current = find();
+      if (selected(current)) { confirmed = true; break; }
+      await waitPreparation(options, 100, "confirming the Flow aspect ratio");
+    }
+    if (!confirmed) {
+      throw root.flowError("FLOW_ASPECT_RATIO_UNCONFIRMED", `Flow did not confirm the requested aspect ratio (${normalized}). Nothing was submitted.`, true, false);
     }
   }
 
@@ -475,15 +502,22 @@
       return candidates
         .find(element => root.visible?.(element) && !isNavControl(element) && matches(element)) || null;
     };
+    const isDisabled = element => element?.disabled === true || element?.getAttribute?.("aria-disabled") === "true";
     const codePrefix = kind === "duration" ? "DURATION" : kind === "resolution" ? "RESOLUTION" : "ASPECT_RATIO";
     await openFlowSettings(options);
     let target = find();
+    if (target && isDisabled(target)) {
+      throw root.flowError(`FLOW_VIDEO_${codePrefix}_UNAVAILABLE`, `Flow's requested video ${kind} (${wanted}) is disabled. Nothing was submitted.`, true, false);
+    }
     if (!target && options.allowAbsent === true) return { selected: false, modelFixed: true };
     if (!target) {
       const deadline = Math.min(Date.now() + 2000, Number.isFinite(options.deadline) ? options.deadline : Infinity);
       while (Date.now() < deadline && !target) {
         await waitPreparation(options, 100, `finding requested video ${kind}`);
         target = find();
+        if (target && isDisabled(target)) {
+          throw root.flowError(`FLOW_VIDEO_${codePrefix}_UNAVAILABLE`, `Flow's requested video ${kind} (${wanted}) is disabled. Nothing was submitted.`, true, false);
+        }
       }
     }
     if (!target) {
@@ -618,6 +652,48 @@
     return foldLabel(label);
   }
 
+  function getVersionedModelIdentity(label) {
+    const normalized = normalizeModelLabel(label);
+    const family = /\bnano banana\b/.test(normalized)
+      ? "nano banana"
+      : /\bimagen\b/.test(normalized)
+        ? "imagen"
+        : /\bveo\b/.test(normalized) ? "veo" : null;
+    if (!family) return null;
+    const match = normalized.match(new RegExp(`\\b${family.replace(/ /g, "\\s+")}(?:\\s+|[-_])(\\d+(?:\\.\\d+)*)(?![\\d.])`));
+    if (!match) return null;
+    const versionParts = match[1].split(".");
+    while (versionParts.length > 1 && Number(versionParts.at(-1)) === 0) versionParts.pop();
+    return {
+      family,
+      version: versionParts.join("."),
+      tier: /\b(lite|fast|quality)\b/.exec(normalized)?.[1] || null,
+    };
+  }
+
+  function modelLabelMatchesRequest(requestedModel, candidateLabel) {
+    const requestedLabel = normalizeModelLabel(requestedModel);
+    const normalized = normalizeModelLabel(candidateLabel);
+    if (!requestedLabel || !normalized) return false;
+    const isBananaLabel = label => /\bnano banana\b/.test(label);
+    if (isBananaLabel(normalized)) {
+      const requestedBananaLite = isBananaLabel(requestedLabel) && /\blite\b/.test(requestedLabel);
+      const candidateBananaLite = /\blite\b/.test(normalized);
+      if (requestedBananaLite !== candidateBananaLite) return false;
+    }
+
+    const requestedIdentity = getVersionedModelIdentity(requestedLabel);
+    if (requestedIdentity) {
+      const candidate = getVersionedModelIdentity(normalized);
+      return Boolean(candidate && candidate.family === requestedIdentity.family &&
+        candidate.version === requestedIdentity.version && candidate.tier === requestedIdentity.tier);
+    }
+
+    const requestedVariant = /\b(fast|quality)\b/.exec(requestedLabel)?.[1];
+    if (requestedVariant && !new RegExp(`\\b${requestedVariant}\\b`).test(normalized)) return false;
+    return getModelAliases(requestedLabel).some(alias => normalized === alias || (alias.length >= 3 && normalized.includes(alias)));
+  }
+
   let capabilityRegistryPromise;
   async function assertNativeModelCapabilities(payload, type, framesMode = false, options = {}) {
     if (!capabilityRegistryPromise) {
@@ -666,7 +742,8 @@
     }
     const selectedModel = payload.model || (findModelPickerButton()?.innerText || findModelPickerButton()?.textContent || "");
     const normalized = normalizeModelLabel(selectedModel);
-    const rule = registry.models.find(item => item.match.some(alias => normalized.includes(normalizeModelLabel(alias))));
+    const hasUnverifiedVeoTier = /\bveo\b/.test(normalized) && /\b(lite|fast|quality)\b/.test(normalized);
+    const rule = hasUnverifiedVeoTier ? undefined : registry.models.find(item => item.match.some(alias => normalized.includes(normalizeModelLabel(alias))));
     const referenceCount = Array.isArray(payload.attachments) ? payload.attachments.length : 0;
     const maxReferences = rule?.maxReferences ?? registry.defaults.maxReferences;
     if (referenceCount > maxReferences) {
@@ -741,8 +818,47 @@
     checkPreparation(options, "selecting the Flow model");
     if (!model) return;
     emitImagePreparationProgress(options, "locating model selector");
-    const legacyImage = type === "image" && /^\s*(nano banana( 2)?|latest)?\s*$/i.test(model);
+    const legacyImage = type === "image" && /^\s*(nano banana|latest)?\s*$/i.test(model);
     const aliases = getModelAliases(model);
+    const requestedLabel = normalizeModelLabel(model);
+    const isBananaLabel = label => /\bnano banana\b/.test(normalizeModelLabel(label));
+    const requestedBananaLite = isBananaLabel(requestedLabel) && /\blite\b/.test(requestedLabel);
+    const isAllowedModelLabel = label => {
+      if (!isBananaLabel(label)) return true;
+      const isLite = /\blite\b/.test(normalizeModelLabel(label));
+      return requestedBananaLite ? isLite : !isLite;
+    };
+    const requestedIdentity = getVersionedModelIdentity(requestedLabel);
+    const matchesRequestedModel = label => isAllowedModelLabel(label) && modelLabelMatchesRequest(model, label);
+    const selectedLabelMatchesRequest = label => {
+      const normalized = normalizeModelLabel(label);
+      if (legacyImage) return false;
+      return matchesRequestedModel(normalized);
+    };
+    const readVisibleModelLabel = element => [...new Set([
+      element?.innerText,
+      element?.textContent,
+      root.accessibleName?.(element),
+    ].map(normalizeModelLabel).filter(Boolean))].join(" ");
+    const readSelectedModelLabel = button => readVisibleModelLabel(button);
+    const optionIsSelected = option => {
+      try {
+        return nativeRadioSelected(option) || ["aria-selected", "aria-checked", "data-selected"].some(attribute =>
+          option?.getAttribute?.(attribute) === "true") || option?.getAttribute?.("data-state") === "active";
+      } catch { return false; }
+    };
+    const isModelMenuVisible = () => {
+      const activeMenu = (typeof root.flowQuery === "function" ? root.flowQuery("settings.activeMenu", document, { checkVisible: false }) : null) ||
+        document.querySelector('[role="menu"]:last-of-type, [data-radix-popper-content-wrapper]:last-of-type, .cdk-overlay-pane:last-of-type');
+      return Boolean(activeMenu && root.visible?.(activeMenu));
+    };
+    const closeModelMenu = async () => {
+      try {
+        if (!isModelMenuVisible()) return;
+        root.dispatchEscapeKey?.();
+        await waitPreparation(options, 150, "closing the Flow model selector");
+      } catch { /* Preserve the model-selection error or cancellation. */ }
+    };
 
     let button = findModelPickerButton();
     if (!button) {
@@ -758,33 +874,45 @@
       }
     }
 
-    if (button) {
-      const currentModelText = normalizeModelLabel(button.innerText || button.textContent || root.accessibleName?.(button) || "");
-      const alreadyApplied = aliases.some(alias => currentModelText === alias || (alias.length >= 3 && currentModelText.includes(alias)));
-      if (alreadyApplied) { emitImagePreparationProgress(options, "requested model already selected"); return; }
+    if (!button) {
+      throw root.flowError("FLOW_MODEL_SELECTOR_UNAVAILABLE", `Flow's ${type} model selector is not available in the visible page. Nothing was submitted.`, true, false);
     }
 
-    if (!button) return;
+    const initialModelLabel = readSelectedModelLabel(button);
+    if (!legacyImage && selectedLabelMatchesRequest(initialModelLabel)) {
+      emitImagePreparationProgress(options, "requested model already selected");
+      return;
+    }
 
     emitImagePreparationProgress(options, "opening model selector");
-    button.click();
-    await waitPreparation(options, 450, "opening the Flow model selector");
+    try {
+      button.click();
+      await waitPreparation(options, 450, "opening the Flow model selector");
+    } catch (error) {
+      await closeModelMenu();
+      throw error;
+    }
 
     let items = [];
     const menuDeadline = Math.min(Date.now() + 4000, Number.isFinite(options.deadline) ? options.deadline : Infinity);
-    while (Date.now() < menuDeadline) {
-      checkPreparation(options, "loading Flow model choices");
-      items = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.dropdownItems", document, { checkVisible: false, latestFirst: true }) : null) || document.querySelectorAll('[role="menuitem"], [role="menuitemradio"], mat-option, [role="option"]'))].filter(el => root.visible?.(el));
-      if (!items.length) {
-        const activeMenu = (typeof root.flowQuery === "function" ? root.flowQuery("settings.activeMenu", document, { checkVisible: false }) : null) ||
-          document.querySelector('[role="menu"]:last-of-type, [data-radix-popper-content-wrapper]:last-of-type, .cdk-overlay-pane:last-of-type');
-        if (activeMenu) items = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("common.buttons", activeMenu, { checkVisible: false }) : null) || activeMenu.querySelectorAll('button, [role="menuitem"], [role="menuitemradio"]'))].filter(el => root.visible?.(el));
+    try {
+      while (Date.now() < menuDeadline) {
+        checkPreparation(options, "loading Flow model choices");
+        items = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.dropdownItems", document, { checkVisible: false, latestFirst: true }) : null) || document.querySelectorAll('[role="menuitem"], [role="menuitemradio"], mat-option, [role="option"]'))].filter(el => root.visible?.(el));
+        if (!items.length) {
+          const activeMenu = (typeof root.flowQuery === "function" ? root.flowQuery("settings.activeMenu", document, { checkVisible: false }) : null) ||
+            document.querySelector('[role="menu"]:last-of-type, [data-radix-popper-content-wrapper]:last-of-type, .cdk-overlay-pane:last-of-type');
+          if (activeMenu) items = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("common.buttons", activeMenu, { checkVisible: false }) : null) || activeMenu.querySelectorAll('button, [role="menuitem"], [role="menuitemradio"]'))].filter(el => root.visible?.(el));
+        }
+        if (items.length) break;
+        await waitPreparation(options, 100, "loading Flow model choices");
       }
-      if (items.length) break;
-      await waitPreparation(options, 100, "loading Flow model choices");
+    } catch (error) {
+      await closeModelMenu();
+      throw error;
     }
 
-    const names = items.map(el => root.accessibleName?.(el)).map(normalizeModelLabel);
+    const names = items.map(readVisibleModelLabel);
     let index = -1;
 
     if (legacyImage) {
@@ -799,13 +927,11 @@
         index = names.findIndex(name => /nano banana/i.test(name) && !/\blite\b/i.test(name));
       }
     } else {
-      index = items.findIndex((item, i) => {
-        const label = names[i] || normalizeModelLabel(item.textContent);
-        return aliases.includes(label);
-      });
-      if (index < 0) {
+      index = items.findIndex((item, i) => matchesRequestedModel(names[i] || item.textContent));
+      if (index < 0 && !requestedIdentity) {
         index = items.findIndex((item, i) => {
           const domText = names[i] || normalizeModelLabel(item.textContent);
+          if (!matchesRequestedModel(domText)) return false;
           const matched = aliases.find(a => domText.includes(a));
           if (!matched) return false;
           if (matched.includes("veo") && domText.includes("veo")) {
@@ -821,21 +947,49 @@
       }
     }
 
+    if (!items.length) {
+      await closeModelMenu();
+      throw root.flowError("FLOW_MODEL_OPTIONS_UNAVAILABLE", `Flow opened the ${type} model selector but did not expose its options. Nothing was submitted.`, true, false);
+    }
+
     if (index < 0) {
-      root.dispatchEscapeKey?.();
+      await closeModelMenu();
       emitImagePreparationProgress(options, "requested model option unavailable");
+      const available = [...new Set(names.filter(Boolean))].slice(0, 12).join(", ") || "none";
+      throw root.flowError("FLOW_MODEL_OPTION_UNAVAILABLE", `Flow does not offer the requested ${type} model "${model}" in the visible selector. Available options: ${available}. Nothing was submitted.`, false, false);
+    }
+
+    const chosenName = names[index] || normalizeModelLabel(items[index].textContent || "");
+    if (legacyImage && initialModelLabel && isAllowedModelLabel(initialModelLabel) &&
+        (initialModelLabel === chosenName || initialModelLabel.includes(chosenName))) {
+      await closeModelMenu();
+      emitImagePreparationProgress(options, "latest non-Lite Nano Banana model already selected");
       return;
     }
 
     const chosenItem = items[index];
     emitImagePreparationProgress(options, "selecting requested model");
-    chosenItem.click();
-    await waitPreparation(options, 500, "selecting the Flow model");
-
-    if (chosenItem.isConnected && root.visible?.(chosenItem)) {
-      root.dispatchEscapeKey?.();
-      await waitPreparation(options, 200, "closing the Flow model selector");
+    try {
+      chosenItem.click();
+      await waitPreparation(options, 500, "selecting the Flow model");
+    } catch (error) {
+      await closeModelMenu();
+      throw error;
     }
+    const optionSelected = optionIsSelected(chosenItem);
+
+    if (isModelMenuVisible()) await closeModelMenu();
+
+    const selectedButton = findModelPickerButton();
+    const selectedModelLabel = readSelectedModelLabel(selectedButton);
+    const selectedButtonConfirms = legacyImage
+      ? isAllowedModelLabel(selectedModelLabel) && Boolean(chosenName) &&
+        (selectedModelLabel === chosenName || selectedModelLabel.includes(chosenName))
+      : selectedLabelMatchesRequest(selectedModelLabel);
+    if (!optionSelected && !selectedButtonConfirms) {
+      throw root.flowError("FLOW_MODEL_SELECTION_UNCONFIRMED", `Flow did not confirm that model "${model}" was selected (current model: ${selectedModelLabel || "unknown"}). Nothing was submitted.`, true, false);
+    }
+
     emitImagePreparationProgress(options, "model selection settled");
   }
 
@@ -876,6 +1030,7 @@
     finishImagePreparationDiagnostics,
     finishVideoPreparationDiagnostics,
     assertNativeModelCapabilities,
+    modelLabelMatchesRequest,
     openFlowSettings,
     closeFlowSettings,
     inspectImagePreparationDiagnostics,
@@ -911,6 +1066,7 @@
   root.chooseResolution = chooseResolution;
   root.chooseNativeVariantCount = chooseNativeVariantCount;
   root.chooseNativeModel = chooseNativeModel;
+  root.modelLabelMatchesRequest = modelLabelMatchesRequest;
   root.restoreNativeFramesMode = restoreNativeFramesMode;
   root.flowRadio = flowRadio;
   root.flowOption = flowOption;

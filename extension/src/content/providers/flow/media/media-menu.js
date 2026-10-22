@@ -353,6 +353,9 @@
 
   async function scanNativeAssets(options = {}) {
     const maxDurationMs = Math.max(1000, Math.min(25_000, Number(options.maxDurationMs) || 25_000));
+    const maxItems = !options.exactName && !options.requireComplete && Number.isFinite(Number(options.maxItems))
+      ? Math.max(1, Math.min(5_000, Math.floor(Number(options.maxItems))))
+      : Infinity;
     const deadline = Math.min(Number(options.deadline) || Infinity, Date.now() + maxDurationMs);
     const controller = new AbortController();
     const remainingMs = Math.max(0, deadline - Date.now());
@@ -403,6 +406,7 @@
       for (const asset of collectAssets({ includeIncomplete: options.includeIncomplete })) {
         const key = asset.id ? `id:${asset.id}` : `name:${asset.kind}:${asset.name.toLowerCase()}`;
         const prior = byIdentity.get(key);
+        if (!prior && byIdentity.size >= maxItems) continue;
         byIdentity.set(key, {
           ...prior,
           ...asset,
@@ -469,6 +473,7 @@
         checkActive();
         const matches = rememberVisible();
         if (options.exactName && matches.length === 1) break;
+        if (byIdentity.size >= maxItems) break;
         const before = container.scrollTop;
         const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
         if (before >= maxTop - 2) { reachedEnd = true; break; }
@@ -497,7 +502,7 @@
         ...(options.includeIncomplete ? { ready, error } : {}),
         ...(hasBaselineIds && asset.id ? { newSinceBaseline: !baselineIds.has(String(asset.id)) } : {}),
       }));
-      options.onDiagnostics?.({ steps: scanSteps, uniqueTiles: output.length, reachedEnd });
+      options.onDiagnostics?.({ steps: scanSteps, uniqueTiles: output.length, reachedEnd, truncated: !reachedEnd && output.length >= maxItems });
       return result;
     } finally {
       clearTimeout(timeout);
