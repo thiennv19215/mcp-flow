@@ -345,6 +345,7 @@
         }
         /* Queue panel layout: compact summary + Auto Gen groups. */
         #flow-mcp-tracker-root {
+          box-sizing: border-box;
           width: min(500px, calc(100vw - 24px));
           max-height: min(470px, calc(100vh - 32px));
           border-radius: 14px;
@@ -445,7 +446,7 @@
         .flow-ft-group-progress > span { display: block; height: 100%; border-radius: 4px; background: #ccff00; transition: width .25s ease; }
         .flow-ft-task {
           display: flex;
-          align-items: center;
+          align-items: flex-start;
           gap: 9px;
           min-height: 39px;
           padding: 3px 4px;
@@ -463,12 +464,13 @@
           font-size: 11px;
           flex: 0 0 auto;
         }
-        .flow-ft-task-info { min-width: 0; flex: 1; }
+        .flow-ft-task-info { min-width: 0; flex: 1 1 0; }
         .flow-ft-task-line { display: flex; align-items: center; gap: 7px; min-width: 0; }
         .flow-ft-task-type { color: #c4d4e8; font-size: 11px; font-weight: 700; white-space: nowrap; }
-        .flow-ft-task-prompt { color: #f3f4f6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-        .flow-ft-task-meta { display: flex; align-items: center; gap: 8px; min-height: 16px; color: #8b95a5; font-size: 10px; }
-        .flow-ft-task-remove { opacity: .7; }
+        .flow-ft-task-prompt { min-width: 0; flex: 1 1 auto; color: #f3f4f6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+        .flow-ft-task-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; min-height: 16px; color: #8b95a5; font-size: 10px; }
+        .flow-ft-task-error { min-width: 0; margin-top: 3px; color: #fda4af; font-size: 10px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+        .flow-ft-task-remove { flex: 0 0 auto; opacity: .7; }
         .flow-ft-task-remove:hover { opacity: 1; color: #fb7185; }
         .flow-ft-status-tag { display: inline-flex; align-items: center; padding: 2px 6px; border-radius: 5px; background: rgba(148,163,184,.12); font-weight: 700; line-height: 1.2; }
         .flow-ft-status-tag.queued { color: #facc15; background: rgba(250,204,21,.13); }
@@ -491,11 +493,14 @@
       rootEl.innerHTML = `
         <div class="flow-ft-header" id="flow-ft-header">
           <div class="flow-ft-icon">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4.5 4.5c0 4 2.4 4.3 5 6.1 1.4 1 2.6 1.4 4.1 1.4h5.9M4.5 19.5c0-4 2.4-4.3 5-6.1 1.4-1 2.6-1.4 4.1-1.4h5.9"/>
+              <circle cx="4.5" cy="4.5" r="1.7" fill="currentColor" stroke="none"/>
+              <circle cx="4.5" cy="19.5" r="1.7" fill="currentColor" stroke="none"/>
+              <circle cx="19.5" cy="12" r="2" fill="currentColor" stroke="none"/>
             </svg>
           </div>
-          <div class="flow-ft-title">TobyFlow</div>
+          <div class="flow-ft-title">Flow MCP</div>
           <div class="flow-ft-auto">Auto</div>
           <div class="flow-ft-queue-state" id="flow-ft-queue-state">Sẵn sàng</div>
           <div class="flow-ft-controls">
@@ -907,7 +912,6 @@
       const failedCount = jobList.filter(j => j.status === "failed").length;
       const firstCreatedAt = jobList.length ? Math.min(...jobList.map(job => Number(job.createdAt) || Date.now())) : Date.now();
 
-      // Summary mirrors the queue state shown by the reference TobyFlow UI.
       if (this.totalEl) this.totalEl.textContent = `${completedCount}/${jobList.length}  ${this.formatDuration(Date.now() - firstCreatedAt)}`;
       if (this.sentEl) this.sentEl.textContent = String(jobList.length);
       if (this.renderingEl) this.renderingEl.textContent = String(activeCount);
@@ -1049,8 +1053,8 @@
             <div class="flow-ft-task-meta">
               <span class="flow-ft-status-tag ${statusClass}">${statusLabel}</span>
               <span class="flow-ft-timer" data-timer-id="${escapeHtml(job.id)}">${percent}</span>
-              ${job.error ? `<span title="${escapeHtml(job.error)}">${escapeHtml(String(job.error).slice(0, 50))}</span>` : ""}
             </div>
+            ${job.error ? `<div class="flow-ft-task-error">${escapeHtml(String(job.error))}</div>` : ""}
           </div>
           ${actionHtml}
           <button class="flow-ft-mini-btn flow-ft-task-remove danger" data-ft-action="remove-task" data-task-id="${escapeHtml(job.id)}" title="Xóa task">🗑</button>

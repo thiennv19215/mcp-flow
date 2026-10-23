@@ -812,6 +812,13 @@
     const b = String(right || "");
     return uuidPattern.test(a) && uuidPattern.test(b) ? a.toLowerCase() === b.toLowerCase() : a === b;
   };
+  const knownDistinctImageReferenceIdentity = (left, right) => {
+    const a = String(left || "");
+    const b = String(right || "");
+    if (uuidPattern.test(a) && uuidPattern.test(b)) return a.toLowerCase() !== b.toLowerCase();
+    if (asbIdentityPattern.test(a) && asbIdentityPattern.test(b)) return a !== b;
+    return false;
+  };
   async function resolveImageReferenceIdentity(id) {
     const value = String(id || "");
     const resolvedUuid = await resolveNativeMediaUuid(value, "image");
@@ -825,6 +832,65 @@
     const txt = normalize(tile?.innerText || tile?.textContent);
     return txt === wanted || txt.startsWith(wanted) || txt.includes(wanted);
   };
+  async function findFlowTileByCanonicalImageIdentity(expectedIdentity, title, deadline, signal) {
+    const tiles = () => (typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", document, { checkVisible: false }) : null) ||
+      [...document.querySelectorAll("flow-grid-tile-container")];
+    const scroller = root.FlowTiles?.flowMediaGridScrollContainer?.() || root.flowMediaGridScrollContainer?.();
+    const originalTop = scroller?.scrollTop || 0;
+    const seen = new Set();
+    const matches = [];
+    let targetTop = null;
+    let keepTargetVisible = false;
+    try {
+      if (scroller) scroller.scrollTop = 0;
+      await boundedWait(100, deadline, "locating the exact uploaded image tile", false, signal);
+      const maxSteps = 60;
+      for (let step = 0; step < maxSteps; step++) {
+        requireTime(deadline, "locating the exact uploaded image tile", false, signal);
+        const currentTop = Number(scroller?.scrollTop || 0);
+        for (const tile of tiles()) {
+          if (!tile?.isConnected || seen.has(tile)) continue;
+          seen.add(tile);
+          const rawId = String(mediaId(tile) || "");
+          const directMatch = sameImageReferenceIdentity(rawId, expectedIdentity);
+          if (!directMatch && !exactTileTitle(tile, title)) continue;
+          const canonicalId = directMatch ? rawId : await resolveImageReferenceIdentity(rawId);
+          if (sameImageReferenceIdentity(canonicalId, expectedIdentity)) {
+            matches.push({ tile, top: currentTop });
+            if (matches.length > 1) return { ambiguous: true, tile: null };
+          }
+        }
+        if (!scroller) break;
+        const top = scroller.scrollTop;
+        const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+        if (top >= max - 2) break;
+        scroller.scrollTop = Math.min(max, top + Math.max(240, scroller.clientHeight * 0.78));
+        const pause = Math.min(180, Math.max(0, deadline - Date.now()));
+        if (pause <= 0) break;
+        await boundedWait(pause, deadline, "scanning Flow media for the requested image", false, signal);
+      }
+      if (matches.length !== 1) return { ambiguous: false, tile: null };
+      targetTop = matches[0].top;
+      if (scroller && Math.abs(scroller.scrollTop - targetTop) > 2) {
+        scroller.scrollTop = targetTop;
+        await boundedWait(100, deadline, "restoring the exact uploaded image tile", false, signal);
+      }
+      const remountedMatches = [];
+      for (const tile of tiles()) {
+        if (!tile?.isConnected) continue;
+        const rawId = String(mediaId(tile) || "");
+        const directMatch = sameImageReferenceIdentity(rawId, expectedIdentity);
+        if (!directMatch && !exactTileTitle(tile, title)) continue;
+        const canonicalId = directMatch ? rawId : await resolveImageReferenceIdentity(rawId);
+        if (sameImageReferenceIdentity(canonicalId, expectedIdentity)) remountedMatches.push(tile);
+      }
+      if (remountedMatches.length !== 1) return { ambiguous: remountedMatches.length > 1, tile: null };
+      keepTargetVisible = true;
+      return { ambiguous: false, tile: remountedMatches[0] };
+    } finally {
+      if (!keepTargetVisible && scroller) scroller.scrollTop = originalTop;
+    }
+  }
   function contextMenuItems(menu) {
     const configured = typeof root.flowQueryAll === "function"
       ? [...root.flowQueryAll("components.addToPromptMenuItem", menu, { checkVisible: false }),
@@ -1058,34 +1124,32 @@
         const attachedIdentity = sameImageReferenceIdentity(attachedRawIdentity, expectedIdentity)
           ? attachedRawIdentity
           : await resolveImageReferenceIdentity(attachedRawIdentity);
-        if (!sameImageReferenceIdentity(attachedIdentity, expectedIdentity)) throw flowError("FLOW_ASSET_ID_MISMATCH", "An image reference with this title is already attached, but its verified media provenance differs from the requested upload.", false, false);
-        updateReferenceActionDiagnostics({ ...diagnostic, step: "serialized_existing_chip_reused", provenanceConfirmed: true, chipUuidConfirmed: attached.chipUuidConfirmed === true });
-        return { name: ref.name, kind: "image", source: attached.source, id: expectedIdentity, idSource: attached.mediaIdSource || (asbIdentityPattern.test(expectedIdentity) ? "verified_asb_tile_action" : "verified_tile_action_provenance"), chipUuidConfirmed: attached.chipUuidConfirmed === true, confirmed: true, reused: true };
+        if (sameImageReferenceIdentity(attachedIdentity, expectedIdentity)) {
+          updateReferenceActionDiagnostics({ ...diagnostic, step: "serialized_existing_chip_reused", provenanceConfirmed: true, chipUuidConfirmed: attached.chipUuidConfirmed === true });
+          return { name: ref.name, kind: "image", source: attached.source, id: expectedIdentity, idSource: attached.mediaIdSource || (asbIdentityPattern.test(expectedIdentity) ? "verified_asb_tile_action" : "verified_tile_action_provenance"), chipUuidConfirmed: attached.chipUuidConfirmed === true, confirmed: true, reused: true };
+        }
+        if (!knownDistinctImageReferenceIdentity(attachedIdentity, expectedIdentity)) {
+          throw flowError("FLOW_ASSET_ID_UNAVAILABLE", "An image reference with this title is already attached, but its media identity cannot be safely compared with the requested upload. No reference was selected.", false, false);
+        }
       }
       const alreadyOpen = contextMenus(document, true);
       if (alreadyOpen.length) throw flowError("FLOW_REFERENCE_CONTEXT_MENU_BUSY", "Flow already has a menu open; no reference menu action was attempted.", false, false);
-      const tileById = await root.findFlowTileByMediaId?.(expectedIdentity, { deadline, signal });
-      const tile = tileById || await root.findFlowTile?.(ref.name);
-      if (!tile || (!tileById && !exactTileTitle(tile, ref.name))) {
-        const state = tile ? "tile_title_mismatch" : "tile_missing";
-        updateReferenceActionDiagnostics({ ...diagnostic, step: tile ? "tile_title_not_exact_picker_fallback" : "tile_missing_picker_fallback", tileActionStep: "menu_missing", surfaceStatus: state });
+      const tileMatch = await findFlowTileByCanonicalImageIdentity(expectedIdentity, ref.name, deadline, signal);
+      if (tileMatch.ambiguous) throw flowError("FLOW_ASSET_AMBIGUOUS", "More than one Flow image tile resolves to the requested media identity. No reference was selected.", false, false);
+      const tile = tileMatch.tile;
+      if (!tile) {
+        updateReferenceActionDiagnostics({ ...diagnostic, step: "exact_identity_tile_missing_picker_fallback", tileActionStep: "menu_missing", surfaceStatus: "tile_missing" });
         return null;
       }
       const verifyTile = async () => {
         const currentRaw = String(mediaId(tile) || "");
-        const current = currentRaw.toLowerCase() === expectedIdentity.toLowerCase()
+        const current = sameImageReferenceIdentity(currentRaw, expectedIdentity)
           ? currentRaw
           : await resolveImageReferenceIdentity(currentRaw);
         const hasVideo = typeof root.flowQuery === "function" ? root.flowQuery("tiles.video", tile, { checkVisible: false }) : tile.querySelector("flow-video-tile,flow-scene-tile");
-        return tile.isConnected && (tileById || exactTileTitle(tile, ref.name)) && sameImageReferenceIdentity(current, expectedIdentity) && !hasVideo;
+        return tile.isConnected && sameImageReferenceIdentity(current, expectedIdentity) && !hasVideo;
       };
       if (!(await verifyTile())) throw flowError("FLOW_ASSET_ID_MISMATCH", "The exact image tile does not match the completed upload UUID and image type. No reference was selected.", false, false);
-      const sameIdentity = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", document, { checkVisible: false }) : null) || document.querySelectorAll("flow-grid-tile-container"))]
-        .filter(candidate => sameImageReferenceIdentity(mediaId(candidate), expectedIdentity));
-      const sameTitle = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", document, { checkVisible: false }) : null) || document.querySelectorAll("flow-grid-tile-container"))]
-        .filter(candidate => exactTileTitle(candidate, ref.name));
-      const uniqueTarget = tileById ? sameIdentity.length === 1 && sameIdentity[0] === tile : sameTitle.length === 1 && sameTitle[0] === tile;
-      if (!uniqueTarget) throw flowError("FLOW_ASSET_AMBIGUOUS", "Flow does not expose one unique tile for the requested image identity. No reference was selected.", false, false);
       tile.scrollIntoView?.({ behavior: "instant", block: "center" });
       await boundedWait(100, deadline, "settling the exact uploaded image tile", false, signal);
       if (!(await verifyTile())) throw flowError("FLOW_ASSET_CHANGED", "The uploaded image tile changed before its context menu opened. No reference was selected.", false, false);
@@ -1190,9 +1254,9 @@
         stableScanCount = signature === previousScanSignature ? stableScanCount + 1 : 1;
         previousScanSignature = signature;
 
-        // Flow may remount existing chips while adding another image. TobyFlow's
-        // V2 path confirms this operation by a scoped +1 chip-count change and
-        // then validates any exposed media UUID. Do the same here: a remount can
+        // Flow may remount existing chips while adding another image. Confirm
+        // the operation by a scoped +1 chip-count change and validate any
+        // exposed media UUID. A remount can
         // make element-by-element differencing report old chips as new even
         // though the composer gained exactly one image.
         const countDelta = current.length - before.length;

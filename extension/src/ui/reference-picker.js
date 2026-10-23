@@ -114,7 +114,12 @@
       if (type === currentGenType) {
         const previewGrid = document.querySelector("#refImagesPreview");
         const ratioCount = document.querySelector("#refRatioCount");
+        const clearAllButton = document.querySelector("#clearAllGenRefsBtn");
         if (ratioCount) ratioCount.textContent = list.length > 0 ? `${list.length}/3 ảnh` : "";
+        if (clearAllButton) {
+          clearAllButton.classList.toggle("hidden", list.length === 0);
+          clearAllButton.disabled = list.length === 0;
+        }
         if (previewGrid) {
           previewGrid.replaceChildren();
           list.forEach((reference, index) => {
@@ -132,12 +137,14 @@
             const tag = document.createElement("span");
             tag.className = "ref-grid-tag";
             tag.textContent = reference.name || (reference.kind === "video" ? "Video" : "Ảnh");
+            tag.title = reference.name || (reference.kind === "video" ? "Video" : "Ảnh");
 
             const removeBtn = document.createElement("button");
             removeBtn.type = "button";
             removeBtn.className = "ref-grid-remove";
-            removeBtn.innerHTML = "×";
-            removeBtn.title = "Xóa ảnh này";
+            removeBtn.innerHTML = '<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg>';
+            removeBtn.title = reference.kind === "video" ? "Xóa video tham chiếu" : "Xóa ảnh tham chiếu";
+            removeBtn.setAttribute("aria-label", removeBtn.title);
             removeBtn.onclick = event => {
               event.stopPropagation();
               const [removed] = list.splice(index, 1);

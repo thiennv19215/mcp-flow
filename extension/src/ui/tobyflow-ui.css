@@ -306,7 +306,27 @@ textarea:disabled {
 .flow-mcp-sidebar #btnSubmitCharacter { min-height: 40px; font-size: 13px; }
 .flow-mcp-sidebar #flowQueuePanel { border-color: var(--border); background: rgba(41, 41, 41, 0.76); }
 .flow-mcp-sidebar #flowLibraryTools { border-color: var(--border); background: var(--surface); }
-.flow-mcp-sidebar .feedback-box { color: #4ade80; }
+.flow-mcp-sidebar .feedback-box {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  max-height: 96px;
+  margin-top: 8px;
+  padding: 7px 9px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: #4ade80;
+  font-size: 11px;
+  line-height: 1.45;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
 
 .flow-mcp-sidebar .gen-type-toggle { gap: 2px; padding: 3px; border-radius: 8px; }
 .flow-mcp-sidebar .gen-type-btn { width: 32px; height: 32px; border-radius: 6px; }
