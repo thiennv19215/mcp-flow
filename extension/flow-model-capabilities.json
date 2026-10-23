@@ -2,6 +2,7 @@
   "version": 1,
   "defaults": {
     "maxReferences": 3,
+    "maxPromptLength": null,
     "videoAspectRatios": ["16:9", "9:16"],
     "imageAspectRatios": ["16:9", "9:16", "1:1", "4:3", "3:4"],
     "frameInputs": 2,
@@ -50,6 +51,7 @@
       "resolutions": [],
       "aspectRatios": ["16:9", "9:16"],
       "maxReferences": 3,
+      "maxPromptLength": null,
       "supportsFrames": true,
       "framesAndReferencesMutuallyExclusive": true
     },
@@ -61,6 +63,7 @@
       "resolutions": [],
       "aspectRatios": ["16:9", "9:16"],
       "maxReferences": 3,
+      "maxPromptLength": null,
       "supportsFrames": true,
       "framesAndReferencesMutuallyExclusive": true
     },
@@ -75,6 +78,7 @@
       "defaultQuantity": 1,
       "aspectRatios": ["16:9", "9:16"],
       "maxReferences": 3,
+      "maxPromptLength": null,
       "supportsFrames": true,
       "framesAndReferencesMutuallyExclusive": true
     },
@@ -85,6 +89,7 @@
       "resolutions": [],
       "aspectRatios": ["16:9", "9:16", "1:1", "4:3", "3:4"],
       "maxReferences": 3,
+      "maxPromptLength": null,
       "supportsFrames": false,
       "framesAndReferencesMutuallyExclusive": false
     }
