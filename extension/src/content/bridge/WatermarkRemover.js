@@ -15,6 +15,16 @@
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
   const luma = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
 
+  // DL-04: a lower-priority variant must beat the current best NCC by more
+  // than this epsilon to displace it, so variant choice is deterministic and
+  // biased toward the higher-priority variant on near-ties.
+  const VARIANT_PRIORITY_EPSILON = 0.02;
+  const MAX_DECODED_VARIANT_MASKS = 8;
+  // Decoded alpha masks for raw (base64) variant specs, shared across Remover
+  // instances in this page session so a per-response instance does not
+  // re-decode the same PNG. Values may be null (decode failed / no alpha).
+  const decodedVariantMaskCache = new Map();
+
   function asMask(mask) {
     if (!mask || !Number.isInteger(mask.width) || !Number.isInteger(mask.height) || mask.width <= 0 || mask.height <= 0) return null;
     const source = mask.data || mask.alpha || mask;
@@ -26,6 +36,81 @@
     if (x < 0 || y < 0 || x >= mask.width || y >= mask.height) return 0;
     const value = Number(mask.data[y * mask.width + x]) || 0;
     return clamp(value > 1 ? value / 255 : value, 0, 0.98);
+  }
+
+  function rawAlpha01(mask, x, y) {
+    const value = Number(mask.data[y * mask.width + x]) || 0;
+    return value > 1 ? value / 255 : value;
+  }
+
+  // Bilinear resample of a mask's alpha channel to target dimensions — the
+  // same smoothing a renderer applies when it scales the rendered logo, so
+  // the rescaled template tracks the rendered watermark at other sizes.
+  function rescaleMask(mask, targetW, targetH) {
+    const data = new Uint8Array(targetW * targetH);
+    const stepX = mask.width / targetW;
+    const stepY = mask.height / targetH;
+    for (let y = 0; y < targetH; y++) {
+      for (let x = 0; x < targetW; x++) {
+        const gx = (x + 0.5) * stepX - 0.5;
+        const gy = (y + 0.5) * stepY - 0.5;
+        const x0 = Math.floor(gx);
+        const y0 = Math.floor(gy);
+        const fx = gx - x0;
+        const fy = gy - y0;
+        let sum = 0;
+        for (let dy = 0; dy <= 1; dy++) {
+          for (let dx = 0; dx <= 1; dx++) {
+            const px = clamp(x0 + dx, 0, mask.width - 1);
+            const py = clamp(y0 + dy, 0, mask.height - 1);
+            sum += rawAlpha01(mask, px, py) * (dx ? fx : 1 - fx) * (dy ? fy : 1 - fy);
+          }
+        }
+        data[y * targetW + x] = Math.round(sum * 255);
+      }
+    }
+    return { width: targetW, height: targetH, data };
+  }
+
+  // One logo variant. Accepted forms: a decoded mask ({mask} or the entry
+  // itself as a mask) and/or a raw alpha_png_b64 spec decoded lazily by
+  // _ensureVariantMasks. baseShortSide is the short side of the reference
+  // render the mask was captured at; baseWidth/baseHeight collapse to it.
+  // Entries with neither a usable mask nor a base64 spec are dropped.
+  function asVariant(entry, index) {
+    if (!entry || typeof entry !== "object") return null;
+    const decoded = asMask(entry.mask) || asMask(entry);
+    const b64 = typeof entry.alpha_png_b64 === "string" && entry.alpha_png_b64.trim() ? entry.alpha_png_b64
+      : (typeof entry.alphaPngB64 === "string" && entry.alphaPngB64.trim() ? entry.alphaPngB64 : null);
+    if (!decoded && !b64) return null;
+    let baseShortSide = Number(entry.baseShortSide ?? entry.base_short_side);
+    if (!Number.isFinite(baseShortSide) || baseShortSide <= 0) {
+      const baseWidth = Number(entry.baseWidth ?? entry.base_width);
+      const baseHeight = Number(entry.baseHeight ?? entry.base_height);
+      baseShortSide = baseWidth > 0 && baseHeight > 0 ? Math.min(baseWidth, baseHeight) : null;
+    }
+    const priority = Number(entry.priority);
+    const id = typeof entry.id === "string" && entry.id.trim() ? entry.id.trim()
+      : (typeof entry.name === "string" && entry.name.trim() ? entry.name.trim() : `variant-${index}`);
+    return {
+      key: `variant-${index}`,
+      id,
+      mask: decoded,
+      maskB64: decoded ? null : b64,
+      baseShortSide: baseShortSide > 0 ? baseShortSide : null,
+      priority: Number.isFinite(priority) ? priority : 0,
+      index,
+    };
+  }
+
+  function normalizeVariants(list) {
+    if (!Array.isArray(list)) return [];
+    const variants = [];
+    list.forEach((entry, index) => {
+      const variant = asVariant(entry, index);
+      if (variant) variants.push(variant);
+    });
+    return variants;
   }
 
   async function maskFromAlphaPng(value) {
@@ -69,12 +154,81 @@
         ...options,
       };
       this.mask = asMask(options.mask);
+      this.variants = normalizeVariants(options.variants);
+      this._scaledMaskCache = new Map();
     }
 
     configure(options = {}) {
       if (options.mask !== undefined) this.mask = asMask(options.mask);
+      if (options.variants !== undefined) {
+        this.variants = normalizeVariants(options.variants);
+        this._scaledMaskCache.clear();
+      }
       this.options = { ...this.options, ...options };
       return this;
+    }
+
+    // Raw base64 variant specs decode lazily (PNG decoding is async); the
+    // decoded masks are cached module-wide by their base64 source. A variant
+    // that fails to decode stays mask-less and is simply never evaluated —
+    // it cannot poison the other variants or the legacy mask.
+    async _ensureVariantMasks() {
+      for (const variant of this.variants) {
+        if (variant.mask || !variant.maskB64) continue;
+        if (decodedVariantMaskCache.has(variant.maskB64)) {
+          variant.mask = asMask(decodedVariantMaskCache.get(variant.maskB64));
+          continue;
+        }
+        let decoded = null;
+        try { decoded = asMask(await maskFromAlphaPng(variant.maskB64)); } catch (_) { decoded = null; }
+        if (decodedVariantMaskCache.size >= MAX_DECODED_VARIANT_MASKS) {
+          decodedVariantMaskCache.delete(decodedVariantMaskCache.keys().next().value);
+        }
+        decodedVariantMaskCache.set(variant.maskB64, decoded);
+        variant.mask = decoded;
+      }
+    }
+
+    // Evaluation order: explicit variants by priority (higher first, config
+    // order breaks ties), then the legacy configured mask as a native-scale
+    // fallback variant — DL-01's lone alpha_png_b64 is a single-variant list
+    // whose behavior is unchanged when no variants are configured.
+    _evaluationVariants() {
+      const decoded = this.variants.filter(variant => variant.mask);
+      decoded.sort((a, b) => (b.priority - a.priority) || (a.index - b.index));
+      if (this.mask && !decoded.some(variant => variant.mask === this.mask)) {
+        decoded.push({
+          key: "legacy",
+          id: null,
+          mask: this.mask,
+          baseShortSide: null,
+          priority: Number.NEGATIVE_INFINITY,
+          index: Number.MAX_SAFE_INTEGER,
+        });
+      }
+      return decoded;
+    }
+
+    // The variant's mask rescaled for this image: ratio of the image's short
+    // side to the variant's base short side. Variants without a base short
+    // side (including the legacy mask) stay at native scale.
+    _scaledVariantMask(variant, image) {
+      const mask = variant.mask;
+      let scale = 1;
+      if (variant.baseShortSide > 0) {
+        scale = clamp(Math.min(image.width, image.height) / variant.baseShortSide, 0.05, 16);
+      }
+      if (Math.abs(scale - 1) < 0.01) return { mask, scale: 1 };
+      const targetW = Math.max(1, Math.round(mask.width * scale));
+      const targetH = Math.max(1, Math.round(mask.height * scale));
+      if (targetW < 4 || targetH < 4) return null;
+      const cacheKey = `${variant.key}:${targetW}x${targetH}`;
+      let scaled = this._scaledMaskCache.get(cacheKey);
+      if (!scaled) {
+        scaled = rescaleMask(mask, targetW, targetH);
+        this._scaledMaskCache.set(cacheKey, scaled);
+      }
+      return { mask: scaled, scale };
     }
 
     _nccAt(image, mask, x, y) {
@@ -158,9 +312,10 @@
       return best;
     }
 
-    locate(image, mask = this.mask) {
-      mask = asMask(mask);
-      if (!mask || !image?.width || !image?.height) return null;
+    // The scan half of location: the best NCC position for one (already
+    // rescaled) mask, corners first then a full scan — thresholding, gain
+    // estimation and refinement are the caller's job.
+    _scanBest(image, mask) {
       let best = null;
       const step = Math.max(1, Number(this.options.scanStep) || 3);
       const maxX = Math.max(0, image.width - mask.width);
@@ -181,9 +336,46 @@
           scan(0, maxX, 0, maxY, Math.max(step, 9));
         }
       } else scan(0, maxX, 0, maxY, step);
+      return best;
+    }
+
+    _locateWithMask(image, mask, variant = null, scale = 1) {
+      const best = this._scanBest(image, mask);
       if (!best || best.ncc < Number(this.options.nccThreshold)) return null;
       best.gain = this._estimateGain(image, mask, best.x, best.y);
-      return this._refineByRoughness(image, mask, best);
+      const refined = this._refineByRoughness(image, mask, best);
+      return { ...refined, variant, scale, mask };
+    }
+
+    locate(image, mask) {
+      if (!image?.width || !image?.height) return null;
+      // An explicitly passed mask keeps the original single-mask contract:
+      // native scale, no variant reporting.
+      if (mask !== undefined) {
+        const explicit = asMask(mask);
+        if (!explicit) return null;
+        return this._locateWithMask(image, explicit, null, 1);
+      }
+      // Detection mode: every configured variant is located with its mask
+      // rescaled to the image; the best score wins, with the priority
+      // epsilon keeping near-ties on the higher-priority variant.
+      const candidates = this._evaluationVariants();
+      if (!candidates.length) return null;
+      let winner = null;
+      for (const candidate of candidates) {
+        const scaled = this._scaledVariantMask(candidate, image);
+        if (!scaled) continue;
+        const best = this._scanBest(image, scaled.mask);
+        if (!best) continue;
+        if (!winner || best.ncc > winner.ncc + VARIANT_PRIORITY_EPSILON) {
+          winner = { ...best, variant: candidate.id, scale: scaled.scale, mask: scaled.mask };
+        }
+      }
+      if (!winner || winner.ncc < Number(this.options.nccThreshold)) return null;
+      const point = { x: winner.x, y: winner.y, ncc: winner.ncc };
+      point.gain = this._estimateGain(image, winner.mask, point.x, point.y);
+      const refined = this._refineByRoughness(image, winner.mask, point);
+      return { ...refined, variant: winner.variant, scale: winner.scale, mask: winner.mask };
     }
 
     _applyDarkDenoise(image, original, mask, point) {
@@ -207,11 +399,27 @@
       }
     }
 
-    remove(imageData, mask = this.mask) {
+    remove(imageData, mask) {
       const image = typeof ImageData !== "undefined" && imageData instanceof ImageData ? imageData : null;
-      mask = asMask(mask);
-      if (!image || !mask || image.width * image.height > this.options.maxPixels) return { changed: false, reason: "unavailable" };
-      const point = this.locate(image, mask);
+      if (!image || image.width * image.height > this.options.maxPixels) return { changed: false, reason: "unavailable" };
+      // An explicit mask keeps the single-mask contract; without one,
+      // detection runs across the configured variants and the winning
+      // variant's rescaled mask drives the removal and the verification.
+      let point = null;
+      let variant = null;
+      let scale = 1;
+      if (mask !== undefined) {
+        mask = asMask(mask);
+        if (!mask) return { changed: false, reason: "unavailable" };
+        point = this._locateWithMask(image, mask, null, 1);
+      } else {
+        point = this.locate(image);
+        if (point) {
+          mask = point.mask;
+          variant = point.variant;
+          scale = point.scale;
+        }
+      }
       if (!point) return { changed: false, reason: "watermark_not_found" };
       const original = new ImageData(new Uint8ClampedArray(image.data), image.width, image.height);
       const cleaned = new ImageData(new Uint8ClampedArray(image.data), image.width, image.height);
@@ -228,20 +436,22 @@
       }
       this._applyDarkDenoise(cleaned, original, mask, point);
       const nccAfter = this._nccAt(cleaned, mask, point.x, point.y);
-      if (nccAfter > Number(this.options.minNccAfter)) return { changed: false, reason: "verification_failed", nccBefore: point.ncc, nccAfter, image: original };
-      return { changed: true, image: cleaned, x: point.x, y: point.y, gain: point.gain, nccBefore: point.ncc, nccAfter };
+      if (nccAfter > Number(this.options.minNccAfter)) return { changed: false, reason: "verification_failed", nccBefore: point.ncc, nccAfter, image: original, variant, scale };
+      return { changed: true, image: cleaned, x: point.x, y: point.y, gain: point.gain, nccBefore: point.ncc, nccAfter, variant, scale };
     }
 
     async processBlob(blob, options = {}) {
       if (!(blob instanceof Blob) || !/^image\//i.test(blob.type || "")) return { blob, changed: false, reason: "not_an_image" };
-      if (!this.mask) return { blob, changed: false, reason: "mask_not_configured" };
+      if (!this.mask && !this.variants.length) return { blob, changed: false, reason: "mask_not_configured" };
+      await this._ensureVariantMasks();
+      if (!this.mask && !this.variants.some(variant => variant.mask)) return { blob, changed: false, reason: "mask_not_configured" };
       const bitmap = await createImageBitmap(blob);
       const canvas = document.createElement("canvas");
       canvas.width = bitmap.width;
       canvas.height = bitmap.height;
       const context = canvas.getContext("2d", { willReadFrequently: true });
       context.drawImage(bitmap, 0, 0);
-      const result = this.remove(context.getImageData(0, 0, canvas.width, canvas.height), options.mask || this.mask);
+      const result = this.remove(context.getImageData(0, 0, canvas.width, canvas.height), options.mask);
       bitmap.close?.();
       if (!result.changed) return { blob, ...result };
       context.putImageData(result.image, 0, 0);
