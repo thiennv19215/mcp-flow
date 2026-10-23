@@ -22,8 +22,25 @@ function normalizeModel(value) {
 function findModelRule(registry, model) {
   const normalized = normalizeModel(model);
   if (!normalized || !Array.isArray(registry?.models)) return null;
-  return registry.models.find(rule => Array.isArray(rule?.match) &&
-    rule.match.some(alias => normalized.includes(normalizeModel(alias)))) || null;
+  // Prefer the rule whose matching alias is longest: matching is substring
+  // based, so a generic alias ("veo 3.1") would otherwise shadow the
+  // specific rule ("veo 3.1 fast") for every model that contains it if the
+  // generic rule ever ends up earlier in the registry. Ties keep the
+  // earliest rule, matching the previous first-match behavior.
+  let best = null;
+  let bestAliasLength = -1;
+  for (const rule of registry.models) {
+    if (!Array.isArray(rule?.match)) continue;
+    for (const alias of rule.match) {
+      const normalizedAlias = normalizeModel(alias);
+      if (!normalizedAlias || !normalized.includes(normalizedAlias)) continue;
+      if (normalizedAlias.length > bestAliasLength) {
+        best = rule;
+        bestAliasLength = normalizedAlias.length;
+      }
+    }
+  }
+  return best;
 }
 
 function jobProblem(index, code, message) {
