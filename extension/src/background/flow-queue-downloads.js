@@ -379,6 +379,63 @@ export function classifyDownloadInterruption(error, canResume) {
   };
 }
 
+// DL-07: explicit HTML-response rejection (study D15, gap G7). Flow
+// sometimes serves an HTML error/placeholder page instead of media;
+// without an explicit check the wait either sat until timeout or, in
+// edge paths, treated the .html payload as the download result. The
+// detector is mime OR filename — mirroring the gap text ("mime or
+// .html filename") and D15's two alternative signals. That OR is
+// deliberately stricter than queueDownloadExtension above: there a
+// real media mime rescues an .html name for EXTENSION purposes, but
+// for HTML rejection a .html/.htm filename alone is enough, even when
+// the item also carries a media mime (pinned in the DL-07 tests).
+export function detectFlowDownloadHtmlResponse(downloadItem) {
+  if (!downloadItem || typeof downloadItem !== "object") return null;
+  const mime = String(downloadItem.mime || "").split(";")[0].trim().toLowerCase();
+  const filename = flowDownloadBasename(downloadItem.filename);
+  if (mime === "text/html") return { via: "mime", mime, filename };
+  if (/\.html?$/i.test(filename)) return { via: "filename", mime, filename };
+  return null;
+}
+
+// Removal goes through chrome.downloads.removeFile — the removal
+// surface Chrome exposes for a completed download's file — guarded
+// like the other optional chrome calls in this module: when it is
+// missing or refuses, removal reports false and the HTML error below
+// still stands (a failed removal must never mask the real failure).
+async function removeQueueDownloadFile(downloadItem) {
+  if (!Number.isInteger(downloadItem?.id) || typeof chrome.downloads?.removeFile !== "function") return false;
+  try { await chrome.downloads.removeFile(downloadItem.id); return true; } catch { return false; }
+}
+
+// Fail fast when a sighted item is an HTML response. Ordering, per
+// DL-07: this check runs on a completed or interrupted sighting
+// BEFORE the item can be returned as media and BEFORE the DL-05
+// resume classifier — an interrupted HTML-ish item is not a media
+// download at all, so resuming it would only re-fetch the same HTML
+// page; and a completed HTML item must never reach the return paths.
+// Callers invoke it only for items already attributed to this wait
+// (ticket-claimed, ticket-matched, title-matched, or identity-
+// re-verified), so removal never touches an unrelated user download.
+// In-progress sightings are left alone: their mime/filename are not
+// yet final, and the next poll re-checks them once they settle.
+async function assertQueueDownloadNotHtml(downloadItem, title) {
+  if (!downloadItem || (downloadItem.state !== "complete" && downloadItem.state !== "interrupted")) return;
+  const signal = detectFlowDownloadHtmlResponse(downloadItem);
+  if (!signal) return;
+  const fileRemoved = await removeQueueDownloadFile(downloadItem);
+  throw Object.assign(new Error(`Chrome download for "${title}" arrived as an HTML page instead of media (detected via ${signal.via === "mime" ? `mime "${signal.mime}"` : `filename "${signal.filename}"`}); the HTML payload is not the generated media${fileRemoved ? " and its file was removed" : ""}. The media remains in Flow.`), {
+    code: "FLOW_DOWNLOAD_HTML_RESPONSE", retryable: false, outcomeUnknown: false, outcome_unknown: false,
+    downloadHtmlResponse: {
+      downloadId: downloadItem.id,
+      via: signal.via,
+      mime: signal.mime || null,
+      filename: signal.filename || null,
+      fileRemoved,
+    },
+  });
+}
+
 function queueDownloadFailure(title, item, classification, resumeAttempts) {
   return Object.assign(new Error(`Chrome download failed for "${title}": ${item?.error || "unknown error"}. The media remains in Flow.`), {
     code: "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
@@ -443,6 +500,8 @@ export async function waitForQueueFlowDownload(beforeIds, title, timeoutMs = 12 
     await throwIfQueueDownloadAborted(signal, title, filenameTicket?.downloadId);
     if (Number.isInteger(filenameTicket?.downloadId)) {
       const [claimed] = await chrome.downloads.search({ id: filenameTicket.downloadId });
+      // DL-07: HTML check first — before resume (DL-05) and before return.
+      await assertQueueDownloadNotHtml(claimed, title);
       if (claimed?.state === "interrupted") await resumeInterruptedQueueDownload(resumeState, claimed, title);
       if (claimed?.state === "complete" && claimed.filename) return {
         id: claimed.id,
@@ -488,6 +547,8 @@ export async function waitForQueueFlowDownload(beforeIds, title, timeoutMs = 12 
         });
       }
       const candidate = matching[0];
+      // DL-07: HTML check first — before resume (DL-05) and before return.
+      await assertQueueDownloadNotHtml(candidate, title);
       if (candidate?.state === "interrupted") await resumeInterruptedQueueDownload(resumeState, candidate, title);
       if (candidate?.state === "complete" && candidate.filename) {
         if (!filenameTicket.downloadId) filenameTicket.downloadId = candidate.id;
@@ -508,12 +569,15 @@ export async function waitForQueueFlowDownload(beforeIds, title, timeoutMs = 12 
     }
     if (Number.isInteger(filenameTicket?.downloadId)) {
       const exact = newItems.find(item => item.id === filenameTicket.downloadId);
+      await assertQueueDownloadNotHtml(exact, title);
       if (exact?.state === "interrupted") await resumeInterruptedQueueDownload(resumeState, exact, title);
       if (exact?.state === "complete" && exact.filename) return { id: exact.id, filename: exact.filename };
       await new Promise(resolve => setTimeout(resolve, 750));
       continue;
     }
     const candidates = flowItems.length === 1 && matching.length === 1 ? matching : [];
+    // DL-07: HTML check first — before resume (DL-05) and before return.
+    for (const candidate of candidates) await assertQueueDownloadNotHtml(candidate, title);
     const interrupted = candidates.find(item => item.state === "interrupted");
     if (interrupted) await resumeInterruptedQueueDownload(resumeState, interrupted, title);
     const complete = candidates.find(item => item.state === "complete" && item.filename);
@@ -527,7 +591,7 @@ export async function waitForQueueFlowDownload(beforeIds, title, timeoutMs = 12 
   });
 }
 
-export async function findExistingQueueFlowDownload(flowMediaId, flowTabId, flowProjectId) {
+export async function findExistingQueueFlowDownload(flowMediaId, flowTabId, flowProjectId, title = "Flow media") {
   if (!chrome.downloads?.search || !flowMediaId || !Number.isInteger(flowTabId)) return null;
   const ticket = {
     flowMediaId: String(flowMediaId),
@@ -536,9 +600,17 @@ export async function findExistingQueueFlowDownload(flowMediaId, flowTabId, flow
   };
   const items = await chrome.downloads.search({ query: [String(flowMediaId)], orderBy: ["-startTime"], limit: 100 });
   const matching = items.filter(item => queueDownloadMatchesTicket(item, ticket));
-  return matching.find(item => item.state === "complete") ||
+  const candidate = matching.find(item => item.state === "complete") ||
     matching.find(item => item.state === "in_progress") ||
     matching.find(item => item.state === "interrupted") || null;
+  // DL-07: the completed candidate this lookup would hand back as an
+  // already-downloaded result is HTML-checked first — downloadQueueMedia
+  // returns a completed existing item without any further wait, so this
+  // is the last point where an HTML payload can be stopped. (An
+  // in-progress/interrupted candidate is checked again by
+  // waitForExistingQueueFlowDownload when the caller waits on it.)
+  if (candidate?.state === "complete") await assertQueueDownloadNotHtml(candidate, title);
+  return candidate;
 }
 
 export async function waitForExistingQueueFlowDownload(downloadId, flowMediaId, flowTabId, flowProjectId, title, timeoutMs = 3 * 60_000, signal = null) {
@@ -557,6 +629,10 @@ export async function waitForExistingQueueFlowDownload(downloadId, flowMediaId, 
     });
     // Identity was verified for this sighting above; after a resume the
     // loop re-verifies it before the item can complete (DL-05).
+    // DL-07: the HTML check runs after that identity verification (so
+    // removal only ever targets this wait's own download) and before
+    // the DL-05 resume below — HTML wins over resume.
+    await assertQueueDownloadNotHtml(item, title);
     if (item.state === "interrupted") await resumeInterruptedQueueDownload(resumeState, item, title);
     if (item.state === "complete" && item.filename) return { id: item.id, filename: item.filename, matchedByQueueTicket: true };
     await new Promise(resolve => setTimeout(resolve, 250));
@@ -714,7 +790,7 @@ export async function downloadQueueMedia(media, outputDir, fileStem, quality, in
           ticketFolder = record.folder || ticketFolder;
         }
       }
-      const existing = await findExistingQueueFlowDownload(flowMediaId, flowTabId, flowProjectId);
+      const existing = await findExistingQueueFlowDownload(flowMediaId, flowTabId, flowProjectId, title);
       if (existing) {
         const resumed = existing.state === "in_progress"
           ? await waitForExistingQueueFlowDownload(existing.id, flowMediaId, flowTabId, flowProjectId, title, quality === "upscaled" ? 12 * 60_000 : 3 * 60_000, hooks.signal)

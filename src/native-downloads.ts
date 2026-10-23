@@ -71,6 +71,50 @@ export function classifyDownloadInterruption(error?: string, canResume?: boolean
   };
 }
 
+// DL-07: explicit HTML-response rejection, mirrored from the extension
+// queue's download module so both waiters speak the same vocabulary.
+// Detection is mime OR filename (mime `text/html`, parameters/case
+// tolerated, or a filename ending .html/.htm) — the OR is pinned: a
+// .html filename rejects even when the item also carries a real media
+// mime. Ordering mirrors the queue side: the check runs on a completed
+// or interrupted sighting BEFORE the item can be selected/returned as
+// media and BEFORE the interruption handling — an interrupted HTML-ish
+// item is not a media download at all. Removal limits differ by side:
+// the queue (extension background) removes the file through
+// chrome.downloads.removeFile, but the connector bridge this backend
+// talks to exposes only flow.downloads.recent and flow.downloads.read
+// — no removal method — so the native waiters cannot remove the file
+// from here; their errors record fileRemoved: false /
+// removalAvailable: false honestly instead of pretending otherwise.
+// (The ExtensionDownload shape carries no mime field today; when the
+// bridge does not supply one, detection rests on the filename signal,
+// which the bridge does expose.)
+export function detectFlowDownloadHtmlResponse(item: { filename?: string | null; mime?: string | null }): { via: "mime" | "filename"; mime: string; filename: string } | null {
+  if (!item || typeof item !== "object") return null;
+  const mime = String(item.mime || "").split(";")[0].trim().toLowerCase();
+  const filename = String(item.filename || "").split(/[\\/]/).pop()?.trim() || "";
+  if (mime === "text/html") return { via: "mime", mime, filename };
+  if (/\.html?$/i.test(filename)) return { via: "filename", mime, filename };
+  return null;
+}
+
+function throwIfHtmlNativeDownload(item: NativeDownload): void {
+  if (!item || (item.state !== "complete" && item.state !== "interrupted")) return;
+  const signal = detectFlowDownloadHtmlResponse(item as { filename?: string; mime?: string });
+  if (!signal) return;
+  throw Object.assign(new Error(`Chrome download for a Flow result arrived as an HTML page instead of media (detected via ${signal.via === "mime" ? `mime "${signal.mime}"` : `filename "${signal.filename}"`}); the HTML payload is not the generated media. The media remains in Flow.`), {
+    code: "FLOW_DOWNLOAD_HTML_RESPONSE", retryable: false, outcome_unknown: false,
+    downloadHtmlResponse: {
+      downloadId: item.id,
+      via: signal.via,
+      mime: signal.mime || null,
+      filename: signal.filename || null,
+      fileRemoved: false,
+      removalAvailable: false,
+    },
+  });
+}
+
 function downloadInterruptionDiagnostics(item: { error?: string; canResume?: boolean }): { reason: string; category: "transient" | "fatal"; canResume: boolean; resumable: boolean } {
   const classification = classifyDownloadInterruption(item.error, item.canResume);
   return {
@@ -87,6 +131,8 @@ function downloadInterruptionDiagnostics(item: { error?: string; canResume?: boo
 export function selectCompletedFlowDownload(items: NativeDownload[], before: ReadonlySet<number>): NativeDownload | undefined {
   return items.find(item => !before.has(item.id) && hasFlowDownloadProvenance(item) &&
     item.state === "complete" && item.filename && (item.totalBytes > 0 || item.bytesReceived > 0) &&
+    // DL-07: an HTML payload is never selected as a media result.
+    !detectFlowDownloadHtmlResponse(item as { filename?: string; mime?: string }) &&
     (!existsSync(item.filename) || statSync(item.filename).size > 0));
 }
 
@@ -100,6 +146,9 @@ export async function waitForNativeDownload(
   let lastProgress = "";
   while (Date.now() < deadline) {
     const items = (await extensionDownloads()).filter(item => !before.has(item.id) && hasFlowDownloadProvenance(item));
+    // DL-07: HTML check on every poll sighting — before selection/return
+    // and before the interruption failure below.
+    for (const item of items) throwIfHtmlNativeDownload(item);
     const complete = selectCompletedFlowDownload(items, before);
     if (complete) return complete;
 
@@ -242,6 +291,9 @@ export async function materializeQueuedNativeDownloads(
         await new Promise(resolve => setTimeout(resolve, 750));
         continue;
       }
+      // DL-07: HTML check on every poll sighting — before the completion
+      // break and before the interruption failure below.
+      throwIfHtmlNativeDownload(download);
       if (download.state === "complete" && download.filename && (download.totalBytes > 0 || download.bytesReceived > 0)) break;
       if (download.state === "interrupted") {
         throw Object.assign(new Error(`Chrome download failed: ${download.error ?? "unknown error"} (${download.bytesReceived}/${download.totalBytes} bytes). The media remains in Flow.`), {
