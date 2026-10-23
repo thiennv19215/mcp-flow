@@ -765,7 +765,13 @@
               const titleOnly = picked.some(item => !item.id || item.id.startsWith("title:"));
               const signature = picked.map(item => item.id || `title:${item.title}`).join("|");
               if (!titleOnly || signature === lastTitleOnlyResult) {
-                const media = picked.map(({ id, title, kind: mediaKind }) => ({ id, title, kind: mediaKind }));
+                const media = picked.map(({ id, title, kind: mediaKind }) => ({
+                  id,
+                  title,
+                  // Flow reports generated video scenes as `scene`; normalize
+                  // them so queue download and download-later treat them as video.
+                  kind: mediaKind === "scene" ? "video" : mediaKind,
+                }));
                 await tiles.emitFlowProgress(command, kind === "video" ? "Tạo video hoàn tất 100%" : "Tạo ảnh hoàn tất 100%", {
                   generationResult: { media },
                 });

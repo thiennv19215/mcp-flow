@@ -961,9 +961,13 @@
           const downloadSummary = downloads.length
             ? ` Đã tải về ${downloads.length} tệp${downloads[0]?.filename ? `: ${String(downloads[0].filename).split(/[\\/]/).pop()}` : "."}`
             : "";
+          const downloadError = String(result?.downloadError || "").trim();
+          const autoDownloadSkipped = result?.autoDownload === false;
           setFeedback(isCharacter
             ? "✅ Đã hoàn tất thao tác nhân vật trong Flow."
-            : `✅ ${type === "video" ? "Tạo video" : "Tạo ảnh"} thành công.${downloadSummary}`, true);
+            : downloadError
+              ? `✅ ${type === "video" ? "Tạo video" : "Tạo ảnh"} thành công, nhưng tải tự động lỗi: ${downloadError} Hãy dùng nút Tải về ở tác vụ để thử lại.`
+              : `✅ ${type === "video" ? "Tạo video" : "Tạo ảnh"} thành công.${downloadSummary}${autoDownloadSkipped ? " Tự động tải đang tắt; có thể bấm Tải về ở tác vụ." : ""}`, !downloadError);
           addLog(isCharacter ? "flow.character.create" : "flow.operation.complete", finished.label || finished.name || "Flow job", true);
           if (isCharacter) void loadFlowCharacters();
         } else if (finished?.status === "failed") {
@@ -986,7 +990,7 @@
     }
   });
 
-  async function executeGenerationTask({ type, prompt, prompts, aspect_ratio, count = 1, model, attachments = [], attachmentsPerPrompt, firstFramesPerPrompt, lastFramesPerPrompt, video_settings, chainVideo = false, btn, btnTextEl, defaultTextKey }) {
+  async function executeGenerationTask({ type, prompt, prompts, aspect_ratio, count = 1, model, autoDownload = false, attachments = [], attachmentsPerPrompt, firstFramesPerPrompt, lastFramesPerPrompt, video_settings, chainVideo = false, btn, btnTextEl, defaultTextKey }) {
     if (isGenerating) {
       setFeedback("Đang có tác vụ đang chạy, vui lòng đợi!", false);
       return;
@@ -1017,6 +1021,7 @@
           operation: "flow.generation.submit",
           payload: {
             type,
+            autoDownload: autoDownload === true,
             prompt: itemPrompt,
             ...(model ? { model } : {}),
             aspectRatio: aspect_ratio,
@@ -1418,6 +1423,7 @@
     const btn = document.querySelector("#btnSubmitImage");
     const btnTextEl = document.querySelector("#txtBtnSubmitImage");
     const prompt = document.querySelector("#inputPromptImage").value.trim();
+    const autoDownload = document.querySelector("#genTabAutoDownload")?.checked === true;
     if (!prompt) {
       setFeedback("Vui lòng nhập câu lệnh prompt cho ảnh!", false);
       return;
@@ -1516,6 +1522,7 @@
         aspect_ratio,
         count,
         model,
+        autoDownload,
         attachmentsPerPrompt,
         btn,
         btnTextEl,
@@ -1536,6 +1543,7 @@
     const btn = document.querySelector("#btnSubmitVideo");
     const btnTextEl = document.querySelector("#txtBtnSubmitVideo");
     const prompt = document.querySelector("#inputPromptVideo").value.trim();
+    const autoDownload = document.querySelector("#genTabAutoDownload")?.checked === true;
     if (!prompt) {
       setFeedback("Vui lòng nhập câu lệnh prompt cho video!", false);
       return;
@@ -1693,6 +1701,7 @@
         prompts,
         aspect_ratio,
         count,
+        autoDownload,
         video_settings: {
           mode,
           model,

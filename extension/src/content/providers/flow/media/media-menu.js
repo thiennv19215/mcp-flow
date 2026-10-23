@@ -305,10 +305,28 @@
       const kind = scene ? "scene" : video ? "video" : image ? "image" : null;
       const name = (tile.getAttribute("aria-label") || tile.getAttribute("title") || tile.getAttribute("data-tile-name") ||
         tile.querySelector("img")?.getAttribute("alt") || tile.querySelector("img")?.getAttribute("aria-label") || "").trim();
-      const imageElement = tile.querySelector("img");
-      const videoElement = tile.querySelector("video");
+      const queriedMedia = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.mediaElements", tile, { checkVisible: false }) : null) || [];
+      const mediaElements = [...new Set([...queriedMedia, ...tile.querySelectorAll("img,video")])];
+      const imageCandidates = mediaElements.flatMap(element => {
+        if (String(element.tagName || "").toLowerCase() === "img") return [element];
+        if (typeof element.querySelectorAll !== "function") return [];
+        return [...element.querySelectorAll("img")];
+      });
+      const videoCandidates = mediaElements.flatMap(element => {
+        if (String(element.tagName || "").toLowerCase() === "video") return [element];
+        if (typeof element.querySelectorAll !== "function") return [];
+        return [...element.querySelectorAll("video")];
+      });
+      const readImageUrl = element => element?.currentSrc || element?.getAttribute?.("src") || "";
+      const usableImageCandidates = [...new Set(imageCandidates)].map(element => ({ element, src: readImageUrl(element) }))
+        .filter(item => item.src && !/^(?:data:|blob:|chrome-extension:)/i.test(item.src) && !/(?:placeholder|spinner|loading|skeleton)/i.test(item.src));
+      const imageElement = usableImageCandidates.sort((a, b) => {
+        const score = item => (item.element.naturalWidth > 1 ? 2 : 0) + (/googleusercontent\.com|googleapis\.com|usercontent\.goog|\/media\//i.test(item.src) ? 1 : 0);
+        return score(b) - score(a);
+      })[0]?.element || null;
+      const videoElement = [...new Set(videoCandidates)].find(element => element.currentSrc || element.getAttribute("src") || element.getAttribute("poster")) || null;
       const mediaElement = imageElement || videoElement;
-      let thumbnailUrl = imageElement?.currentSrc || imageElement?.getAttribute("src") ||
+      let thumbnailUrl = usableImageCandidates.find(item => item.element === imageElement)?.src ||
         videoElement?.getAttribute("poster") || videoElement?.poster || "";
       try {
         const parsedThumbnail = new URL(thumbnailUrl, location.href);

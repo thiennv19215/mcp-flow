@@ -57,6 +57,7 @@
       pending: "Đang chờ", runningStatus: "Đang chạy", completedStatus: "Hoàn tất", failed: "Thất bại", cancelled: "Đã hủy",
       needsAttention: "Cần xử lý",
       generationComplete: "Flow đã tạo {count} kết quả", downloadQueued: "Chờ tải {done}/{total}", downloadingCount: "Đang tải {done}/{total}", downloadedCount: "Đã tải {done}/{total}", downloadFailedCount: "Tải lỗi {done}/{total}", downloadSkipped: "Đã bỏ qua tải",
+      downloadError: "Lỗi tải",
       waitingForUser: "Chờ bạn bấm Tạo", continueManual: "Đã bấm Tạo · tiếp tục", cancelManual: "Bỏ qua", manualSubmitLabel: "Tôi sẽ tự bấm Tạo trên Flow",
       noConnection: "Không thể kết nối với tiện ích Flow.", updateFailed: "Không thể cập nhật hàng đợi Flow.",
       assetRequired: "Nhập tên video cần chỉnh sửa hoặc nối tiếp.", scenesRequired: "Nhập ít nhất một cảnh, mỗi cảnh trên một dòng.",
@@ -92,6 +93,7 @@
       pending: "Pending", runningStatus: "Running", completedStatus: "Completed", failed: "Failed", cancelled: "Cancelled",
       needsAttention: "Needs attention",
       generationComplete: "Flow created {count} result(s)", downloadQueued: "Download queued {done}/{total}", downloadingCount: "Downloading {done}/{total}", downloadedCount: "Downloaded {done}/{total}", downloadFailedCount: "Download failed {done}/{total}", downloadSkipped: "Download skipped",
+      downloadError: "Download error",
       waitingForUser: "Waiting for your submit", continueManual: "I clicked Create · continue", cancelManual: "Skip", manualSubmitLabel: "I will click Create in Flow",
       noConnection: "Cannot connect to the Flow extension.", updateFailed: "Could not update the Flow queue.",
       assetRequired: "Enter the video name to edit or continue.", scenesRequired: "Enter at least one scene, one per line.",
@@ -125,6 +127,7 @@
     .flow-queue-panel__label{font-weight:600;overflow-wrap:anywhere}
     .flow-queue-panel__status{white-space:nowrap;color:var(--text-muted,#8b8b92);font-size:11px}
     .flow-queue-panel__detail{margin-top:4px;color:var(--text-muted,#8b8b92);white-space:pre-wrap;overflow-wrap:anywhere}
+    .flow-queue-panel__detail--download-error{color:#f87171}
     .flow-queue-panel__milestones{margin-top:5px;color:#a3e635;font-size:11px;overflow-wrap:anywhere}
     .flow-queue-panel__milestones--failed{color:#f87171}
     .flow-queue-panel__progress{height:4px;margin-top:7px;border-radius:4px;background:rgba(255,255,255,.1);overflow:hidden}
@@ -172,7 +175,7 @@
     const checkpoint = task?.metadata?.generationResultCheckpoint?.media;
     const result = task?.result?.result ?? task?.result;
     const media = Array.isArray(checkpoint) && checkpoint.length ? checkpoint : result?.media;
-    if (!Array.isArray(media) || !media.some(item => item?.id && (item?.title || item?.name) && ["image", "video"].includes(String(item?.kind || item?.type || "").toLowerCase()))) return false;
+    if (!Array.isArray(media) || !media.some(item => item?.id && (item?.title || item?.name) && ["image", "video", "scene"].includes(String(item?.kind || item?.type || "").toLowerCase()))) return false;
     const state = String(task?.progress?.download?.state || "skipped").toLowerCase();
     return !["queued", "downloading", "completed"].includes(state);
   }
@@ -546,6 +549,13 @@
           `${this._text("generationComplete", { count })} · ${this._text(downloadKey, { done, total })}`,
         );
         item.append(milestone);
+        if (state === "failed" && download?.error) {
+          item.append(makeElement(
+            "div",
+            "flow-queue-panel__detail flow-queue-panel__detail--download-error",
+            `${this._text("downloadError")}: ${String(download.error).slice(0, 700)}`,
+          ));
+        }
       }
       const percent = progressPercent(task);
       if (percent !== null) {

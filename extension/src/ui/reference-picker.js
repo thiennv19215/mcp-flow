@@ -22,6 +22,7 @@
     let pickerVisibleLimit = 20;
     let pickerScanLimit = 120;
     let pickerScannedCount = 0;
+    const flowThumbnailProxyCache = new Map();
 
     const modal = document.querySelector("#referencePickerModal");
     const flowGrid = document.querySelector("#refPickerFlowGrid");
@@ -52,6 +53,71 @@
     const hasLocalFile = file => (pickerPurpose === "frames" ? frameSources : referencesFor(pickerType))
       .some(item => item.source === "local" && localFileKey(item.file) === localFileKey(file));
 
+    function normalizeFlowThumbnailUrl(asset) {
+      const candidate = asset?.thumbnailUrl || asset?.thumbnail_url || asset?.thumbnail || asset?.previewUrl || asset?.posterUrl || asset?.poster || asset?.src;
+      if (typeof candidate !== "string" || !candidate.trim()) return "";
+      try {
+        const parsed = new URL(candidate, location.href);
+        if (parsed.protocol !== "https:") return "";
+        return parsed.href;
+      } catch {
+        return "";
+      }
+    }
+
+    function isFlowThumbnailHost(url) {
+      try {
+        const host = new URL(url).hostname.toLowerCase();
+        return host === "flow.google.com" || host === "labs.google" || host.endsWith(".googleusercontent.com") ||
+          host.endsWith(".googleapis.com") || host === "storage.googleapis.com" || host.endsWith(".usercontent.goog");
+      } catch {
+        return false;
+      }
+    }
+
+    function proxyFlowThumbnail(url) {
+      if (!isFlowThumbnailHost(url)) return Promise.resolve("");
+      const cached = flowThumbnailProxyCache.get(url);
+      if (cached) return cached;
+      const pending = (async () => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15_000);
+        try {
+          const response = await fetch(url, { credentials: "include", cache: "force-cache", signal: controller.signal });
+          if (!response.ok) return "";
+          const blob = await response.blob();
+          if (!blob.size || blob.size > 3 * 1024 * 1024 || !/^image\//i.test(blob.type || "")) return "";
+          return URL.createObjectURL(blob);
+        } catch {
+          return "";
+        } finally {
+          clearTimeout(timeout);
+        }
+      })();
+      flowThumbnailProxyCache.set(url, pending);
+      if (flowThumbnailProxyCache.size > 100) flowThumbnailProxyCache.delete(flowThumbnailProxyCache.keys().next().value);
+      void pending.then(result => { if (!result) flowThumbnailProxyCache.delete(url); });
+      return pending;
+    }
+
+    function bindFlowThumbnail(img, url, onUnavailable) {
+      let proxyAttempted = false;
+      img.onerror = async () => {
+        if (proxyAttempted || !img.isConnected) {
+          onUnavailable?.();
+          return;
+        }
+        proxyAttempted = true;
+        const proxiedUrl = await proxyFlowThumbnail(url);
+        if (proxiedUrl && img.isConnected) {
+          img.src = proxiedUrl;
+          return;
+        }
+        onUnavailable?.();
+      };
+      img.src = url;
+    }
+
     function renderReferenceCards(type) {
       type = normalizeType(type);
       const isImage = type === "image";
@@ -69,11 +135,11 @@
         const img = document.createElement("img");
         const isFlowAsset = reference.source === "flow";
         const isVideo = reference.kind === "video";
-        if (isFlowAsset && reference.thumbnailUrl) img.src = reference.thumbnailUrl;
-        else if (!isFlowAsset) {
+        const flowThumbnailUrl = isFlowAsset ? normalizeFlowThumbnailUrl(reference) : "";
+        if (!flowThumbnailUrl && !isFlowAsset) {
           if (!reference.previewUrl) reference.previewUrl = URL.createObjectURL(reference.file);
           img.src = reference.previewUrl;
-        } else img.style.display = "none";
+        } else if (!flowThumbnailUrl) img.style.display = "none";
         img.alt = reference.name || (isVideo ? "Video tham chiếu" : "Ảnh tham chiếu");
         img.onerror = () => { img.style.display = "none"; };
 
@@ -106,6 +172,7 @@
         };
         card.append(img, badge, tag, remove);
         cardsList.insertBefore(card, uploadSlot);
+        if (flowThumbnailUrl) bindFlowThumbnail(img, flowThumbnailUrl, () => { img.style.display = "none"; });
       });
       uploadSlot.style.display = list.length >= 3 ? "none" : "flex";
 
@@ -128,9 +195,9 @@
             item.dataset.index = String(index);
             const img = document.createElement("img");
             const isFlowAsset = reference.source === "flow";
-            if (isFlowAsset && reference.thumbnailUrl) img.src = reference.thumbnailUrl;
-            else if (!isFlowAsset && reference.previewUrl) img.src = reference.previewUrl;
-            else img.style.display = "none";
+            const flowThumbnailUrl = isFlowAsset ? normalizeFlowThumbnailUrl(reference) : "";
+            if (!flowThumbnailUrl && !isFlowAsset && reference.previewUrl) img.src = reference.previewUrl;
+            else if (!flowThumbnailUrl) img.style.display = "none";
             img.alt = reference.name || "";
             img.onerror = () => { img.style.display = "none"; };
 
@@ -153,6 +220,7 @@
             };
             item.append(img, tag, removeBtn);
             previewGrid.appendChild(item);
+            if (flowThumbnailUrl) bindFlowThumbnail(img, flowThumbnailUrl, () => { img.style.display = "none"; });
           });
         }
       }
@@ -212,13 +280,13 @@
         button.className = `ref-picker-asset${isExisting || isPicked ? " selected" : ""}`;
         button.title = isExisting ? "Đã có trong danh sách tham chiếu" : !canIdentifySafely ? `Flow không cung cấp media ID ổn định cho ${isVideo ? "video" : "ảnh"} này` : asset.name || (isVideo ? "Video Flow" : "Ảnh Flow");
         button.disabled = isExisting || (!canIdentifySafely && !isPicked) || (!isPicked && selectedCount() >= selectionLimit());
-        if (asset.thumbnailUrl) {
-          const thumbnail = document.createElement("img");
-          thumbnail.src = asset.thumbnailUrl;
-          thumbnail.alt = "";
-          thumbnail.loading = "lazy";
-          thumbnail.onerror = () => thumbnail.remove();
-          button.appendChild(thumbnail);
+        const thumbnailUrl = normalizeFlowThumbnailUrl(asset);
+        let thumbnailElement = null;
+        if (thumbnailUrl) {
+          thumbnailElement = document.createElement("img");
+          thumbnailElement.alt = "";
+          thumbnailElement.loading = "lazy";
+          button.appendChild(thumbnailElement);
         } else {
           const placeholder = document.createElement("div");
           placeholder.className = "ref-picker-asset-placeholder";
@@ -259,7 +327,7 @@
               kind: asset.kind || (isVideo ? "video" : "image"),
               assetName: `asset:${asset.name}`,
               expectedId: assetId,
-              thumbnailUrl: asset.thumbnailUrl || ""
+              thumbnailUrl
             };
             pickerFlowSelection.set(assetId, selectedReference);
             pickerSelectionOrder.push(selectedReference);
@@ -267,6 +335,12 @@
           updatePickerCount();
         };
         flowGrid.appendChild(button);
+        if (thumbnailElement) bindFlowThumbnail(thumbnailElement, thumbnailUrl, () => {
+          const placeholder = document.createElement("div");
+          placeholder.className = "ref-picker-asset-placeholder";
+          placeholder.textContent = isVideo ? "▶" : "▧";
+          if (thumbnailElement.isConnected) thumbnailElement.replaceWith(placeholder);
+        });
       }
       if (flowMessage) {
         flowMessage.hidden = !pickerFlowLoading && list.length > 0;
@@ -319,7 +393,8 @@
         const assets = Array.isArray(result) ? result : (result?.assets || []);
         if (projectEpoch !== pickerProjectEpoch || projectId !== pickerProjectId) return;
         pickerScannedCount = assets.length;
-        pickerFlowAssets = assets.filter(asset => asset && (asset.kind === "image" || asset.kind === "video") && typeof asset.name === "string");
+        pickerFlowAssets = assets.filter(asset => asset && (asset.kind === "image" || asset.kind === "video") && typeof asset.name === "string")
+          .map(asset => ({ ...asset, thumbnailUrl: normalizeFlowThumbnailUrl(asset) }));
         flowAssetCacheByProject.set(projectId, { assets: pickerFlowAssets, scannedCount: assets.length });
         while (flowAssetCacheByProject.size > 5) flowAssetCacheByProject.delete(flowAssetCacheByProject.keys().next().value);
         pickerVisibleLimit = 20;

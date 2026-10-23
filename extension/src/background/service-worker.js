@@ -1349,10 +1349,10 @@ async function withQueueDownloads(job, payload, operationResult, invoke, hooks) 
     try {
       await hooks.progress({
         phase: "download_failed",
-        message: `Flow created ${media.length} result${media.length === 1 ? "" : "s"}, but download stopped at ${downloadedCount}/${media.length}.`,
+        message: `Flow created ${media.length} result${media.length === 1 ? "" : "s"}, but download stopped at ${downloadedCount}/${media.length}: ${String(error?.message || error).slice(0, 700)}`,
         percent: 90 + Math.floor(downloadedCount * 9 / Math.max(1, media.length)),
         generation: generationState,
-        download: { state: "failed", completed: downloadedCount, total: media.length },
+        download: { state: "failed", completed: downloadedCount, total: media.length, error: String(error?.message || error).slice(0, 700) },
       });
     } catch (progressError) {
       console.warn("[FlowQueue] Could not persist generated/download stage details:", progressError?.message || progressError);
@@ -1360,10 +1360,23 @@ async function withQueueDownloads(job, payload, operationResult, invoke, hooks) 
     return {
       ...operationResult,
       browserDownloads: Array.isArray(error?.browserDownloads) ? error.browserDownloads : [],
-      downloadError: String(error?.message || error),
+      downloadError: String(error?.message || error).slice(0, 700),
       downloadErrorCode: String(error?.code || "FLOW_DOWNLOAD_FAILED"),
     };
   }
+}
+function queueCompletionProgress(result, message) {
+  if (result?.downloadError) {
+    return {
+      phase: "download_failed",
+      message: `${message} Automatic download failed; the generated media is still available in Flow.`,
+      percent: 100,
+    };
+  }
+  if (result?.autoDownload === false) {
+    return { phase: "complete", message: `${message} Automatic download is off.`, percent: 100 };
+  }
+  return { phase: "complete", message, percent: 100 };
 }
 function generatedMediaForQueueJob(job) {
   const checkpointMedia = job?.metadata?.generationResultCheckpoint?.media;
@@ -1372,7 +1385,7 @@ function generatedMediaForQueueJob(job) {
   return media.map(item => ({
     id: String(item?.id || "").trim(),
     title: String(item?.title || item?.name || "").trim(),
-    kind: String(item?.kind || item?.type || "").toLowerCase(),
+    kind: String(item?.kind || item?.type || "").toLowerCase() === "scene" ? "video" : String(item?.kind || item?.type || "").toLowerCase(),
   })).filter(item => item.id && item.title && ["image", "video"].includes(item.kind));
 }
 async function downloadGeneratedQueueJob(job, payload, invoke, hooks) {
@@ -1543,7 +1556,7 @@ async function runExtensionFlowJob(job, hooks) {
       generation: { state: "completed", count: checkpoint.media.length, media: checkpoint.media },
     });
     const operationResult = await withQueueDownloads(job, payload, recoveredResult, invoke, hooks);
-    await hooks.progress({ phase: "complete", message: "Flow generation completed.", percent: 100 });
+    await hooks.progress(queueCompletionProgress(operationResult, "Flow generation completed."));
     return { completed: true, requestDispatched: true, ...checkpoint.quoteFields, result: operationResult };
   }
   await hooks.progress({ phase: "submit", message: "Submitting to Google Flow…", percent: 5 });
@@ -1551,7 +1564,7 @@ async function runExtensionFlowJob(job, hooks) {
     try {
       const rawResult = await invoke(operation, payload);
       const result = await withQueueDownloads(job, payload, rawResult, invoke, hooks);
-      await hooks.progress({ phase: "complete", message: "Flow operation completed.", percent: 100 });
+      await hooks.progress(queueCompletionProgress(result, "Flow operation completed."));
       return { completed: true, operation, requestDispatched: Boolean(result?.requestDispatched), result };
     } catch (error) {
       throw Object.assign(error, {
@@ -1664,7 +1677,7 @@ async function runExtensionFlowJob(job, hooks) {
     });
   }
   const operationResult = await withQueueDownloads(job, payload, { ...observed, ...quoteFields }, invoke, hooks);
-  await hooks.progress({ phase: "complete", message: "Flow generation completed.", percent: 100 });
+  await hooks.progress(queueCompletionProgress(operationResult, "Flow generation completed."));
   return { completed: true, requestDispatched: true, ...quoteFields, result: operationResult };
 }
 // Keep a small cooldown between generations to avoid hammering Flow while

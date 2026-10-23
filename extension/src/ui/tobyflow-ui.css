@@ -451,7 +451,7 @@ textarea:disabled {
 .flow-mcp-sidebar .ref-picker-asset:hover:not(:disabled),
 .flow-mcp-sidebar .ref-picker-asset.selected { border-color: var(--primary); }
 .flow-mcp-sidebar .ref-picker-asset:disabled { cursor: default; opacity: .62; }
-.flow-mcp-sidebar .ref-picker-asset > img { width: 100%; height: calc(100% - 30px); min-height: 0; object-fit: cover; }
+.flow-mcp-sidebar .ref-picker-asset > img { width: 100%; height: calc(100% - 30px); min-height: 0; object-fit: cover; object-position: center; background: var(--surface); }
 .flow-mcp-sidebar .ref-picker-asset-placeholder { display: grid; flex: 1; place-items: center; color: var(--muted-foreground); font-size: 28px; }
 .flow-mcp-sidebar .ref-picker-asset-name { overflow: hidden; padding: 6px 7px; color: var(--foreground); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .flow-mcp-sidebar .ref-picker-check {
