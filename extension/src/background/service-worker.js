@@ -1203,7 +1203,21 @@ async function runExtensionFlowJob(job, hooks) {
 }
 // Keep a small cooldown between generations to avoid hammering Flow while
 // removing most of the previous 5–10 second idle wait between queued jobs.
-const flowJobQueue = new FlowJobQueue(runExtensionFlowJob, { minDelayMs: 1_000, maxDelayMs: 2_000 });
+const flowJobQueue = new FlowJobQueue(runExtensionFlowJob, {
+  minDelayMs: 1_000,
+  maxDelayMs: 2_000,
+  // Admission preflight reads the same capability registry the sidebar and
+  // content scripts validate against, so a batch is checked as a whole
+  // before its first job can spend credits.
+  loadCapabilityRegistry: async () => {
+    try {
+      const response = await fetch(chrome.runtime.getURL("flow-model-capabilities.json"));
+      return response.ok ? await response.json() : null;
+    } catch {
+      return null;
+    }
+  },
+});
 flowJobQueue.subscribe((snapshot, reason) => {
   broadcastFlowQueue(snapshot, reason);
   // Failures during queue preflight happen before the download runner can mark

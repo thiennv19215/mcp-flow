@@ -27,6 +27,10 @@ Queue bridge operations are accepted only from the local MCP connector path. Ext
 
 The result is `{ job, snapshot }`. `job.id` is the persistent queue ID; use it with get/wait/cancel/retry. The queue keeps the side panel's sequential execution, pacing, progress, and unknown-outcome handling.
 
+## Admission preflight
+
+Before a generation job (or any job of a batch) enters the queue, the queue validates the fields it specifies against the local model capability registry (`flow-model-capabilities.json`): generation type, frames-vs-ingredients exclusivity, the per-model reference cap, and — when the model has a registry rule — duration, resolution, aspect ratio, and frame support. A failing single add throws the specific `FLOW_QUEUE_PREFLIGHT_*` code; a failing batch throws with a `problems` list naming every offending job index, and **no** job from that batch is queued, so a batch never spends credits on its first prompts only to fail on a later impossible one. Jobs for other operations, jobs with models the registry does not know, and submissions made while the registry cannot be read are not blocked here; the content-side capability check at run time remains the backstop.
+
 ## Extension-owned workflow planning
 
 MCP callers should use `flow.queue.generate`, `flow.queue.edit`, `flow.queue.continue`, or `flow.queue.agent` for AI-requested workflows. These operations plan scene numbering, prompt additions, reference normalization, and per-project queue metadata inside the extension before enqueuing. They accept `output_dir` and `outputAssets` as local-output context; generation also accepts the Flow library as `knownAssets`, plus `characterLooks`, `techniques`, and `capabilityRegistry` inputs. `chain_previous` and `reference_previous` become dependency edges between queue jobs. Reordering that would put a dependent scene before its predecessor is rejected.

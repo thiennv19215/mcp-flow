@@ -69,6 +69,30 @@ matching Flow itself.
 - **Omni label matching** — `getModelAliases` accepts both "Omni Flash" and
   "Omni 1.1 Flash" picker labels in both directions.
 
+## Queue logic comparison
+
+The reference runs a two-layer design: persistent per-project **batches**
+(admitted atomically after a full validation pass) feeding a serial
+runtime queue. This repo's `FlowJobQueue` already matches or exceeds the
+runtime half — sequential draining with randomized inter-job pacing,
+bounded auto-retry for explicitly retryable pre-submit errors with the
+failed job re-queued at the tail, unknown-outcome pause with an attention
+record, page-blocker pause, dependency edges with skip propagation, and
+checkpoint-based recovery after a worker restart.
+
+The one missing piece was the admission half, now aligned:
+
+- **Batch admission preflight** (`flow-queue-preflight.js`, wired into
+  `FlowJobQueue.add`/`addBatch`): every generation job in a submission is
+  validated against the local capability registry before any job is
+  queued — frames/ingredients exclusivity, reference cap, and per-rule
+  duration/resolution/aspect/frame support. Any failure rejects the whole
+  submission with per-job problem codes; nothing is queued and no credits
+  are spent. Deliberate differences from the reference: unknown models are
+  not rejected (MCP callers may omit or name future models; the run-time
+  content check decides), and an unreadable registry skips preflight
+  instead of blocking the queue.
+
 ## Deliberately not ported
 
 - The reference's **Flow API V2 driver** and its model/selector configs are

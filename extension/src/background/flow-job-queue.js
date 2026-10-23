@@ -1,3 +1,5 @@
+import { validateFlowJobPayloads, preflightError } from "./flow-queue-preflight.js";
+
 const STORAGE_KEY = "flowMcpJobQueueV1";
 const AUTO_RETRY_MAX = 2;
 const PAGE_BLOCKER_ERROR_CODES = new Set([
@@ -61,10 +63,12 @@ const mayHaveDispatched = value => value?.outcomeUnknown === true || value?.outc
  * normal add; callers that intentionally pause the queue can resume it later.
  */
 export class FlowJobQueue {
-  constructor(runner, { storageKey = STORAGE_KEY, storage = globalThis.chrome?.storage?.local, minDelayMs = 5_000, maxDelayMs = 10_000 } = {}) {
+  constructor(runner, { storageKey = STORAGE_KEY, storage = globalThis.chrome?.storage?.local, minDelayMs = 5_000, maxDelayMs = 10_000, loadCapabilityRegistry = null } = {}) {
     if (typeof runner !== "function") throw new TypeError("FlowJobQueue requires a runner(job, hooks).");
     if (!storage?.get || !storage?.set) throw new TypeError("FlowJobQueue requires chrome.storage.local or a compatible storage adapter.");
     this.runner = runner;
+    this.loadCapabilityRegistry = typeof loadCapabilityRegistry === "function" ? loadCapabilityRegistry : null;
+    this.capabilityRegistryPromise = null;
     this.storage = storage;
     this.storageKey = storageKey;
     this.minDelayMs = Math.max(0, Number(minDelayMs) || 0);
@@ -220,10 +224,30 @@ export class FlowJobQueue {
     return () => this.listeners.delete(listener);
   }
 
+  // Admission preflight: validate every generation job against the local
+  // model capability registry before any of them enters the queue, so an
+  // impossible job fails the whole submission up front instead of failing
+  // at run time after earlier jobs already spent credits. Skipped when no
+  // registry loader is configured or the registry cannot be read; the
+  // content-side capability check at run time remains the backstop.
+  async #preflight(jobs) {
+    if (!this.loadCapabilityRegistry) return;
+    if (!this.capabilityRegistryPromise) {
+      this.capabilityRegistryPromise = Promise.resolve()
+        .then(() => this.loadCapabilityRegistry())
+        .catch(() => null);
+    }
+    const registry = await this.capabilityRegistryPromise;
+    if (!registry) return;
+    const problems = validateFlowJobPayloads(jobs, registry);
+    if (problems.length > 0) throw preflightError(problems);
+  }
+
   async add(input) {
     await this.ready;
     const job = this.#makeJob(input);
     if (this.jobs.some(existing => existing.id === job.id)) throw new Error(`Flow job already exists: ${job.id}`);
+    await this.#preflight([job]);
     this.jobs.push(job);
     await this.#persist();
     this.#emit("added");
@@ -251,6 +275,7 @@ export class FlowJobQueue {
       if (ids.has(job.id)) throw new Error(`Flow job already exists: ${job.id}`);
       ids.add(job.id);
     }
+    await this.#preflight(jobs);
     this.jobs.push(...jobs);
     try {
       await this.#persist();
