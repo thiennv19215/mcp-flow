@@ -24,19 +24,24 @@ async function copyOptionalDirectory(source, destination) {
   }
 }
 
-async function copyCapabilities(stageRoot) {
+async function copyCapabilitiesFile(stageRoot, fileName) {
   const candidates = [
-    resolve(repoRoot, "flow-model-capabilities.json"),
-    resolve(extensionSourceRoot, "flow-model-capabilities.json"),
+    resolve(repoRoot, fileName),
+    resolve(extensionSourceRoot, fileName),
   ];
   for (const candidate of candidates) {
     try {
-      await cp(candidate, resolve(stageRoot, "flow-model-capabilities.json"));
+      await cp(candidate, resolve(stageRoot, fileName));
       return;
     } catch (error) {
       if (error?.code !== "ENOENT") throw error;
     }
   }
+}
+
+async function copyCapabilities(stageRoot) {
+  await copyCapabilitiesFile(stageRoot, "flow-model-capabilities.json");
+  await copyCapabilitiesFile(stageRoot, "chatgpt-model-capabilities.json");
 }
 
 function manifestFileReferences(manifest) {
