@@ -139,16 +139,6 @@
           </svg>
           <span data-i18n="tab.gen">Gen</span>
         </button>
-        <!-- 2. Workflow -->
-        <button class="tobyflow-tab tab-btn" data-tab="tab-workflow" id="navWorkflow" data-i18n-title="tab.workflow" role="tab" aria-selected="false" tabindex="-1">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <g fill="currentColor">
-              <path fill-rule="evenodd" d="M12.123 15.292c-.587-1.927 1.198-3.775 3.158-3.155l5.955 1.848.003.001c2.33.733 2.35 4.024.04 4.801v.001l-1.63.55h-.004a.5.5 0 0 0-.325.322l-.003.01-.55 1.63c-.782 2.339-4.067 2.273-4.792-.052l-1.85-5.95zm2.555-1.248a.52.52 0 0 0-.642.665l1.849 5.943.034.087a.516.516 0 0 0 .952-.075l.001-.003.55-1.63c.237-.718.78-1.27 1.454-1.539l.138-.05 1.626-.55h.002c.487-.163.467-.85-.002-.997l-5.956-1.85z" clip-rule="evenodd"></path>
-              <path d="M15 1c2.599 0 4.678.514 6.082 1.918S23 6.401 23 9v3a1 1 0 1 1-2 0V9c0-2.401-.486-3.822-1.332-4.668S17.401 3 15 3H9c-2.401 0-3.822.486-4.668 1.332S3 6.599 3 9v6c0 2.401.486 3.822 1.332 4.668S6.599 21 9 21h3a1 1 0 1 1 0 2H9c-2.599 0-4.678-.514-6.082-1.918S1 17.599 1 15V9c0-2.599.514-4.678 1.918-6.082S6.401 1 9 1z"></path>
-            </g>
-          </svg>
-          <span data-i18n="tab.workflow">Workflow</span>
-        </button>
         <!-- 3. Templates & My Prompts -->
         <button class="tobyflow-tab tab-btn" data-tab="tab-templates" id="tabTemplatesBtn" data-i18n-title="tab.prompts" role="tab" aria-selected="false" tabindex="-1">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -350,12 +340,12 @@
                 <!-- Gen Type Toggle: Image / Video -->
                 <div class="gen-compact-item" id="genTypeTabs">
                   <div class="gen-type-toggle" id="genTypeToggle">
-                    <button type="button" class="gen-type-btn active" data-value="Image" data-i18n-title="gen.typeImage" title="Create image">
+                    <button type="button" class="gen-type-btn active" data-value="image" data-i18n-title="gen.typeImage" title="Create image" aria-label="Create image" aria-pressed="true">
                       <svg width="14" height="14" viewBox="0 0 13 12" fill="none">
                         <path d="M6.25 1.5H3.9C3.05992 1.5 2.63988 1.5 2.31901 1.66349C2.03677 1.8073 1.8073 2.03677 1.66349 2.31901C1.5 2.63988 1.5 3.05992 1.5 3.9V8.1C1.5 8.94008 1.5 9.36012 1.66349 9.68099C1.8073 9.96323 2.03677 10.1927 2.31901 10.3365C2.63988 10.5 3.05992 10.5 3.9 10.5H8.5C8.96499 10.5 9.19748 10.5 9.38823 10.4489C9.90587 10.3102 10.3102 9.90587 10.4489 9.38823C10.5 9.19748 10.5 8.96499 10.5 8.5M5.25 4.25C5.25 4.80228 4.80228 5.25 4.25 5.25C3.69772 5.25 3.25 4.80228 3.25 4.25C3.25 3.69772 3.69772 3.25 4.25 3.25C4.80228 3.25 5.25 3.69772 5.25 4.25ZM7.49502 5.95907L3.26557 9.80402C3.02768 10.0203 2.90873 10.1284 2.89821 10.2221C2.88909 10.3033 2.92023 10.3838 2.98159 10.4378C3.05239 10.5 3.21314 10.5 3.53464 10.5H8.22799C8.94757 10.5 9.30736 10.5 9.58996 10.3791C9.94472 10.2274 10.2274 9.94472 10.3791 9.58996C10.5 9.30736 10.5 8.94757 10.5 8.22799C10.5 7.98587 10.5 7.86482 10.4735 7.75208C10.4403 7.61039 10.3765 7.47768 10.2866 7.3632C10.2151 7.2721 10.1206 7.19647 9.93154 7.04523L8.53291 5.92633C8.34369 5.77495 8.24908 5.69927 8.1449 5.67256C8.05307 5.64901 7.95643 5.65206 7.86627 5.68135C7.76397 5.71457 7.67432 5.79607 7.49502 5.95907Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"></path>
                       </svg>
                     </button>
-                    <button type="button" class="gen-type-btn" data-value="Video" data-i18n-title="gen.typeVideo" title="Create video">
+                    <button type="button" class="gen-type-btn" data-value="video" data-i18n-title="gen.typeVideo" title="Create video" aria-label="Create video" aria-pressed="false">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="m22 8-6 4 6 4V8Z"></path>
                         <rect x="2" y="6" width="14" height="12" rx="2" ry="2"></rect>
@@ -363,8 +353,8 @@
                     </button>
                   </div>
                   <select id="genType" class="hidden">
-                    <option value="Image">Image</option>
-                    <option value="Video">Video</option>
+                    <option value="image">Image</option>
+                    <option value="video">Video</option>
                   </select>
                 </div>
 
@@ -402,8 +392,8 @@
                 <div class="gen-compact-item hidden" id="videoInputTypeContainer">
                   <div class="input-group select-group compact-select">
                     <select id="videoInputType">
-                      <option value="Ingredients" selected>Ingredients</option>
-                      <option value="Frames">Frames</option>
+                      <option value="ingredients" selected>Ingredients</option>
+                      <option value="frames">Frames</option>
                     </select>
                     <svg class="select-arrow" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
                   </div>
@@ -560,7 +550,7 @@
               <!-- Upload action button bar -->
               <div class="ref-toolbar" id="refToolbarActions">
                 <div class="ref-toolbar-actions ref-toolbar-actions--full">
-                  <button class="ref-btn-upload ref-btn-upload--wide" id="openImagePickerBtn" type="button">
+                  <button class="ref-btn-upload ref-btn-upload--wide" id="openImagePickerBtn" type="button" aria-haspopup="dialog" aria-controls="referencePickerModal">
                     <svg class="ref-btn-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                       <path d="M15 8h.01"></path>
                       <path d="M12.5 21h-6.5a3 3 0 0 1 -3 -3v-12a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v6.5"></path>
@@ -682,16 +672,6 @@
 
           <!-- Submit Bar -->
           <section class="section actions">
-            <div class="gen-run-mode-row">
-              <button class="gen-run-mode-btn active" id="genRunModeBtn" type="button" title="Chạy song song / tuần tự">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <line x1="4" y1="6" x2="20" y2="6"></line>
-                  <line x1="4" y1="12" x2="20" y2="12"></line>
-                  <line x1="4" y1="18" x2="20" y2="18"></line>
-                </svg>
-                <span class="gen-run-mode-label" id="genRunModeLabel" data-i18n="gen.parallel">Parallel</span>
-              </button>
-            </div>
             <div class="gen-btn-row" id="genBtnRow">
               <button class="btn btn-generate" id="genSubmitBtn" type="button">
                 <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
@@ -716,71 +696,7 @@
         </div>
 
         <!-- ========================================== -->
-        <!-- TAB 2: WORKFLOW                            -->
-        <!-- ========================================== -->
-        <div id="tab-workflow" class="tab-pane" role="tabpanel">
-          <div class="wf-toolbar">
-            <div class="wf-toolbar-left">
-              <button class="btn btn-secondary btn-sm btn-toolbar-icon" id="wfSearchToggle" title="Tìm kiếm" type="button">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path></svg>
-              </button>
-              <button class="btn btn-secondary btn-sm btn-toolbar-icon" id="refreshWorkflowsBtn" title="Làm mới" type="button">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
-              </button>
-            </div>
-            <div class="wf-toolbar-right">
-              <button class="btn btn-primary btn-sm btn-icon-text" id="createWorkflowBtn" title="Tạo mới" type="button">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                <span>Add</span>
-              </button>
-            </div>
-          </div>
-          <div class="wf-search-row hidden" id="wfSearchRow">
-            <input type="text" id="wfSearchInput" placeholder="Tìm kiếm workflow..." />
-          </div>
-          <div id="workflowList" class="workflow-list"></div>
-
-          <!-- Workflow Automation Section (Flow MCP Agent Batch / Edit / Continue) -->
-          <section class="section-card flow-workflow-card" style="margin-top:12px;">
-            <div class="form-group">
-              <label class="form-label" for="workflowType" id="lblWorkflowType">Loại quy trình</label>
-              <select class="form-select" id="workflowType">
-                <option value="agent" id="optWorkflowAgent">Agent batch (mỗi dòng một cảnh)</option>
-                <option value="edit" id="optWorkflowEdit">Chỉnh sửa video</option>
-                <option value="continue" id="optWorkflowContinue">Tiếp tục video</option>
-              </select>
-            </div>
-            <div class="form-group" id="workflowScenesGroup">
-              <label class="form-label" for="workflowScenes" id="lblWorkflowScenes">Cảnh / prompt</label>
-              <textarea class="form-textarea" id="workflowScenes" placeholder="Mỗi dòng là một cảnh hoặc prompt"></textarea>
-            </div>
-            <div class="form-group" id="workflowAssetGroup" hidden>
-              <label class="form-label" for="workflowAsset" id="lblWorkflowAsset">Tên video nguồn</label>
-              <input class="form-input" id="workflowAsset" placeholder="Tên video trong Flow">
-            </div>
-            <div class="grid-2">
-              <div class="form-group">
-                <label class="form-label" for="workflowAspect" id="lblWorkflowAspect">Tỷ lệ</label>
-                <select class="form-select" id="workflowAspect">
-                  <option value="16:9">16:9</option>
-                  <option value="9:16">9:16</option>
-                  <option value="1:1">1:1</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label class="form-label" for="workflowPromptExtra" id="lblWorkflowExtra">Prompt bổ sung</label>
-                <input class="form-input" id="workflowPromptExtra" placeholder="Tùy chọn">
-              </div>
-            </div>
-            <button type="button" class="btn btn-primary" id="btnRunWorkflow">
-              <span id="txtRunWorkflow">Chạy quy trình</span>
-            </button>
-            <p class="flow-inline-note" id="workflowScopeNote">Lệnh được thêm vào hàng đợi; thao tác DOM diễn ra trong tab Flow.</p>
-          </section>
-        </div>
-
-        <!-- ========================================== -->
-        <!-- TAB 3: TEMPLATES & MY PROMPTS              -->
+        <!-- TAB 2: TEMPLATES & MY PROMPTS              -->
         <!-- ========================================== -->
         <div id="tab-templates" class="tab-pane" role="tabpanel">
           <div class="prompts-subtabs">
@@ -820,7 +736,7 @@
         </div>
 
         <!-- ========================================== -->
-        <!-- TAB 4: TASKS (MULTI-TASK)                  -->
+        <!-- TAB 3: TASKS (MULTI-TASK)                  -->
         <!-- ========================================== -->
         <div id="tab-tasks" class="tab-pane" role="tabpanel">
           <div class="task-toolbar">
@@ -849,7 +765,7 @@
         </div>
 
         <!-- ========================================== -->
-        <!-- TAB 5: PHOTOS                              -->
+        <!-- TAB 4: PHOTOS                              -->
         <!-- ========================================== -->
         <div id="tab-photos" class="tab-pane" role="tabpanel">
           <div class="photos-subtabs">
@@ -916,7 +832,7 @@
         </div>
 
         <!-- ========================================== -->
-        <!-- TAB 6: TOOLS                               -->
+        <!-- TAB 5: TOOLS                               -->
         <!-- ========================================== -->
         <div id="tab-tools" class="tab-pane" role="tabpanel">
           <div class="tools-grid">
@@ -1031,7 +947,7 @@
         </div>
 
         <!-- ========================================== -->
-        <!-- TAB 7: HISTORY                             -->
+        <!-- TAB 6: HISTORY                             -->
         <!-- ========================================== -->
         <div id="tab-history" class="tab-pane" role="tabpanel">
           <div class="flow-history-toolbar" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
@@ -1046,7 +962,7 @@
         </div>
 
         <!-- ========================================== -->
-        <!-- TAB 8: QUEUE & LOGS                        -->
+        <!-- TAB 7: QUEUE & LOGS                        -->
         <!-- ========================================== -->
         <div id="tab-logs" class="tab-pane" role="tabpanel">
           <div class="tobyflow-queue-monitor" id="queueMonitorContent">

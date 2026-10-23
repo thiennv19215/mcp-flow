@@ -38,7 +38,8 @@
     const supportedReferenceId = value => typeof value === "string" && (
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value) || value.startsWith("asb:")
     );
-    const referencesFor = type => references[type === "image" ? "image" : "video"];
+    const normalizeType = type => String(type || "").toLowerCase() === "video" ? "video" : "image";
+    const referencesFor = type => references[normalizeType(type)];
     const localFileKey = file => `${file.name}\u0000${file.size}\u0000${file.lastModified}`;
     const isVideoFile = file => file?.type?.startsWith("video/") || /\.(mp4|mov|webm|mkv|avi|m4v)$/i.test(String(file?.name || ""));
     const normalizeReferenceId = value => String(value || "").toLowerCase();
@@ -52,6 +53,7 @@
       .some(item => item.source === "local" && localFileKey(item.file) === localFileKey(file));
 
     function renderReferenceCards(type) {
+      type = normalizeType(type);
       const isImage = type === "image";
       const list = referencesFor(type);
       const cardsList = document.querySelector(isImage ? "#refCardsListImage" : "#refCardsListVideo");
@@ -108,7 +110,7 @@
       uploadSlot.style.display = list.length >= 3 ? "none" : "flex";
 
       // Also synchronize TobyFlow preview grid and ratio count
-      const currentGenType = document.querySelector("#genType")?.value || "image";
+      const currentGenType = normalizeType(document.querySelector("#genType")?.value);
       if (type === currentGenType) {
         const previewGrid = document.querySelector("#refImagesPreview");
         const ratioCount = document.querySelector("#refRatioCount");
@@ -150,6 +152,7 @@
     }
 
     function addLocalFilesToReferences(type, files) {
+      type = normalizeType(type);
       const list = referencesFor(type);
       let rejectedVideo = false;
       for (const file of files) {
@@ -426,7 +429,7 @@
     }
 
     function open(type, purpose = "references") {
-      pickerType = type === "image" ? "image" : "video";
+      pickerType = normalizeType(type);
       pickerPurpose = purpose === "frames" ? "frames" : "references";
       const cachedProjectAssets = pickerProjectId ? flowAssetCacheByProject.get(pickerProjectId) : null;
       pickerFlowAssets = Array.isArray(cachedProjectAssets?.assets) ? [...cachedProjectAssets.assets] : [];

@@ -308,6 +308,193 @@ textarea:disabled {
 .flow-mcp-sidebar #flowLibraryTools { border-color: var(--border); background: var(--surface); }
 .flow-mcp-sidebar .feedback-box { color: #4ade80; }
 
+.flow-mcp-sidebar .gen-type-toggle { gap: 2px; padding: 3px; border-radius: 8px; }
+.flow-mcp-sidebar .gen-type-btn { width: 32px; height: 32px; border-radius: 6px; }
+.flow-mcp-sidebar .gen-type-btn.active { background: var(--primary); color: var(--primary-fg); }
+.flow-mcp-sidebar .gen-type-btn:focus-visible { outline-offset: 2px; }
+
+.flow-mcp-sidebar .ref-picker-overlay[hidden],
+.flow-mcp-sidebar .ref-picker-content[hidden],
+.flow-mcp-sidebar .ref-picker-more[hidden] { display: none !important; }
+.flow-mcp-sidebar .ref-picker-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000001;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, .72);
+  -webkit-backdrop-filter: blur(5px);
+  backdrop-filter: blur(5px);
+}
+.flow-mcp-sidebar .ref-picker-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(720px, 100%);
+  height: min(680px, calc(100vh - 32px));
+  max-height: calc(100vh - 32px);
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-light);
+  border-radius: 12px;
+  background: var(--background);
+  color: var(--foreground);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, .55);
+}
+.flow-mcp-sidebar .ref-picker-header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 650;
+}
+.flow-mcp-sidebar .ref-picker-close {
+  display: grid;
+  flex: 0 0 32px;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 22px;
+  cursor: pointer;
+}
+.flow-mcp-sidebar .ref-picker-close:hover { background: rgba(255, 255, 255, .08); color: var(--foreground); }
+.flow-mcp-sidebar .ref-picker-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  padding: 8px 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+.flow-mcp-sidebar .ref-picker-tab {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  cursor: pointer;
+}
+.flow-mcp-sidebar .ref-picker-tab:hover { color: var(--foreground); }
+.flow-mcp-sidebar .ref-picker-tab.active { border-bottom-color: var(--primary); color: var(--primary); }
+.flow-mcp-sidebar .ref-picker-content {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+  overscroll-behavior: contain;
+}
+.flow-mcp-sidebar .ref-picker-toolbar { display: flex; flex: 0 0 auto; gap: 8px; }
+.flow-mcp-sidebar .ref-picker-search { flex: 1 1 auto; min-width: 0; }
+.flow-mcp-sidebar .ref-picker-results {
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.flow-mcp-sidebar .ref-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 9px;
+}
+.flow-mcp-sidebar .ref-picker-asset {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  aspect-ratio: 1;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--foreground);
+  text-align: left;
+  cursor: pointer;
+}
+.flow-mcp-sidebar .ref-picker-asset:hover:not(:disabled),
+.flow-mcp-sidebar .ref-picker-asset.selected { border-color: var(--primary); }
+.flow-mcp-sidebar .ref-picker-asset:disabled { cursor: default; opacity: .62; }
+.flow-mcp-sidebar .ref-picker-asset > img { width: 100%; height: calc(100% - 30px); min-height: 0; object-fit: cover; }
+.flow-mcp-sidebar .ref-picker-asset-placeholder { display: grid; flex: 1; place-items: center; color: var(--muted-foreground); font-size: 28px; }
+.flow-mcp-sidebar .ref-picker-asset-name { overflow: hidden; padding: 6px 7px; color: var(--foreground); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.flow-mcp-sidebar .ref-picker-check {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--primary);
+  color: var(--primary-fg);
+  font-size: 11px;
+  font-weight: 700;
+}
+.flow-mcp-sidebar .ref-picker-message { padding: 18px 8px; color: var(--muted-foreground); font-size: 12px; text-align: center; }
+.flow-mcp-sidebar .ref-picker-more { align-self: center; min-height: 34px; padding: 6px 12px; border: 1px solid var(--border-light); border-radius: 6px; background: transparent; color: var(--foreground); cursor: pointer; }
+.flow-mcp-sidebar .ref-picker-drop {
+  display: flex;
+  flex: 1 0 180px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 180px;
+  padding: 18px;
+  border: 1px dashed var(--border-light);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .02);
+  color: var(--muted-foreground);
+  text-align: center;
+}
+.flow-mcp-sidebar .ref-picker-drop small { max-width: 420px; color: var(--muted-foreground); line-height: 1.45; }
+.flow-mcp-sidebar .ref-picker-local-list { display: flex; flex-direction: column; gap: 7px; }
+.flow-mcp-sidebar .ref-picker-local-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+}
+.flow-mcp-sidebar .ref-picker-local-row img { width: 42px; height: 42px; flex: 0 0 42px; border-radius: 4px; object-fit: cover; }
+.flow-mcp-sidebar .ref-picker-local-row > span { overflow: hidden; color: var(--foreground); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.flow-mcp-sidebar .ref-picker-footer {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 56px;
+  padding: 9px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--background);
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.flow-mcp-sidebar .ref-picker-footer > div { display: flex; gap: 8px; }
+.flow-mcp-sidebar .ref-picker-footer .btn { width: auto; }
+
 .flow-mcp-sidebar .flow-inline-note {
   margin: 0;
   color: var(--muted-foreground);

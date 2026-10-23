@@ -374,10 +374,14 @@
       replaceSelectOptions(document.querySelector("#aspectRatio"), videoRule.aspectRatios, value => value, rememberedSelection.aspectRatio ?? "9:16", videoModelChanged);
     }
     const framesOption = document.querySelector('#selectModeVideo option[value="frames"]');
+    const compactFramesOption = document.querySelector('#videoInputType option[value="frames"]');
     if (framesOption) {
       framesOption.disabled = videoRule.supportsFrames !== true;
+      if (compactFramesOption) compactFramesOption.disabled = framesOption.disabled;
       if (framesOption.disabled && document.querySelector("#selectModeVideo")?.value === "frames") {
         document.querySelector("#selectModeVideo").value = "ingredients";
+        const compactMode = document.querySelector("#videoInputType");
+        if (compactMode) compactMode.value = "ingredients";
         updateVideoFrameInputs();
       }
     }
@@ -426,7 +430,6 @@
 
     // Tabs
     setText("#tabCreateLabel", t("sidebar.tabGen"));
-    setText("#tabWorkflowLabel", t("sidebar.tabWorkflow"));
     setText("#tabPromptsLabel", t("sidebar.tabPrompts"));
     setText("#tabLibraryLabel", t("sidebar.tabLibrary"));
     setText("#tabTasksLabel", t("sidebar.tabTasks"));
@@ -436,7 +439,6 @@
     setText("#tabSettingsLabel", t("sidebar.tabSettings"));
     for (const [id, key] of [
       ["viewCreateTitle", "viewCreateTitle"], ["viewCreateSubtitle", "viewCreateSubtitle"],
-      ["viewWorkflowTitle", "viewWorkflowTitle"], ["viewWorkflowSubtitle", "viewWorkflowSubtitle"],
       ["viewPromptsTitle", "viewPromptsTitle"], ["viewPromptsSubtitle", "viewPromptsSubtitle"],
       ["viewLibraryTitle", "viewLibraryTitle"], ["viewLibrarySubtitle", "viewLibrarySubtitle"],
       ["viewTasksTitle", "viewTasksTitle"], ["viewTasksSubtitle", "viewTasksSubtitle"],
@@ -446,26 +448,6 @@
       ["viewSettingsTitle", "viewSettingsTitle"], ["viewSettingsSubtitle", "viewSettingsSubtitle"],
     ]) setText(`#${id}`, t(`sidebar.${key}`));
 
-    // Mode Segments
-    setText("#txtModeImage", t("sidebar.typeImage"));
-    setText("#txtModeVideo", t("sidebar.typeVideo"));
-    setText("#txtModeCharacter", t("sidebar.typeCharacter"));
-
-    setText("#lblWorkflowType", t("sidebar.workflowType"));
-    setText("#optWorkflowAgent", t("sidebar.workflowAgent"));
-    setText("#optWorkflowEdit", t("sidebar.workflowEdit"));
-    setText("#optWorkflowContinue", t("sidebar.workflowContinue"));
-    setText("#lblWorkflowScenes", t("sidebar.workflowScenes"));
-    setPlaceholder("#workflowScenes", t("sidebar.workflowScenesPlaceholder"));
-    setText("#lblWorkflowAsset", t("sidebar.workflowAsset"));
-    setPlaceholder("#workflowAsset", t("sidebar.workflowAssetPlaceholder"));
-    setText("#lblWorkflowAspect", t("sidebar.workflowAspect"));
-    setText("#lblWorkflowExtra", t("sidebar.workflowExtra"));
-    setPlaceholder("#workflowPromptExtra", t("sidebar.workflowOptional"));
-    setText("#txtRunWorkflow", t("sidebar.workflowRun"));
-    setText("#workflowScopeNote", cur === "vi"
-      ? "Extension chỉ gửi lệnh vào hàng đợi; thao tác DOM diễn ra trong tab Flow."
-      : "The extension only queues the request; DOM actions run inside the Flow tab.");
     setText("#lblPromptName", t("sidebar.promptName"));
     setText("#lblPromptDraft", t("sidebar.promptLabel"));
     setPlaceholder("#promptDraft", t("sidebar.promptPlaceholder"));
@@ -893,85 +875,6 @@
     });
   });
 
-  // Mode Segments switching (Image / Video / Character)
-  function selectCreationMode(mode = "image") {
-    const selected = document.querySelector(`.mode-segment-btn[data-mode="${mode}"]`);
-    if (selected) {
-      document.querySelectorAll(".mode-segment-btn").forEach(button => button.classList.toggle("active", button === selected));
-    }
-    const formImage = document.querySelector("#formImage");
-    const formVideo = document.querySelector("#formVideo");
-    const formCharacter = document.querySelector("#formCharacter");
-    if (formImage) formImage.style.display = mode === "image" ? "flex" : "none";
-    if (formVideo) formVideo.style.display = mode === "video" ? "flex" : "none";
-    if (formCharacter) formCharacter.style.display = mode === "character" ? "flex" : "none";
-    setFeedback("");
-  }
-  document.querySelectorAll(".mode-segment-btn").forEach(btn => {
-    btn.addEventListener("click", () => selectCreationMode(btn.getAttribute("data-mode")));
-  });
-  const resetCreationView = () => {
-    const createTab = document.querySelector("#navGen") || document.querySelector("#navCreate");
-    if (createTab) activateTab(createTab);
-    selectCreationMode(document.querySelector("#genType")?.value || "image");
-  };
-  resetCreationView();
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") resetCreationView();
-  });
-
-  function syncWorkflowFields() {
-    const type = document.querySelector("#workflowType")?.value || "agent";
-    const scenesGroup = document.querySelector("#workflowScenesGroup");
-    const assetGroup = document.querySelector("#workflowAssetGroup");
-    if (scenesGroup) scenesGroup.hidden = type !== "agent";
-    if (assetGroup) assetGroup.hidden = type === "agent";
-  }
-
-  async function queueLocalWorkflow() {
-    const type = document.querySelector("#workflowType")?.value || "agent";
-    const scenes = document.querySelector("#workflowScenes")?.value.split(/\r?\n/).map(item => item.trim()).filter(Boolean) || [];
-    const asset = document.querySelector("#workflowAsset")?.value.trim() || "";
-    const extra = document.querySelector("#workflowPromptExtra")?.value.trim() || "";
-    const aspectRatio = document.querySelector("#workflowAspect")?.value || "16:9";
-    let operation;
-    let payload;
-    let label;
-    if (type === "agent") {
-      if (!scenes.length) throw new Error(t("sidebar.workflowNeedScenes"));
-      operation = "flow.agent.batch";
-      payload = { params: { agent_scenes: scenes.map(scene => extra ? `${scene} ${extra}` : scene), aspect_ratio: aspectRatio, type: "image" } };
-      label = `Agent batch: ${scenes.length} scenes`;
-    } else {
-      if (!asset) throw new Error(t("sidebar.workflowNeedAsset"));
-      const prompt = extra || (scenes[0] || "");
-      if (!prompt) throw new Error(t("sidebar.workflowNeedScenes"));
-      operation = type === "edit" ? "flow.edit.run" : "flow.continue.run";
-      payload = { params: type === "edit"
-        ? { edit_asset: asset, prompt, type: "video" }
-        : { continue_from: asset, prompt, continue_mode: "exact", aspect_ratio: aspectRatio, type: "video" } };
-      label = `${type === "edit" ? "Edit" : "Continue"}: ${asset}`;
-    }
-    const result = await chrome.runtime.sendMessage({ type: "flow-queue:add", job: { operation, payload, label } });
-    if (!result?.ok) throw new Error(result?.error?.message || "Could not add workflow to the Flow queue.");
-    rememberSubmittedQueueJob(result);
-    setFeedback(t("sidebar.workflowQueued"), true);
-    addLog(operation, label, true);
-    document.querySelector("#workflowScenes").value = "";
-    document.querySelector("#workflowAsset").value = "";
-    document.querySelector("#workflowPromptExtra").value = "";
-  }
-
-  document.querySelector("#workflowType")?.addEventListener("change", syncWorkflowFields);
-  document.querySelector("#btnRunWorkflow")?.addEventListener("click", async event => {
-    const button = event.currentTarget;
-    button.disabled = true;
-    try { await queueLocalWorkflow(); }
-    catch (error) { setFeedback(error.message || String(error), false); addLog("flow.workflow.error", error.message || String(error), false); }
-    finally { button.disabled = false; }
-  });
-  syncWorkflowFields();
-
   document.querySelector("#btnSavePrompt")?.addEventListener("click", async () => {
     const name = document.querySelector("#promptName")?.value.trim();
     const prompt = document.querySelector("#promptDraft")?.value.trim();
@@ -991,7 +894,15 @@
     const deleteId = event.target.closest("[data-prompt-delete]")?.dataset.promptDelete;
     if (useId) {
       const item = savedPrompts.find(prompt => prompt.id === useId);
-      if (item) { document.querySelector("#inputPromptImage").value = item.prompt; document.querySelector("#inputPromptVideo").value = item.prompt; document.querySelector("#navCreate")?.click(); setFeedback(t("sidebar.promptUse"), true); }
+      if (item) {
+        const editor = document.querySelector("#promptsArea");
+        if (editor) {
+          editor.value = item.prompt;
+          editor.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+        document.querySelector("#navGen")?.click();
+        setFeedback(t("sidebar.promptUse"), true);
+      }
       return;
     }
     if (deleteId) {
@@ -2435,10 +2346,13 @@
     });
 
     // Provider Tabs
-    document.querySelectorAll("#genProviderTabs .gen-provider-tab").forEach(tab => {
+    document.querySelectorAll("#genProviderTabs .provider-tab").forEach(tab => {
       tab.addEventListener("click", () => {
-        document.querySelectorAll("#genProviderTabs .gen-provider-tab").forEach(t => t.classList.remove("active"));
-        tab.classList.add("active");
+        document.querySelectorAll("#genProviderTabs .provider-tab").forEach(button => {
+          const selected = button === tab;
+          button.classList.toggle("provider-tab--active", selected);
+          button.setAttribute("aria-selected", String(selected));
+        });
         const provider = tab.getAttribute("data-provider") || "flow";
         const hiddenProvider = document.querySelector("#genProvider");
         if (hiddenProvider) hiddenProvider.value = provider;
@@ -2452,13 +2366,23 @@
 
     // Gen Type Toggle
     function setGenType(type = "image") {
-      document.querySelectorAll("#genTypeToggle .toggle-btn").forEach(btn => {
-        btn.classList.toggle("active", btn.getAttribute("data-type") === type);
+      const normalizedType = String(type).toLowerCase() === "video" ? "video" : "image";
+      const compactBar = document.querySelector("#genCompactBar");
+      if (compactBar) compactBar.dataset.genMode = normalizedType;
+      document.querySelectorAll("#genTypeToggle .gen-type-btn").forEach(btn => {
+        const buttonType = String(btn.dataset.value || "").toLowerCase();
+        const active = buttonType === normalizedType;
+        const locale = typeof I18n !== "undefined" ? I18n.getLocale() : "vi";
+        btn.classList.toggle("active", active);
+        btn.setAttribute("aria-pressed", String(active));
+        btn.setAttribute("aria-label", locale === "en"
+          ? buttonType === "video" ? "Create video" : "Create image"
+          : buttonType === "video" ? "Tạo video" : "Tạo ảnh");
       });
       const hiddenGenType = document.querySelector("#genType");
-      if (hiddenGenType) hiddenGenType.value = type;
+      if (hiddenGenType && hiddenGenType.value !== normalizedType) hiddenGenType.value = normalizedType;
 
-      const isImage = type === "image";
+      const isImage = normalizedType === "image";
       document.querySelector("#imageModelContainer")?.classList.toggle("hidden", !isImage);
       document.querySelector("#videoModelContainer")?.classList.toggle("hidden", isImage);
       document.querySelector("#videoInputTypeContainer")?.classList.toggle("hidden", isImage);
@@ -2466,19 +2390,21 @@
       document.querySelector("#flowVideoResolutionContainer")?.classList.toggle("hidden", isImage);
       document.querySelector("#genVideoVoiceContainer")?.classList.toggle("hidden", isImage);
 
-      const isFrames = document.querySelector("#videoInputType")?.value === "frames";
+      const isFrames = String(document.querySelector("#videoInputType")?.value || "").toLowerCase() === "frames";
       document.querySelector("#videoFramesSection")?.classList.toggle("hidden", isImage || !isFrames);
 
       const submitText = document.querySelector("#genSubmitBtnText");
       if (submitText) submitText.textContent = isImage ? t("sidebar.btnGenerateImage", "Tạo ảnh") : t("sidebar.btnGenerateVideo", "Tạo video");
 
-      selectCreationMode(type);
-      referencePicker.renderReferenceCards?.(type);
+      referencePicker.renderReferenceCards?.(normalizedType);
     }
 
-    document.querySelectorAll("#genTypeToggle .toggle-btn").forEach(btn => {
-      btn.addEventListener("click", () => setGenType(btn.getAttribute("data-type") || "image"));
+    document.querySelectorAll("#genTypeToggle .gen-type-btn").forEach(btn => {
+      btn.addEventListener("click", () => setGenType(btn.dataset.value || "image"));
     });
+    const hiddenGenType = document.querySelector("#genType");
+    hiddenGenType?.addEventListener("change", () => setGenType(hiddenGenType.value));
+    setGenType(hiddenGenType?.value || document.querySelector("#genTypeToggle .gen-type-btn.active")?.dataset.value || "image");
 
     // Model selects synchronization
     document.querySelector("#imageModel")?.addEventListener("change", function () {
@@ -2526,7 +2452,7 @@
 
     // Video frames and inputs
     document.querySelector("#videoInputType")?.addEventListener("change", function () {
-      const mode = this.value;
+      const mode = String(this.value || "ingredients").toLowerCase();
       const selectModeVideo = document.querySelector("#selectModeVideo");
       if (selectModeVideo) {
         selectModeVideo.value = mode;
@@ -2614,11 +2540,6 @@
       }
     });
 
-    document.querySelector("#genRunModeBtn")?.addEventListener("click", function () {
-      this.classList.toggle("active");
-      const label = document.querySelector("#genRunModeLabel");
-      if (label) label.textContent = this.classList.contains("active") ? "Parallel" : "Sequential";
-    });
   }
 
   // 6. Style dropdown

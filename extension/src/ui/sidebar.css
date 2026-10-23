@@ -4650,46 +4650,6 @@ img.task-ref-thumb-cross-project {
   cursor: not-allowed
 }
 
-.gen-run-mode-row {
-  display: flex;
-  justify-content: center;
-  margin-bottom: 10px
-}
-
-.gen-run-mode-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  color: var(--text-muted);
-  font-size: 12px;
-  cursor: pointer;
-  transition: all 0.2s ease
-}
-
-.gen-run-mode-btn:hover {
-  background: var(--surface-hover);
-  color: var(--foreground)
-}
-
-.gen-run-mode-btn.active {
-  background: var(--surface);
-  border-color: var(--primary);
-  color: var(--primary)
-}
-
-.gen-run-mode-btn svg {
-  width: 14px;
-  height: 14px
-}
-
-.gen-run-mode-label {
-  font-weight: 500
-}
-
 .btn-generate {
   display: flex;
   align-items: center;
