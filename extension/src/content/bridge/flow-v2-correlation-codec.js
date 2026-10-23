@@ -114,6 +114,16 @@
     };
   }
 
+  function videoRowModelRatio(row) {
+    // Positional wire layout, mirroring the observer's row decode: the model
+    // key is the string at [2], [1] or [4], with the ratio enum immediately
+    // after it. Any other shape means the row carries no readable pair.
+    if (typeof row?.[2] === "string") return { model: row[2], ratio: row[3] };
+    if (typeof row?.[1] === "string") return { model: row[1], ratio: row[2] };
+    if (typeof row?.[4] === "string") return { model: row[4], ratio: row[5] };
+    return null;
+  }
+
   function plainInputSummary(payload) {
     const rows = payload?.[0];
     if (!Array.isArray(rows) || !rows.length) return null;
@@ -121,13 +131,28 @@
       const nodes = videoInputNodes(row);
       if (!Array.isArray(nodes) || !nodes.length || nodes.some(node => !Array.isArray(node) || typeof node[0] !== "string" || node.slice(1).some(value => value != null))) return null;
       const normalized = normalizePrompt(nodes.map(node => node[0]).join(""));
+      const decoded = videoRowModelRatio(row);
       return {
         fingerprint: promptFingerprint(normalized),
         anchorFingerprint: promptFingerprint(normalized.slice(0, 512)),
         normalizedLength: normalized.length,
+        model: decoded && decoded.model ? decoded.model : null,
+        ratio: decoded && Number.isInteger(decoded.ratio) && decoded.ratio >= 1 ? decoded.ratio : null,
       };
     });
-    return values.every(value => value && value.fingerprint === values[0].fingerprint) ? values[0] : null;
+    if (!values.every(value => value && value.fingerprint === values[0].fingerprint)) return null;
+    const summary = {
+      fingerprint: values[0].fingerprint,
+      anchorFingerprint: values[0].anchorFingerprint,
+      normalizedLength: values[0].normalizedLength,
+    };
+    // VID-03: the summary also carries the wire model key and ratio enum
+    // when every row decodes the same value. Disagreement between rows or an
+    // unreadable field leaves the key absent, which consumers treat as
+    // "don't care" — the same contract as an arm without expectations.
+    if (values.every(value => value.model !== null && value.model === values[0].model)) summary.model = values[0].model;
+    if (values.every(value => value.ratio !== null && value.ratio === values[0].ratio)) summary.ratio = values[0].ratio;
+    return summary;
   }
 
   function classifyError(value) {

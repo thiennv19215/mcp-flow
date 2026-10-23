@@ -52,6 +52,21 @@
     });
   }
 
+  // VID-03: correlation expectations are optional at every layer. They are
+  // normalised here with exactly the rules the observer applies when storing
+  // the attempt (model key charset, ratio enum clamped to 1..16) and are
+  // included in the arm detail only when valid, so an arm that carries no
+  // expectation produces the historical detail byte-for-byte.
+  function correlationModelKey(value) {
+    return typeof value === "string" && /^[a-zA-Z0-9_-]{1,128}$/.test(value) ? value : undefined;
+  }
+
+  function correlationRatioEnum(value) {
+    return value != null && Number.isInteger(Number(value))
+      ? Math.max(1, Math.min(16, Number(value)))
+      : undefined;
+  }
+
   async function armNativeFlowCorrelation({
     projectId,
     mediaType,
@@ -62,8 +77,19 @@
     expectedCharacterIds = [],
     expectedVoiceCount = 0,
     unverifiedMediaCount = 0,
+    expectedVideoModelKey,
+    expectedVideoRatioEnum,
+    expectedImageModelKey,
   }) {
     if (!projectId || !["image", "video"].includes(mediaType)) return null;
+    const videoModelKey = correlationModelKey(expectedVideoModelKey);
+    const videoRatioEnum = correlationRatioEnum(expectedVideoRatioEnum);
+    const imageModelKey = correlationModelKey(expectedImageModelKey);
+    const expectationDetail = {
+      ...(videoModelKey !== undefined ? { expectedVideoModelKey: videoModelKey } : {}),
+      ...(videoRatioEnum !== undefined ? { expectedVideoRatioEnum: videoRatioEnum } : {}),
+      ...(imageModelKey !== undefined ? { expectedImageModelKey: imageModelKey } : {}),
+    };
     const attemptId = crypto.randomUUID();
     const nonce = crypto.randomUUID();
     const entry = { attemptId, nonce, projectId, mediaType, receipts: [], listener: null, armed: false, armedAt: Date.now(), requestSeen: false, useTilesFallback: false };
@@ -112,13 +138,14 @@
         expectedGlobalCharacter: false,
         strictDispatch: true,
         ttlMs: 15 * 60_000,
+        ...expectationDetail,
       },
     }));
     if (!(await armed)) {
       root.__flowNativeCorrelationArmDiagnostics = {
         requestedAt: new Date(entry.armedAt).toISOString(),
         result: "not_armed",
-        expected: { projectId, mediaType, promptFingerprint: flowPromptFingerprint(prompt) },
+        expected: { projectId, mediaType, promptFingerprint: flowPromptFingerprint(prompt), ...expectationDetail },
         receipt: entry.receipts.find(receipt => receipt?.stage === "armed") || null,
         timeoutMs: 500,
       };
@@ -133,7 +160,7 @@
     root.__flowNativeCorrelationArmDiagnostics = {
       requestedAt: new Date(entry.armedAt).toISOString(),
       result: "armed",
-      expected: { projectId, mediaType, promptFingerprint: flowPromptFingerprint(prompt) },
+      expected: { projectId, mediaType, promptFingerprint: flowPromptFingerprint(prompt), ...expectationDetail },
       receipt: entry.receipts.find(receipt => receipt?.stage === "armed") || null,
       timeoutMs: 500,
     };
