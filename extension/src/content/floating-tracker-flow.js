@@ -277,6 +277,9 @@
         .flow-ft-status-tag.failed {
           color: #f87171;
         }
+        .flow-ft-status-tag.cancelled {
+          color: #9ca3af;
+        }
         .flow-ft-timer {
           font-family: ui-monospace, monospace;
           color: #6b7280;
@@ -477,6 +480,7 @@
         .flow-ft-status-tag.rendering { color: #d9ff5f; background: rgba(204,255,0,.13); }
         .flow-ft-status-tag.completed { color: #34d399; background: rgba(52,211,153,.13); }
         .flow-ft-status-tag.failed { color: #fb7185; background: rgba(251,113,133,.14); }
+        .flow-ft-status-tag.cancelled { color: #9ca3af; background: rgba(148,163,184,.14); }
         .flow-ft-status-tag.awaiting-user { color: #93c5fd; background: rgba(96,165,250,.14); }
         .flow-ft-task .flow-ft-thumb { width: 28px; height: 28px; border-radius: 6px; }
         .flow-ft-task .flow-ft-spinner { width: 15px; height: 15px; }
@@ -636,7 +640,7 @@
 
     clearFinishedTasks() {
       for (const job of this.jobs.values()) {
-        if (["completed", "failed"].includes(job.status)) void this.sendQueueAction("flow-queue:remove", job.id);
+        if (["completed", "failed", "cancelled"].includes(job.status)) void this.sendQueueAction("flow-queue:remove", job.id);
       }
     }
 
@@ -674,7 +678,8 @@
     queueStatus(status) {
       if (status === "running") return "rendering";
       if (status === "completed") return "completed";
-      if (status === "failed" || status === "cancelled") return "failed";
+      if (status === "failed") return "failed";
+      if (status === "cancelled") return "cancelled";
       if (status === "waiting_for_user") return "awaiting-user";
       return "queued";
     }
@@ -1039,13 +1044,14 @@
       const isRendering = job.status === "rendering";
       const isCompleted = job.status === "completed";
       const isFailed = job.status === "failed";
+      const isCancelled = job.status === "cancelled";
       const typeLabel = job.title || (job.type === "video" ? "Tạo video" : job.type === "character" ? "Tạo nhân vật" : "Tạo ảnh");
-      const statusLabel = isQueued ? "Chờ chạy" : isAwaitingUser ? "Chờ bạn bấm Tạo" : isRendering ? (job.type === "download" ? "Đang tải" : "Đang tạo") : isCompleted ? "Xong" : isFailed ? "Thất bại" : "Đang xử lý";
-      const statusClass = isQueued ? "queued" : isAwaitingUser ? "awaiting-user" : isRendering ? "rendering" : isCompleted ? "completed" : isFailed ? "failed" : "";
+      const statusLabel = isQueued ? "Chờ chạy" : isAwaitingUser ? "Chờ bạn bấm Tạo" : isRendering ? (job.type === "download" ? "Đang tải" : "Đang tạo") : isCompleted ? "Xong" : isFailed ? "Thất bại" : isCancelled ? "Đã hủy" : "Đang xử lý";
+      const statusClass = isQueued ? "queued" : isAwaitingUser ? "awaiting-user" : isRendering ? "rendering" : isCompleted ? "completed" : isFailed ? "failed" : isCancelled ? "cancelled" : "";
       const elapsed = this.formatDuration((job.completedAt || Date.now()) - job.createdAt);
       const percent = Number.isFinite(Number(job.progress?.percent)) ? `${Math.max(0, Math.min(100, Number(job.progress.percent)))}%` : elapsed;
       const prompt = job.detailPrompt || String(job.prompt || "").replace(/^(Tạo ảnh|Tạo video|Tạo nhân vật):\s*/i, "");
-      let thumbContent = isRendering || isQueued ? `<div class="flow-ft-spinner"></div>` : (isFailed ? "⚠️" : "✓");
+      let thumbContent = isRendering || isQueued ? `<div class="flow-ft-spinner"></div>` : (isFailed ? "⚠️" : isCancelled ? "✕" : "✓");
       if (job.thumbnail) thumbContent = `<img src="${escapeHtml(job.thumbnail)}" alt="Thumbnail">`;
       let actionHtml = "";
       const download = Array.isArray(job.result?.result?.browserDownloads) ? job.result.result.browserDownloads[0] : Array.isArray(job.result?.browserDownloads) ? job.result.browserDownloads[0] : null;

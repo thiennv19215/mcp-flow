@@ -46,7 +46,7 @@ function applyLanguage() {
   document.querySelector("#txtCardTitle").textContent = t("cardTitle");
   document.querySelector("#txtUseLocal").textContent = t("useLocal");
   document.querySelector("#txtGuideTitle").textContent = t("guideTitle");
-  document.querySelector("#step1").textContent = t("step1");
+  document.querySelector("#step1").innerHTML = t("step1");
   document.querySelector("#step2").innerHTML = t("step2");
   document.querySelector("#step3").innerHTML = t("step3");
   document.querySelector("#langVi").classList.toggle("active", currentLang === "vi");

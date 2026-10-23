@@ -32,8 +32,9 @@ function applyLanguage() {
   if (document.querySelector("#txtOpenStudio")) {
     document.querySelector("#txtOpenStudio").textContent = t("popup.btnStudio");
   }
-  if (document.querySelector("#txtOptions")) {
-    document.querySelector("#txtOptions").textContent = t("btnOptions");
+  const optionsBtn = document.querySelector("#options");
+  if (optionsBtn) {
+    optionsBtn.title = t("btnOptions");
   }
   if (document.querySelector("#openSidebarBtn")) {
     document.querySelector("#openSidebarBtn").title = t("btnSidebar");
