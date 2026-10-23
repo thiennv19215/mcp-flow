@@ -424,6 +424,32 @@ export class FlowJobQueue {
     return clone(job);
   }
 
+  async updateGeneratedMediaDownload(id, download, message = "") {
+    await this.ready;
+    const job = this.jobs.find(item => item.id === String(id));
+    if (!job || !["completed", "failed"].includes(job.status)) return null;
+    const state = String(download?.state || "");
+    if (!["queued", "downloading", "completed", "failed", "skipped"].includes(state)) {
+      throw Object.assign(new Error("Invalid generated-media download state."), { code: "FLOW_QUEUE_DOWNLOAD_STATE_INVALID" });
+    }
+    const previous = job.progress && typeof job.progress === "object" ? job.progress : {};
+    const nextDownload = {
+      state,
+      completed: Math.max(0, Number(download?.completed) || 0),
+      total: Math.max(1, Number(download?.total) || Number(previous.generation?.count) || 1),
+      ...(download?.current && typeof download.current === "object" ? { current: clone(download.current) } : {}),
+    };
+    job.progress = {
+      ...previous,
+      phase: `download_${state}`,
+      ...(message ? { message: String(message).slice(0, 1000) } : {}),
+      download: nextDownload,
+    };
+    await this.#persist();
+    this.#emit("generated-media-download-progress");
+    return clone(job);
+  }
+
   async wait(id, timeoutMs = 30_000) {
     await this.ready;
     const jobId = String(id);

@@ -656,12 +656,14 @@
       const params = payload?.params || {};
       const raw = String(payload?.type || params?.type || "").toLowerCase();
       const operation = String(job?.operation || "").toLowerCase();
+      if (operation.includes("download-generated")) return "download";
       if (raw.includes("video") || operation.includes("video") || operation.includes("edit") || operation.includes("continue")) return "video";
       if (raw.includes("character")) return "character";
       return "image";
     }
 
     resolveQueuePrompt(job) {
+      if (String(job?.operation || "") === "flow.queue.download-generated") return "Kết quả Flow đã tạo";
       const payload = job?.payload || job?.data?.payload || {};
       const params = payload?.params || {};
       const prompt = payload?.prompt || params?.prompt || params?.description || "";
@@ -691,7 +693,7 @@
         const id = String(queueJob.id);
         visibleIds.add(id);
         const type = this.resolveQueueType(queueJob);
-        const typeLabel = type === "video" ? "Tạo video" : type === "character" ? "Tạo nhân vật" : "Tạo ảnh";
+        const typeLabel = type === "download" ? "Tải kết quả" : type === "video" ? "Tạo video" : type === "character" ? "Tạo nhân vật" : "Tạo ảnh";
         const detail = this.resolveQueuePrompt(queueJob);
         const previous = this.jobs.get(id) || {};
         const completed = queueJob.status === "completed";
@@ -1007,9 +1009,17 @@
       this.contentEl.querySelectorAll("[data-ft-action='download-group']").forEach(button => {
         button.addEventListener("click", () => {
           const group = button.closest(".flow-ft-group");
+          const pendingDownloads = [...(group?.querySelectorAll("button[data-ft-action='download-task']") || [])];
+          if (pendingDownloads.length) {
+            for (const taskButton of pendingDownloads) void this.sendQueueAction("flow-queue:download", taskButton.dataset.taskId);
+            return;
+          }
           const media = group?.querySelector("a.flow-ft-action-btn");
           media?.click();
         });
+      });
+      this.contentEl.querySelectorAll("[data-ft-action='download-task']").forEach(button => {
+        button.addEventListener("click", () => void this.sendQueueAction("flow-queue:download", button.dataset.taskId));
       });
       this.contentEl.querySelectorAll("[data-ft-action='remove-task']").forEach(button => {
         button.addEventListener("click", () => void this.sendQueueAction("flow-queue:remove", button.dataset.taskId));
@@ -1030,7 +1040,7 @@
       const isCompleted = job.status === "completed";
       const isFailed = job.status === "failed";
       const typeLabel = job.title || (job.type === "video" ? "Tạo video" : job.type === "character" ? "Tạo nhân vật" : "Tạo ảnh");
-      const statusLabel = isQueued ? "Chờ chạy" : isAwaitingUser ? "Chờ bạn bấm Tạo" : isRendering ? "Đang tạo" : isCompleted ? "Xong" : isFailed ? "Thất bại" : "Đang xử lý";
+      const statusLabel = isQueued ? "Chờ chạy" : isAwaitingUser ? "Chờ bạn bấm Tạo" : isRendering ? (job.type === "download" ? "Đang tải" : "Đang tạo") : isCompleted ? "Xong" : isFailed ? "Thất bại" : "Đang xử lý";
       const statusClass = isQueued ? "queued" : isAwaitingUser ? "awaiting-user" : isRendering ? "rendering" : isCompleted ? "completed" : isFailed ? "failed" : "";
       const elapsed = this.formatDuration((job.completedAt || Date.now()) - job.createdAt);
       const percent = Number.isFinite(Number(job.progress?.percent)) ? `${Math.max(0, Math.min(100, Number(job.progress.percent)))}%` : elapsed;
@@ -1039,7 +1049,15 @@
       if (job.thumbnail) thumbContent = `<img src="${escapeHtml(job.thumbnail)}" alt="Thumbnail">`;
       let actionHtml = "";
       const download = Array.isArray(job.result?.result?.browserDownloads) ? job.result.result.browserDownloads[0] : Array.isArray(job.result?.browserDownloads) ? job.result.browserDownloads[0] : null;
-      if (isCompleted && job.mediaUrl) actionHtml = `<a class="flow-ft-action-btn" href="${escapeHtml(job.mediaUrl)}" target="_blank" download>↓</a>`;
+      const checkpoint = job.metadata?.generationResultCheckpoint?.media;
+      const resultMedia = job.result?.result?.result?.media || job.result?.result?.media || job.result?.media;
+      const generatedMedia = Array.isArray(checkpoint) && checkpoint.length ? checkpoint : resultMedia;
+      const downloadState = String(job.progress?.download?.state || "skipped").toLowerCase();
+      const canDownload = job.operation !== "flow.queue.download-generated" && (isCompleted || isFailed) && Array.isArray(generatedMedia) && generatedMedia.some(item =>
+        item?.id && (item?.title || item?.name) && ["image", "video"].includes(String(item?.kind || item?.type || "").toLowerCase()),
+      ) && !["queued", "downloading", "completed"].includes(downloadState);
+      if (canDownload) actionHtml = `<button class="flow-ft-action-btn" data-ft-action="download-task" data-task-id="${escapeHtml(job.id)}" title="Tải media đã tạo">↓</button>`;
+      else if (isCompleted && job.mediaUrl) actionHtml = `<a class="flow-ft-action-btn" href="${escapeHtml(job.mediaUrl)}" target="_blank" download>↓</a>`;
       else if (download?.filename) actionHtml = `<span class="flow-ft-action-btn" title="${escapeHtml(download.filename)}">↓</span>`;
       return `
         <div class="flow-ft-task" data-job-id="${escapeHtml(job.id)}">

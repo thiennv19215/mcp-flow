@@ -35,6 +35,8 @@ const extensionQueueJobOperations = new Set([
   "flow.generation.submit", "flow.edit.run", "flow.continue.run", "flow.agent.batch",
   "flow.character.create", "flow.character.edit",
 ]);
+const GENERATED_MEDIA_DOWNLOAD_OPERATION = "flow.queue.download-generated";
+const queueDownloadEnqueues = new Map();
 let socket = null;
 let httpSession = null;
 let bridgeTransport = "disconnected";
@@ -894,6 +896,70 @@ async function retryExtensionFlowJob(id) {
   const snapshot = await flowJobQueue.resume();
   return { job, snapshot: flowQueueSnapshot(snapshot) };
 }
+async function enqueueGeneratedMediaDownload(id) {
+  const jobId = String(id || "").trim();
+  if (!jobId) throw Object.assign(new Error("A Flow task ID is required to download its generated result."), { code: "FLOW_QUEUE_ID_REQUIRED" });
+  const inFlight = queueDownloadEnqueues.get(jobId);
+  if (inFlight) return inFlight;
+  const request = (async () => {
+    const sourceJob = await flowJobQueue.get(jobId);
+    if (!sourceJob || !["completed", "failed"].includes(sourceJob.status)) {
+      throw Object.assign(new Error("This Flow task has not finished yet."), { code: "FLOW_QUEUE_DOWNLOAD_SOURCE_UNAVAILABLE" });
+    }
+    const media = generatedMediaForQueueJob(sourceJob);
+    if (!media.length) {
+      throw Object.assign(new Error("This task has no verified generated Flow media available to download."), { code: "FLOW_QUEUE_DOWNLOAD_MEDIA_UNAVAILABLE" });
+    }
+    const jobs = await flowJobQueue.list();
+    const activeDownload = jobs.find(job => job.operation === GENERATED_MEDIA_DOWNLOAD_OPERATION &&
+      String(job.payload?.sourceJobId || "") === jobId && ["pending", "running"].includes(job.status));
+    if (activeDownload) {
+      await flowJobQueue.updateGeneratedMediaDownload(jobId, {
+        state: activeDownload.status === "running" ? "downloading" : "queued",
+        completed: Number(sourceJob.progress?.download?.completed) || 0,
+        total: media.length,
+      }, activeDownload.status === "running" ? "Downloading existing Flow results…" : "Download is already queued.");
+      const snapshot = await flowJobQueue.snapshot();
+      return { job: activeDownload, snapshot: flowQueueSnapshot(snapshot) };
+    }
+    const target = await captureFlowTargetMetadata();
+    const sourceMetadata = sourceJob.metadata && typeof sourceJob.metadata === "object" ? sourceJob.metadata : {};
+    const downloadMetadata = {
+      source: sourceMetadata.source || "extension",
+      ...target,
+      ...(Number.isInteger(sourceMetadata.flowTabId) ? { flowTabId: sourceMetadata.flowTabId } : {}),
+      ...(Object.prototype.hasOwnProperty.call(sourceMetadata, "flowProjectId") ? { flowProjectId: sourceMetadata.flowProjectId } : {}),
+    };
+    const downloadJob = await flowJobQueue.add({
+      operation: GENERATED_MEDIA_DOWNLOAD_OPERATION,
+      payload: { sourceJobId: jobId },
+      label: `Download: ${sourceJob.label || media[0].title}`,
+      metadata: {
+        ...downloadMetadata,
+        generatedMediaDownloadFor: jobId,
+        generationResultCheckpoint: {
+          media,
+          quoteFields: {},
+          recordedAt: Date.now(),
+        },
+      },
+    });
+    await flowJobQueue.updateGeneratedMediaDownload(jobId, {
+      state: "queued", completed: 0, total: media.length,
+    }, `Download queued for ${media.length} existing Flow result${media.length === 1 ? "" : "s"}.`);
+    const beforeStart = await flowJobQueue.snapshot();
+    const snapshot = beforeStart.isPaused || beforeStart.waitingForUser > 0
+      ? beforeStart
+      : await flowJobQueue.resume();
+    return { job: downloadJob, snapshot: flowQueueSnapshot(snapshot) };
+  })();
+  queueDownloadEnqueues.set(jobId, request);
+  try {
+    return await request;
+  } finally {
+    if (queueDownloadEnqueues.get(jobId) === request) queueDownloadEnqueues.delete(jobId);
+  }
+}
 function broadcastFlowQueue(snapshot, reason) {
   const message = { type: "flow-queue:changed", snapshot: flowQueueSnapshot(snapshot), reason };
   // runtime.sendMessage updates extension pages, but does not deliver to content
@@ -1139,9 +1205,9 @@ async function downloadQueueMedia(media, outputDir, fileStem, quality, invoke, h
           });
           continue;
         }
-        if (existing.state === "interrupted") throw Object.assign(new Error(`Chrome download failed for "${title}": ${existing.error || "unknown error"}. The media remains in Flow.`), {
-          code: "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
-        });
+        // An interrupted Chrome download does not mean the Flow asset is gone.
+        // Start a fresh, ticketed download below so the user can retry from the
+        // queue without regenerating the media.
       }
       const before = await chrome.downloads.search({ orderBy: ["-startTime"], limit: 100 });
       const beforeIds = new Set(before.map(download => download.id));
@@ -1299,11 +1365,89 @@ async function withQueueDownloads(job, payload, operationResult, invoke, hooks) 
     };
   }
 }
+function generatedMediaForQueueJob(job) {
+  const checkpointMedia = job?.metadata?.generationResultCheckpoint?.media;
+  const result = job?.result?.result || job?.result || {};
+  const media = Array.isArray(checkpointMedia) && checkpointMedia.length ? checkpointMedia : flowResultMedia(result);
+  return media.map(item => ({
+    id: String(item?.id || "").trim(),
+    title: String(item?.title || item?.name || "").trim(),
+    kind: String(item?.kind || item?.type || "").toLowerCase(),
+  })).filter(item => item.id && item.title && ["image", "video"].includes(item.kind));
+}
+async function downloadGeneratedQueueJob(job, payload, invoke, hooks) {
+  const sourceId = String(payload?.sourceJobId || "").trim();
+  const sourceJob = sourceId ? await flowJobQueue.get(sourceId) : null;
+  if (!sourceJob || !["completed", "failed"].includes(sourceJob.status)) {
+    throw Object.assign(new Error("The original Flow task is missing or has not finished yet."), { code: "FLOW_QUEUE_DOWNLOAD_SOURCE_UNAVAILABLE", outcomeUnknown: false });
+  }
+  const media = generatedMediaForQueueJob(sourceJob);
+  if (!media.length) {
+    throw Object.assign(new Error("This Flow task has no verified generated media to download."), { code: "FLOW_QUEUE_DOWNLOAD_MEDIA_UNAVAILABLE", outcomeUnknown: false });
+  }
+  const params = sourceJob.payload?.params && typeof sourceJob.payload.params === "object" ? sourceJob.payload.params : {};
+  const requestedFileStem = sourceJob.metadata?.file_stem || sourceJob.payload?.file_stem || params.file_stem;
+  const kind = media[0].kind;
+  const fallbackLabel = sourceJob.label || sourceJob.payload?.prompt || `flow-${kind}`;
+  const fallbackStem = String(fallbackLabel)
+    .normalize("NFKC")
+    .replace(/[<>:"/\\|?*\u0000-\u001F]+/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-.]+|[-.]+$/g, "")
+    .slice(0, 96);
+  const fileStem = typeof requestedFileStem === "string" && requestedFileStem.trim()
+    ? requestedFileStem.trim()
+    : (fallbackStem || `flow-${kind}-${String(sourceJob.id).slice(0, 8)}`);
+  const generation = { state: "completed", count: media.length, media };
+  const setSourceDownload = (state, completed, message, current) => flowJobQueue.updateGeneratedMediaDownload(sourceJob.id, {
+    state, completed, total: media.length, ...(current ? { current } : {}),
+  }, message);
+  await setSourceDownload("downloading", 0, `Downloading ${media.length} existing Flow result${media.length === 1 ? "" : "s"}…`);
+  const progressHooks = {
+    signal: hooks.signal,
+    progress: async progress => {
+      await hooks.progress(progress);
+      if (progress?.download) {
+        const state = progress.download.state;
+        const completed = Number(progress.download.completed) || 0;
+        const current = progress.download.current;
+        await setSourceDownload(state, completed, progress.message || "Downloading existing Flow results…", current);
+      }
+    },
+  };
+  const operationResult = sourceJob.result?.result || sourceJob.result || {};
+  const sceneNumbers = Array.isArray(operationResult?.sceneNumbers) && operationResult.sceneNumbers.length === media.length
+    ? operationResult.sceneNumbers
+    : [];
+  try {
+    const browserDownloads = await downloadQueueMedia(
+      media,
+      sourceJob.metadata?.output_dir || sourceJob.payload?.output_dir || params.output_dir || "",
+      fileStem,
+      params.download_quality || sourceJob.payload?.download_quality || "original",
+      invoke,
+      progressHooks,
+      sceneNumbers,
+      sourceJob.id,
+      job.metadata?.flowTabId,
+      job.metadata?.flowProjectId,
+      generation,
+    );
+    await setSourceDownload("completed", media.length, `Downloaded ${media.length} existing Flow result${media.length === 1 ? "" : "s"}.`);
+    return { completed: true, downloadOnly: true, sourceJobId: sourceJob.id, browserDownloads };
+  } catch (error) {
+    const completed = Array.isArray(error?.browserDownloads) ? error.browserDownloads.length : 0;
+    await setSourceDownload("failed", completed, `Download failed at ${completed}/${media.length}: ${String(error?.message || error).slice(0, 700)}.`);
+    throw Object.assign(error, { outcomeUnknown: false, requestDispatched: false, retryable: false });
+  }
+}
 async function runExtensionFlowJob(job, hooks) {
   const operation = job.operation || job.data?.operation;
   const payload = structuredClone(job.payload || job.data?.payload || {});
   const queuedOperations = new Set([
     ...extensionQueueJobOperations,
+    GENERATED_MEDIA_DOWNLOAD_OPERATION,
   ]);
   if (!queuedOperations.has(operation)) {
     throw Object.assign(new Error(`Unsupported extension queue operation: ${String(operation || "(missing)")}`), {
@@ -1351,6 +1495,9 @@ async function runExtensionFlowJob(job, hooks) {
     await new Promise(resolve => setTimeout(resolve, 1_000));
   }
   if (hooks.signal.aborted) throw Object.assign(new Error("Queue stopped before Flow accepted this task."), { outcomeUnknown: false });
+  if (operation === GENERATED_MEDIA_DOWNLOAD_OPERATION) {
+    return downloadGeneratedQueueJob(job, payload, invoke, hooks);
+  }
   if (job.metadata?.dependsOnId) {
     const previous = await flowJobQueue.get(job.metadata.dependsOnId);
     if (!previous || previous.status !== "completed") {
@@ -1523,7 +1670,23 @@ async function runExtensionFlowJob(job, hooks) {
 // Keep a small cooldown between generations to avoid hammering Flow while
 // removing most of the previous 5–10 second idle wait between queued jobs.
 const flowJobQueue = new FlowJobQueue(runExtensionFlowJob, { minDelayMs: 1_000, maxDelayMs: 2_000 });
-flowJobQueue.subscribe((snapshot, reason) => broadcastFlowQueue(snapshot, reason));
+flowJobQueue.subscribe((snapshot, reason) => {
+  broadcastFlowQueue(snapshot, reason);
+  // Failures during queue preflight happen before the download runner can mark
+  // the source item. Repair its state from the durable download job outcome.
+  if (!["job-finished", "attention-required", "paused"].includes(reason)) return;
+  for (const downloadJob of snapshot.jobs || []) {
+    if (downloadJob.operation !== GENERATED_MEDIA_DOWNLOAD_OPERATION || downloadJob.status !== "failed") continue;
+    const sourceJob = (snapshot.jobs || []).find(job => job.id === String(downloadJob.payload?.sourceJobId || ""));
+    const state = String(sourceJob?.progress?.download?.state || "");
+    if (!sourceJob || !["queued", "downloading"].includes(state)) continue;
+    const media = generatedMediaForQueueJob(sourceJob);
+    void flowJobQueue.updateGeneratedMediaDownload(sourceJob.id, {
+      state: "failed", completed: 0, total: media.length || 1,
+    }, `Download task failed: ${String(downloadJob.error || "Flow download did not complete.").slice(0, 700)}`)
+      .catch(error => console.warn("[FlowQueue] Could not update failed manual-download state:", error?.message || error));
+  }
+});
 void flowJobQueue.ready.then(() => flowJobQueue.resumeRecovered()).catch(error => {
   console.error("[FlowQueue] Could not resume a checkpointed job after worker restart:", error?.message || error);
 });
@@ -1789,11 +1952,11 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 chrome.runtime.onMessage.addListener((message, _sender, respond) => {
   if (typeof message?.type === "string" && message.type.startsWith("flow-queue:")) {
-    // The Flow page tracker needs a snapshot and a few queue controls so its
-    // compact panel can pause, resume, stop, or remove a visible task. Keep job
-    // creation and all other queue mutations restricted to extension UI pages.
+    // The Flow page tracker can control visible queue tasks and request a
+    // download for a verified generated result. Keep generation and other queue
+    // mutations restricted to extension UI pages.
     const readOnlyQueueState = message.type === "flow-queue:get";
-    const trackerQueueAction = ["flow-queue:pause", "flow-queue:resume", "flow-queue:stop", "flow-queue:remove"].includes(message.type);
+    const trackerQueueAction = ["flow-queue:pause", "flow-queue:resume", "flow-queue:stop", "flow-queue:remove", "flow-queue:download"].includes(message.type);
     if (_sender?.id !== chrome.runtime.id || (_sender?.tab && !readOnlyQueueState && !trackerQueueAction)) {
       respond({ ok: false, error: { code: "FLOW_QUEUE_FORBIDDEN", message: "Flow queue controls are available only from the extension UI." } });
       return;
@@ -1872,6 +2035,12 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
           await flowJobQueue.remove(String(message.id || message.taskId || ""));
           snapshot = await flowJobQueue.snapshot();
           break;
+        case "flow-queue:download": {
+          const result = await enqueueGeneratedMediaDownload(String(message.id || message.taskId || ""));
+          addedJob = result.job;
+          snapshot = result.snapshot;
+          break;
+        }
         case "flow-queue:retry":
           snapshot = (await retryExtensionFlowJob(String(message.id || message.taskId || ""))).snapshot;
           break;

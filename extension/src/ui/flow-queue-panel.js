@@ -15,6 +15,7 @@
     reorder: "flow-queue:reorder",
     retry: "flow-queue:retry",
     retryBatch: "flow-queue:retry-batch",
+    download: "flow-queue:download",
   });
 
   const RETRYABLE_OPERATIONS = new Set([
@@ -52,6 +53,7 @@
       outcomeUnknownAttention: "Flow chưa xác nhận task hiện tại đã gửi hay chưa. Hàng đợi đã tạm dừng và giữ các task sau ở trạng thái chờ. Kiểm tra Flow trước; nếu lệnh đã chạy, đừng gửi lại. Sau khi xác định trạng thái, bấm Chạy tiếp để chạy task sau. Task hiện tại sẽ không tự gửi lại.",
       dependencyBlockedAttention: "Tác vụ này đang chờ một tác vụ Flow trước đó. Xử lý hoặc thử lại tác vụ trước, rồi bấm Chạy tiếp để nối lại chuỗi.",
       mcp: "AI · MCP", manual: "THỦ CÔNG", moveUp: "Chuyển tác vụ {n} lên", moveDown: "Chuyển tác vụ {n} xuống", retry: "Thử lại", remove: "Xóa",
+      download: "Tải về",
       pending: "Đang chờ", runningStatus: "Đang chạy", completedStatus: "Hoàn tất", failed: "Thất bại", cancelled: "Đã hủy",
       needsAttention: "Cần xử lý",
       generationComplete: "Flow đã tạo {count} kết quả", downloadQueued: "Chờ tải {done}/{total}", downloadingCount: "Đang tải {done}/{total}", downloadedCount: "Đã tải {done}/{total}", downloadFailedCount: "Tải lỗi {done}/{total}", downloadSkipped: "Đã bỏ qua tải",
@@ -86,6 +88,7 @@
       outcomeUnknownAttention: "Flow did not confirm whether the current task was submitted. The queue paused and kept later tasks pending. Check Flow first; if the request is running, do not submit it again. After you confirm its state, select Resume to run the next task. The current task will not be retried automatically.",
       dependencyBlockedAttention: "This task is waiting for an earlier Flow task. Resolve or retry that task, then select Resume to continue the chain.",
       mcp: "AI · MCP", manual: "MANUAL", moveUp: "Move task {n} up", moveDown: "Move task {n} down", retry: "Retry", remove: "Remove",
+      download: "Download",
       pending: "Pending", runningStatus: "Running", completedStatus: "Completed", failed: "Failed", cancelled: "Cancelled",
       needsAttention: "Needs attention",
       generationComplete: "Flow created {count} result(s)", downloadQueued: "Download queued {done}/{total}", downloadingCount: "Downloading {done}/{total}", downloadedCount: "Downloaded {done}/{total}", downloadFailedCount: "Download failed {done}/{total}", downloadSkipped: "Download skipped",
@@ -160,6 +163,18 @@
     const current = Number(task?.completed ?? task?.progress?.completed ?? task?.current);
     if (Number.isFinite(total) && total > 0 && Number.isFinite(current)) return Math.max(0, Math.min(100, current / total * 100));
     return null;
+  }
+
+  function canDownloadGeneratedMedia(task) {
+    if (String(task?.operation || "") === "flow.queue.download-generated") return false;
+    const status = String(task?.status ?? task?.state ?? "").toLowerCase();
+    if (!["completed", "failed"].includes(status)) return false;
+    const checkpoint = task?.metadata?.generationResultCheckpoint?.media;
+    const result = task?.result?.result ?? task?.result;
+    const media = Array.isArray(checkpoint) && checkpoint.length ? checkpoint : result?.media;
+    if (!Array.isArray(media) || !media.some(item => item?.id && (item?.title || item?.name) && ["image", "video"].includes(String(item?.kind || item?.type || "").toLowerCase()))) return false;
+    const state = String(task?.progress?.download?.state || "skipped").toLowerCase();
+    return !["queued", "downloading", "completed"].includes(state);
   }
 
   class FlowQueuePanel {
@@ -567,6 +582,12 @@
         retry.dataset.index = String(index);
         actions.append(retry);
       }
+      if (canDownloadGeneratedMedia(task)) {
+        const downloadButton = this._button(this._text("download"), "download");
+        downloadButton.dataset.itemId = id;
+        downloadButton.setAttribute("aria-label", `${this._text("download")}: ${String(label)}`);
+        actions.append(downloadButton);
+      }
       const batchId = task?.batch?.batchId;
       if (batchId) {
         const siblings = normalizeItems(this.snapshot).filter(candidate => candidate?.batch?.batchId === batchId);
@@ -706,6 +727,7 @@
       if (action === "clear") return this.clear();
       if (action === "refresh") return this.refresh();
       if (action === "remove") return this._send(MESSAGE.remove, { id: button.dataset.itemId, taskId: button.dataset.itemId });
+      if (action === "download") return this._send(MESSAGE.download, { id: button.dataset.itemId, taskId: button.dataset.itemId });
       if (action === "manual-continue") return this._send(MESSAGE.manualContinue, { id: button.dataset.itemId, taskId: button.dataset.itemId });
       if (action === "manual-cancel") return this._send(MESSAGE.cancel, { id: button.dataset.itemId, taskId: button.dataset.itemId });
       if (action === "reorder") return this._send(MESSAGE.reorder, {
