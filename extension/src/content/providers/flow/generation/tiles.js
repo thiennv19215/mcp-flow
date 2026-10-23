@@ -253,6 +253,20 @@
     ) || null;
   }
 
+  // VID-06: receipt stages that prove Flow's server accepted a dispatch,
+  // in the correlation observer's stage vocabulary — the same pair
+  // nativeFlowCorrelationReceipt treats as the accepted/result receipt.
+  // "request_seen" only proves the request left the browser, and
+  // "acceptance_unknown" explicitly records that acceptance was NOT
+  // established, so neither can ever set this flag.
+  const FLOW_CORRELATION_ACCEPTANCE_STAGES = ["response_seen", "result_seen"];
+
+  function nativeFlowCorrelationAcceptanceObserved(attemptId) {
+    const entry = nativeFlowCorrelationMap().get(String(attemptId || ""));
+    if (!entry || !Array.isArray(entry.receipts)) return false;
+    return entry.receipts.some(receipt => FLOW_CORRELATION_ACCEPTANCE_STAGES.includes(receipt?.stage));
+  }
+
   function releaseSubmitOnlyCorrelation(attemptId, requestDispatched) {
     if (requestDispatched !== true) return null;
     const entry = nativeFlowCorrelationMap().get(String(attemptId || ""));
@@ -1094,6 +1108,7 @@
     armNativeFlowCorrelation,
     disarmNativeFlowCorrelation,
     nativeFlowCorrelationReceipt,
+    nativeFlowCorrelationAcceptanceObserved,
     releaseSubmitOnlyCorrelation,
     nativeFlowCorrelationMap,
     inspectNativeFlowCorrelationObserver,
@@ -1120,6 +1135,7 @@
   root.armNativeFlowCorrelation = armNativeFlowCorrelation;
   root.disarmNativeFlowCorrelation = disarmNativeFlowCorrelation;
   root.nativeFlowCorrelationReceipt = nativeFlowCorrelationReceipt;
+  root.nativeFlowCorrelationAcceptanceObserved = nativeFlowCorrelationAcceptanceObserved;
   root.nativeFlowCorrelationMap = nativeFlowCorrelationMap;
   root.inspectNativeFlowCorrelationObserver = inspectNativeFlowCorrelationObserver;
   root.retryNativeErrorTile = retryNativeErrorTile;
