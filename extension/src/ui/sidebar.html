@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="sidebar-light.css">
   <link rel="stylesheet" href="tobyflow-ui.css">
 </head>
-<body data-tf-rev="b7f3a91c" class="flow-mcp-sidebar">
+<body data-tf-rev="b7f3a91c">
   <!-- Loading Overlay -->
   <div id="tobyflow-loading-overlay" class="tobyflow-loading-overlay hidden">
     <div class="tobyflow-loading-content">
@@ -33,7 +33,7 @@
       <header class="tobyflow-header">
         <div class="tobyflow-header-brand">
           <div class="tobyflow-header-logo">
-            <img src="../icons/icon-48.png" alt="" />
+            <img src="../icons/icon-32.png" alt="Flow MCP" />
           </div>
           <span class="tobyflow-header-title">Flow MCP</span>
           <span class="tobyflow-user-plan-badge" id="userPlanBadge" data-plan="free" data-i18n-title="settings.planBadgeTooltip" title="Plan &amp; quota">Free</span>
@@ -118,6 +118,21 @@
               </button>
             </div>
           </div>
+                    <!-- User avatar / status -->
+          <div class="tobyflow-header-user" id="headerAuth">
+            <button class="tobyflow-header-btn tobyflow-user-avatar" id="loginBtn" type="button" data-i18n-tooltip="header.login" data-tooltip-pos="bottom">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                <circle cx="12" cy="7" r="4" />
+              </svg>
+              <span class="tobyflow-premium-crown hidden" id="headerPremiumCrown" data-tooltip="Premium">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M5 16L3 5L8.5 10L12 4L15.5 10L21 5L19 16H5ZM19 19C19 19.6 18.6 20 18 20H6C5.4 20 5 19.6 5 19V18H19V19Z" />
+                </svg>
+              </span>
+            </button>
+            <span id="sseStatusDot" class="sse-status-dot" data-tooltip="Realtime: Not connected"></span>
+          </div>
           <!-- Hidden compatibility elements -->
           <button id="langSwitchBtn" class="hidden" type="button"></button>
           <button id="reloadBtn" class="hidden" type="button"></button>
@@ -135,6 +150,16 @@
             <path d="M4.6519 14.7568L4.82063 14.2084C4.84491 14.1295 4.91781 14.0757 5.00037 14.0757C5.08292 14.0757 5.15582 14.1295 5.1801 14.2084L5.34883 14.7568C5.56525 15.4602 6.11587 16.0108 6.81925 16.2272L7.36762 16.3959C7.44652 16.4202 7.50037 16.4931 7.50037 16.5757C7.50037 16.6582 7.44652 16.7311 7.36762 16.7554L6.81926 16.9241C6.11587 17.1406 5.56525 17.6912 5.34883 18.3946L5.1801 18.9429C5.15582 19.0218 5.08292 19.0757 5.00037 19.0757C4.91781 19.0757 4.84491 19.0218 4.82063 18.9429L4.65191 18.3946C4.43548 17.6912 3.88486 17.1406 3.18147 16.9241L2.63311 16.7554C2.55421 16.7311 2.50037 16.6582 2.50037 16.5757C2.50037 16.4931 2.55421 16.4202 2.63311 16.3959L3.18148 16.2272C3.88486 16.0108 4.43548 15.4602 4.6519 14.7568Z"></path>
           </svg>
           <span data-i18n="tab.gen">Gen</span>
+        </button>
+                <!-- 2. Workflow -->
+        <button class="tobyflow-tab tab-btn" data-tab="tab-workflow" id="navWorkflow" data-i18n-title="tab.workflow" role="tab" aria-selected="false" tabindex="-1">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <g fill="currentColor">
+              <path fill-rule="evenodd" d="M12.123 15.292c-.587-1.927 1.198-3.775 3.158-3.155l5.955 1.848.003.001c2.33.733 2.35 4.024.04 4.801v.001l-1.63.55h-.004a.5.5 0 0 0-.325.322l-.003.01-.55 1.63c-.782 2.339-4.067 2.273-4.792-.052l-1.85-5.95zm2.555-1.248a.52.52 0 0 0-.642.665l1.849 5.943.034.087a.516.516 0 0 0 .952-.075l.001-.003.55-1.63c.237-.718.78-1.27 1.454-1.539l.138-.05 1.626-.55h.002c.487-.163.467-.85-.002-.997l-5.956-1.85z" clip-rule="evenodd"></path>
+              <path d="M15 1c2.599 0 4.678.514 6.082 1.918S23 6.401 23 9v3a1 1 0 1 1-2 0V9c0-2.401-.486-3.822-1.332-4.668S17.401 3 15 3H9c-2.401 0-3.822.486-4.668 1.332S3 6.599 3 9v6c0 2.401.486 3.822 1.332 4.668S6.599 21 9 21h3a1 1 0 1 1 0 2H9c-2.599 0-4.678-.514-6.082-1.918S1 17.599 1 15V9c0-2.599.514-4.678 1.918-6.082S6.401 1 9 1z"></path>
+            </g>
+          </svg>
+          <span data-i18n="tab.workflow">Workflow</span>
         </button>
         <!-- 3. Templates & My Prompts -->
         <button class="tobyflow-tab tab-btn" data-tab="tab-templates" id="tabTemplatesBtn" data-i18n-title="tab.prompts" role="tab" aria-selected="false" tabindex="-1">
@@ -158,7 +183,13 @@
             <path fill-rule="evenodd" d="M6.974 3.95a3.065 3.065 0 0 1 3.461-2.608l5.975.84a3.065 3.065 0 0 1 2.608 3.462l-.84 5.975a3.064 3.064 0 0 1-3.46 2.607l-.938-.132.03.206a3.065 3.065 0 0 1-2.608 3.462l-5.975.839a3.065 3.065 0 0 1-3.461-2.607l-.84-5.975a3.065 3.065 0 0 1 2.608-3.462l3.134-.441zm-.517 9.528a1.337 1.337 0 0 0-1.871.263l-1.513 2.007.009.06a1.736 1.736 0 0 0 1.96 1.477l5.45-.767zm3.237-6.443-5.974.838a1.736 1.736 0 0 0-1.477 1.96l.568 4.051.713-.944a2.666 2.666 0 0 1 3.733-.524l4.72 3.557a1.73 1.73 0 0 0 .516-1.487l-.84-5.975a1.735 1.735 0 0 0-1.959-1.476m.557-4.375a1.735 1.735 0 0 0-1.96 1.476l-.252 1.787 1.47-.206a3.066 3.066 0 0 1 3.462 2.61l.617 4.397 1.314.186a1.735 1.735 0 0 0 1.96-1.477l.84-5.975a1.736 1.736 0 0 0-1.478-1.96z" clip-rule="evenodd"></path>
           </svg>
         </button>
-        <!-- 6. History -->
+                <!-- 6. Tools -->
+        <button class="tobyflow-tab tab-btn tobyflow-tab--icon-only" data-tab="tab-tools" id="navTools" data-i18n-tooltip="tab.tools" aria-label="Tools" role="tab" aria-selected="false" tabindex="-1">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path fill="currentColor" fill-rule="evenodd" d="M5.933 2.754c1.29-2.339 4.661-2.339 5.951 0l2.19 3.97.002.001.718 1.308Q15.144 8 15.5 8a7.5 7.5 0 1 1-7.483 7.996H4.4c-2.577 0-4.224-2.762-2.976-5.03l4.51-8.21zm10.473 8.211c.504.916.535 1.913.225 2.776l-.025.064A3.37 3.37 0 0 1 13.43 16h-3.406a5.5 5.5 0 1 0 5.86-5.986zM10.134 3.72c-.53-.96-1.92-.96-2.45 0l-4.508 8.208a1.396 1.396 0 0 0 1.223 2.068h9.03a1.395 1.395 0 0 0 1.307-1.887l-.083-.177-1.28-2.33-.003-.007-1.047-1.906z" clip-rule="evenodd"></path>
+          </svg>
+        </button>
+        <!-- 7. History -->
         <button class="tobyflow-tab tab-btn tobyflow-tab--icon-only" data-tab="tab-history" id="navHistory" data-i18n-tooltip="tab.history" aria-label="History" role="tab" aria-selected="false" tabindex="-1">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
             <g fill="currentColor">
@@ -167,7 +198,7 @@
             </g>
           </svg>
         </button>
-        <!-- 7. Queue & Logs -->
+        <!-- 8. Queue & Logs -->
         <button class="tobyflow-tab tab-btn tobyflow-tab--icon-only" data-tab="tab-logs" id="navLogs" data-i18n-tooltip="logs.queue" aria-label="Queue" role="tab" aria-selected="false" tabindex="-1">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="5" cy="6" r="1" />
@@ -663,8 +694,18 @@
 
           <!-- Submit Bar -->
           <section class="section actions">
+            <div class="gen-run-mode-row">
+              <button class="gen-run-mode-btn active" id="genRunModeBtn" data-i18n-title="gen.runModeParallel" type="button">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="4" y1="6" x2="20" y2="6"></line>
+                  <line x1="4" y1="12" x2="20" y2="12"></line>
+                  <line x1="4" y1="18" x2="20" y2="18"></line>
+                </svg>
+                <span class="gen-run-mode-label" data-i18n="gen.parallel">Parallel</span>
+              </button>
+            </div>
             <div class="gen-btn-row" id="genBtnRow">
-              <button class="btn btn-generate" id="genSubmitBtn" type="button">
+              <button class="btn btn-generate" id="startBtn" type="button">
                 <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
                   <path d="M11.8525 4.21651L11.7221 3.2387C11.6906 3.00226 11.4889 2.82568 11.2504 2.82568C11.0118 2.82568 10.8102 3.00226 10.7786 3.23869L10.6483 4.21651C10.2658 7.0847 8.00939 9.34115 5.14119 9.72358L4.16338 9.85396C3.92694 9.88549 3.75037 10.0872 3.75037 10.3257C3.75037 10.5642 3.92694 10.7659 4.16338 10.7974L5.14119 10.9278C8.00938 11.3102 10.2658 13.5667 10.6483 16.4349L10.7786 17.4127C10.8102 17.6491 11.0118 17.8257 11.2504 17.8257C11.4889 17.8257 11.6906 17.6491 11.7221 17.4127L11.8525 16.4349C12.2349 13.5667 14.4913 11.3102 17.3595 10.9278L18.3374 10.7974C18.5738 10.7659 18.7504 10.5642 18.7504 10.3257C18.7504 10.0872 18.5738 9.88549 18.3374 9.85396L17.3595 9.72358C14.4913 9.34115 12.2349 7.0847 11.8525 4.21651Z"></path>
                   <path d="M4.6519 14.7568L4.82063 14.2084C4.84491 14.1295 4.91781 14.0757 5.00037 14.0757C5.08292 14.0757 5.15582 14.1295 5.1801 14.2084L5.34883 14.7568C5.56525 15.4602 6.11587 16.0108 6.81925 16.2272L7.36762 16.3959C7.44652 16.4202 7.50037 16.4931 7.50037 16.5757C7.50037 16.6582 7.44652 16.7311 7.36762 16.7554L6.81926 16.9241C6.11587 17.1406 5.56525 17.6912 5.34883 18.3946L5.1801 18.9429C5.15582 19.0218 5.08292 19.0757 5.00037 19.0757C4.91781 19.0757 4.84491 19.0218 4.82063 18.9429L4.65191 18.3946C4.43548 17.6912 3.88486 17.1406 3.18147 16.9241L2.63311 16.7554C2.55421 16.7311 2.50037 16.6582 2.50037 16.5757C2.50037 16.4931 2.55421 16.4202 2.63311 16.3959L3.18148 16.2272C3.88486 16.0108 4.43548 15.4602 4.6519 14.7568Z"></path>
@@ -678,7 +719,7 @@
               </button>
             </div>
             <!-- Backward compatibility submit buttons -->
-            <button id="startBtn" class="hidden" type="button"></button>
+            <button id="genSubmitBtn" class="hidden" type="button"></button>
             <button id="btnSubmitImage" class="hidden" type="button"><span id="txtBtnSubmitImage">Tạo ảnh</span></button>
             <button id="btnSubmitVideo" class="hidden" type="button"><span id="txtBtnSubmitVideo">Tạo video</span></button>
             <!-- Feedback box -->
@@ -752,6 +793,89 @@
               </button>
             </div>
           </div>
+        <!-- ========================================== -->
+        <!-- TAB 2: WORKFLOW                            -->
+        <!-- ========================================== -->
+        <div id="tab-workflow" class="tab-pane module-pending" role="tabpanel">
+          <section class="section" id="workflowListSection">
+            <div class="wf-toolbar">
+              <div class="wf-toolbar-left">
+                <button class="btn btn-secondary btn-sm btn-toolbar-icon" id="wfSearchToggle" data-i18n-title="workflow.search" title="Search" type="button">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <path d="m21 21-4.35-4.35"></path>
+                  </svg>
+                </button>
+                <button class="btn btn-secondary btn-sm btn-toolbar-icon" id="refreshWorkflowsBtn" data-i18n-title="workflow.reload" title="Reload" type="button">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="23 4 23 10 17 10"></polyline>
+                    <polyline points="1 20 1 14 7 14"></polyline>
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                  </svg>
+                </button>
+                <button class="btn btn-secondary btn-sm btn-toolbar-icon" id="importWorkflowBtn" data-i18n-title="workflow.importFromFile" title="Import workflow from file" type="button">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                </button>
+              </div>
+              <div class="wf-toolbar-right">
+                <select class="wf-project-select-inline hidden" id="wfProjectSelectInline" data-i18n-title="workflow.filterByProject" title="Filter by project"></select>
+                <button class="btn btn-secondary btn-sm btn-icon-text btn-add-short" id="runAllWorkflowsBtn" data-i18n-title="workflow.runAll" title="Run All" type="button">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                  </svg>
+                  <span data-i18n="workflow.runAll">Run All</span>
+                </button>
+                <button class="btn btn-primary btn-sm btn-icon-text btn-add-short" id="createWorkflowBtn" data-i18n-title="workflow.createNew" title="Create New" type="button">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                  </svg>
+                  <span data-i18n="workflow.add">Add</span>
+                </button>
+              </div>
+            </div>
+            <div class="wf-batch-progress hidden" id="wfBatchProgress">
+              <div class="batch-progress-info">
+                <span class="batch-progress-label" id="wfBatchProgressLabel">Running workflow...</span>
+                <span class="batch-progress-count" id="wfBatchProgressCount">0/0</span>
+              </div>
+              <div class="batch-progress-bar">
+                <div class="batch-progress-fill" id="wfBatchProgressFill"></div>
+              </div>
+            </div>
+            <div class="wf-search-row hidden" id="wfSearchRow">
+              <div class="wf-search-input-wrapper">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <path d="m21 21-4.35-4.35"></path>
+                </svg>
+                <input type="text" data-i18n-placeholder="workflow.searchPlaceholder" placeholder="Search workflows..." id="wfSearchInput" />
+                <button class="wf-search-close" id="wfSearchClose" data-i18n-title="common.close" title="Close" type="button">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div class="workflow-empty-state hidden" id="workflowEmptyState">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <circle cx="18" cy="18" r="3"></circle>
+                <circle cx="6" cy="6" r="3"></circle>
+                <path d="M13 6h3a2 2 0 0 1 2 2v7"></path>
+                <path d="M11 18H8a2 2 0 0 1-2-2V9"></path>
+              </svg>
+              <p data-i18n="workflow.emptyTitle">No workflows yet</p>
+              <button class="btn btn-primary" id="createFirstWorkflowBtn" data-i18n="workflow.createFirst" type="button">Create your first workflow</button>
+            </div>
+            <div id="workflowList" class="workflow-list"></div>
+          </section>
+        </div>
+
           <div id="queuePage" style="margin-top:12px;"></div>
         </div>
 
@@ -864,6 +988,83 @@
         </div>
 
         <!-- ========================================== -->
+        
+        <!-- ========================================== -->
+        <!-- TAB 6: TOOLS                               -->
+        <!-- ========================================== -->
+        <div id="tab-tools" class="tab-pane" role="tabpanel">
+          <div class="tools-grid">
+            <button class="tools-item hidden" id="autoCapcutToolbarBtn" type="button">
+              <div class="tools-item-icon tools-item-icon--cyan">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="5" width="18" height="16" rx="2" />
+                  <path d="M3 10h18M7 3l2 4m4-4 2 4m4-4 2 4" />
+                </svg>
+              </div>
+              <span class="tools-item-label" data-i18n="autoCapcut.title">Auto CapCut Builder</span>
+              <span class="tools-item-desc" data-i18n="autoCapcut.description">Align media to narration and create a CapCut project</span>
+            </button>
+            <button class="tools-item" id="watermarkToolbarBtn" type="button">
+              <div class="tools-item-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" role="img" aria-label="Scan">
+                  <g fill="currentColor">
+                    <path d="M2 14.25c.41 0 .75.34.75.75v2.5c0 2.07 1.68 3.75 3.75 3.75H9c.41 0 .75.34.75.75s-.34.75-.75.75H6.5c-2.89 0-5.25-2.35-5.25-5.25V15c0-.41.34-.75.75-.75m20 1c.41 0 .75.34.75.75v1.5c0 2.9-2.36 5.25-5.25 5.25H16c-.41 0-.75-.34-.75-.75s.34-.75.75-.75h1.5c2.07 0 3.75-1.68 3.75-3.75V16c0-.41.34-.75.75-.75"></path>
+                    <path fill-rule="evenodd" d="M14 5.75c2.42 0 3.75 1.33 3.75 3.75v1.75H19c.41 0 .75.34.75.75s-.34.75-.75.75h-1.25v1.75c0 2.42-1.33 3.75-3.75 3.75h-4c-2.42 0-3.75-1.33-3.75-3.75v-1.75H5c-.41 0-.75-.34-.75-.75s.34-.75.75-.75h1.25V9.5c0-2.42 1.33-3.75 3.75-3.75zm-6.25 7v1.75c0 1.58.67 2.25 2.25 2.25h4c1.58 0 2.25-.67 2.25-2.25v-1.75zM10 7.25c-1.58 0-2.25.67-2.25 2.25v1.75h8.5V9.5c0-1.58-.67-2.25-2.25-2.25z" clip-rule="evenodd"></path>
+                    <path d="M9 1.25c.41 0 .75.34.75.75s-.34.75-.75.75H6.5c-2.07 0-3.75 1.68-3.75 3.75V9c0 .41-.34.75-.75.75s-.75-.34-.75-.75V6.5c0-2.9 2.36-5.25 5.25-5.25zm8.5 0c2.89 0 5.25 2.35 5.25 5.25V9c0 .41-.34.75-.75.75s-.75-.34-.75-.75V6.5c0-2.07-1.68-3.75-3.75-3.75H15c-.41 0-.75-.34-.75-.75s.34-.75.75-.75z"></path>
+                  </g>
+                </svg>
+              </div>
+              <span class="tools-item-label" data-i18n="tools.watermark">Remove watermark</span>
+              <span class="tools-item-desc" data-i18n="tools.watermarkDesc">Remove Gemini/Flow logo from images</span>
+            </button>
+            <button class="tools-item" id="anglesToolbarBtn" type="button">
+              <div class="tools-item-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="22" y1="12" x2="18" y2="12" />
+                  <line x1="6" y1="12" x2="2" y2="12" />
+                  <line x1="12" y1="6" x2="12" y2="2" />
+                  <line x1="12" y1="22" x2="12" y2="18" />
+                </svg>
+              </div>
+              <span class="tools-item-label" data-i18n="tools.angles">Angles</span>
+              <span class="tools-item-desc" data-i18n="tools.anglesDesc">Generate multi-angle views</span>
+            </button>
+            <button class="tools-item" id="effectsToolbarBtn" type="button">
+              <div class="tools-item-icon tools-item-icon--cyan">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M12 2v4m0 12v4M2 12h4m12 0h4" />
+                  <path d="m4.93 4.93 2.83 2.83m8.48 8.48 2.83 2.83M4.93 19.07l2.83-2.83m8.48-8.48 2.83-2.83" />
+                </svg>
+              </div>
+              <span class="tools-item-label" data-i18n="tools.effects">Effects</span>
+              <span class="tools-item-desc" data-i18n="tools.effectsDesc">Apply image effects</span>
+            </button>
+            <button class="tools-item" id="aiAgentToolbarBtn" type="button">
+              <div class="tools-item-icon tools-item-icon--purple">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="11" width="18" height="10" rx="2"></rect>
+                  <circle cx="8.5" cy="16" r="1.1" fill="currentColor" stroke="none"></circle>
+                  <circle cx="15.5" cy="16" r="1.1" fill="currentColor" stroke="none"></circle>
+                  <path d="M12 7V4M9 4h6"></path>
+                </svg>
+              </div>
+              <span class="tools-item-label" data-i18n="tools.aiAgent">AI Agent</span>
+              <span class="tools-item-desc" data-i18n="tools.aiAgentDesc">Connect Claude/Cursor (MCP) to auto-gen & build workflows</span>
+            </button>
+            <button class="tools-item" id="telegramToolbarBtn" type="button">
+              <div class="tools-item-icon tools-item-icon--blue">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z" />
+                </svg>
+              </div>
+              <span class="tools-item-label" data-i18n="tools.telegram">Telegram</span>
+              <span class="tools-item-desc" data-i18n="tools.telegramDesc">Link a bot for remote control</span>
+            </button>
+          </div>
+          <div class="wmtool-inline hidden" id="watermarkToolPanel"></div>
+        </div>
         <!-- TAB 5: HISTORY                             -->
         <!-- ========================================== -->
         <div id="tab-history" class="tab-pane" role="tabpanel">
@@ -1001,28 +1202,7 @@
         </section>
       </div>
 
-      <!-- Image Confirm Dialog -->
-      <dialog id="imageConfirmDialog" class="image-confirm-dialog" aria-labelledby="imageConfirmTitle" aria-describedby="imageConfirmDescription">
-        <div class="image-confirm-content">
-          <h2 class="image-confirm-title" id="imageConfirmTitle" data-i18n="sidebar.imageConfirmTitle">Xác nhận tạo ảnh</h2>
-          <p class="image-confirm-description" id="imageConfirmDescription" data-i18n="sidebar.imageConfirmDescription">Kiểm tra thiết lập trước khi thêm vào hàng đợi Flow.</p>
-          <div class="image-confirm-summary">
-            <div class="image-confirm-summary-row"><span data-i18n="sidebar.imageConfirmPrompts">Số prompt</span><strong id="imageConfirmPromptCount">1</strong></div>
-            <div class="image-confirm-summary-row"><span data-i18n="sidebar.imageConfirmModel">Mô hình</span><strong id="imageConfirmModel">Nano Banana</strong></div>
-            <div class="image-confirm-summary-row"><span data-i18n="sidebar.imageConfirmQuantity">Số ảnh</span><strong id="imageConfirmQuantity">1 ảnh</strong></div>
-            <div class="image-confirm-summary-row"><span data-i18n="sidebar.imageConfirmReferences">Ảnh tham chiếu</span><strong id="imageConfirmReferences">0</strong></div>
-            <div class="image-confirm-summary-row"><span data-i18n="sidebar.imageConfirmCharacter">Nhân vật</span><strong id="imageConfirmCharacter">Không chọn</strong></div>
-          </div>
-          <div class="image-confirm-fields">
-            <label class="form-group"><span class="form-label" data-i18n="sidebar.aspectRatio">Tỷ lệ khung hình</span><select class="form-select" id="imageConfirmRatio"></select></label>
-            <label class="form-group"><span class="form-label" data-i18n="sidebar.quantity">Số lượng</span><select class="form-select" id="imageConfirmCount"></select></label>
-          </div>
-          <div class="image-confirm-actions">
-            <button type="button" class="btn btn-secondary" id="imageConfirmCancel" data-i18n="sidebar.imageConfirmCancel">Hủy</button>
-            <button type="button" class="btn btn-primary" id="imageConfirmRun" data-i18n="sidebar.imageConfirmRun">Xác nhận và thêm hàng đợi</button>
-          </div>
-        </div>
-      </dialog>
+
 
       <!-- Flow Photo Preview Dialog -->
       <dialog id="flowPhotoPreview" class="flow-photo-preview">

@@ -1,5 +1,8 @@
 # Hướng dẫn Kiến trúc & Phát triển Extension (Flow Native Automation)
 
+> 💡 **Dành cho lập trình viên cần sửa nhanh tính năng:**  
+> Xem ngay [**Bản Đồ Tra Cứu Nhiệm Vụ & File Cần Sửa (DEVELOPER-GUIDE.md)**](DEVELOPER-GUIDE.md) để định vị đúng file cần sửa trong 30 giây mà không cần đọc toàn bộ dự án.
+
 Tài liệu này hướng dẫn cấu trúc mã nguồn extension, nhiệm vụ mô-đun và quy trình phát triển. `extension/` là cây nguồn; gói Chrome đã build nằm tại `dist/extension/`.
 
 ---

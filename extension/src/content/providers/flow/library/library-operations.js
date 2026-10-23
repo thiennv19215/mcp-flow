@@ -247,10 +247,15 @@
         const inputs = [...new Set(scopedInputs)];
         if (inputs.length !== 1) throw this.error(inputs.length ? "FLOW_RENAME_INPUT_AMBIGUOUS" : "FLOW_RENAME_INPUT_MISSING", "Flow did not expose one unique editable title field; inspect Flow before retrying.", false, true);
         const input = inputs[0];
-        if (typeof root.setEditable !== "function") {
-          throw this.error("FLOW_RENAME_INPUT_UNAVAILABLE", "Flow's framework-aware title editor is unavailable; no title change was attempted.", false, false);
+        if (typeof root.setEditable === "function") {
+          root.setEditable(input, newName);
+        } else if (input.isContentEditable) {
+          input.textContent = newName;
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+        } else {
+          input.value = newName;
+          input.dispatchEvent(new Event("input", { bubbles: true }));
         }
-        root.setEditable(input, newName);
         const enteredTitle = String(input.value ?? input.innerText ?? input.textContent ?? "").replace(/\s+/g, " ").trim();
         if (normalizeTitle(enteredTitle) !== normalizeTitle(newName) || input.getAttribute?.("aria-invalid") === "true") {
           throw this.error("FLOW_RENAME_INPUT_UNCONFIRMED", `Flow did not accept the requested title "${newName}" in its rename editor.`, false, false);

@@ -1471,6 +1471,10 @@
       ...(queriedTabs || []),
       ...scopedTabs,
     ])].filter(el => (el === surface || surface.contains?.(el) || scopedTabs.includes(el)) && filterCandidate(el));
+    if (!candidates.length) {
+      const docTabs = [...(surface?.ownerDocument?.querySelectorAll?.('[role="tab"]') || document.querySelectorAll?.('[role="tab"]') || [])];
+      candidates = docTabs.filter(filterCandidate);
+    }
     // Prefer explicit tabs over their nested button/chip wrappers. Only treat
     // multiple actual tab controls as ambiguous; wrapper duplicates are one
     // semantic category, not separate choices.
@@ -1848,21 +1852,23 @@
       // Flow excludes already attached characters from its picker. Check our
       // confirmed provenance first, before requiring the option to exist again.
       const reusableCandidates = chips().filter(chip => (normalize(chip.name) === normalize(ref.name) || (ref.search_value && normalize(chip.name) === normalize(ref.search_value))) && (!ref.kind || chip.kind === ref.kind));
-      if (!config.expectedId && reusableCandidates.some(chip => chip.kind === "character")) {
-        throw flowError("FLOW_CHARACTER_ID_UNAVAILABLE", `Flow already has a same-name character chip for "${ref.name}", but this request has no character entity UUID to prove it is the intended character. No generation was submitted.`, false, false);
-      }
       let reusable = null;
       for (const chip of reusableCandidates) {
         if (chip.kind === "character") {
-          const requestedCharacterId = String(config.expectedId || "").trim();
           const existingCharacterId = explicitCharacterUuid(chip.element) ||
             (chip.mediaIdSource === "character_identity_attribute" ? chip.mediaId : undefined);
-          if (characterUuidPattern.test(requestedCharacterId) && characterUuidPattern.test(String(existingCharacterId || "")) &&
-              requestedCharacterId.toLowerCase() === String(existingCharacterId).toLowerCase()) {
-            reusable = chip;
-            break;
+          if (!existingCharacterId) continue;
+          if (config.expectedId) {
+            const requestedCharacterId = String(config.expectedId || "").trim();
+            if (characterUuidPattern.test(requestedCharacterId) &&
+                requestedCharacterId.toLowerCase() === String(existingCharacterId).toLowerCase()) {
+              reusable = chip;
+              break;
+            }
+            continue;
           }
-          continue;
+          reusable = chip;
+          break;
         }
         if (!config.expectedId) { reusable = chip; break; }
         const mediaType = chip.kind === "video" ? "video" : "image";

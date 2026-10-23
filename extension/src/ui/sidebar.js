@@ -83,78 +83,7 @@
     return typeof I18n !== "undefined" ? I18n.t(key, params) : key;
   }
 
-  function confirmImageGeneration({ prompts, model, aspectRatio, count, references, character, submitButton }) {
-    const dialog = document.querySelector("#imageConfirmDialog");
-    const ratioSelect = document.querySelector("#imageConfirmRatio");
-    const countSelect = document.querySelector("#imageConfirmCount");
-    const sourceRatio = document.querySelector("#selectRatioImage");
-    const sourceCount = document.querySelector("#selectQtyImage");
-    if (!dialog || typeof dialog.showModal !== "function" || !ratioSelect || !countSelect || !sourceRatio || !sourceCount) {
-      throw new Error("Không thể mở bước xác nhận tạo ảnh trong extension.");
-    }
-    if (dialog.open) return Promise.resolve(null);
 
-    ratioSelect.replaceChildren(...[...sourceRatio.options].map(option => option.cloneNode(true)));
-    countSelect.replaceChildren(...[...sourceCount.options].map(option => option.cloneNode(true)));
-    ratioSelect.value = aspectRatio;
-    countSelect.value = String(count);
-
-    const promptCount = Array.isArray(prompts) ? prompts.length : 0;
-    const promptSummary = document.querySelector("#imageConfirmPromptCount");
-    const modelSummary = document.querySelector("#imageConfirmModel");
-    const quantitySummary = document.querySelector("#imageConfirmQuantity");
-    const referencesSummary = document.querySelector("#imageConfirmReferences");
-    const characterSummary = document.querySelector("#imageConfirmCharacter");
-    const updateQuantitySummary = () => {
-      const perPrompt = Math.max(1, Number(countSelect.value) || 1);
-      if (quantitySummary) quantitySummary.textContent = t("sidebar.imageConfirmQuantityDetail", { total: promptCount * perPrompt, count: perPrompt });
-    };
-    if (promptSummary) promptSummary.textContent = promptCount === 1
-      ? t("sidebar.imageConfirmSinglePrompt")
-      : t("sidebar.imageConfirmBatchPrompts", { count: promptCount });
-    if (modelSummary) modelSummary.textContent = document.querySelector("#selectModelImage")?.selectedOptions?.[0]?.textContent?.trim() || model;
-    if (referencesSummary) referencesSummary.textContent = String(Array.isArray(references) ? references.length : 0);
-    if (characterSummary) characterSummary.textContent = character
-      ? document.querySelector("#selectCharImage")?.selectedOptions?.[0]?.textContent?.trim() || character
-      : t("sidebar.imageConfirmNone");
-    updateQuantitySummary();
-
-    return new Promise((resolve, reject) => {
-      const cleanup = () => {
-        dialog.removeEventListener("close", onClose);
-        dialog.removeEventListener("click", onDialogClick);
-        document.querySelector("#imageConfirmCancel")?.removeEventListener("click", onCancel);
-        document.querySelector("#imageConfirmRun")?.removeEventListener("click", onConfirm);
-        countSelect.removeEventListener("change", updateQuantitySummary);
-      };
-      const onClose = () => {
-        const result = dialog.returnValue === "confirm"
-          ? { aspect_ratio: ratioSelect.value, count: Math.max(1, Number(countSelect.value) || 1) }
-          : null;
-        cleanup();
-        submitButton?.focus();
-        resolve(result);
-      };
-      const onDialogClick = event => {
-        if (event.target === dialog) dialog.close("cancel");
-      };
-      const onCancel = () => dialog.close("cancel");
-      const onConfirm = () => dialog.close("confirm");
-      dialog.returnValue = "";
-      dialog.addEventListener("close", onClose, { once: true });
-      dialog.addEventListener("click", onDialogClick);
-      document.querySelector("#imageConfirmCancel")?.addEventListener("click", onCancel);
-      document.querySelector("#imageConfirmRun")?.addEventListener("click", onConfirm);
-      countSelect.addEventListener("change", updateQuantitySummary);
-      try {
-        dialog.showModal();
-        document.querySelector("#imageConfirmCancel")?.focus();
-      } catch (error) {
-        cleanup();
-        reject(error);
-      }
-    });
-  }
 
   function updateVideoFrameInputs() {
     const framesMode = document.querySelector("#selectModeVideo")?.value === "frames";
@@ -396,7 +325,10 @@
   async function loadFlowModelCapabilities() {
     if (flowModelCapabilities) return flowModelCapabilities;
     if (!flowModelCapabilitiesPromise) {
-      flowModelCapabilitiesPromise = fetch(chrome.runtime.getURL("flow-model-capabilities.json"))
+      const url = (typeof chrome !== "undefined" && chrome.runtime?.getURL)
+        ? chrome.runtime.getURL("flow-model-capabilities.json")
+        : "../flow-model-capabilities.json";
+      flowModelCapabilitiesPromise = fetch(url)
         .then(response => {
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           return response.json();
@@ -959,7 +891,8 @@
   }
 
   // Listen for real-time progress broadcast from background/Flow
-  chrome.runtime.onMessage.addListener(msg => {
+  if (typeof chrome !== "undefined" && chrome.runtime?.onMessage?.addListener) {
+    chrome.runtime.onMessage.addListener(msg => {
     if (msg?.type === "flow-queue:changed") {
       const jobs = msg.snapshot?.jobs || msg.snapshot?.items || [];
       const active = jobs.find(job => job.status === "running");
@@ -1008,7 +941,9 @@
           : document.querySelector("#txtBtnSubmitVideo");
         if (btnTextEl) btnTextEl.textContent = msg.progress;
       }
+    }
   });
+}
 
   async function executeGenerationTask({ type, prompt, prompts, aspect_ratio, count = 1, model, autoDownload = false, attachments = [], attachmentsPerPrompt, firstFramesPerPrompt, lastFramesPerPrompt, video_settings, chainVideo = false, btn, btnTextEl, defaultTextKey }) {
     if (isGenerating) {
@@ -1057,6 +992,9 @@
           label: `[${type.toUpperCase()}] ${itemPrompt.slice(0, 96)}`,
         };
       });
+      if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) {
+        throw new Error("Không thể kết nối với extension background. Vui lòng mở tiện ích trong Chrome Side Panel.");
+      }
       const addResult = await chrome.runtime.sendMessage(jobs.length > 1
         ? { type: "flow-queue:add-batch", jobs, batchLabel: `${type === "video" ? "Video" : "Image"} batch` }
         : { type: "flow-queue:add", job: jobs[0] });
@@ -1493,20 +1431,6 @@
 
     try {
       if (btn) btn.disabled = true;
-      const confirmation = await confirmImageGeneration({
-        prompts,
-        model,
-        aspectRatio: aspect_ratio,
-        count,
-        references: activeImageReferences,
-        character,
-        submitButton: btn,
-      });
-      if (!confirmation) return;
-      aspect_ratio = confirmation.aspect_ratio;
-      count = confirmation.count;
-      document.querySelector("#selectRatioImage").value = aspect_ratio;
-      document.querySelector("#selectQtyImage").value = String(count);
       // Reuse selected Flow media IDs; only newly chosen local files are uploaded.
       const attachmentByReference = new Map();
       const localImageReferences = activeImageReferences.filter(reference => reference.source === "local");
@@ -2169,15 +2093,17 @@
       if (label) label.textContent = isDark ? (t("header.lightMode") || "Light Mode") : (t("header.darkMode") || "Dark Mode");
     };
 
-    chrome.storage.local.get(["af_settings"]).then(res => {
-      const theme = res?.af_settings?.theme || "dark";
-      const root = document.querySelector("#flow-auto-sidebar-root");
-      if (root) {
-        root.classList.remove("theme-light", "theme-dark");
-        root.classList.add(`theme-${theme}`);
-      }
-      updateThemeUI(theme === "dark");
-    }).catch(() => {});
+    if (typeof chrome !== "undefined" && chrome.storage?.local?.get) {
+      chrome.storage.local.get(["af_settings"]).then(res => {
+        const theme = res?.af_settings?.theme || "dark";
+        const root = document.querySelector("#flow-auto-sidebar-root");
+        if (root) {
+          root.classList.remove("theme-light", "theme-dark");
+          root.classList.add(`theme-${theme}`);
+        }
+        updateThemeUI(theme === "dark");
+      }).catch(() => {});
+    }
 
     document.querySelector("#themeToggleBtn")?.addEventListener("click", async () => {
       const root = document.querySelector("#flow-auto-sidebar-root");
@@ -2189,10 +2115,12 @@
       }
       updateThemeUI(newTheme === "dark");
       try {
-        const stored = await chrome.storage.local.get(["af_settings"]);
-        await chrome.storage.local.set({
-          af_settings: { ...(stored?.af_settings || {}), theme: newTheme }
-        });
+        if (typeof chrome !== "undefined" && chrome.storage?.local?.get) {
+          const stored = await chrome.storage.local.get(["af_settings"]);
+          await chrome.storage.local.set({
+            af_settings: { ...(stored?.af_settings || {}), theme: newTheme }
+          });
+        }
       } catch (_) {}
     });
   }
@@ -2579,6 +2507,32 @@
     document.querySelector("#startBtn")?.addEventListener("click", () => {
       document.querySelector("#genSubmitBtn")?.click();
     });
+
+    let runMode = "parallel";
+    function updateRunModeUI() {
+      const btn = document.querySelector("#genRunModeBtn");
+      if (!btn) return;
+      const isParallel = runMode === "parallel";
+      const label = btn.querySelector(".gen-run-mode-label");
+      const svg = btn.querySelector("svg");
+      if (label) {
+        const isVi = (document.documentElement.lang || "vi").startsWith("vi");
+        label.textContent = isParallel ? (isVi ? "Song song" : "Parallel") : (isVi ? "Tuần tự" : "Sequential");
+      }
+      btn.title = isParallel ? "Run mode: Parallel (no waiting between prompts)" : "Run mode: Sequential (wait for each prompt result)";
+      if (svg) {
+        svg.innerHTML = isParallel
+          ? '<line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="18" x2="20" y2="18"></line>'
+          : '<line x1="10" y1="6" x2="21" y2="6"></line><line x1="10" y1="12" x2="21" y2="12"></line><line x1="10" y1="18" x2="21" y2="18"></line><polyline points="3 6 4 7 6 5"></polyline><polyline points="3 12 4 13 6 11"></polyline><polyline points="3 18 4 19 6 17"></polyline>';
+      }
+      btn.classList.toggle("active", isParallel);
+    }
+
+    document.querySelector("#genRunModeBtn")?.addEventListener("click", () => {
+      runMode = runMode === "parallel" ? "sequential" : "parallel";
+      updateRunModeUI();
+    });
+    updateRunModeUI();
 
     document.querySelector("#genStopBtn")?.addEventListener("click", async () => {
       try {
