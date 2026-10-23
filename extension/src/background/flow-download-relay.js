@@ -53,6 +53,132 @@ const allowedMediaHost = hostname => {
     host.endsWith(".googleapis.com") || host.endsWith(".usercontent.goog");
 };
 
+// GPT-15: provider tab-fetch relay (study (E)15, §D.3.5, behavior
+// B24). A provider result image is fetched with a credentialed fetch
+// executed in the provider tab's context (the tab's own logged-in
+// session rides the request) and the bytes come back base64 — the
+// same out-contract readFlowDownloadChunk below already uses
+// ({ data: base64, sha256 digest, totalBytes }). This is ONE relay
+// generalized by a provider/host table, not a second implementation:
+// the "flow" provider delegates its host check to the legacy
+// allowedMediaHost above (its verdicts are unchanged), while
+// "chatgpt" accepts only its result hosts — the chat host and the
+// file-CDN host family the GPT-04 extraction tiers produce.
+//
+// Validation discipline mirrors the chunk relay: everything checkable
+// is refused BEFORE the fetch is issued — a non-https URL, embedded
+// URL credentials, an unknown provider, a host that is not an exact
+// host or proper subdomain (dot boundary, never substring) of the
+// provider's bases, or a declared size over the cap. After the
+// response headers arrive but BEFORE the body is read, an oversized
+// Content-Length or a non-image Content-Type refuses (body cancelled,
+// never consumed). After the read, an actual byte count over the cap
+// or one disagreeing with the declared size refuses instead of
+// returning bytes.
+//
+// The cap is a named constant: 25 MiB, the image cap the repo's
+// transfer layer already applies to images (src/flow-transfer.ts).
+// The accepted content types are the image types the queue download
+// pipeline already maps to extensions in flow-queue-downloads.js
+// (png / jpeg / webp / gif). The fetch timeout mirrors the chunk
+// relay's 45 s AbortSignal.timeout.
+export const TAB_FETCH_IMAGE_MAX_BYTES = 25 * 1024 * 1024;
+export const TAB_FETCH_IMAGE_CONTENT_TYPES = Object.freeze(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+export const TAB_FETCH_TIMEOUT_MS = 45_000;
+export const TAB_FETCH_PROVIDER_HOSTS = Object.freeze({
+  chatgpt: Object.freeze(["chatgpt.com", "oaiusercontent.com"]),
+});
+
+const tabFetchHostMatchesBase = (hostname, base) => {
+  const host = String(hostname || "").toLowerCase();
+  return host === base || host.endsWith(`.${base}`);
+};
+
+export function isTabFetchHostAllowed(hostname, provider = "chatgpt") {
+  if (provider === "flow") return allowedMediaHost(hostname);
+  const bases = TAB_FETCH_PROVIDER_HOSTS[provider];
+  if (!bases) return false;
+  return bases.some(base => tabFetchHostMatchesBase(hostname, base));
+}
+
+const tabFetchRefusal = (code, message) => Object.assign(new Error(message), {
+  code, retryable: false, outcomeUnknown: false, outcome_unknown: false,
+});
+
+export function validateTabFetchImageRequest(input) {
+  const provider = typeof input?.provider === "string" && input.provider ? input.provider : "chatgpt";
+  const maxBytes = input?.maxBytes === undefined ? TAB_FETCH_IMAGE_MAX_BYTES : input.maxBytes;
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > TAB_FETCH_IMAGE_MAX_BYTES) {
+    throw tabFetchRefusal("TAB_FETCH_SIZE_REJECTED", "The tab-fetch image size cap is invalid.");
+  }
+  let parsed;
+  try { parsed = new URL(String(input?.url || "")); } catch {
+    throw tabFetchRefusal("TAB_FETCH_URL_REJECTED", "The provider result URL is not a readable URL.");
+  }
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password || !isTabFetchHostAllowed(parsed.hostname, provider)) {
+    throw tabFetchRefusal("TAB_FETCH_URL_REJECTED", "The provider result URL is not on an approved provider host.");
+  }
+  const declaredBytes = input?.declaredBytes === undefined || input?.declaredBytes === null ? null : Number(input.declaredBytes);
+  if (declaredBytes !== null && (!Number.isSafeInteger(declaredBytes) || declaredBytes < 0)) {
+    throw tabFetchRefusal("TAB_FETCH_SIZE_REJECTED", "The declared provider image size is invalid.");
+  }
+  if (declaredBytes !== null && declaredBytes > maxBytes) {
+    throw tabFetchRefusal("TAB_FETCH_SIZE_REJECTED", `The declared provider image size exceeds the ${maxBytes}-byte tab-fetch cap.`);
+  }
+  return { url: parsed.href, provider, host: parsed.hostname.toLowerCase(), declaredBytes, maxBytes };
+}
+
+export async function relayTabFetchImage(input, {
+  fetchImpl = fetch,
+  cryptoApi = crypto,
+} = {}) {
+  // Pre-fetch refusals: host / scheme / credentials / declared size
+  // are all settled here, before fetchImpl is ever called.
+  const request = validateTabFetchImageRequest(input);
+  let response;
+  try {
+    response = await fetchImpl(request.url, {
+      credentials: "include",
+      cache: "no-store",
+      redirect: "follow",
+      signal: AbortSignal.timeout(TAB_FETCH_TIMEOUT_MS),
+    });
+  } catch {
+    throw tabFetchRefusal("TAB_FETCH_FAILED", "Could not fetch the provider image in the provider tab. The signed link may have expired.");
+  }
+  const status = Number(response?.status);
+  if (!Number.isSafeInteger(status) || status < 200 || status >= 300) {
+    await response?.body?.cancel().catch(() => {});
+    throw tabFetchRefusal("TAB_FETCH_FAILED", `The provider image fetch failed (HTTP ${Number.isSafeInteger(status) ? status : "unknown"}).`);
+  }
+  // Header-stage refusals: the body is cancelled, never read.
+  const mime = String(response.headers?.get?.("content-type") || "").split(";")[0].trim().toLowerCase();
+  if (!TAB_FETCH_IMAGE_CONTENT_TYPES.includes(mime)) {
+    await response.body?.cancel().catch(() => {});
+    throw tabFetchRefusal("TAB_FETCH_CONTENT_REJECTED", `The provider URL returned ${mime || "an unknown content type"} instead of an image; nothing was saved.`);
+  }
+  const declaredLength = Number(response.headers?.get?.("content-length"));
+  if (Number.isSafeInteger(declaredLength) && declaredLength > request.maxBytes) {
+    await response.body?.cancel().catch(() => {});
+    throw tabFetchRefusal("TAB_FETCH_SIZE_REJECTED", `The provider image is ${declaredLength} bytes, over the ${request.maxBytes}-byte tab-fetch cap; nothing was saved.`);
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (bytes.length > request.maxBytes) {
+    throw tabFetchRefusal("TAB_FETCH_SIZE_REJECTED", `The provider image is ${bytes.length} bytes, over the ${request.maxBytes}-byte tab-fetch cap; nothing was saved.`);
+  }
+  if (bytes.length < 1) {
+    throw tabFetchRefusal("TAB_FETCH_CONTENT_REJECTED", "The provider URL returned no image bytes; nothing was saved.");
+  }
+  if (request.declaredBytes !== null && bytes.length !== request.declaredBytes) {
+    throw tabFetchRefusal("TAB_FETCH_SIZE_REJECTED", `The provider image size did not match the declared size (${bytes.length} !== ${request.declaredBytes}); nothing was saved.`);
+  }
+  const digest = new Uint8Array(await cryptoApi.subtle.digest("SHA-256", bytes));
+  const sha256 = [...digest].map(value => value.toString(16).padStart(2, "0")).join("");
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return { provider: request.provider, data: btoa(binary), mime, size: bytes.length, totalBytes: bytes.length, sha256 };
+}
+
 export async function readFlowDownloadChunk(input, {
   downloads = chrome.downloads,
   fetchImpl = fetch,
