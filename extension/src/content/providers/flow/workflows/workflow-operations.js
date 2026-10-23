@@ -367,7 +367,7 @@
             agent_scenes: requested.map(index => scenes[index]),
             agent_numbers: requested.map(index => sceneNumbers[index]),
           };
-          const result = await this.runAgentBatchPass(passParams, command, deadline, before);
+          const result = await runAgentBatchPass(passParams, command, deadline, before);
           dispatchEvidence = result;
           latestPreflight = result.preflight;
           if (params.submit_only === true) {
