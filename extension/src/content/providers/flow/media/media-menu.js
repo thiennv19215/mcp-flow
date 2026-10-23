@@ -359,6 +359,196 @@
     throw root.flowError("FLOW_MEDIA_NOT_READY", `Flow has not finished loading media for "${title}" (${lastState}).`, true);
   }
 
+  // DL-08 — direct-bytes fallback route. The Flow menu is the web route's
+  // only download mechanism; when it breaks before any download started
+  // (menu never opens, submenu or quality choice missing), the fallback
+  // fetches verified bytes directly from the tile media element's URL,
+  // canonicalized to full size (Google size suffix stripped) or rewritten
+  // to the requested size, and saves them through a blob anchor under the
+  // planned filename. Only these pre-click menu failures engage it: a
+  // click may already have started a browser download, and re-saving
+  // after that would double-save.
+  const DIRECT_FALLBACK_MENU_CODES = new Set([
+    "FLOW_TILE_MENU_MISSING",
+    "FLOW_DOWNLOAD_SUBMENU_MISSING",
+    "FLOW_DOWNLOAD_QUALITY_MISSING",
+  ]);
+
+  // Magic-byte sniffing decides the real mime (the reference rule: the
+  // bytes, never the header, are authoritative). HTML/JSON/text bodies
+  // are not media and are rejected by the caller with a distinct error.
+  function sniffMediaBytes(bytes) {
+    if (!bytes || bytes.length === 0) return null;
+    const startsWith = (signature, offset = 0) =>
+      bytes.length >= offset + signature.length && signature.every((value, index) => bytes[offset + index] === value);
+    const asciiAt = (text, offset = 0) =>
+      bytes.length >= offset + text.length && [...text].every((char, index) => bytes[offset + index] === char.charCodeAt(0));
+    if (startsWith([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return { mime: "image/png", extension: ".png", kind: "image" };
+    if (startsWith([0xff, 0xd8, 0xff])) return { mime: "image/jpeg", extension: ".jpg", kind: "image" };
+    if (asciiAt("GIF8")) return { mime: "image/gif", extension: ".gif", kind: "image" };
+    if (asciiAt("RIFF") && asciiAt("WEBP", 8)) return { mime: "image/webp", extension: ".webp", kind: "image" };
+    if (asciiAt("ftyp", 4)) return { mime: "video/mp4", extension: ".mp4", kind: "video" };
+    if (startsWith([0x1a, 0x45, 0xdf, 0xa3])) return { mime: "video/webm", extension: ".webm", kind: "video" };
+    let first = 0;
+    while (first < bytes.length && (bytes[first] === 0x20 || bytes[first] === 0x09 || bytes[first] === 0x0d || bytes[first] === 0x0a)) first++;
+    if (bytes[first] === 0x3c) return { html: true }; // '<' — a markup body, never media
+    return null;
+  }
+
+  // Full-size URL canonicalization for the fallback fetch: the Google
+  // media size suffix ("=s512", "=w1280-h720") is a display detail —
+  // stripping it yields the original-resolution bytes; a numeric
+  // requested size ("720", "720p") rewrites it to "=s720". The ASB
+  // poster transform (the other half of reference behavior D9) is
+  // blocked on a server-delivered pattern (DL-B4) and is NOT attempted.
+  // Placeholder and media.html URLs are rejected up front (returns null),
+  // as are non-https URLs, which can never be rewritten safely.
+  function directBytesTargetUrl(rawUrl, quality) {
+    let url;
+    try { url = new URL(String(rawUrl || ""), location.href); } catch (_) { return null; }
+    if (url.protocol !== "https:") return null;
+    const path = url.pathname.toLowerCase();
+    if (path.includes("media.html") || path.endsWith(".html")) return null;
+    if (/(?:placeholder|spinner|loading|skeleton)/i.test(url.pathname)) return null;
+    const sizeMatch = /^(\d{3,4})(?:p)?$/i.exec(String(quality || "").trim());
+    url.pathname = url.pathname.replace(/=[^/]*$/, sizeMatch ? `=s${sizeMatch[1]}` : "");
+    url.hash = "";
+    return url.toString();
+  }
+
+  // The planned filename: an explicit caller-supplied name first, then
+  // the tile's own data-file-name (the name Flow planned for the menu
+  // download — the same source collectAssets reports), then the asset
+  // title. Never a name derived from the media URL. The extension is
+  // always the sniffed one (the queue ticket applies the same rule when
+  // it assigns the final filename).
+  function plannedFallbackFilename({ operationOptions, tile, mediaElement, title, sniffed }) {
+    const explicit = [operationOptions?.filename, operationOptions?.fileName]
+      .find(value => typeof value === "string" && value.trim());
+    const tileName = tile?.getAttribute?.("data-file-name") || tile?.getAttribute?.("data-filename") ||
+      mediaElement?.getAttribute?.("data-file-name") || mediaElement?.getAttribute?.("data-filename") || "";
+    const raw = String(explicit || tileName || title || "flow-media");
+    let base = raw.replace(/[<>:\"/\\|?*\u0000-\u001f]/g, "-").replace(/\s+/g, "-").replace(/-+/g, "-")
+      .replace(/^[-.]+|[-.]+$/g, "").slice(0, 120).replace(/\.[a-z0-9]{1,10}$/i, "");
+    if (!base) base = "flow-media";
+    return `${base}${sniffed.extension}`;
+  }
+
+  // Save verified bytes through a blob anchor — the same trigger the
+  // interceptor itself uses to deliver cleaned bytes. A blob: href is
+  // not a Flow media URL, so the interceptor's anchor claim ignores it:
+  // no double processing, no context consumption.
+  function saveVerifiedBytes(blob, filename) {
+    const objectUrl = URL.createObjectURL(blob);
+    try {
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      (document.body || document.documentElement)?.appendChild?.(anchor);
+      anchor.click();
+      anchor.remove?.();
+    } finally {
+      setTimeout(() => { try { URL.revokeObjectURL(objectUrl); } catch (_) {} }, 10_000);
+    }
+  }
+
+  // The fallback proper. Returns the op result on success, null when the
+  // fallback cannot engage at all (no fetch in this world, or no usable
+  // media URL — the caller then rethrows the original menu failure), and
+  // throws its own distinct errors when the fetched bytes fail
+  // verification.
+  //
+  // Watermark contract: media-menu runs in the ISOLATED world while the
+  // interceptor wraps the MAIN world's fetch, so this fetch can never
+  // pass through cleaning. The fallback therefore posts NO arm (an
+  // unconsumed context would linger and could claim a later page fetch),
+  // and its result reports the saved bytes honestly: when the resolved
+  // mode was "clean", the outcome is status "original" with reason
+  // "direct_bytes_fallback" and cleaned:false — the bytes are the
+  // original bytes, never claimed as cleaned.
+  async function directBytesDownloadFallback({ tile, title, kind, quality, operationOptions, helpers, menuError }) {
+    if (typeof fetch !== "function") return null;
+    const mediaElement = tile?.querySelector?.("img,video") || null;
+    const rawUrl = mediaElement?.currentSrc || mediaElement?.src || mediaElement?.getAttribute?.("src") || "";
+    const targetUrl = directBytesTargetUrl(rawUrl, quality);
+    if (!targetUrl) return null;
+    helpers.checkActive("fetching the Flow media bytes directly");
+    // Resolve (never arm) the job's requested mode for honest reporting.
+    const { watermarkMode } = operationOptions;
+    const arm = await resolveWatermarkArm({ mode: watermarkMode, kind });
+    let response = null;
+    let fetchFailure = null;
+    for (const credentials of ["include", "omit"]) {
+      try {
+        const attempt = await fetch(targetUrl, {
+          credentials,
+          ...(operationOptions.signal ? { signal: operationOptions.signal } : {}),
+        });
+        if (attempt?.ok) { response = attempt; break; }
+        fetchFailure = new Error(`HTTP ${attempt?.status || "unknown"}`);
+      } catch (error) {
+        if (operationOptions.signal?.aborted) helpers.checkActive("fetching the Flow media bytes directly");
+        fetchFailure = error;
+      }
+    }
+    if (!response) {
+      throw root.flowError("FLOW_DOWNLOAD_FALLBACK_FETCH_FAILED",
+        `Flow's download menu failed (${menuError?.code || "unknown"}) and the direct fetch of "${title}" also failed: ${String(fetchFailure?.message || fetchFailure || "no response")}.`,
+        true, false);
+    }
+    const blob = await response.blob();
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const sniffed = sniffMediaBytes(bytes);
+    const contentType = response.headers?.get?.("content-type") || "";
+    if (sniffed?.html || (!sniffed && /text\/html/i.test(contentType))) {
+      throw root.flowError("FLOW_DOWNLOAD_HTML_RESPONSE",
+        `Flow's download menu failed (${menuError?.code || "unknown"}) and the direct route for "${title}" returned an HTML page instead of media; nothing was saved.`,
+        false, false);
+    }
+    if (!sniffed) {
+      throw root.flowError("FLOW_DOWNLOAD_BYTES_INVALID",
+        `Flow's download menu failed (${menuError?.code || "unknown"}) and the direct route for "${title}" returned ${bytes.length} byte(s) that are not recognizable media; nothing was saved.`,
+        false, false);
+    }
+    if (sniffed.kind !== kind) {
+      throw root.flowError("FLOW_DOWNLOAD_BYTES_INVALID",
+        `Flow's download menu failed (${menuError?.code || "unknown"}) and the direct route for "${title}" returned ${sniffed.mime} bytes for a ${kind} download; nothing was saved.`,
+        false, false);
+    }
+    helpers.checkActive("saving the directly fetched Flow media");
+    const filename = plannedFallbackFilename({ operationOptions, tile, mediaElement, title, sniffed });
+    const verifiedBlob = blob.type === sniffed.mime ? blob : new Blob([bytes], { type: sniffed.mime });
+    try {
+      saveVerifiedBytes(verifiedBlob, filename);
+    } catch (error) {
+      throw root.flowError("FLOW_DOWNLOAD_FALLBACK_SAVE_FAILED",
+        `The direct route fetched verified ${sniffed.mime} bytes for "${title}" but could not start the browser download: ${String(error?.message || error)}.`,
+        true, false);
+    }
+    return {
+      title,
+      kind,
+      downloadTriggered: true,
+      trustedGesture: false,
+      route: "direct-bytes",
+      fallback: {
+        menuError: menuError?.code || null,
+        url: targetUrl,
+        mime: sniffed.mime,
+        bytes: bytes.length,
+        filename,
+      },
+      watermark: {
+        mode: arm.mode,
+        armed: false,
+        cleaned: false,
+        status: "original",
+        outcomeReason: "direct_bytes_fallback",
+        reason: arm.reason,
+      },
+    };
+  }
+
   function triggerFlowDownload(title, quality = "original", mediaHandle, operationOptions = {}) {
     return (async () => {
       const deadline = Date.now() + Math.max(5000, Math.min(90_000, Number(operationOptions.timeoutMs) || 45_000));
@@ -420,6 +610,10 @@
         tile.scrollIntoView({ behavior: "instant", block: "center" });
         if (!scene) await waitForFlowTileMedia(tile, title, 20_000, helpers);
       }
+      // DL-08: a pre-click menu failure gets one direct-bytes fallback
+      // attempt (see directBytesDownloadFallback); anything else rethrows.
+      let menuFailure = null;
+      try {
       if (scene) {
         tile.click();
         await wait(1200, "opening the Flow scene");
@@ -481,6 +675,16 @@
             downloadMayHaveStarted = true;
           }
         } else throw root.flowError("FLOW_TILE_MENU_MISSING", `Could not open options for "${title}".`, true);
+      }
+      } catch (error) {
+        menuFailure = error;
+      }
+      if (menuFailure) {
+        if (!scene && !downloadMayHaveStarted && DIRECT_FALLBACK_MENU_CODES.has(menuFailure?.code) && !operationOptions.signal?.aborted) {
+          const fallbackResult = await directBytesDownloadFallback({ tile, title, kind, quality, operationOptions, helpers, menuError: menuFailure });
+          if (fallbackResult) return fallbackResult;
+        }
+        throw menuFailure;
       }
       const watermarkAttribution = await settleWatermarkOutcome(watermarkOutcome, helpers);
       return {
@@ -1144,6 +1348,8 @@
     triggerFlowDownload,
     resolveWatermarkArm,
     watermarkMaskHasAlpha,
+    sniffMediaBytes,
+    directBytesTargetUrl,
     scanNativeAssets,
     scanGalleryTiles,
     scanNativeProjects,
