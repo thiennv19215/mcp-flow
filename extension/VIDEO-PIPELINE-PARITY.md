@@ -101,6 +101,40 @@ The one missing piece was the admission half, now aligned:
   dependency-skipped. The panel handlers now forward job IDs like the
   bridge path does.
 
+## Feature gaps (Flow + extension + queue, audited 2026-10-24)
+
+The sidebar shell mirrors the reference's tabs, but several tabs are
+visual ports without engines behind them. Verified by handler audit of
+`src/ui/sidebar.js`:
+
+**Generation / Flow features**
+- No camera-angles generator (multi-view from one image), no effects
+  presets, no Auto CapCut project builder (hidden shell button), no
+  standalone prompt-assistant. The Tools tab buttons (Angles, watermark,
+  CapCut) have no backing logic in the panel.
+- No per-item settings overrides in panel batches (each prompt in a batch
+  shares one settings snapshot; MCP-planned scenes can vary).
+- Generation history is a local list only — no re-run/regenerate with the
+  original settings from a history entry.
+
+**Extension UI**
+- Workflow tab is `module-pending` (blocked overlay): no visual workflow
+  editor, workflow templates, or sharing. Workflow execution exists only
+  as MCP-planned queue jobs.
+- Templates tab and My Prompts are empty states: no user template
+  library, no prompt snippets insertable into the Gen form.
+- Photos tab albums are an empty state: no album organization of results.
+
+**Queue / job submission**
+- No saved batch drafts: the reference persists named batches per project
+  that can be created now, run later, re-run, and resumed per item
+  (GenBatchQueueStore + scheduler run-all/run-one). Here the queue itself
+  is the only persistence; batches are one-shot groups of jobs.
+- No saved multi-task lists (named prompt sets with run-all) in the
+  panel; the Tasks tab is the live queue view.
+- No remote submission channel (the reference accepts jobs via
+  Telegram/SSE remote control); submission here is panel + local MCP.
+
 ## Deliberately not ported
 
 - The reference's **Flow API V2 driver** and its model/selector configs are
