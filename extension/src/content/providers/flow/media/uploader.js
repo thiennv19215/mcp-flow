@@ -541,6 +541,101 @@
     }
   }
 
+  // IMG-03: rich upload receipts + the background media catalog. At
+  // confirmation time the observer's media-identity metadata can already
+  // map the tile's persistent id (often an `asb:` form) to the canonical
+  // media UUID; resolving it here — instead of at attach time — means the
+  // receipt carries the durable identity bundle (mediaUuid, projectId,
+  // thumbnailUrl) and the asset is registered in the per-project catalog
+  // that later identity resolutions consult before any DOM scan. Every
+  // step degrades silently: no metadata, no background, or a rejected
+  // message leaves the receipt exactly as it was before this item.
+  const FLOW_MEDIA_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  function flowUploadProjectId() {
+    try {
+      return root.location?.pathname?.match(/\/project\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/|$)/i)?.[1]?.toLowerCase() || null;
+    } catch { return null; }
+  }
+
+  async function flowMediaCatalogLookup(query) {
+    try {
+      const sendMessage = root.chrome?.runtime?.sendMessage;
+      if (typeof sendMessage !== "function") return null;
+      const response = await sendMessage.call(root.chrome.runtime, { type: "flow-media-catalog:lookup", query });
+      return response?.ok ? response.entry || null : null;
+    } catch { return null; }
+  }
+
+  function flowMediaCatalogRecord(entry) {
+    try {
+      const sendMessage = root.chrome?.runtime?.sendMessage;
+      if (typeof sendMessage !== "function") return;
+      // Fire-and-forget: registration must never fail or delay an upload.
+      Promise.resolve(sendMessage.call(root.chrome.runtime, { type: "flow-media-catalog:record", entry })).catch(() => {});
+    } catch {}
+  }
+
+  function flowUploadTileThumbnailUrl(tile) {
+    if (!tile) return null;
+    try {
+      const images = typeof tile.querySelectorAll === "function"
+        ? [...tile.querySelectorAll("img")]
+        : [tile.querySelector?.("img")].filter(Boolean);
+      for (const image of images) {
+        const src = image?.currentSrc || (typeof image?.getAttribute === "function" ? image.getAttribute("src") : null) || image?.src || "";
+        if (!src) continue;
+        try {
+          const parsed = new URL(String(src), root.location?.href || "https://flow.google.com/");
+          if (parsed.protocol === "https:") return parsed.href;
+        } catch {}
+      }
+    } catch {}
+    return null;
+  }
+
+  async function enrichFlowUploadReceipt(receipt, kind) {
+    if (!receipt || typeof receipt !== "object") return receipt;
+    const enriched = { ...receipt };
+    const projectId = flowUploadProjectId();
+    if (projectId && !enriched.projectId) enriched.projectId = projectId;
+    let uuid = null;
+    if (typeof enriched.mediaUuid === "string" && FLOW_MEDIA_UUID_PATTERN.test(enriched.mediaUuid)) {
+      uuid = enriched.mediaUuid.toLowerCase();
+    } else if (typeof enriched.id === "string" && FLOW_MEDIA_UUID_PATTERN.test(enriched.id)) {
+      uuid = enriched.id.toLowerCase();
+    }
+    if (!uuid && typeof enriched.id === "string" && enriched.id.startsWith("asb:")) {
+      // A previous upload of this same asset may already have registered
+      // its canonical UUID; the catalog answers without any page work.
+      if (projectId) {
+        const known = await flowMediaCatalogLookup({ projectId, mediaId: enriched.id });
+        if (known?.uuid && FLOW_MEDIA_UUID_PATTERN.test(String(known.uuid))) uuid = String(known.uuid).toLowerCase();
+      }
+      // Otherwise ask the correlation observer's identity channel — the
+      // same bounded probe reference resolution uses at attach time.
+      if (!uuid && typeof root.resolveNativeMediaUuid === "function") {
+        try { uuid = await root.resolveNativeMediaUuid(enriched.id, kind); } catch {}
+        if (uuid && !FLOW_MEDIA_UUID_PATTERN.test(String(uuid))) uuid = null;
+        if (uuid) uuid = String(uuid).toLowerCase();
+      }
+    }
+    if (uuid) enriched.mediaUuid = uuid;
+    if (projectId && (enriched.id || uuid)) {
+      flowMediaCatalogRecord({
+        projectId,
+        mediaId: typeof enriched.id === "string" ? enriched.id : null,
+        uuid,
+        uploadName: typeof enriched.uploadName === "string" ? enriched.uploadName : null,
+        originalName: typeof enriched.originalName === "string" ? enriched.originalName : null,
+        name: typeof enriched.name === "string" ? enriched.name : null,
+        thumbnailUrl: typeof enriched.thumbnailUrl === "string" ? enriched.thumbnailUrl : null,
+        kind: enriched.kind || kind || null,
+      });
+    }
+    return enriched;
+  }
+
   async function waitForNativeMediaTile(assetName, command, kind, options = {}) {
     const fn = root.flowError || ((c, m, r, o) => Object.assign(new Error(m), { code: c, retryable: r, outcome_unknown: o }));
     const deadline = Math.min(options.deadline || Infinity, Date.now() + (kind === "video" ? 60_000 : 90_000));
@@ -610,7 +705,9 @@
         if (requireNewOwner && hasPersistentIdentity && !isNewOwner) {
           // Pre-existing tile
         } else if (ready && kindMatches && identityMatchesOwner && hasPersistentIdentity && flowUploadTileNames(tile).some(name => flowUploadNameMatches(name, assetName))) {
-          return { name: flowUploadTileNames(tile).find(name => flowUploadNameMatches(name, assetName)) || assetName, id: identity, kind };
+          const thumbnailUrl = flowUploadTileThumbnailUrl(tile);
+          return { name: flowUploadTileNames(tile).find(name => flowUploadNameMatches(name, assetName)) || assetName, id: identity, kind,
+            ...(thumbnailUrl ? { thumbnailUrl } : {}) };
         }
       }
       if (!tabActivationAttempted && document.visibilityState === "hidden" && Date.now() - startedAt > 5000) {
@@ -659,7 +756,10 @@
               const kindMatches = flowUploadKindMatches(kind, asset.kind);
               const kindUnknown = !asset.kind;
               if (!kindMatches && !kindUnknown) throw fn("FLOW_UPLOAD_KIND_MISMATCH", `Flow's new media ID for "${assetName}" hydrated as ${asset.kind}, not ${kind}. Inspect it before retrying.`, false, true);
-              if (kindMatches && asset.ready === true && asset.busy === false) return { name: asset.name, id: asset.id, kind };
+              if (kindMatches && asset.ready === true && asset.busy === false) {
+                const thumbnailUrl = asset.thumbnailUrl || asset.thumbnail || null;
+                return { name: asset.name, id: asset.id, kind, ...(thumbnailUrl ? { thumbnailUrl } : {}) };
+              }
             }
           }
         } catch (error) {
@@ -693,7 +793,15 @@
     throw timeoutErr;
   }
 
+  // IMG-03: every successful upload receipt passes through enrichment —
+  // canonical media UUID, project id, catalog registration — regardless of
+  // which path (fresh dispatch, reconciliation, reuse) produced it.
   async function uploadStagedMedia(file, kind, command, options = {}) {
+    const receipt = await uploadStagedMediaInternal(file, kind, command, options);
+    return enrichFlowUploadReceipt(receipt, kind);
+  }
+
+  async function uploadStagedMediaInternal(file, kind, command, options = {}) {
     const fn = root.flowError || ((c, m, r, o) => Object.assign(new Error(m), { code: c, retryable: r, outcome_unknown: o }));
     const deadline = options.deadline || root.FlowUiDeadline?.makeDeadline(command, 75_000, 15_000) || Date.now() + 60_000;
     const checkTime = (operation, outcomeUnknown = false) => root.FlowUiDeadline?.requireTime(deadline, operation, outcomeUnknown, options.signal);
@@ -804,7 +912,9 @@
       const chosen = reusableTiles.find(item => item.actualKind && item.ready) || reusableTiles[0];
       if (chosen.actualKind && chosen.ready) {
         root.emitFlowProgress?.(command, `Reusing existing Flow ${kind} media ID ${chosen.id} for "${file.name}"; skipped upload.`);
-        return { uploaded: true, name: file.name, kind, id: chosen.id, ...identityFields, reused: true };
+        const thumbnailUrl = flowUploadTileThumbnailUrl(chosen.tile);
+        return { uploaded: true, name: file.name, kind, id: chosen.id, ...identityFields, reused: true,
+          ...(thumbnailUrl ? { thumbnailUrl } : {}) };
       }
       const confirmed = await waitForNativeMediaTile(matchName, command, kind, { deadline, signal: options.signal, expectedId: chosen.id });
       root.emitFlowProgress?.(command, `Reusing existing Flow ${kind} media ID ${confirmed.id} for "${file.name}" after readiness confirmation; skipped upload.`);

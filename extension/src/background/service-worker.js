@@ -5,6 +5,7 @@ import { decideDevExtensionReload } from "./dev-extension-reload.js";
 import { flowDocumentMatchesLocale, flowHomeUrl, flowLocaleFromUrl, flowProjectUrl, normalizeFlowLocale } from "./flow-locale.js";
 import { FlowJobQueue } from "./flow-job-queue.js";
 import { FlowBatchDrafts, materializeDraftJobs } from "./flow-batch-drafts.js";
+import { FlowMediaCatalog } from "./flow-media-catalog.js";
 import { FlowBridgeClient, readBridgeConfig, postHttpMessage } from "./flow-bridge-client.js";
 import { planFlowAgentBatch, planFlowBatch, planFlowContinue, planFlowEdit } from "./flow-workflows.js";
 import {
@@ -1229,6 +1230,7 @@ const flowJobQueue = new FlowJobQueue(runExtensionFlowJob, {
   },
 });
 const flowBatchDrafts = new FlowBatchDrafts();
+const flowMediaCatalog = new FlowMediaCatalog();
 flowJobQueue.subscribe((snapshot, reason) => {
   broadcastFlowQueue(snapshot, reason);
   // Failures during queue preflight happen before the download runner can mark
@@ -1500,6 +1502,34 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
     })().then(respond).catch(error => respond({
       ok: false,
       error: { code: error?.code || "FLOW_BATCH_FAILED", message: String(error?.message || error) },
+    }));
+    return true;
+  }
+  if (typeof message?.type === "string" && message.type.startsWith("flow-media-catalog:")) {
+    // The catalog is written and read by the Flow tab's content scripts
+    // (upload receipts register identities; reference resolution looks them
+    // up) and by extension UI pages. Foreign extensions are rejected, and
+    // a tab sender must be a Flow tab — the same discipline the
+    // flow-queue/flow-batch handlers apply to their senders.
+    if (_sender?.id !== chrome.runtime.id || (_sender?.tab && !flowUrl(_sender.tab.url))) {
+      respond({ ok: false, error: { code: "FLOW_MEDIA_CATALOG_FORBIDDEN", message: "The media catalog is available only to this extension's Flow tabs and UI pages." } });
+      return;
+    }
+    void (async () => {
+      await flowMediaCatalog.ready;
+      switch (message.type) {
+        case "flow-media-catalog:record":
+          return { ok: true, entry: await flowMediaCatalog.record(message.entry || {}) };
+        case "flow-media-catalog:lookup":
+          return { ok: true, entry: await flowMediaCatalog.lookup(message.query || {}) };
+        case "flow-media-catalog:list":
+          return { ok: true, entries: await flowMediaCatalog.list(message.projectId) };
+        default:
+          throw Object.assign(new Error(`Unsupported media catalog action: ${message.type}`), { code: "FLOW_MEDIA_CATALOG_ACTION_UNSUPPORTED" });
+      }
+    })().then(respond).catch(error => respond({
+      ok: false,
+      error: { code: error?.code || "FLOW_MEDIA_CATALOG_FAILED", message: String(error?.message || error) },
     }));
     return true;
   }

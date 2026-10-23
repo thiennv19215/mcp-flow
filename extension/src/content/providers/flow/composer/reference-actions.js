@@ -33,6 +33,22 @@
     const callerBudget = Number.isFinite(callerTimeout) && callerTimeout > 0 ? Math.max(250, callerTimeout - reserveMs) : fallbackMs;
     return Date.now() + Math.min(fallbackMs, callerBudget);
   };
+  // IMG-03: the background media catalog resolves identities that uploads
+  // registered at upload time. It is consulted BEFORE the observer-event
+  // wait (and long before any DOM grid scan): a hit answers from storage
+  // even after the asset's tile has been detached from the page. Every
+  // failure mode — no background, no entry, a rejected message — degrades
+  // to null so the caller falls back to the existing resolution paths.
+  async function lookupFlowMediaCatalog(query) {
+    try {
+      const sendMessage = root.chrome?.runtime?.sendMessage;
+      if (typeof sendMessage !== "function") return null;
+      const response = await sendMessage.call(root.chrome.runtime, { type: "flow-media-catalog:lookup", query });
+      return response?.ok ? response.entry || null : null;
+    } catch {
+      return null;
+    }
+  }
   async function resolveNativeMediaUuid(id, expectedType = "image") {
     const value = String(id || "");
     const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -41,6 +57,10 @@
     if (!asb || !["image", "video"].includes(expectedType)) return undefined;
     const projectId = location.pathname.match(/\/project\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/|$)/i)?.[1]?.toLowerCase();
     if (!projectId) return undefined;
+    const catalogEntry = await lookupFlowMediaCatalog({ projectId, mediaId: value });
+    if (catalogEntry?.uuid && uuidPattern.test(String(catalogEntry.uuid))) {
+      return String(catalogEntry.uuid).toLowerCase();
+    }
     const identitiesEvent = "TOBY_FLOW_MEDIA_IDENTITIES";
     const identitiesV2Event = "TOBY_FLOW_V2_MEDIA_IDENTITIES";
     const readEvent = "TOBY_FLOW_MEDIA_IDENTITIES_READ";

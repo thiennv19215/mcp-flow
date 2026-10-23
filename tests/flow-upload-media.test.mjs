@@ -161,8 +161,10 @@ test('reusing an exact-name tile rejects a ready tile of the wrong media kind', 
 test('reusing an exact-name image tile of the requested kind remains successful', async () => {
   const { components, mediaId } = uploadHarness({ tileKind: 'image' });
   const result = await components.uploadStagedFlowMedia({ name: 'same-name.png' }, 'image', {});
+  // IMG-03: the receipt surfaces the canonical media UUID (here the tile id
+  // already is one) as mediaUuid alongside the unchanged legacy fields.
   assert.deepEqual(JSON.parse(JSON.stringify(result)), {
-    uploaded: true, name: 'same-name.png', kind: 'image', id: mediaId, reused: true,
+    uploaded: true, name: 'same-name.png', kind: 'image', id: mediaId, reused: true, mediaUuid: mediaId,
   });
 });
 
