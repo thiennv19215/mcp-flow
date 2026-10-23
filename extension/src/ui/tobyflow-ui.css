@@ -492,6 +492,12 @@ textarea:disabled {
 .flow-photo-preview-video[hidden] { display: none; }
 .flow-photo-preview p { margin: 8px 0 0; color: var(--text-muted); text-align: center; font-size: 12px; overflow-wrap: anywhere; }
 
+.prompts-subtab-pane:not(.active),
+.photos-subtab-pane:not(.active),
+.subtab-pane:not(.active) {
+  display: none !important;
+}
+
 @media (max-width: 480px) {
   .flow-mcp-options { padding: 20px 12px; }
   .flow-mcp-sidebar .tabs-content { padding-right: 10px; padding-left: 10px; }

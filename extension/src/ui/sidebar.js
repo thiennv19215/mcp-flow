@@ -287,31 +287,39 @@
     const locale = typeof I18n !== "undefined" ? I18n.getLocale() : "vi";
     for (const type of ["image", "video"]) {
       const select = document.querySelector(type === "image" ? "#selectModelImage" : "#selectModelVideo");
+      const tobySelect = document.querySelector(type === "image" ? "#imageModel" : "#videoModel");
       const models = registry.uiModels?.[type];
-      if (!select || !Array.isArray(models) || !models.length) continue;
-      const previous = select.value;
-      select.replaceChildren();
+      if (!Array.isArray(models) || !models.length) continue;
+      const previous = select?.value || tobySelect?.value || "";
+      if (select) select.replaceChildren();
+      if (tobySelect) tobySelect.replaceChildren();
       for (const model of models) {
         if (!model?.value) continue;
-        const option = document.createElement("option");
-        option.value = String(model.value);
-        option.textContent = String(model.labels?.[locale] || model.label || model.value);
-        select.appendChild(option);
+        const opt = document.createElement("option");
+        opt.value = String(model.value);
+        opt.textContent = String(model.labels?.[locale] || model.label || model.value);
+        if (select) select.appendChild(opt);
+        if (tobySelect) tobySelect.appendChild(opt.cloneNode(true));
       }
-      select.value = models.some(model => String(model.value) === previous)
+      const chosen = models.some(model => String(model.value) === previous)
         ? previous : String(models[0]?.value || "");
+      if (select) select.value = chosen;
+      if (tobySelect) tobySelect.value = chosen;
     }
 
     const imageModel = document.querySelector("#selectModelImage")?.value;
     const imageRule = getFlowModelRule("image", imageModel);
     if (imageRule?.aspectRatios?.length) {
       replaceSelectOptions(document.querySelector("#selectRatioImage"), imageRule.aspectRatios, value => value, "9:16");
+      replaceSelectOptions(document.querySelector("#aspectRatio"), imageRule.aspectRatios, value => value, "9:16");
     }
 
     const videoModelSelect = document.querySelector("#selectModelVideo");
     const videoModel = videoModelSelect?.value;
     const durationSelect = document.querySelector("#selectDurationVideo");
+    const tobyDurationSelect = document.querySelector("#flowVideoDuration");
     const resolutionSelect = document.querySelector("#selectResolutionVideo");
+    const tobyResolutionSelect = document.querySelector("#flowVideoResolution");
     const ratioSelect = document.querySelector("#selectRatioVideo");
     const quantitySelect = document.querySelector("#selectCountVideo");
     const chainEnabled = document.querySelector("#chainVideoFromPrevious")?.checked === true;
@@ -340,7 +348,9 @@
       ? `${t("sidebar.videoDurationFixed", { seconds: fixedDuration })}:`
       : `${t("sidebar.videoDuration")}:`;
     replaceSelectOptions(durationSelect, durations, value => `${value} ${locale === "en" ? "seconds" : "giây"}`, rememberedSelection.duration ?? durationDefault, videoModelChanged);
+    replaceSelectOptions(tobyDurationSelect, durations, value => `${value}s`, rememberedSelection.duration ?? durationDefault, videoModelChanged);
     if (durationSelect) durationSelect.disabled = fixedDuration !== null;
+    if (tobyDurationSelect) tobyDurationSelect.disabled = fixedDuration !== null;
 
     const resolutionGroup = document.querySelector("#videoResolutionGroup");
     const resolutions = Array.isArray(videoRule.resolutions) ? videoRule.resolutions : [];
@@ -349,7 +359,9 @@
       resolutionGroup.querySelector("#lblResolutionVideo").textContent = `${t("sidebar.videoResolution")}:`;
     }
     replaceSelectOptions(resolutionSelect, resolutions, value => String(value), rememberedSelection.resolution ?? videoRule.defaultResolution, videoModelChanged);
+    replaceSelectOptions(tobyResolutionSelect, resolutions, value => String(value), rememberedSelection.resolution ?? videoRule.defaultResolution, videoModelChanged);
     if (resolutionSelect) resolutionSelect.disabled = resolutions.length === 0;
+    if (tobyResolutionSelect) tobyResolutionSelect.disabled = resolutions.length === 0;
 
     const quantityGroup = document.querySelector("#videoCountGroup");
     const quantities = getValidVideoQuantities(videoRule);
@@ -359,6 +371,7 @@
 
     if (videoRule.aspectRatios?.length) {
       replaceSelectOptions(ratioSelect, videoRule.aspectRatios, value => value, rememberedSelection.aspectRatio ?? "9:16", videoModelChanged);
+      replaceSelectOptions(document.querySelector("#aspectRatio"), videoRule.aspectRatios, value => value, rememberedSelection.aspectRatio ?? "9:16", videoModelChanged);
     }
     const framesOption = document.querySelector('#selectModeVideo option[value="frames"]');
     if (framesOption) {
@@ -394,23 +407,33 @@
     return flowModelCapabilitiesPromise;
   }
 
+  function setText(selector, text) {
+    const el = document.querySelector(selector);
+    if (el) el.textContent = text;
+  }
+
+  function setPlaceholder(selector, text) {
+    const el = document.querySelector(selector);
+    if (el) el.placeholder = text;
+  }
+
   function applyLanguage() {
     const cur = typeof I18n !== "undefined" ? I18n.getLocale() : "vi";
     document.documentElement.lang = cur;
     if (typeof I18n !== "undefined") I18n.applyTranslations(document);
     flowQueuePanel?.setLocale?.(cur);
-    document.querySelector("#langSwitchLabel").textContent = cur.toUpperCase();
+    setText("#langSwitchLabel", cur.toUpperCase());
 
     // Tabs
-    document.querySelector("#tabCreateLabel").textContent = t("sidebar.tabGen");
-    document.querySelector("#tabWorkflowLabel").textContent = t("sidebar.tabWorkflow");
-    document.querySelector("#tabPromptsLabel").textContent = t("sidebar.tabPrompts");
-    document.querySelector("#tabLibraryLabel").textContent = t("sidebar.tabLibrary");
-    document.querySelector("#tabTasksLabel").textContent = t("sidebar.tabTasks");
-    document.querySelector("#tabHistoryLabel").textContent = t("sidebar.tabHistory");
-    document.querySelector("#tabStatusLabel").textContent = t("sidebar.tabStatus");
-    document.querySelector("#tabLogsLabel").textContent = t("sidebar.tabLogs");
-    document.querySelector("#tabSettingsLabel").textContent = t("sidebar.tabSettings");
+    setText("#tabCreateLabel", t("sidebar.tabGen"));
+    setText("#tabWorkflowLabel", t("sidebar.tabWorkflow"));
+    setText("#tabPromptsLabel", t("sidebar.tabPrompts"));
+    setText("#tabLibraryLabel", t("sidebar.tabLibrary"));
+    setText("#tabTasksLabel", t("sidebar.tabTasks"));
+    setText("#tabHistoryLabel", t("sidebar.tabHistory"));
+    setText("#tabStatusLabel", t("sidebar.tabStatus"));
+    setText("#tabLogsLabel", t("sidebar.tabLogs"));
+    setText("#tabSettingsLabel", t("sidebar.tabSettings"));
     for (const [id, key] of [
       ["viewCreateTitle", "viewCreateTitle"], ["viewCreateSubtitle", "viewCreateSubtitle"],
       ["viewWorkflowTitle", "viewWorkflowTitle"], ["viewWorkflowSubtitle", "viewWorkflowSubtitle"],
@@ -421,99 +444,98 @@
       ["viewStatusTitle", "viewStatusTitle"], ["viewStatusSubtitle", "viewStatusSubtitle"],
       ["viewLogsTitle", "viewLogsTitle"], ["viewLogsSubtitle", "viewLogsSubtitle"],
       ["viewSettingsTitle", "viewSettingsTitle"], ["viewSettingsSubtitle", "viewSettingsSubtitle"],
-    ]) document.querySelector(`#${id}`).textContent = t(`sidebar.${key}`);
+    ]) setText(`#${id}`, t(`sidebar.${key}`));
 
     // Mode Segments
-    document.querySelector("#txtModeImage").textContent = t("sidebar.typeImage");
-    document.querySelector("#txtModeVideo").textContent = t("sidebar.typeVideo");
-    document.querySelector("#txtModeCharacter").textContent = t("sidebar.typeCharacter");
+    setText("#txtModeImage", t("sidebar.typeImage"));
+    setText("#txtModeVideo", t("sidebar.typeVideo"));
+    setText("#txtModeCharacter", t("sidebar.typeCharacter"));
 
-    document.querySelector("#lblWorkflowType").textContent = t("sidebar.workflowType");
-    document.querySelector("#optWorkflowAgent").textContent = t("sidebar.workflowAgent");
-    document.querySelector("#optWorkflowEdit").textContent = t("sidebar.workflowEdit");
-    document.querySelector("#optWorkflowContinue").textContent = t("sidebar.workflowContinue");
-    document.querySelector("#lblWorkflowScenes").textContent = t("sidebar.workflowScenes");
-    document.querySelector("#workflowScenes").placeholder = t("sidebar.workflowScenesPlaceholder");
-    document.querySelector("#lblWorkflowAsset").textContent = t("sidebar.workflowAsset");
-    document.querySelector("#workflowAsset").placeholder = t("sidebar.workflowAssetPlaceholder");
-    document.querySelector("#lblWorkflowAspect").textContent = t("sidebar.workflowAspect");
-    document.querySelector("#lblWorkflowExtra").textContent = t("sidebar.workflowExtra");
-    document.querySelector("#workflowPromptExtra").placeholder = t("sidebar.workflowOptional");
-    document.querySelector("#txtRunWorkflow").textContent = t("sidebar.workflowRun");
-    document.querySelector("#workflowScopeNote").textContent = cur === "vi"
+    setText("#lblWorkflowType", t("sidebar.workflowType"));
+    setText("#optWorkflowAgent", t("sidebar.workflowAgent"));
+    setText("#optWorkflowEdit", t("sidebar.workflowEdit"));
+    setText("#optWorkflowContinue", t("sidebar.workflowContinue"));
+    setText("#lblWorkflowScenes", t("sidebar.workflowScenes"));
+    setPlaceholder("#workflowScenes", t("sidebar.workflowScenesPlaceholder"));
+    setText("#lblWorkflowAsset", t("sidebar.workflowAsset"));
+    setPlaceholder("#workflowAsset", t("sidebar.workflowAssetPlaceholder"));
+    setText("#lblWorkflowAspect", t("sidebar.workflowAspect"));
+    setText("#lblWorkflowExtra", t("sidebar.workflowExtra"));
+    setPlaceholder("#workflowPromptExtra", t("sidebar.workflowOptional"));
+    setText("#txtRunWorkflow", t("sidebar.workflowRun"));
+    setText("#workflowScopeNote", cur === "vi"
       ? "Extension chỉ gửi lệnh vào hàng đợi; thao tác DOM diễn ra trong tab Flow."
-      : "The extension only queues the request; DOM actions run inside the Flow tab.";
-    document.querySelector("#lblPromptName").textContent = t("sidebar.promptName");
-    document.querySelector("#lblPromptDraft").textContent = t("sidebar.promptLabel");
-    document.querySelector("#promptDraft").placeholder = t("sidebar.promptPlaceholder");
-    document.querySelector("#promptName").placeholder = t("sidebar.promptNamePlaceholder");
-    document.querySelector("#txtSavePrompt").textContent = t("sidebar.promptSave");
-    document.querySelector("#btnRefreshHistory").textContent = t("sidebar.historyRefresh");
-    document.querySelector("#btnClearHistory").textContent = t("sidebar.historyClear");
-    document.querySelector("#savedPromptsEmpty").textContent = t("sidebar.promptEmpty");
-    document.querySelector("#flowHistoryEmpty").textContent = t("sidebar.historyEmpty");
-    document.querySelector("#flowHistoryActivity").textContent = t("sidebar.historyActivity");
+      : "The extension only queues the request; DOM actions run inside the Flow tab.");
+    setText("#lblPromptName", t("sidebar.promptName"));
+    setText("#lblPromptDraft", t("sidebar.promptLabel"));
+    setPlaceholder("#promptDraft", t("sidebar.promptPlaceholder"));
+    setPlaceholder("#promptName", t("sidebar.promptNamePlaceholder"));
+    setText("#txtSavePrompt", t("sidebar.promptSave"));
+    setText("#btnRefreshHistory", t("sidebar.historyRefresh"));
+    setText("#btnClearHistory", t("sidebar.historyClear"));
+    setText("#savedPromptsEmpty", t("sidebar.promptEmpty"));
+    setText("#flowHistoryEmpty", t("sidebar.historyEmpty"));
+    setText("#flowHistoryActivity", t("sidebar.historyActivity"));
 
     // Form Image
-    document.querySelector("#lblPromptImage").textContent = t("sidebar.promptLabel") + ":";
-    document.querySelector("#inputPromptImage").placeholder = t("sidebar.promptPlaceholder");
-    document.querySelector("#lblRatioImage").textContent = t("sidebar.aspectRatio") + ":";
-    document.querySelector("#lblModelImage").textContent = t("sidebar.imageModel") + ":";
-    document.querySelector("#lblQtyImage").textContent = t("sidebar.quantity") + ":";
-    document.querySelector("#lblCharImage").textContent = t("sidebar.characterSelect") + ":";
-    document.querySelector("#btnImportPromptsImage").textContent = t("sidebar.multiPromptImport");
-    document.querySelector("#promptBatchHintImage").textContent = t("sidebar.multiPromptHint");
-    document.querySelector("#txtBtnSubmitImage").textContent = t("sidebar.btnGenerateImage");
+    setText("#lblPromptImage", t("sidebar.promptLabel") + ":");
+    setPlaceholder("#inputPromptImage", t("sidebar.promptPlaceholder"));
+    setText("#lblRatioImage", t("sidebar.aspectRatio") + ":");
+    setText("#lblModelImage", t("sidebar.imageModel") + ":");
+    setText("#lblQtyImage", t("sidebar.quantity") + ":");
+    setText("#lblCharImage", t("sidebar.characterSelect") + ":");
+    setText("#btnImportPromptsImage", t("sidebar.multiPromptImport"));
+    setText("#promptBatchHintImage", t("sidebar.multiPromptHint"));
+    setText("#txtBtnSubmitImage", t("sidebar.btnGenerateImage"));
 
     // Form Video
-    document.querySelector("#lblPromptVideo").textContent = t("sidebar.promptLabel") + ":";
-    document.querySelector("#inputPromptVideo").placeholder = t("sidebar.promptPlaceholderVideo");
-    document.querySelector("#btnImportPromptsVideo").textContent = t("sidebar.multiPromptImport");
-    document.querySelector("#promptBatchHintVideo").textContent = t("sidebar.multiPromptHint");
-    document.querySelector("#lblRatioVideo").textContent = t("sidebar.aspectRatio") + ":";
-    document.querySelector("#lblDurationVideo").textContent = t("sidebar.videoDuration") + ":";
-    document.querySelector("#lblModelVideo").textContent = t("sidebar.videoModel") + ":";
-    document.querySelector("#lblQtyVideo").textContent = t("sidebar.quantity") + ":";
-    document.querySelector("#lblResolutionVideo").textContent = t("sidebar.videoResolution") + ":";
-    document.querySelector("#lblModeVideo").textContent = t("sidebar.videoMode") + ":";
-    document.querySelector("#lblCharVideo").textContent = t("sidebar.characterSelect") + ":";
-    document.querySelector("#videoFrameNamesHint").textContent = t("sidebar.videoFrameNamesHint");
+    setText("#lblPromptVideo", t("sidebar.promptLabel") + ":");
+    setPlaceholder("#inputPromptVideo", t("sidebar.promptPlaceholderVideo"));
+    setText("#btnImportPromptsVideo", t("sidebar.multiPromptImport"));
+    setText("#promptBatchHintVideo", t("sidebar.multiPromptHint"));
+    setText("#lblRatioVideo", t("sidebar.aspectRatio") + ":");
+    setText("#lblDurationVideo", t("sidebar.videoDuration") + ":");
+    setText("#lblModelVideo", t("sidebar.videoModel") + ":");
+    setText("#lblQtyVideo", t("sidebar.quantity") + ":");
+    setText("#lblResolutionVideo", t("sidebar.videoResolution") + ":");
+    setText("#lblModeVideo", t("sidebar.videoMode") + ":");
+    setText("#lblCharVideo", t("sidebar.characterSelect") + ":");
+    setText("#videoFrameNamesHint", t("sidebar.videoFrameNamesHint"));
     updateVideoChainUI();
     renderVideoFrameSources();
     renderVideoFrameAssignments();
     updateVideoFrameInputs();
     applyFlowModelControls();
-    document.querySelector("#txtBtnSubmitVideo").textContent = t("sidebar.btnGenerateVideo");
+    setText("#txtBtnSubmitVideo", t("sidebar.btnGenerateVideo"));
     updatePromptFormFeedback("image");
     updatePromptFormFeedback("video");
 
     // Form Character
-    document.querySelector("#lblCharName").textContent = t("sidebar.charNameLabel") + ":";
-    document.querySelector("#inputCharName").placeholder = t("sidebar.charNamePlaceholder");
-    document.querySelector("#lblCharDesc").textContent = t("sidebar.charDescLabel") + ":";
-    document.querySelector("#inputCharDesc").placeholder = t("sidebar.charDescPlaceholder");
-    document.querySelector("#txtBtnSubmitChar").textContent = t("sidebar.btnCreateCharacter");
+    setText("#lblCharName", t("sidebar.charNameLabel") + ":");
+    setPlaceholder("#inputCharName", t("sidebar.charNamePlaceholder"));
+    setText("#lblCharDesc", t("sidebar.charDescLabel") + ":");
+    setPlaceholder("#inputCharDesc", t("sidebar.charDescPlaceholder"));
+    setText("#txtBtnSubmitChar", t("sidebar.btnCreateCharacter"));
 
     // Status pane
-    document.querySelector("#lblFlowTabs").textContent = t("popup.flowTabs");
-    document.querySelector("#lblSelectedTab").textContent = t("popup.selectedTab");
-    document.querySelector("#lblQuickActions").textContent = t("sidebar.quickActions");
-    document.querySelector("#txtBtnReconnect").textContent = t("sidebar.btnReconnect");
-    document.querySelector("#txtBtnPreview").textContent = t("sidebar.btnPreview");
-    document.querySelector("#txtBtnOpenFlow").textContent = t("sidebar.btnOpenFlow");
+    setText("#lblFlowTabs", t("popup.flowTabs"));
+    setText("#lblSelectedTab", t("popup.selectedTab"));
+    setText("#lblQuickActions", t("sidebar.quickActions"));
+    setText("#txtBtnReconnect", t("sidebar.btnReconnect"));
+    setText("#txtBtnPreview", t("sidebar.btnPreview"));
+    setText("#txtBtnOpenFlow", t("sidebar.btnOpenFlow"));
 
     // Logs pane
-    document.querySelector("#lblLogsTitle").textContent = t("sidebar.tabLogs");
-    document.querySelector("#btnClearLogs").textContent = t("sidebar.clearLogs");
+    setText("#lblLogsTitle", t("sidebar.tabLogs"));
+    setText("#btnClearLogs", t("sidebar.clearLogs"));
     const emptyEl = document.querySelector("#logsEmpty");
     if (emptyEl) emptyEl.textContent = t("sidebar.logsEmpty");
 
     // Settings pane
-    const saveSettingsLabel = document.querySelector("#txtSaveSettings");
-    if (saveSettingsLabel) saveSettingsLabel.textContent = t("sidebar.saveSettings");
+    setText("#txtSaveSettings", t("sidebar.saveSettings"));
 
     if (cachedStatus) renderStatus(cachedStatus);
-    else document.querySelector("#wsText").textContent = t("popup.checking");
+    else setText("#wsText", t("popup.checking"));
     renderSavedPrompts();
     renderHistory();
   }
@@ -671,10 +693,95 @@
     } catch (_) {}
   }
 
+  function findCharacterMentionInPrompt(promptText, characters) {
+    if (!promptText || !Array.isArray(characters) || !characters.length) return null;
+    const pattern = /@(?:\[([^\]]+)\]|([\p{L}\p{N}_]+))/gu;
+    const normalize = val => String(val || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[đĐ]/g, "d").trim().toLowerCase();
+
+    const charMap = new Map();
+    for (const c of characters) {
+      const name = typeof c === "string" ? c : c?.name;
+      if (!name) continue;
+      const key = normalize(name);
+      charMap.set(key, c);
+      charMap.set(key.replace(/_/g, " "), c);
+      charMap.set(key.replace(/\s+/g, "_"), c);
+    }
+
+    let match;
+    while ((match = pattern.exec(promptText)) !== null) {
+      if (promptText[pattern.lastIndex] === ":") continue;
+      const raw = String(match[1] || match[2] || "").trim();
+      const key = normalize(raw);
+      const found = charMap.get(key) || charMap.get(key.replace(/_/g, " ")) || charMap.get(key.replace(/\s+/g, "_"));
+      if (found) {
+        const name = typeof found === "string" ? found : found.name;
+        const uuid = typeof found === "object" && typeof found.uuid === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(found.uuid.trim())
+          ? found.uuid.trim().toLowerCase() : "";
+        return {
+          name,
+          attachment: {
+            assetName: `character:${name}`,
+            kind: "character",
+            ...(uuid ? { expectedId: uuid } : {}),
+          },
+        };
+      }
+    }
+    return null;
+  }
+
+  function updateCharacterUiState(charObj) {
+    const label = document.querySelector("#genCharacterLabel");
+    const thumb = document.querySelector("#genCharacterTriggerThumb");
+    const genSelect = document.querySelector("#genCharacterSelect");
+    const imgSelect = document.querySelector("#selectCharImage");
+    const vidSelect = document.querySelector("#selectCharVideo");
+    if (!label) return;
+
+    if (!charObj) {
+      label.textContent = t("character.none") || "Character";
+      if (thumb) {
+        thumb.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"></circle><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"></path></svg>`;
+      }
+      if (genSelect) genSelect.value = "";
+      if (imgSelect) imgSelect.value = "";
+      if (vidSelect) vidSelect.value = "";
+      return;
+    }
+
+    const name = typeof charObj === "string" ? charObj : charObj.name;
+    const uuid = typeof charObj === "object" && charObj.uuid ? charObj.uuid.toLowerCase() : "";
+    const val = uuid ? `flow-character:${uuid}` : `flow-character-name:${name}`;
+
+    label.textContent = name;
+    const avatar = typeof charObj === "object" ? (charObj.avatarUrl || charObj.thumbnailUrl || charObj.image) : null;
+    if (thumb) {
+      if (avatar && typeof avatar === "string" && avatar.startsWith("http")) {
+        thumb.innerHTML = `<img src="${avatar}" style="width:14px;height:14px;border-radius:50%;object-fit:cover;" alt="" />`;
+      } else {
+        thumb.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"></circle><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"></path></svg>`;
+      }
+    }
+    if (genSelect) genSelect.value = val;
+    if (imgSelect) imgSelect.value = val;
+    if (vidSelect) vidSelect.value = val;
+  }
+
+  function updateVoiceUiState(voiceName) {
+    const label = document.querySelector("#genVideoVoiceLabel");
+    const genVoiceSelect = document.querySelector("#genVideoVoiceSelect");
+    const flowVoiceSelect = document.querySelector("#flowVoiceSelect");
+    const name = String(voiceName || "").trim();
+    if (label) label.textContent = name || (t("voice.random") || "Random voice");
+    if (genVoiceSelect) genVoiceSelect.value = name;
+    if (flowVoiceSelect) flowVoiceSelect.value = name;
+  }
+
   function populateCharacterSelects() {
-    const selects = [document.querySelector("#selectCharImage"), document.querySelector("#selectCharVideo")];
+    const selects = [document.querySelector("#selectCharImage"), document.querySelector("#selectCharVideo"), document.querySelector("#genCharacterSelect")].filter(Boolean);
     selects.forEach(sel => {
-      if (!sel) return;
+      if (sel.tagName === "INPUT") return;
       const currentVal = sel.value;
       const currentName = sel.selectedOptions?.[0]?.dataset?.characterName || sel.selectedOptions?.[0]?.textContent?.replace(/^👤\s*/, "").trim() || "";
       const restoreLegacyName = Boolean(currentVal && !currentVal.startsWith("flow-character:") && !currentVal.startsWith("flow-character-name:") && currentName);
@@ -700,14 +807,48 @@
         sel.appendChild(opt);
       });
     });
+
+    // Sync UI trigger state with current selection
+    const activeVal = document.querySelector("#genCharacterSelect")?.value || document.querySelector("#selectCharVideo")?.value || document.querySelector("#selectCharImage")?.value || "";
+    if (activeVal) {
+      const found = currentCharacters.find(c => {
+        const u = c?.uuid ? `flow-character:${c.uuid.toLowerCase()}` : `flow-character-name:${c?.name}`;
+        return u === activeVal || c?.name === activeVal;
+      });
+      if (found) updateCharacterUiState(found);
+    }
   }
 
   function selectedFlowCharacter(select) {
-    const option = select?.selectedOptions?.[0];
-    const name = String(option?.dataset?.characterName || "").trim();
-    if (!name || !option?.value) return null;
-    const id = String(option.dataset.characterUuid || "").trim();
-    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id) ? id.toLowerCase() : "";
+    const sel = select || document.querySelector("#genCharacterSelect") || document.querySelector("#selectCharVideo") || document.querySelector("#selectCharImage");
+    if (!sel) return null;
+    let name = "";
+    let uuid = "";
+    if (sel.tagName === "INPUT") {
+      const val = sel.value || "";
+      if (val.startsWith("flow-character:")) {
+        uuid = val.replace("flow-character:", "").trim();
+        const found = currentCharacters.find(c => typeof c === "object" && c?.uuid?.toLowerCase() === uuid.toLowerCase());
+        name = found?.name || "";
+      } else if (val.startsWith("flow-character-name:")) {
+        name = val.replace("flow-character-name:", "").trim();
+      } else if (val) {
+        name = val;
+      }
+    } else {
+      const option = sel.selectedOptions?.[0];
+      name = String(option?.dataset?.characterName || "").trim();
+      if (!name && option?.value && !option.value.startsWith("flow-character")) {
+        name = option.textContent?.replace(/^👤\s*/, "").trim();
+      }
+      const id = String(option?.dataset?.characterUuid || "").trim();
+      uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id) ? id.toLowerCase() : "";
+      if (!uuid && option?.value?.startsWith?.("flow-character:")) {
+        const parsed = option.value.replace("flow-character:", "").trim();
+        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(parsed)) uuid = parsed.toLowerCase();
+      }
+    }
+    if (!name || (sel.tagName !== "INPUT" && !sel.value)) return null;
     return {
       name,
       attachment: {
@@ -718,9 +859,14 @@
     };
   }
 
+  document.querySelector("#flowVoiceSelect")?.addEventListener("change", event => {
+    updateVoiceUiState(event.target.value);
+  });
+
   // Toby-style views with roving focus for keyboard users.
   const tabs = [...document.querySelectorAll(".tobyflow-tab")];
   const activateTab = tab => {
+      if (!tab) return;
       document.querySelectorAll(".tobyflow-tab").forEach(t => t.classList.remove("active"));
       document.querySelectorAll(".tab-pane").forEach(p => p.classList.remove("active"));
       tab.classList.add("active");
@@ -731,7 +877,7 @@
       });
       const targetId = tab.getAttribute("data-tab");
       document.getElementById(targetId)?.classList.add("active");
-      if (targetId === "tab-library" && !flowPhotosScanned) {
+      if ((targetId === "tab-library" || targetId === "tab-photos") && !flowPhotosScanned) {
         void runLibraryAction(null, refreshFlowPhotos);
       }
   };
@@ -750,20 +896,24 @@
   // Mode Segments switching (Image / Video / Character)
   function selectCreationMode(mode = "image") {
     const selected = document.querySelector(`.mode-segment-btn[data-mode="${mode}"]`);
-    if (!selected) return;
-    document.querySelectorAll(".mode-segment-btn").forEach(button => button.classList.toggle("active", button === selected));
-    document.querySelector("#formImage").style.display = mode === "image" ? "flex" : "none";
-    document.querySelector("#formVideo").style.display = mode === "video" ? "flex" : "none";
-    document.querySelector("#formCharacter").style.display = mode === "character" ? "flex" : "none";
+    if (selected) {
+      document.querySelectorAll(".mode-segment-btn").forEach(button => button.classList.toggle("active", button === selected));
+    }
+    const formImage = document.querySelector("#formImage");
+    const formVideo = document.querySelector("#formVideo");
+    const formCharacter = document.querySelector("#formCharacter");
+    if (formImage) formImage.style.display = mode === "image" ? "flex" : "none";
+    if (formVideo) formVideo.style.display = mode === "video" ? "flex" : "none";
+    if (formCharacter) formCharacter.style.display = mode === "character" ? "flex" : "none";
     setFeedback("");
   }
   document.querySelectorAll(".mode-segment-btn").forEach(btn => {
     btn.addEventListener("click", () => selectCreationMode(btn.getAttribute("data-mode")));
   });
   const resetCreationView = () => {
-    const createTab = document.querySelector("#navCreate");
+    const createTab = document.querySelector("#navGen") || document.querySelector("#navCreate");
     if (createTab) activateTab(createTab);
-    selectCreationMode("image");
+    selectCreationMode(document.querySelector("#genType")?.value || "image");
   };
   resetCreationView();
   document.addEventListener("visibilitychange", () => {
@@ -937,25 +1087,40 @@
       const promptList = Array.isArray(prompts) && prompts.length ? prompts : [prompt];
       chainVideo = type === "video" && chainVideo;
       const chainIds = chainVideo ? promptList.map(() => `flow-video-chain-${crypto.randomUUID()}`) : [];
-      const jobs = promptList.map((itemPrompt, index) => ({
-        ...(chainVideo ? { id: chainIds[index] } : {}),
-        ...(chainVideo && index > 0 ? { metadata: { dependsOnId: chainIds[index - 1], dependencyType: "chain_previous" } } : {}),
-        operation: "flow.generation.submit",
-        payload: {
-          type,
-          prompt: itemPrompt,
-          ...(model ? { model } : {}),
-          aspectRatio: aspect_ratio,
-          aspect_ratio,
-          variants: count,
-          count,
-          attachments: attachmentsPerPrompt?.[index] || attachments,
-          ...((!chainVideo || index === 0) && firstFramesPerPrompt?.[index] ? { firstFrame: typeof firstFramesPerPrompt[index] === "string" ? { assetName: firstFramesPerPrompt[index] } : firstFramesPerPrompt[index] } : {}),
-          ...(!chainVideo && lastFramesPerPrompt?.[index] ? { lastFrame: typeof lastFramesPerPrompt[index] === "string" ? { assetName: lastFramesPerPrompt[index] } : lastFramesPerPrompt[index] } : {}),
-          ...(video_settings || {})
-        },
-        label: `[${type.toUpperCase()}] ${itemPrompt.slice(0, 96)}`,
-      }));
+      const jobs = promptList.map((itemPrompt, index) => {
+        const itemAttachments = attachmentsPerPrompt?.[index] || attachments;
+        const refMediaTypeMap = {};
+        for (const att of itemAttachments) {
+          if (att && typeof att === "object") {
+            const key = att.assetName || att.id || att.expectedId;
+            if (key && att.kind) {
+              refMediaTypeMap[key] = att.kind;
+              if (att.expectedId) refMediaTypeMap[att.expectedId] = att.kind;
+              if (att.assetName) refMediaTypeMap[att.assetName.replace(/^(?:asset|character):/i, "")] = att.kind;
+            }
+          }
+        }
+        return {
+          ...(chainVideo ? { id: chainIds[index] } : {}),
+          ...(chainVideo && index > 0 ? { metadata: { dependsOnId: chainIds[index - 1], dependencyType: "chain_previous" } } : {}),
+          operation: "flow.generation.submit",
+          payload: {
+            type,
+            prompt: itemPrompt,
+            ...(model ? { model } : {}),
+            aspectRatio: aspect_ratio,
+            aspect_ratio,
+            variants: count,
+            count,
+            attachments: itemAttachments,
+            ...(Object.keys(refMediaTypeMap).length > 0 ? { refMediaTypeMap } : {}),
+            ...((!chainVideo || index === 0) && firstFramesPerPrompt?.[index] ? { firstFrame: typeof firstFramesPerPrompt[index] === "string" ? { assetName: firstFramesPerPrompt[index] } : firstFramesPerPrompt[index] } : {}),
+            ...(!chainVideo && lastFramesPerPrompt?.[index] ? { lastFrame: typeof lastFramesPerPrompt[index] === "string" ? { assetName: lastFramesPerPrompt[index] } : lastFramesPerPrompt[index] } : {}),
+            ...(video_settings || {})
+          },
+          label: `[${type.toUpperCase()}] ${itemPrompt.slice(0, 96)}`,
+        };
+      });
       const addResult = await chrome.runtime.sendMessage(jobs.length > 1
         ? { type: "flow-queue:add-batch", jobs, batchLabel: `${type === "video" ? "Video" : "Image"} batch` }
         : { type: "flow-queue:add", job: jobs[0] });
@@ -1293,7 +1458,13 @@
         const matches = [...(aliases.get(key) || [])];
         if (matches.length > 1) throw new Error(t("sidebar.multiPromptMentionAmbiguous", { name }));
         if (matches.length === 0) {
-          unresolvedNames.add(name);
+          const isCharacter = Array.isArray(currentCharacters) && currentCharacters.some(c => {
+            const cName = normalizeName(typeof c === "string" ? c : c?.name);
+            return cName === key || cName.replace(/_/g, " ") === key.replace(/_/g, " ") || cName.replace(/\s+/g, "_") === key;
+          });
+          if (!isCharacter) {
+            unresolvedNames.add(name);
+          }
           continue;
         }
         const reference = matches[0];
@@ -1357,7 +1528,7 @@
       setFeedback(t("sidebar.multiPromptRefsMissing"), false);
       return;
     }
-    const selectedCharacter = selectedFlowCharacter(document.querySelector("#selectCharImage"));
+    const selectedCharacter = selectedFlowCharacter(document.querySelector("#selectCharImage") || document.querySelector("#genCharacterSelect"));
     const character = selectedCharacter?.name || "";
 
     const commonAttachments = [];
@@ -1394,7 +1565,11 @@
       for (let i = 0; i < activeImageReferences.length; i++) {
         const reference = activeImageReferences[i];
         if (reference.source === "flow") {
-          const attachment = { assetName: reference.assetName, expectedId: reference.expectedId };
+          const attachment = {
+            assetName: reference.assetName,
+            expectedId: reference.expectedId,
+            kind: reference.kind || "image",
+          };
           referenceAttachments.push(attachment);
           attachmentByReference.set(reference, attachment);
           continue;
@@ -1404,14 +1579,25 @@
         const uploaded = await uploadReferenceImage(reference.file, undefined, i + 1);
         const uploadedName = typeof uploaded === "string" ? uploaded : (uploaded?.name || uploaded?.title || String(uploaded));
         const uploadedId = typeof uploaded === "object" ? (uploaded?.id || uploaded?.mediaId) : undefined;
-        const attachment = { assetName: `asset:${uploadedName}`, ...(uploadedId ? { expectedId: uploadedId } : {}) };
+        const attachment = {
+          assetName: `asset:${uploadedName}`,
+          ...(uploadedId ? { expectedId: uploadedId } : {}),
+          kind: reference.kind || "image",
+        };
         referenceAttachments.push(attachment);
         attachmentByReference.set(reference, attachment);
       }
 
-      const attachmentsPerPrompt = referenceMode === "mention"
-        ? mentionResolution.assignments.map(references => [...commonAttachments, ...references.map(reference => attachmentByReference.get(reference)).filter(Boolean)])
-        : assignBatchReferences(prompts, referenceMode, commonAttachments, referenceAttachments, referencesPerPrompt);
+      const baseBatchAttachments = assignBatchReferences(prompts, referenceMode, [], referenceAttachments, referencesPerPrompt);
+      const attachmentsPerPrompt = prompts.map((itemPrompt, idx) => {
+        const itemChar = findCharacterMentionInPrompt(itemPrompt, currentCharacters) || selectedCharacter;
+        const charAtts = itemChar ? [itemChar.attachment] : [];
+        if (referenceMode === "mention") {
+          const refs = mentionResolution.assignments[idx].map(reference => attachmentByReference.get(reference)).filter(Boolean);
+          return [...charAtts, ...refs];
+        }
+        return [...charAtts, ...(baseBatchAttachments[idx] || [])];
+      });
       const queued = await executeGenerationTask({
         type: "image",
         prompt,
@@ -1460,7 +1646,7 @@
       ? document.querySelector("#selectResolutionVideo").value : undefined;
     const count = getVideoQuantity(modelRule, document.querySelector("#selectCountVideo")?.value);
     const mode = document.querySelector("#selectModeVideo").value || "ingredients";
-    const selectedCharacter = mode === "frames" ? null : selectedFlowCharacter(document.querySelector("#selectCharVideo"));
+    const selectedCharacter = mode === "frames" ? null : selectedFlowCharacter(document.querySelector("#genCharacterSelect") || document.querySelector("#selectCharVideo"));
     const character = selectedCharacter?.name || "";
     const chainVideo = document.querySelector("#chainVideoFromPrevious")?.checked === true;
     if (chainVideo && count !== 1) {
@@ -1480,7 +1666,7 @@
       setFeedback(t("sidebar.videoChainNeedsPrompts"), false);
       return;
     }
-    const selectedVoice = document.querySelector("#flowVoiceSelect")?.value || "";
+    const selectedVoice = document.querySelector("#genVideoVoiceSelect")?.value || document.querySelector("#flowVoiceSelect")?.value || "";
     if (chainVideo && mode !== "frames" && (refFilesVideo.length > 0 || character || selectedVoice)) {
       setFeedback(t("sidebar.videoChainReferencesConflict"), false);
       return;
@@ -1523,17 +1709,25 @@
       for (let i = 0; i < activeVideoReferences.length; i++) {
         const reference = activeVideoReferences[i];
         if (reference.source === "flow") {
-          const attachment = { assetName: reference.assetName, expectedId: reference.expectedId };
+          const attachment = {
+            assetName: reference.assetName,
+            expectedId: reference.expectedId,
+            kind: reference.kind || "video",
+          };
           referenceAttachments.push(attachment);
           attachmentByReference.set(reference, attachment);
           continue;
         }
         uploadedVideoCount++;
-        setFeedback(`Đang tải ảnh tham chiếu ${uploadedVideoCount}/${localVideoReferences.length} lên Flow...`, true);
+        setFeedback(`Đang tải media tham chiếu ${uploadedVideoCount}/${localVideoReferences.length} lên Flow...`, true);
         const uploaded = await uploadReferenceImage(reference.file, undefined, i + 1);
         const uploadedName = typeof uploaded === "string" ? uploaded : (uploaded?.name || uploaded?.title || String(uploaded));
         const uploadedId = typeof uploaded === "object" ? (uploaded?.id || uploaded?.mediaId) : undefined;
-        const attachment = { assetName: `asset:${uploadedName}`, ...(uploadedId ? { expectedId: uploadedId } : {}) };
+        const attachment = {
+          assetName: `asset:${uploadedName}`,
+          ...(uploadedId ? { expectedId: uploadedId } : {}),
+          kind: reference.kind || "video",
+        };
         referenceAttachments.push(attachment);
         attachmentByReference.set(reference, attachment);
       }
@@ -1570,11 +1764,18 @@
         }
       }
 
+      const baseBatchAttachments = assignBatchReferences(prompts, referenceMode, [], referenceAttachments, referencesPerPrompt);
       const attachmentsPerPrompt = hasFrames
         ? prompts.map(() => [])
-        : referenceMode === "mention"
-          ? mentionResolution.assignments.map(references => [...commonAttachments, ...references.map(reference => attachmentByReference.get(reference)).filter(Boolean)])
-          : assignBatchReferences(prompts, referenceMode, commonAttachments, referenceAttachments, referencesPerPrompt);
+        : prompts.map((itemPrompt, idx) => {
+            const itemChar = findCharacterMentionInPrompt(itemPrompt, currentCharacters) || selectedCharacter;
+            const charAtts = itemChar ? [itemChar.attachment] : [];
+            if (referenceMode === "mention") {
+              const refs = mentionResolution.assignments[idx].map(reference => attachmentByReference.get(reference)).filter(Boolean);
+              return [...charAtts, ...refs];
+            }
+            return [...charAtts, ...(baseBatchAttachments[idx] || [])];
+          });
       const queued = await executeGenerationTask({
         type: "video",
         prompt,
@@ -1808,7 +2009,11 @@
     return { assets: flowAssets.length };
   }
 
-  document.querySelector("#btnRefreshPhotos").onclick = event => runLibraryAction(event.currentTarget, refreshFlowPhotos);
+  const triggerPhotosRefresh = event => runLibraryAction(event.currentTarget, refreshFlowPhotos);
+  const btnRefPhotos = document.querySelector("#btnRefreshPhotos");
+  if (btnRefPhotos) btnRefPhotos.onclick = triggerPhotosRefresh;
+  const btnRefFlowImages = document.querySelector("#refreshFlowImagesBtn");
+  if (btnRefFlowImages) btnRefFlowImages.onclick = triggerPhotosRefresh;
   document.querySelector("#flowPhotosSearch").oninput = () => { flowPhotosVisibleLimit = 30; renderFlowPhotos(); };
   document.querySelector("#flowPhotosKind").onchange = () => { flowPhotosVisibleLimit = 30; renderFlowPhotos(); };
   document.querySelector("#btnMorePhotos").onclick = () => { flowPhotosVisibleLimit += 30; renderFlowPhotos(); };
@@ -2003,6 +2208,634 @@
 
   document.querySelector("#btnPairSettings").onclick = () => chrome.runtime.openOptionsPage();
 
+  // ==========================================
+  // TOBYFLOW ENHANCED UI CONTROLS & WIRING
+  // ==========================================
+
+  // 1. Theme Management (Light / Dark)
+  function initTheme() {
+    const updateThemeUI = isDark => {
+      const sunIcon = document.querySelector("#themeIconSun");
+      const moonIcon = document.querySelector("#themeIconMoon");
+      const label = document.querySelector("#themeToggleLabel");
+      if (sunIcon) sunIcon.classList.toggle("hidden", isDark);
+      if (moonIcon) moonIcon.classList.toggle("hidden", !isDark);
+      if (label) label.textContent = isDark ? (t("header.lightMode") || "Light Mode") : (t("header.darkMode") || "Dark Mode");
+    };
+
+    chrome.storage.local.get(["af_settings"]).then(res => {
+      const theme = res?.af_settings?.theme || "dark";
+      const root = document.querySelector("#flow-auto-sidebar-root");
+      if (root) {
+        root.classList.remove("theme-light", "theme-dark");
+        root.classList.add(`theme-${theme}`);
+      }
+      updateThemeUI(theme === "dark");
+    }).catch(() => {});
+
+    document.querySelector("#themeToggleBtn")?.addEventListener("click", async e => {
+      e.stopPropagation();
+      const root = document.querySelector("#flow-auto-sidebar-root");
+      const isCurrentlyLight = root?.classList.contains("theme-light");
+      const newTheme = isCurrentlyLight ? "dark" : "light";
+      if (root) {
+        root.classList.remove("theme-light", "theme-dark");
+        root.classList.add(`theme-${newTheme}`);
+      }
+      updateThemeUI(newTheme === "dark");
+      try {
+        const stored = await chrome.storage.local.get(["af_settings"]);
+        await chrome.storage.local.set({
+          af_settings: { ...(stored?.af_settings || {}), theme: newTheme }
+        });
+      } catch (_) {}
+    });
+  }
+
+  // 2. Header and Settings Menu
+  function initSettingsAndHeader() {
+    const dropdown = document.querySelector("#settingsDropdown");
+    const dropdownBtn = document.querySelector("#settingsDropdownBtn");
+    const menu = document.querySelector("#settingsMenu");
+    const popup = document.querySelector("#settingsPopup");
+
+    dropdownBtn?.addEventListener("click", e => {
+      e.stopPropagation();
+      menu?.classList.toggle("hidden");
+    });
+
+    document.addEventListener("click", e => {
+      if (menu && !dropdown?.contains(e.target)) {
+        menu.classList.add("hidden");
+      }
+    });
+
+    document.querySelector("#openSettingsBtn")?.addEventListener("click", () => {
+      menu?.classList.add("hidden");
+      popup?.classList.remove("hidden");
+    });
+
+    document.querySelector("#closeSettingsPopupBtn")?.addEventListener("click", () => {
+      popup?.classList.add("hidden");
+    });
+    document.querySelector("#saveSettingsBtn")?.addEventListener("click", () => {
+      popup?.classList.add("hidden");
+    });
+
+    // Language button
+    document.querySelector("#languageBtn")?.addEventListener("click", () => {
+      document.querySelector("#langSwitchBtn")?.click();
+    });
+
+    // Tip coffee & changelog
+    document.querySelector("#tipCoffeeBtn")?.addEventListener("click", () => {
+      setFeedback("☕ Cảm ơn bạn đã đồng hành và ủng hộ Toby Flow Studio!", true);
+    });
+    document.querySelector("#changelogBtn")?.addEventListener("click", () => {
+      setFeedback("Toby Flow Studio v1.3.103 · Hỗ trợ tạo ảnh, tạo video, tham chiếu, frames & đa tác vụ", true);
+    });
+
+    // Extension reload button
+    document.querySelector("#extensionLinkBtn")?.addEventListener("click", () => {
+      menu?.classList.add("hidden");
+      document.querySelector("#reloadBtn")?.click();
+    });
+  }
+
+  // 3. Screen capture
+  function initScreenCapture() {
+    const triggerCapture = async () => {
+      try {
+        setFeedback("Đang chụp ảnh màn hình tab hiện tại...", true);
+        const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: "png" });
+        if (!dataUrl) throw new Error("Trình duyệt không trả về dữ liệu ảnh màn hình.");
+        const res = await fetch(dataUrl);
+        const blob = await res.blob();
+        const file = new File([blob], `screenshot-${Date.now()}.png`, { type: "image/png" });
+        const currentGenType = document.querySelector("#genType")?.value || "image";
+        referencePicker.addLocalFilesToReferences(currentGenType, [file]);
+        setFeedback("Đã chụp ảnh màn hình và thêm vào danh sách tham chiếu!", true);
+      } catch (err) {
+        setFeedback(`Chụp màn hình thất bại: ${err.message}`, false);
+      }
+    };
+
+    document.querySelector("#headerCaptureBtn")?.addEventListener("click", triggerCapture);
+    document.querySelector("#screenCaptureBtn")?.addEventListener("click", triggerCapture);
+  }
+
+  // 4. Subtab switching for Templates and Photos
+  function initSubtabs() {
+    document.querySelectorAll("[data-subtab]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const subtab = btn.getAttribute("data-subtab");
+        const parentPane = btn.closest(".tab-pane");
+        if (!parentPane) return;
+        parentPane.querySelectorAll("[data-subtab]").forEach(b => b.classList.toggle("active", b === btn));
+        parentPane.querySelectorAll(".subtab-pane, .prompts-subtab-pane, .photos-subtab-pane").forEach(pane => {
+          pane.classList.toggle("active", pane.id === subtab);
+        });
+        if (subtab === "photos-flow-images" && !flowPhotosScanned) {
+          void runLibraryAction(null, refreshFlowPhotos);
+        }
+      });
+    });
+  }
+
+  // 5. Gen Tab Controls
+  function initTobyGenControls() {
+    const promptsArea = document.querySelector("#promptsArea");
+    const multiPromptCheck = document.querySelector("#multiPromptCheck");
+    const promptCharCount = document.querySelector("#promptCharCount");
+    const promptCountBadge = document.querySelector("#promptCount");
+    const multiPromptHint = document.querySelector("#multiPromptHint");
+
+    function updatePromptsMetrics() {
+      if (!promptsArea) return;
+      const val = promptsArea.value;
+      if (promptCharCount) promptCharCount.textContent = `${val.length} ký tự`;
+      const isMulti = multiPromptCheck?.checked === true;
+      if (multiPromptHint) multiPromptHint.classList.toggle("hidden", !isMulti);
+      const count = val.trim() ? (isMulti ? val.trim().split(/\n\s*\n/).filter(Boolean).length : 1) : 0;
+      if (promptCountBadge) promptCountBadge.textContent = `${count} prompt${count > 1 ? "s" : ""}`;
+
+      // Sync to legacy inputs
+      const inputPromptImage = document.querySelector("#inputPromptImage");
+      const inputPromptVideo = document.querySelector("#inputPromptVideo");
+      if (inputPromptImage && inputPromptImage.value !== val) {
+        inputPromptImage.value = val;
+        inputPromptImage.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      if (inputPromptVideo && inputPromptVideo.value !== val) {
+        inputPromptVideo.value = val;
+        inputPromptVideo.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    }
+
+    promptsArea?.addEventListener("input", updatePromptsMetrics);
+    multiPromptCheck?.addEventListener("change", () => {
+      const isMulti = multiPromptCheck.checked;
+      const multiPromptImage = document.querySelector("#multiPromptImage");
+      const multiPromptVideo = document.querySelector("#multiPromptVideo");
+      if (multiPromptImage) multiPromptImage.checked = isMulti;
+      if (multiPromptVideo) multiPromptVideo.checked = isMulti;
+      updatePromptsMetrics();
+    });
+
+    // Keyboard shortcut Ctrl+Enter / Cmd+Enter
+    promptsArea?.addEventListener("keydown", e => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        document.querySelector("#genSubmitBtn")?.click();
+      }
+    });
+
+    // Import TXT file into promptsArea
+    const importTxtBtn = document.querySelector("#importTxtBtn");
+    if (importTxtBtn) {
+      const txtInput = document.createElement("input");
+      txtInput.type = "file";
+      txtInput.accept = ".txt";
+      txtInput.hidden = true;
+      document.body.appendChild(txtInput);
+      importTxtBtn.addEventListener("click", () => txtInput.click());
+      txtInput.addEventListener("change", async () => {
+        const file = txtInput.files?.[0];
+        txtInput.value = "";
+        if (!file) return;
+        try {
+          const text = await file.text();
+          const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith("#"));
+          if (!lines.length) throw new Error("Tệp không có dòng văn bản hợp lệ.");
+          const imported = lines.join("\n\n");
+          promptsArea.value = promptsArea.value.trim() ? `${promptsArea.value.trim()}\n\n${imported}` : imported;
+          if (lines.length > 1 && multiPromptCheck) multiPromptCheck.checked = true;
+          updatePromptsMetrics();
+          setFeedback(`Đã nhập ${lines.length} câu lệnh từ file!`, true);
+        } catch (err) {
+          setFeedback(`Lỗi nhập tệp: ${err.message}`, false);
+        }
+      });
+    }
+
+    // Save prompt button
+    document.querySelector("#promptSaveBtn")?.addEventListener("click", async () => {
+      const val = promptsArea?.value.trim();
+      if (!val) { setFeedback("Vui lòng nhập câu lệnh để lưu!", false); return; }
+      const item = { id: crypto.randomUUID?.() || `${Date.now()}`, name: val.slice(0, 36), prompt: val, createdAt: Date.now() };
+      savedPrompts = [item, ...savedPrompts.filter(p => p.prompt !== val)].slice(0, 100);
+      await writeUiStorage(SAVED_PROMPTS_KEY, savedPrompts);
+      renderSavedPrompts();
+      setFeedback("Đã lưu câu lệnh vào thư viện Prompts!", true);
+    });
+
+    // Provider Tabs
+    document.querySelectorAll("#genProviderTabs .gen-provider-tab").forEach(tab => {
+      tab.addEventListener("click", () => {
+        document.querySelectorAll("#genProviderTabs .gen-provider-tab").forEach(t => t.classList.remove("active"));
+        tab.classList.add("active");
+        const provider = tab.getAttribute("data-provider") || "flow";
+        const hiddenProvider = document.querySelector("#genProvider");
+        if (hiddenProvider) hiddenProvider.value = provider;
+        if (provider !== "flow") {
+          setFeedback(`Provider: ${provider.toUpperCase()} (Tự động thực thi qua Flow MCP Studio)`, true);
+        } else {
+          setFeedback("Google Flow Provider đang hoạt động", true);
+        }
+      });
+    });
+
+    // Gen Type Toggle
+    function setGenType(type = "image") {
+      document.querySelectorAll("#genTypeToggle .toggle-btn").forEach(btn => {
+        btn.classList.toggle("active", btn.getAttribute("data-type") === type);
+      });
+      const hiddenGenType = document.querySelector("#genType");
+      if (hiddenGenType) hiddenGenType.value = type;
+
+      const isImage = type === "image";
+      document.querySelector("#imageModelContainer")?.classList.toggle("hidden", !isImage);
+      document.querySelector("#videoModelContainer")?.classList.toggle("hidden", isImage);
+      document.querySelector("#videoInputTypeContainer")?.classList.toggle("hidden", isImage);
+      document.querySelector("#flowVideoDurationContainer")?.classList.toggle("hidden", isImage);
+      document.querySelector("#flowVideoResolutionContainer")?.classList.toggle("hidden", isImage);
+      document.querySelector("#genVideoVoiceContainer")?.classList.toggle("hidden", isImage);
+
+      const isFrames = document.querySelector("#videoInputType")?.value === "frames";
+      document.querySelector("#videoFramesSection")?.classList.toggle("hidden", isImage || !isFrames);
+
+      const submitText = document.querySelector("#genSubmitBtnText");
+      if (submitText) submitText.textContent = isImage ? t("sidebar.btnGenerateImage", "Tạo ảnh") : t("sidebar.btnGenerateVideo", "Tạo video");
+
+      selectCreationMode(type);
+      referencePicker.renderReferenceCards?.(type);
+    }
+
+    document.querySelectorAll("#genTypeToggle .toggle-btn").forEach(btn => {
+      btn.addEventListener("click", () => setGenType(btn.getAttribute("data-type") || "image"));
+    });
+
+    // Model selects synchronization
+    document.querySelector("#imageModel")?.addEventListener("change", function () {
+      const sel = document.querySelector("#selectModelImage");
+      if (sel && sel.value !== this.value) {
+        sel.value = this.value;
+        sel.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    });
+
+    document.querySelector("#videoModel")?.addEventListener("change", function () {
+      const sel = document.querySelector("#selectModelVideo");
+      if (sel && sel.value !== this.value) {
+        sel.value = this.value;
+        sel.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    });
+
+    // Aspect ratio synchronization
+    document.querySelector("#aspectRatio")?.addEventListener("change", function () {
+      const val = this.value;
+      const ratioImage = document.querySelector("#selectRatioImage");
+      const ratioVideo = document.querySelector("#selectRatioVideo");
+      if (ratioImage) ratioImage.value = val;
+      if (ratioVideo) ratioVideo.value = val;
+    });
+
+    // Quantity controls
+    const quantityInput = document.querySelector("#quantitySelect");
+    const qtyMinus = document.querySelector("#genQtyMinus");
+    const qtyPlus = document.querySelector("#genQtyPlus");
+
+    function setQuantity(val) {
+      const clamped = Math.max(1, Math.min(4, Number(val) || 1));
+      if (quantityInput) quantityInput.value = String(clamped);
+      const selectQtyImage = document.querySelector("#selectQtyImage");
+      const selectCountVideo = document.querySelector("#selectCountVideo");
+      if (selectQtyImage) selectQtyImage.value = String(clamped);
+      if (selectCountVideo) selectCountVideo.value = String(clamped);
+    }
+
+    qtyMinus?.addEventListener("click", () => setQuantity((Number(quantityInput?.value) || 1) - 1));
+    qtyPlus?.addEventListener("click", () => setQuantity((Number(quantityInput?.value) || 1) + 1));
+    quantityInput?.addEventListener("change", e => setQuantity(e.target.value));
+
+    // Video frames and inputs
+    document.querySelector("#videoInputType")?.addEventListener("change", function () {
+      const mode = this.value;
+      const selectModeVideo = document.querySelector("#selectModeVideo");
+      if (selectModeVideo) {
+        selectModeVideo.value = mode;
+        selectModeVideo.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      const framesSection = document.querySelector("#videoFramesSection");
+      if (framesSection) framesSection.classList.toggle("hidden", mode !== "frames");
+      document.querySelector("#genVideoVoiceContainer")?.classList.toggle("hidden", mode === "frames");
+    });
+
+    document.querySelector("#genTabFrame1Slot")?.addEventListener("click", () => {
+      referencePicker.openFrames(sources => {
+        videoFrameSources = sources;
+        renderVideoFrameSources();
+        if (sources[0]) {
+          applyVideoFrameAssignment("start");
+          const img = document.querySelector("#genTabFrame1Slot img") || document.createElement("img");
+          img.src = sources[0].source === "flow" ? sources[0].thumbnailUrl : sources[0].previewUrl;
+          document.querySelector("#genTabFrame1Slot")?.replaceChildren(img);
+        }
+      });
+    });
+
+    document.querySelector("#genTabFrame2Slot")?.addEventListener("click", () => {
+      referencePicker.openFrames(sources => {
+        videoFrameSources = sources;
+        renderVideoFrameSources();
+        if (sources[1]) {
+          if (!videoFrameAssignments[0]) videoFrameAssignments[0] = { first: null, last: null };
+          videoFrameAssignments[0].last = sources[1];
+          const img = document.querySelector("#genTabFrame2Slot img") || document.createElement("img");
+          img.src = sources[1].source === "flow" ? sources[1].thumbnailUrl : sources[1].previewUrl;
+          document.querySelector("#genTabFrame2Slot")?.replaceChildren(img);
+        }
+      });
+    });
+
+    // Reference images buttons
+    document.querySelector("#openImagePickerBtn")?.addEventListener("click", () => {
+      const currentGenType = document.querySelector("#genType")?.value || "image";
+      referencePicker.open(currentGenType);
+    });
+
+    document.querySelector("#clearAllGenRefsBtn")?.addEventListener("click", () => {
+      const currentGenType = document.querySelector("#genType")?.value || "image";
+      const list = referencePicker.getReferences(currentGenType);
+      list.splice(0, list.length);
+      referencePicker.renderReferenceCards(currentGenType);
+    });
+
+    document.querySelector("#refImageMode")?.addEventListener("change", function () {
+      const val = this.value;
+      const multiRefModeImage = document.querySelector("#multiRefModeImage");
+      const multiRefModeVideo = document.querySelector("#multiRefModeVideo");
+      if (multiRefModeImage) multiRefModeImage.value = val;
+      if (multiRefModeVideo) multiRefModeVideo.value = val;
+    });
+
+    // Submit & Stop
+    document.querySelector("#genSubmitBtn")?.addEventListener("click", () => {
+      const isImage = (document.querySelector("#genType")?.value || "image") === "image";
+      const pArea = document.querySelector("#promptsArea");
+      if (pArea) {
+        const val = pArea.value.trim();
+        const targetInput = document.querySelector(isImage ? "#inputPromptImage" : "#inputPromptVideo");
+        if (targetInput) {
+          targetInput.value = val;
+          targetInput.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+      }
+      const targetSubmit = document.querySelector(isImage ? "#btnSubmitImage" : "#btnSubmitVideo");
+      targetSubmit?.click();
+    });
+
+    document.querySelector("#startBtn")?.addEventListener("click", () => {
+      document.querySelector("#genSubmitBtn")?.click();
+    });
+
+    document.querySelector("#genStopBtn")?.addEventListener("click", async () => {
+      try {
+        await chrome.runtime.sendMessage({ type: "flow-queue:pause" });
+        setFeedback("Đã gửi yêu cầu tạm dừng hàng đợi Flow.", true);
+      } catch (err) {
+        setFeedback(`Không thể dừng hàng đợi: ${err.message}`, false);
+      }
+    });
+
+    document.querySelector("#genRunModeBtn")?.addEventListener("click", function () {
+      this.classList.toggle("active");
+      const label = document.querySelector("#genRunModeLabel");
+      if (label) label.textContent = this.classList.contains("active") ? "Parallel" : "Sequential";
+    });
+  }
+
+  // 6. Style dropdown
+  function initStyleDropdown() {
+    const STYLES = [
+      { label: "Mặc định (Không phong cách)", value: "" },
+      { label: "Photorealistic 8K", value: ", photorealistic, 8k resolution, highly detailed, realistic lighting" },
+      { label: "Cinematic Film 35mm", value: ", cinematic lighting, 35mm film photograph, dramatic atmosphere" },
+      { label: "Anime Makoto Shinkai", value: ", anime style, vibrant skies, emotional lighting, Makoto Shinkai aesthetic" },
+      { label: "3D Pixar Animation", value: ", 3D animated character, Pixar render style, smooth textures, expressive" },
+      { label: "Cyberpunk Neon", value: ", cyberpunk, glowing neon lights, futuristic city rain, high contrast" },
+      { label: "Watercolor Art", value: ", watercolor painting, soft color bleeding, textured paper background" },
+      { label: "Vintage 1970s Retro", value: ", vintage 1970s photo, grainy film, warm muted tones, nostalgic" },
+      { label: "Studio Portrait Lighting", value: ", professional studio portrait, softbox rim lighting, sharp focus" },
+      { label: "Dark Fantasy Oil Painting", value: ", dark fantasy, oil on canvas, rich brush strokes, ominous lighting" }
+    ];
+
+    const trigger = document.querySelector("#addonPromptTrigger");
+    const popup = document.querySelector("#addonPromptPopup");
+    const search = document.querySelector("#addonPromptSearch");
+    const list = document.querySelector("#addonPromptList");
+    const label = document.querySelector("#addonPromptLabel");
+
+    if (!trigger || !popup || !list) return;
+
+    function renderStyles(query = "") {
+      list.replaceChildren();
+      const filtered = STYLES.filter(s => !query || s.label.toLowerCase().includes(query.toLowerCase()));
+      for (const s of filtered) {
+        const item = document.createElement("div");
+        item.className = "addon-prompt-item";
+        item.textContent = s.label;
+        item.onclick = () => {
+          if (label) label.textContent = s.value ? s.label.split(" ")[0] : "Style";
+          popup.classList.add("hidden");
+          const promptsArea = document.querySelector("#promptsArea");
+          if (s.value && promptsArea) {
+            promptsArea.value = promptsArea.value.trim() ? `${promptsArea.value.trim()}${s.value}` : s.value.replace(/^,\s*/, "");
+            promptsArea.dispatchEvent(new Event("input", { bubbles: true }));
+          }
+        };
+        list.appendChild(item);
+      }
+    }
+
+    trigger.onclick = e => {
+      e.stopPropagation();
+      popup.classList.toggle("hidden");
+      if (!popup.classList.contains("hidden")) renderStyles();
+    };
+
+    search?.addEventListener("input", e => renderStyles(e.target.value));
+
+    document.addEventListener("click", e => {
+      if (!popup.contains(e.target) && !trigger.contains(e.target)) {
+        popup.classList.add("hidden");
+      }
+    });
+  }
+
+  // 7. Enhanced Character & Voice Modals
+  function initCharacterAndVoiceModals() {
+    async function openCharacterModal() {
+      const container = document.querySelector("#characterSelectModalContainer");
+      if (!container) return;
+      if (!currentCharacters.length) {
+        setFeedback("Đang tải danh sách nhân vật từ Flow...", true);
+        await loadFlowCharacters();
+      }
+      const currentVal = document.querySelector("#genCharacterSelect")?.value || "";
+
+      const itemsHtml = [
+        `<div class="style-modal-item none-option ${!currentVal ? "selected" : ""}" data-val="">
+          <div class="style-modal-item-icon">👤</div>
+          <div class="voice-modal-item-info">
+            <span class="style-modal-item-name">Không chọn</span>
+            <span class="voice-modal-item-desc">Tạo ảnh/video không chỉ định nhân vật</span>
+          </div>
+        </div>`,
+        ...currentCharacters.map(c => {
+          const name = typeof c === "string" ? c : c.name;
+          const uuid = typeof c === "object" && c.uuid ? c.uuid : "";
+          const val = uuid ? `flow-character:${uuid}` : `flow-character-name:${name}`;
+          const isSelected = val === currentVal || name === currentVal;
+          return `
+            <div class="style-modal-item ${isSelected ? "selected" : ""}" data-val="${escapeHtml(val)}" data-name="${escapeHtml(name)}">
+              <div class="style-modal-item-icon">👤</div>
+              <div class="voice-modal-item-info">
+                <span class="style-modal-item-name">${escapeHtml(name)}</span>
+              </div>
+              ${isSelected ? '<svg class="style-modal-item-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>' : ''}
+            </div>
+          `;
+        })
+      ].join("");
+
+      container.innerHTML = `
+        <div class="style-modal-overlay" id="characterSelectModalOverlay">
+          <div class="style-modal-backdrop"></div>
+          <div class="style-modal-content">
+            <div class="style-modal-header">
+              <h3 class="style-modal-title">Chọn nhân vật Flow</h3>
+              <div class="voice-modal-header-actions">
+                <button type="button" class="voice-modal-sync-btn" id="characterModalSyncBtn" title="Đồng bộ từ Flow">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                </button>
+                <button type="button" class="style-modal-close" id="characterModalClose">×</button>
+              </div>
+            </div>
+            <div class="style-modal-search">
+              <input type="text" id="characterModalSearch" placeholder="Tìm nhân vật..." />
+            </div>
+            <div class="style-modal-list" id="characterModalList">${itemsHtml}</div>
+          </div>
+        </div>
+      `;
+
+      const overlay = container.querySelector("#characterSelectModalOverlay");
+      const close = () => overlay?.remove();
+      overlay?.querySelector(".style-modal-backdrop")?.addEventListener("click", close);
+      overlay?.querySelector("#characterModalClose")?.addEventListener("click", close);
+
+      overlay?.querySelector("#characterModalSyncBtn")?.addEventListener("click", async () => {
+        setFeedback("Đang tải danh sách nhân vật từ Flow...", true);
+        await loadFlowCharacters();
+        openCharacterModal();
+      });
+
+      overlay?.querySelector("#characterModalSearch")?.addEventListener("input", e => {
+        const q = e.target.value.toLowerCase().trim();
+        overlay.querySelectorAll(".style-modal-item").forEach(item => {
+          const text = item.textContent.toLowerCase();
+          item.style.display = !q || text.includes(q) ? "flex" : "none";
+        });
+      });
+
+      overlay?.querySelectorAll(".style-modal-item").forEach(item => {
+        item.addEventListener("click", () => {
+          const val = item.dataset.val || "";
+          const name = item.dataset.name || "";
+          const charSelect = document.querySelector("#genCharacterSelect");
+          const charLabel = document.querySelector("#genCharacterLabel");
+          if (charSelect) charSelect.value = val;
+          if (charLabel) charLabel.textContent = name || "Character";
+
+          const selectCharImage = document.querySelector("#selectCharImage");
+          const selectCharVideo = document.querySelector("#selectCharVideo");
+          if (selectCharImage) selectCharImage.value = val;
+          if (selectCharVideo) selectCharVideo.value = val;
+          close();
+        });
+      });
+    }
+
+    async function openVoiceModal() {
+      const container = document.querySelector("#voiceSelectModalContainer");
+      if (!container) return;
+      const currentVal = document.querySelector("#genVideoVoiceSelect")?.value || "";
+
+      let voices = [];
+      try {
+        const res = await dispatchFlowOperation("flow.voices.options");
+        voices = Array.isArray(res?.voices) ? res.voices : (Array.isArray(res) ? res : []);
+      } catch (_) {}
+
+      const itemsHtml = [
+        `<div class="style-modal-item ${!currentVal ? "selected" : ""}" data-val="">
+          <div class="voice-modal-item-info">
+            <span class="style-modal-item-name">Random voice</span>
+            <span class="voice-modal-item-desc">Tự động chọn giọng nói</span>
+          </div>
+        </div>`,
+        ...voices.map(v => {
+          const name = typeof v === "string" ? v : v.name;
+          const isSelected = name === currentVal;
+          return `
+            <div class="style-modal-item ${isSelected ? "selected" : ""}" data-val="${escapeHtml(name)}">
+              <div class="voice-modal-item-info">
+                <span class="style-modal-item-name">${escapeHtml(name)}</span>
+              </div>
+              ${isSelected ? '<svg class="style-modal-item-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>' : ''}
+            </div>
+          `;
+        })
+      ].join("");
+
+      container.innerHTML = `
+        <div class="style-modal-overlay" id="voiceSelectModalOverlay">
+          <div class="style-modal-backdrop"></div>
+          <div class="style-modal-content">
+            <div class="style-modal-header">
+              <h3 class="style-modal-title">Chọn giọng nói Flow</h3>
+              <button type="button" class="style-modal-close" id="voiceModalClose">×</button>
+            </div>
+            <div class="style-modal-list">${itemsHtml}</div>
+          </div>
+        </div>
+      `;
+
+      const overlay = container.querySelector("#voiceSelectModalOverlay");
+      const close = () => overlay?.remove();
+      overlay?.querySelector(".style-modal-backdrop")?.addEventListener("click", close);
+      overlay?.querySelector("#voiceModalClose")?.addEventListener("click", close);
+
+      overlay?.querySelectorAll(".style-modal-item").forEach(item => {
+        item.addEventListener("click", () => {
+          const val = item.dataset.val || "";
+          const voiceSelect = document.querySelector("#genVideoVoiceSelect");
+          const voiceLabel = document.querySelector("#genVideoVoiceLabel");
+          const flowVoiceSelect = document.querySelector("#flowVoiceSelect");
+          if (voiceSelect) voiceSelect.value = val;
+          if (voiceLabel) voiceLabel.textContent = val || "Random voice";
+          if (flowVoiceSelect) flowVoiceSelect.value = val;
+          close();
+        });
+      });
+    }
+
+    document.querySelector("#genCharacterTrigger")?.addEventListener("click", openCharacterModal);
+    document.querySelector("#genVideoVoiceTrigger")?.addEventListener("click", openVoiceModal);
+  }
+
   // Initialize
   const initLocale = typeof I18n !== "undefined" ? I18n.init() : Promise.resolve();
   const queueContainer = document.querySelector("#flowQueuePanel");
@@ -2016,6 +2849,13 @@
   }
   if (queueContainer && window.FlowQueuePanel) flowQueuePanel = new window.FlowQueuePanel(queueContainer).mount();
   initLocale.then(async () => {
+    initTheme();
+    initSettingsAndHeader();
+    initScreenCapture();
+    initSubtabs();
+    initTobyGenControls();
+    initStyleDropdown();
+    initCharacterAndVoiceModals();
     await loadFlowModelCapabilities();
     applyLanguage();
     return loadLocalUiState();

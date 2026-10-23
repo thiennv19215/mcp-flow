@@ -379,6 +379,15 @@
     recordNameSaveResponse: recordCharacterNameSaveResponse,
     findCharacterTiles,
     characterLibraryScrollContainer,
+    select: async (character, options = {}) => {
+      const name = typeof character === "string" ? character : (character?.search_value || character?.name);
+      return globalThis.FlowReferenceActions?.attach?.(name, undefined, {
+        ...options,
+        kind: "character",
+        search_value: typeof character === "object" ? character.search_value : undefined,
+        expectedId: typeof character === "object" ? (character.expectedId || character.uuid || character.id) : undefined,
+      });
+    },
     create: async (payload = {}, command = {}) => {
       const c = payload.character || payload.job?.params || payload;
       if (!String(c.name || "").trim()) throw flowError("FLOW_INVALID_ARGUMENT", "Character name is required.");

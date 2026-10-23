@@ -68,6 +68,15 @@
       window.dispatchEvent(new CustomEvent(readV2Event));
     });
   }
+  async function resolveReferenceMediaIdentity(id, mediaType = "image") {
+    const value = String(id || "");
+    if (!value) return undefined;
+    const resolved = await resolveNativeMediaUuid(value, mediaType);
+    // Video reference IDs must be canonical UUIDs so submit correlation can
+    // bind the request to the exact selected asset. Keep the legacy opaque
+    // identity fallback for image references only.
+    return resolved || (mediaType === "video" ? undefined : value);
+  }
   root.resolveNativeMediaUuid = resolveNativeMediaUuid;
   root.FlowUiDeadline = Object.freeze({ makeDeadline, requireTime, boundedWait });
   const undecorate = value => normalize(value).replace(/\s+(?:image|video|character|avatar|ảnh|nhân vật)$/i, "");
@@ -79,18 +88,26 @@
   let referenceContextMenuTail = Promise.resolve();
   let lastReferenceActionDiagnostics = { action: "idle", phase: "idle", step: "idle", error: null, cleanupError: null, updatedAt: null };
   function parse(value) {
-    const text = typeof value === "string" ? value : value?.assetName;
-    const explicitCharacter = /^character:/i.test(text || "");
+    const text = typeof value === "string" ? value : (value?.assetName || value?.name || value?.search_value);
+    const explicitCharacter = /^character:/i.test(text || "") || value?.kind === "character";
     const name = String(text || "").replace(/^(?:asset|character):/i, "").trim();
     if (!name) throw flowError("FLOW_INVALID_ARGUMENT", "Reference name is required.");
-    return { name, kind: explicitCharacter ? "character" : value?.kind };
+    return {
+      name,
+      kind: explicitCharacter ? "character" : value?.kind,
+      search_value: value?.search_value || name,
+    };
   }
-  function exactOption(options, name, decorated = true) {
+  function exactOption(options, name, decorated = true, searchValue = null) {
     const wanted = normalize(name);
+    const altWanted = searchValue ? normalize(searchValue) : null;
     const matches = options.filter(option => {
       const names = [accessibleName(option), option.getAttribute("aria-label"), option.getAttribute("title")];
       for (const node of option.querySelectorAll("[aria-label],[title]")) names.push(node.getAttribute("aria-label"), node.getAttribute("title"));
-      return names.some(value => normalize(value) === wanted || decorated && undecorate(value) === wanted);
+      return names.some(value => {
+        const norm = normalize(value);
+        return norm === wanted || (altWanted && norm === altWanted) || (decorated && (undecorate(value) === wanted || (altWanted && undecorate(value) === altWanted)));
+      });
     });
     if (matches.length > 1) throw flowError("FLOW_ASSET_AMBIGUOUS", `More than one reference is named "${name}". Select a unique name or use character:<name> for a character. Nothing was attached.`);
     return matches[0] || null;
@@ -203,7 +220,7 @@
       ...patch,
     };
   }
-  async function scanExactReferenceOption(name, decorated, deadline, signal) {
+  async function scanExactReferenceOption(name, decorated, deadline, signal, searchValue = null) {
     let list = picker();
     if (!list) throw flowError("FLOW_ASSET_PICKER_LOADING", "Flow's reference picker closed before its options could be scanned.", true, false);
     const scrollOwner = referenceScrollOwner(list);
@@ -230,7 +247,7 @@
         const key = referenceOptionIdentity(option, pages, index);
         if (seen.has(key)) return;
         seen.add(key);
-        if (exactOption([option], name, decorated) && !exact.has(key)) exact.set(key, { option, scrollTop: scroller?.scrollTop || 0, key, page: pages });
+        if (exactOption([option], name, decorated, searchValue) && !exact.has(key)) exact.set(key, { option, scrollTop: scroller?.scrollTop || 0, key, page: pages });
       });
       return true;
     };
@@ -1325,11 +1342,9 @@
   };
   function pickerSurface() {
     const list = picker();
-    // Keep category discovery anchored to the active listbox. Falling back to
-    // document-wide tabs can match unrelated Flow/sidebar controls and report
-    // a false ambiguity.
     return list?.closest?.('[role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane, [class*="dialog"]') ||
-      list?.closest?.('[class*="picker"], [class*="surface"]') || list || null;
+      list?.closest?.('[class*="picker"], [class*="surface"]') ||
+      list || null;
   }
   function pickerCategoryTabs(name) {
     const norm = normalize(name);
@@ -1339,8 +1354,9 @@
     const queriedTabs = typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.categoryTabs", surface) : null;
     const candidates = [...new Set([
       ...(queriedTabs || []),
-      ...(surface.querySelectorAll?.('[role="tab"],button,[role="button"],mat-chip,[class*="chip"]') || []),
+      ...(surface?.querySelectorAll?.('[role="tab"],button,[role="button"],mat-chip,[class*="chip"]') || []),
     ])].filter(el => {
+      if (el !== surface && !surface.contains?.(el)) return false;
       if (!visible(el)) return false;
       const rawText = accessibleName(el) || el.getAttribute?.("aria-label") || el.getAttribute?.("title") || el.innerText || el.textContent || "";
       const label = normalize(rawText)
@@ -1708,32 +1724,48 @@
       requireTime(deadline, "attaching a Flow reference", false, config.signal);
       // Flow excludes already attached characters from its picker. Check our
       // confirmed provenance first, before requiring the option to exist again.
-      const reusableCandidates = chips().filter(chip => normalize(chip.name) === normalize(ref.name) && (!ref.kind || chip.kind === ref.kind));
-      const requestedReusableId = config.expectedId && reusableCandidates.length
-        ? (await resolveNativeMediaUuid(config.expectedId, "image") || String(config.expectedId).toLowerCase())
-        : null;
-      const reusable = reusableCandidates.find(chip => {
-        if (!requestedReusableId) return true;
+      const reusableCandidates = chips().filter(chip => (normalize(chip.name) === normalize(ref.name) || (ref.search_value && normalize(chip.name) === normalize(ref.search_value))) && (!ref.kind || chip.kind === ref.kind));
+      let reusable = null;
+      for (const chip of reusableCandidates) {
+        if (!config.expectedId) { reusable = chip; break; }
+        const mediaType = chip.kind === "video" ? "video" : "image";
+        const expectedId = await resolveReferenceMediaIdentity(config.expectedId, mediaType);
         const existingId = chip.kind === "character"
           ? explicitCharacterUuid(chip.element) || (chip.mediaIdSource === "character_identity_attribute" ? chip.mediaId : undefined)
           : chip.mediaId || chipMediaUuids(chip)[0];
-        return String(existingId || "").toLowerCase() === requestedReusableId;
-      });
+        const resolvedExistingId = await resolveReferenceMediaIdentity(existingId, mediaType);
+        if (expectedId && resolvedExistingId && resolvedExistingId.toLowerCase() === expectedId.toLowerCase()) {
+          reusable = chip;
+          break;
+        }
+      }
       if (reusable) {
-        const reusableId = reusable.kind === "character"
+        let reusableId = reusable.kind === "character"
           ? explicitCharacterUuid(reusable.element) || (reusable.mediaIdSource === "character_identity_attribute" && characterUuidPattern.test(String(reusable.mediaId || "")) ? String(reusable.mediaId).toLowerCase() : undefined)
           : reusable.mediaId || chipMediaUuids(reusable)[0];
+        if (reusable.kind === "video") {
+          reusableId = await resolveReferenceMediaIdentity(reusableId, "video");
+          if (!uuidPattern.test(String(reusableId || ""))) {
+            throw flowError("FLOW_ASSET_ID_UNAVAILABLE", `Flow did not expose a canonical media UUID for the already attached video reference "${ref.name}". No generation was submitted.`, false, false);
+          }
+        }
         if (reusable.kind === "character" && !reusableId) {
           throw flowError("FLOW_CHARACTER_ID_UNAVAILABLE", `Flow did not expose an explicit character identity for "${ref.name}". No selection or generation was submitted.`, false, false);
         }
-        if (requestedReusableId && String(reusableId || "").toLowerCase() !== requestedReusableId) {
+        const requestedReusableId = config.expectedId
+          ? await resolveReferenceMediaIdentity(config.expectedId, reusable.kind === "video" ? "video" : "image")
+          : null;
+        if (config.expectedId && !requestedReusableId && reusable.kind === "video") {
+          throw flowError("FLOW_ASSET_ID_UNAVAILABLE", `Flow could not canonicalize the requested video identity for "${ref.name}". No generation was submitted.`, false, false);
+        }
+        if (requestedReusableId && String(reusableId || "").toLowerCase() !== requestedReusableId.toLowerCase()) {
           throw flowError("FLOW_ASSET_ID_MISMATCH", `The already attached reference "${ref.name}" cannot be proven to match the uploaded media ID. No generation was submitted.`, false, false);
         }
         const result = { name: ref.name, kind: reusable.kind, source: reusable.source, ...(reusableId ? { id: reusableId } : {}), confirmed: true, reused: true };
         updateReferenceActionDiagnostics({ phase: "completed", step: "existing reference reused", lastResult: { name: result.name, id: result.id || null } });
         return result;
       }
-      if (!slot && ref.kind !== "character" && config.expectedId) {
+      if (!slot && ref.kind !== "character" && ref.kind !== "video" && config.expectedId) {
         const tileResult = await attachUploadedImageFromTile(ref, config.expectedId, deadline, config.signal);
         if (tileResult) {
           updateReferenceActionDiagnostics({ phase: "completed", lastResult: { confirmed: true, chipUuidConfirmed: tileResult.chipUuidConfirmed } });
@@ -1758,16 +1790,18 @@
           await category(scanCategory, deadline, config.signal);
         }
         const categoriesScanned = [...new Set([...(lastReferenceActionDiagnostics.categoriesScanned || []), scanCategory])];
+        const searchQuery = ref.search_value || ref.name;
         updateReferenceActionDiagnostics({ categoriesScanned, step: `searching ${scanCategory} for exact reference` });
-        await search(ref.name, deadline, config.signal);
-        const categoryScan = await scanExactReferenceOption(ref.name, ref.kind !== "character", deadline, config.signal);
+        await search(searchQuery, deadline, config.signal);
+        const categoryScan = await scanExactReferenceOption(ref.name, ref.kind !== "character", deadline, config.signal, ref.search_value);
         scan = categoryScan;
         updateReferenceActionDiagnostics({ pickerScanPages: categoryScan.pages, pickerScanEndReached: categoryScan.reachedEnd, pickerOptionCount: categoryScan.optionCount });
         if (!categoryScan.option) continue;
         if (config.expectedId && ref.kind !== "character") {
-          const candidateId = await resolveNativeMediaUuid(referenceOptionMediaId(categoryScan.option), "image") || referenceOptionMediaId(categoryScan.option);
-          const expectedId = await resolveNativeMediaUuid(config.expectedId, "image") || config.expectedId;
-          if (candidateId !== expectedId) {
+          const mediaType = ref.kind === "video" ? "video" : "image";
+          const candidateId = await resolveReferenceMediaIdentity(referenceOptionMediaId(categoryScan.option), mediaType);
+          const expectedId = await resolveReferenceMediaIdentity(config.expectedId, mediaType);
+          if (!candidateId || !expectedId || candidateId.toLowerCase() !== expectedId.toLowerCase()) {
             exactTitleWithWrongId = true;
             continue;
           }
@@ -1797,6 +1831,15 @@
       if (kind === "image") {
         selectedId = await resolveNativeMediaUuid(selectedId, "image") || selectedId;
         expectedId = await resolveNativeMediaUuid(expectedId, "image") || expectedId;
+      } else if (kind === "video") {
+        selectedId = await resolveReferenceMediaIdentity(selectedId, "video");
+        expectedId = await resolveReferenceMediaIdentity(expectedId, "video");
+        if (!uuidPattern.test(String(selectedId || ""))) {
+          throw flowError("FLOW_ASSET_ID_UNAVAILABLE", `Flow's exact video option for "${ref.name}" did not expose a canonical media UUID. No generation was submitted.`, false, false);
+        }
+        if (config.expectedId && !uuidPattern.test(String(expectedId || ""))) {
+          throw flowError("FLOW_ASSET_ID_UNAVAILABLE", `Flow could not canonicalize the requested video identity for "${ref.name}". No generation was submitted.`, false, false);
+        }
       }
       if (expectedId && selectedId !== expectedId) {
         throw flowError("FLOW_ASSET_ID_MISMATCH", `Flow's reference picker did not prove that "${ref.name}" matches the completed upload ID. No generation was submitted.`, false, false);
@@ -1807,7 +1850,7 @@
       // Only reuse a chip whose selection provenance this driver recorded.
       const existing = before.find(chip => chip.name === ref.name && chip.kind === kind);
       if (existing) {
-        const result = { name: ref.name, kind, source: existing.source, id: kind === "character" ? selectedId : existing.mediaId || selectedId, confirmed: true, reused: true };
+        const result = { name: ref.name, kind, source: existing.source, id: kind === "character" || kind === "video" ? selectedId : existing.mediaId || selectedId, confirmed: true, reused: true };
         updateReferenceActionDiagnostics({ phase: "completed", step: "existing reference reused", lastResult: { name: result.name, id: result.id || null } });
         return result;
       }

@@ -40,6 +40,7 @@
     );
     const referencesFor = type => references[type === "image" ? "image" : "video"];
     const localFileKey = file => `${file.name}\u0000${file.size}\u0000${file.lastModified}`;
+    const isVideoFile = file => file?.type?.startsWith("video/") || /\.(mp4|mov|webm|mkv|avi|m4v)$/i.test(String(file?.name || ""));
     const normalizeReferenceId = value => String(value || "").toLowerCase();
     const selectionLimit = () => pickerPurpose === "frames" ? 100 : 3;
     const selectedCount = () => pickerPurpose === "frames" ? frameSources.length + pickerFlowSelection.size + pickerLocalFiles.length
@@ -57,7 +58,7 @@
       const uploadSlot = document.querySelector(isImage ? "#refUploadSlotImage" : "#refUploadSlotVideo");
       const countBadge = document.querySelector(isImage ? "#refImageCountImage" : "#refImageCountVideo");
       if (!cardsList || !uploadSlot) return;
-      if (countBadge) countBadge.textContent = `${list.length}/3 ảnh`;
+      if (countBadge) countBadge.textContent = `${list.length}/3 ${type === "video" ? "tham chiếu" : "ảnh"}`;
       cardsList.querySelectorAll(".ref-card").forEach(element => element.remove());
 
       list.forEach((reference, index) => {
@@ -65,25 +66,35 @@
         card.className = "ref-card";
         const img = document.createElement("img");
         const isFlowAsset = reference.source === "flow";
+        const isVideo = reference.kind === "video";
         if (isFlowAsset && reference.thumbnailUrl) img.src = reference.thumbnailUrl;
         else if (!isFlowAsset) {
           if (!reference.previewUrl) reference.previewUrl = URL.createObjectURL(reference.file);
           img.src = reference.previewUrl;
         } else img.style.display = "none";
-        img.alt = reference.name || "Ảnh tham chiếu";
+        img.alt = reference.name || (isVideo ? "Video tham chiếu" : "Ảnh tham chiếu");
         img.onerror = () => { img.style.display = "none"; };
 
         const badge = document.createElement("div");
         badge.className = "ref-badge";
         badge.textContent = String(index + 1);
+
+        if (isVideo) {
+          const videoIndicator = document.createElement("div");
+          videoIndicator.className = "ref-video-indicator";
+          videoIndicator.textContent = "▶ Video";
+          videoIndicator.style.cssText = "position:absolute;bottom:22px;left:4px;background:rgba(0,0,0,0.75);color:#fff;font-size:9px;padding:1px 4px;border-radius:3px;z-index:2;font-weight:600;";
+          card.appendChild(videoIndicator);
+        }
+
         const tag = document.createElement("div");
         tag.className = "ref-tag";
-        tag.textContent = reference.name || "Ảnh tham chiếu";
-        tag.title = `${isFlowAsset ? "Ảnh trên Flow" : "Chờ upload"}: ${reference.name || "Ảnh tham chiếu"}`;
+        tag.textContent = reference.name || (isVideo ? "Video tham chiếu" : "Ảnh tham chiếu");
+        tag.title = `${isFlowAsset ? (isVideo ? "Video trên Flow" : "Ảnh trên Flow") : "Chờ upload"}: ${reference.name || (isVideo ? "Video tham chiếu" : "Ảnh tham chiếu")}`;
         const remove = document.createElement("button");
         remove.className = "ref-remove-btn";
         remove.type = "button";
-        remove.title = "Xóa ảnh này";
+        remove.title = isVideo ? "Xóa video này" : "Xóa ảnh này";
         remove.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
         remove.onclick = event => {
           event.stopPropagation();
@@ -95,31 +106,86 @@
         cardsList.insertBefore(card, uploadSlot);
       });
       uploadSlot.style.display = list.length >= 3 ? "none" : "flex";
+
+      // Also synchronize TobyFlow preview grid and ratio count
+      const currentGenType = document.querySelector("#genType")?.value || "image";
+      if (type === currentGenType) {
+        const previewGrid = document.querySelector("#refImagesPreview");
+        const ratioCount = document.querySelector("#refRatioCount");
+        if (ratioCount) ratioCount.textContent = list.length > 0 ? `${list.length}/3 ảnh` : "";
+        if (previewGrid) {
+          previewGrid.replaceChildren();
+          list.forEach((reference, index) => {
+            const item = document.createElement("div");
+            item.className = "ref-grid-item";
+            item.dataset.index = String(index);
+            const img = document.createElement("img");
+            const isFlowAsset = reference.source === "flow";
+            if (isFlowAsset && reference.thumbnailUrl) img.src = reference.thumbnailUrl;
+            else if (!isFlowAsset && reference.previewUrl) img.src = reference.previewUrl;
+            else img.style.display = "none";
+            img.alt = reference.name || "";
+            img.onerror = () => { img.style.display = "none"; };
+
+            const tag = document.createElement("span");
+            tag.className = "ref-grid-tag";
+            tag.textContent = reference.name || (reference.kind === "video" ? "Video" : "Ảnh");
+
+            const removeBtn = document.createElement("button");
+            removeBtn.type = "button";
+            removeBtn.className = "ref-grid-remove";
+            removeBtn.innerHTML = "×";
+            removeBtn.title = "Xóa ảnh này";
+            removeBtn.onclick = event => {
+              event.stopPropagation();
+              const [removed] = list.splice(index, 1);
+              if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+              renderReferenceCards(type);
+            };
+            item.append(img, tag, removeBtn);
+            previewGrid.appendChild(item);
+          });
+        }
+      }
     }
 
     function addLocalFilesToReferences(type, files) {
       const list = referencesFor(type);
+      let rejectedVideo = false;
       for (const file of files) {
-        if (!file?.type?.startsWith("image/") || list.length >= 3) continue;
+        if (isVideoFile(file)) {
+          rejectedVideo = true;
+          continue;
+        }
+        const isImage = file?.type?.startsWith("image/");
+        if (!isImage || list.length >= 3) continue;
         const key = localFileKey(file);
         if (list.some(item => item.source === "local" && localFileKey(item.file) === key)) continue;
-        list.push({ source: "local", file, name: file.name || "Ảnh mới", previewUrl: URL.createObjectURL(file) });
+        list.push({
+          source: "local",
+          file,
+          name: file.name || "Ảnh mới",
+          kind: "image",
+          previewUrl: URL.createObjectURL(file)
+        });
       }
+      if (rejectedVideo) setFeedback?.(t("referencePickerVideoUploadUnsupported", "Không hỗ trợ tải video từ máy. Hãy chọn video có sẵn trong Thư viện Flow."), false);
       renderReferenceCards(type);
     }
 
     function renderFlowPickerAssets() {
       const query = (searchInput.value || "").trim().toLocaleLowerCase();
-      const list = pickerFlowAssets.filter(asset => asset.kind === "image" && !asset.busy && !asset.error && asset.ready !== false)
+      const allowVideo = pickerType === "video" && pickerPurpose !== "frames";
+      const list = pickerFlowAssets.filter(asset => (asset.kind === "image" || (allowVideo && asset.kind === "video")) && !asset.busy && !asset.error && asset.ready !== false)
         .filter(asset => !query || String(asset.name || "").toLocaleLowerCase().includes(query));
       const assetCount = document.querySelector("#refPickerAssetCount");
       const moreButton = document.querySelector("#refPickerMore");
-      if (assetCount) assetCount.textContent = `Tìm thấy ${list.length} ảnh`;
+      if (assetCount) assetCount.textContent = `Tìm thấy ${list.length} ${allowVideo ? "media" : "ảnh"}`;
       if (moreButton) {
         moreButton.hidden = (list.length <= pickerVisibleLimit && pickerScannedCount < pickerScanLimit) || pickerFlowLoading;
         moreButton.textContent = list.length > pickerVisibleLimit
-          ? `⊕  Xem thêm ${list.length - pickerVisibleLimit} ảnh`
-          : pickerScannedCount >= pickerScanLimit ? "⊕  Quét thêm ảnh trên Flow" : "";
+          ? `⊕  Xem thêm ${list.length - pickerVisibleLimit} ${allowVideo ? "media" : "ảnh"}`
+          : pickerScannedCount >= pickerScanLimit ? `⊕  Quét thêm ${allowVideo ? "media" : "ảnh"} trên Flow` : "";
       }
       flowGrid.replaceChildren();
       const selectedReferences = pickerPurpose === "frames" ? frameSources : referencesFor(pickerType);
@@ -130,10 +196,11 @@
         const isExisting = existingIds.has(normalizedAssetId);
         const isPicked = pickerFlowSelection.has(assetId);
         const canIdentifySafely = supportedReferenceId(assetId);
+        const isVideo = asset.kind === "video";
         const button = document.createElement("button");
         button.type = "button";
         button.className = `ref-picker-asset${isExisting || isPicked ? " selected" : ""}`;
-        button.title = isExisting ? "Đã có trong danh sách tham chiếu" : !canIdentifySafely ? "Flow không cung cấp media ID ổn định cho ảnh này" : asset.name || "Ảnh Flow";
+        button.title = isExisting ? "Đã có trong danh sách tham chiếu" : !canIdentifySafely ? `Flow không cung cấp media ID ổn định cho ${isVideo ? "video" : "ảnh"} này` : asset.name || (isVideo ? "Video Flow" : "Ảnh Flow");
         button.disabled = isExisting || (!canIdentifySafely && !isPicked) || (!isPicked && selectedCount() >= selectionLimit());
         if (asset.thumbnailUrl) {
           const thumbnail = document.createElement("img");
@@ -145,8 +212,15 @@
         } else {
           const placeholder = document.createElement("div");
           placeholder.className = "ref-picker-asset-placeholder";
-          placeholder.textContent = "▧";
+          placeholder.textContent = isVideo ? "▶" : "▧";
           button.appendChild(placeholder);
+        }
+        if (isVideo) {
+          const videoIndicator = document.createElement("span");
+          videoIndicator.className = "ref-picker-video-badge";
+          videoIndicator.textContent = "▶ Video";
+          videoIndicator.style.cssText = "position:absolute;top:4px;left:4px;background:rgba(0,0,0,0.7);color:#fff;font-size:10px;padding:1px 4px;border-radius:3px;z-index:2;";
+          button.appendChild(videoIndicator);
         }
         if (isExisting || isPicked) {
           const check = document.createElement("span");
@@ -158,7 +232,7 @@
         }
         const name = document.createElement("span");
         name.className = "ref-picker-asset-name";
-        name.textContent = asset.name || "Ảnh không tên";
+        name.textContent = asset.name || (isVideo ? "Video không tên" : "Ảnh không tên");
         button.appendChild(name);
         button.onclick = () => {
           if (!canIdentifySafely || isExisting) return;
@@ -168,8 +242,14 @@
             pickerSelectionOrder = pickerSelectionOrder.filter(item => item !== selectedReference);
           } else if (selectedCount() < selectionLimit()) {
             const selectedReference = {
-              source: "flow", projectId: pickerProjectId, id: assetId, name: asset.name,
-              assetName: `asset:${asset.name}`, expectedId: assetId, thumbnailUrl: asset.thumbnailUrl || ""
+              source: "flow",
+              projectId: pickerProjectId,
+              id: assetId,
+              name: asset.name,
+              kind: asset.kind || (isVideo ? "video" : "image"),
+              assetName: `asset:${asset.name}`,
+              expectedId: assetId,
+              thumbnailUrl: asset.thumbnailUrl || ""
             };
             pickerFlowSelection.set(assetId, selectedReference);
             pickerSelectionOrder.push(selectedReference);
@@ -180,9 +260,9 @@
       }
       if (flowMessage) {
         flowMessage.hidden = !pickerFlowLoading && list.length > 0;
-        if (pickerFlowLoading) flowMessage.textContent = "Đang quét thư viện ảnh Flow...";
+        if (pickerFlowLoading) flowMessage.textContent = `Đang quét thư viện ${allowVideo ? "media" : "ảnh"} Flow...`;
         else if (!pickerProjectId) flowMessage.textContent = "Đang chờ xác định dự án Flow...";
-        else if (!list.length) flowMessage.textContent = query ? "Không tìm thấy ảnh khớp." : "Không tìm thấy ảnh sẵn sàng trong thư viện Flow. Hãy mở dự án Flow rồi quét lại.";
+        else if (!list.length) flowMessage.textContent = query ? `Không tìm thấy ${allowVideo ? "media" : "ảnh"} khớp.` : `Không tìm thấy ${allowVideo ? "media" : "ảnh"} sẵn sàng trong thư viện Flow. Hãy mở dự án Flow rồi quét lại.`;
       }
     }
 
@@ -229,7 +309,7 @@
         const assets = Array.isArray(result) ? result : (result?.assets || []);
         if (projectEpoch !== pickerProjectEpoch || projectId !== pickerProjectId) return;
         pickerScannedCount = assets.length;
-        pickerFlowAssets = assets.filter(asset => asset && asset.kind === "image" && typeof asset.name === "string");
+        pickerFlowAssets = assets.filter(asset => asset && (asset.kind === "image" || asset.kind === "video") && typeof asset.name === "string");
         flowAssetCacheByProject.set(projectId, { assets: pickerFlowAssets, scannedCount: assets.length });
         while (flowAssetCacheByProject.size > 5) flowAssetCacheByProject.delete(flowAssetCacheByProject.keys().next().value);
         pickerVisibleLimit = 20;
@@ -359,14 +439,27 @@
       pickerFlowScanned = Boolean(cachedProjectAssets);
       searchInput.value = "";
       localList.replaceChildren();
-      document.querySelector("#refPickerTitle").textContent = pickerPurpose === "frames" ? t("framePickerTitle", "Chọn ảnh nguồn Frames") : t("referencePickerTitle", "Chọn / Tải ảnh lên");
+      document.querySelector("#refPickerTitle").textContent = pickerPurpose === "frames" ? t("framePickerTitle", "Chọn ảnh nguồn Frames")
+        : pickerType === "video" ? t("videoReferencePickerTitle", "Chọn ảnh hoặc video tham chiếu")
+          : t("referencePickerTitle", "Chọn / Tải ảnh lên");
       document.querySelector("#refPickerLimitHint").textContent = pickerPurpose === "frames" ? t("framePickerLimit", "Tối đa 100 ảnh nguồn") : t("referencePickerLimit", "Tối đa 3 ảnh tham chiếu");
       document.querySelector("#refPickerUploadHint").textContent = pickerPurpose === "frames"
         ? t("framePickerUploadHint", "Ảnh sẽ được tải lên Flow trước khi xếp các prompt vào hàng đợi.")
-        : t("referencePickerUploadHint", "Ảnh sẽ được tải lên Flow khi bạn bấm Tạo ảnh hoặc Tạo video.");
-      document.querySelector('[data-ref-picker-tab="flow"]').textContent = pickerPurpose === "frames" ? t("framePickerFlowTab", "Thư viện Flow") : t("referencePickerFlowTab", "Ảnh trên Flow");
-      document.querySelector('[data-ref-picker-tab="upload"]').textContent = pickerPurpose === "frames" ? t("framePickerLocalTab", "Máy tính") : t("referencePickerLocalTab", "Upload");
+        : pickerType === "video"
+          ? t("videoReferencePickerUploadHint", "Ảnh từ máy có thể dùng làm tham chiếu; video phải được chọn từ Thư viện Flow.")
+          : t("referencePickerUploadHint", "Ảnh sẽ được tải lên Flow khi bạn bấm Tạo ảnh hoặc Tạo video.");
+      const localDescription = document.querySelector("#refPickerDrop > span");
+      if (localDescription) {
+        localDescription.textContent = pickerPurpose === "frames"
+          ? t("framePickerLocalDescription", "Chọn ảnh từ máy hoặc kéo thả ảnh vào đây")
+          : t("referencePickerLocalDescription", "Chỉ nhận ảnh từ máy; video từ máy chưa được hỗ trợ.");
+      }
+      document.querySelector('[data-ref-picker-tab="flow"]').textContent = pickerPurpose === "frames" ? t("framePickerFlowTab", "Thư viện Flow")
+        : pickerType === "video" ? t("videoReferencePickerFlowTab", "Ảnh & video trên Flow")
+          : t("referencePickerFlowTab", "Ảnh trên Flow");
+      document.querySelector('[data-ref-picker-tab="upload"]').textContent = pickerPurpose === "frames" ? t("framePickerLocalTab", "Máy tính") : t("referencePickerLocalTab", "Ảnh từ máy");
       document.querySelector("#refPickerConfirm").textContent = pickerPurpose === "frames" ? t("framePickerConfirm", "Thêm nguồn") : t("referencePickerConfirm", "Xác nhận");
+      fileInput.accept = "image/*";
       modal.hidden = false;
       document.body.style.overflow = "hidden";
       // Show the cached same-project gallery immediately, or scan it when the
@@ -405,19 +498,28 @@
       }
     };
     document.querySelector("#refPickerChooseFiles").onclick = () => fileInput.click();
-    fileInput.onchange = event => {
-      for (const file of Array.from(event.target.files || [])) {
-        if (!file.type.startsWith("image/")) continue;
+    function addPickerLocalFiles(files) {
+      let rejectedVideo = false;
+      for (const file of Array.from(files || [])) {
+        if (isVideoFile(file)) {
+          rejectedVideo = true;
+          continue;
+        }
+        if (!file?.type?.startsWith("image/")) continue;
         if (selectedCount() >= selectionLimit()) break;
         const key = localFileKey(file);
         if (pickerLocalFiles.some(entry => localFileKey(entry.file) === key) || hasLocalFile(file)) continue;
-        const entry = { source: "local", file, previewUrl: URL.createObjectURL(file) };
+        const entry = { source: "local", file, kind: "image", previewUrl: URL.createObjectURL(file) };
         pickerLocalFiles.push(entry);
         pickerSelectionOrder.push(entry);
       }
-      fileInput.value = "";
+      if (rejectedVideo) setFeedback?.(t("referencePickerVideoUploadUnsupported", "Không hỗ trợ tải video từ máy. Hãy chọn video có sẵn trong Thư viện Flow."), false);
       renderPickerLocalFiles();
       updatePickerCount();
+    }
+    fileInput.onchange = event => {
+      addPickerLocalFiles(event.target.files);
+      fileInput.value = "";
     };
     const dropTarget = document.querySelector("#refPickerDrop");
     dropTarget.ondragover = event => { event.preventDefault(); dropTarget.style.borderColor = "var(--primary)"; };
@@ -425,17 +527,7 @@
     dropTarget.ondrop = event => {
       event.preventDefault();
       dropTarget.style.borderColor = "";
-      for (const file of Array.from(event.dataTransfer?.files || [])) {
-        if (!file.type.startsWith("image/")) continue;
-        if (selectedCount() >= selectionLimit()) break;
-        const key = localFileKey(file);
-        if (pickerLocalFiles.some(entry => localFileKey(entry.file) === key) || hasLocalFile(file)) continue;
-        const entry = { source: "local", file, previewUrl: URL.createObjectURL(file) };
-        pickerLocalFiles.push(entry);
-        pickerSelectionOrder.push(entry);
-      }
-      renderPickerLocalFiles();
-      updatePickerCount();
+      addPickerLocalFiles(event.dataTransfer?.files);
     };
     modal.onclick = event => { if (event.target === modal) close(); };
     document.addEventListener("keydown", event => { if (event.key === "Escape" && !modal.hidden) close(); });
@@ -491,7 +583,7 @@
     document.querySelector("#refPickerConfirm").onclick = () => {
       const list = referencesFor(pickerType);
       const pending = [...pickerSelectionOrder].map(entry => entry.source === "local"
-        ? { ...entry, name: entry.file.name || "Ảnh mới" }
+        ? { ...entry, name: entry.file.name || (entry.kind === "video" ? "Video mới" : "Ảnh mới") }
         : entry);
       if (pickerPurpose === "frames") {
         const additions = pending.filter(entry => !hasFrameSource(entry)).slice(0, Math.max(0, selectionLimit() - frameSources.length));
@@ -550,6 +642,9 @@
         return [...frameSources];
       },
       openFrames: onChanged => { onFrameSourcesChanged = onChanged; open("video", "frames"); },
+      open: (type = "image", purpose = "references") => open(type, purpose),
+      renderReferenceCards,
+      addLocalFilesToReferences,
     };
   }
 

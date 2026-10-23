@@ -1,1104 +1,1174 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="vi">
 <head>
-  <meta charset="utf-8">
+  <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Flow MCP Studio</title>
-  <style>
-    :root {
-      --bg: #1e1e1e;
-      --card: #292929;
-      --card-elevated: #2e2e33;
-      --border: rgba(255, 255, 255, 0.08);
-      --border-hover: rgba(255, 255, 255, 0.16);
-      --text: #dedede;
-      --text-primary: #f8fafc;
-      --text-muted: #8b8b92;
-      --text-dim: #65656c;
-      
-      /* TobyFlow signature Neon Lime theme */
-      --primary: #ccff00;
-      --primary-hover: #b8e600;
-      --primary-fg: #1e1e1e;
-      --primary-glow: rgba(204, 255, 0, 0.25);
-
-      --success: #22c55e;
-      --success-bg: rgba(34, 197, 94, 0.12);
-      --danger: #ef4444;
-      --danger-bg: rgba(239, 68, 68, 0.12);
-      --warning: #f59e0b;
-      --warning-bg: rgba(245, 158, 11, 0.12);
-      
-      --radius: 8px;
-      --radius-sm: 6px;
-      --radius-pill: 20px;
-      --font: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    body {
-      width: 100%;
-      height: 100vh;
-      font-family: var(--font);
-      background-color: var(--bg);
-      color: var(--text);
-      font-size: 13px;
-      line-height: 1.5;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-      user-select: none;
-    }
-
-    /* TobyFlow Header */
-    .tobyflow-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 12px 16px;
-      background: var(--bg);
-      border-bottom: 1px solid var(--border);
-      flex-shrink: 0;
-    }
-
-    .tobyflow-header-brand {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .tobyflow-header-logo {
-      width: 28px;
-      height: 28px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border-radius: var(--radius-sm);
-      background: var(--card);
-      border: 1px solid var(--border);
-      color: var(--primary);
-    }
-
-    .tobyflow-header-title {
-      font-size: 15px;
-      font-weight: 700;
-      color: var(--text-primary);
-      letter-spacing: -0.2px;
-    }
-
-    .tobyflow-user-plan-badge {
-      font-size: 10px;
-      font-weight: 700;
-      background: rgba(204, 255, 0, 0.12);
-      color: var(--primary);
-      border: 1px solid rgba(204, 255, 0, 0.3);
-      padding: 1px 7px;
-      border-radius: var(--radius-pill);
-      letter-spacing: 0.2px;
-      text-transform: uppercase;
-    }
-
-    .tobyflow-header-actions {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .tobyflow-header-btn {
-      width: 28px;
-      height: 28px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      color: var(--text-muted);
-      cursor: pointer;
-      transition: all 0.15s ease;
-    }
-
-    .tobyflow-header-btn:hover {
-      background: var(--card-elevated);
-      color: var(--text-primary);
-      border-color: var(--border-hover);
-    }
-
-    /* Tabs Bar TobyFlow style */
-    .tobyflow-tabs {
-      display: flex;
-      align-items: center;
-      padding: 8px 16px;
-      gap: 6px;
-      background: var(--bg);
-      border-bottom: 1px solid var(--border);
-      flex-shrink: 0;
-      overflow-x: auto;
-    }
-
-    .tobyflow-tab {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 6px 12px;
-      border-radius: var(--radius-pill);
-      background: transparent;
-      border: 1px solid transparent;
-      color: var(--text-muted);
-      font-size: 12px;
-      font-weight: 600;
-      cursor: pointer;
-      white-space: nowrap;
-      transition: all 0.15s ease;
-    }
-
-    .tobyflow-tab:hover {
-      color: var(--text-primary);
-      background: rgba(255, 255, 255, 0.04);
-    }
-
-    .tobyflow-tab.active {
-      background: var(--card);
-      border-color: var(--border);
-      color: var(--text-primary);
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-    }
-
-    .tobyflow-tab.active svg {
-      color: var(--primary);
-    }
-
-    /* Tab Panes */
-    .tabs-content {
-      flex: 1;
-      overflow-y: auto;
-      padding: 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-    }
-
-    .tab-pane {
-      display: none;
-      flex-direction: column;
-      gap: 14px;
-    }
-
-    .tab-pane.active {
-      display: flex;
-    }
-
-    /* Segmented Mode Controller (Image / Video / Character) */
-    .mode-segments {
-      display: flex;
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 3px;
-      gap: 3px;
-    }
-
-    .mode-segment-btn {
-      flex: 1;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      padding: 8px 10px;
-      background: transparent;
-      border: none;
-      color: var(--text-muted);
-      font-size: 12px;
-      font-weight: 700;
-      border-radius: var(--radius-sm);
-      cursor: pointer;
-      transition: all 0.18s ease;
-    }
-
-    .mode-segment-btn:hover {
-      color: var(--text-primary);
-    }
-
-    .mode-segment-btn.active {
-      background: var(--primary);
-      color: var(--primary-fg);
-      box-shadow: 0 1px 6px var(--primary-glow);
-    }
-
-    /* Section Cards */
-    .section-card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 14px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-
-    .section-title {
-      font-size: 12px;
-      font-weight: 700;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .section-title svg {
-      color: var(--primary);
-    }
-
-    /* Form Fields */
-    .form-group {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-
-    #videoFrameNamesGroup[hidden] { display: none !important; }
-    #videoDurationGroup[hidden], #videoResolutionGroup[hidden] { display: none !important; }
-    #videoReferenceOptionsGroup[hidden], #videoReferenceSection[hidden], #videoCharacterGroup[hidden], #flowVoicePickerGroup[hidden] { display: none !important; }
-    #videoChainOption[hidden] { display: none !important; }
-    #videoFrameNamesGroup textarea { min-height: 54px; }
-
-    .form-label {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text-muted);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    .form-textarea {
-      width: 100%;
-      min-height: 80px;
-      background: #181818;
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      padding: 10px 12px;
-      color: var(--text-primary);
-      font-family: var(--font);
-      font-size: 13px;
-      line-height: 1.4;
-      resize: vertical;
-      outline: none;
-      transition: border-color 0.2s ease;
-    }
-
-    .form-textarea:focus {
-      border-color: var(--primary);
-    }
-
-    .multi-prompt-tools { display:flex; align-items:center; justify-content:space-between; gap:8px; color:var(--text-muted); font-size:11px; }
-    .multi-prompt-tools .btn { width:auto; padding:6px 9px; }
-    .multi-prompt-hint { color:var(--text-muted); font-size:11px; }
-    .multi-prompt-hint[hidden] { display:none !important; }
-
-    .form-input {
-      background: #181818;
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      padding: 9px 12px;
-      color: var(--text-primary);
-      font-family: var(--font);
-      font-size: 13px;
-      outline: none;
-      transition: border-color 0.2s ease;
-    }
-
-    .form-input:focus {
-      border-color: var(--primary);
-    }
-
-    .form-select {
-      background: #181818;
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      padding: 8px 12px;
-      color: var(--text-primary);
-      font-family: var(--font);
-      font-size: 12.5px;
-      outline: none;
-      cursor: pointer;
-    }
-
-    .form-select:focus {
-      border-color: var(--primary);
-    }
-
-    .grid-2 {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-    }
-
-    /* Reference Image Section (TobyFlow style) */
-    .ref-section {
-      background: #141414;
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 12px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-
-    .ref-section-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    .ref-section-title {
-      font-size: 12px;
-      font-weight: 700;
-      color: var(--text-primary);
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .ref-count-badge {
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--text-muted);
-      background: rgba(255, 255, 255, 0.05);
-      padding: 2px 8px;
-      border-radius: 10px;
-    }
-
-    .ref-container {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-
-    .ref-cards-list {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      overflow-x: auto;
-      padding: 4px 2px;
-    }
-
-    .ref-upload-slot {
-      width: 72px;
-      height: 72px;
-      border: 1.5px dashed var(--border-hover);
-      border-radius: var(--radius-sm);
-      background: rgba(255, 255, 255, 0.02);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 4px;
-      color: var(--text-muted);
-      font-size: 10.5px;
-      font-weight: 600;
-      font-family: inherit;
-      padding: 0;
-      text-align: center;
-      cursor: pointer;
-      flex-shrink: 0;
-      transition: all 0.18s ease;
-    }
-
-    .ref-upload-slot:hover {
-      border-color: var(--primary);
-      color: var(--primary);
-      background: rgba(204, 255, 0, 0.04);
-    }
-
-    .ref-card {
-      position: relative;
-      width: 72px;
-      height: 72px;
-      border-radius: var(--radius-sm);
-      overflow: hidden;
-      border: 1.5px solid var(--border);
-      background: #0f0f12;
-      flex-shrink: 0;
-    }
-
-    .ref-card img {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-    }
-
-    .ref-badge {
-      position: absolute;
-      top: 4px;
-      left: 4px;
-      width: 18px;
-      height: 18px;
-      border-radius: 4px;
-      background: var(--primary);
-      color: #000;
-      font-size: 11px;
-      font-weight: 800;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.5);
-    }
-
-    .ref-tag {
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      background: rgba(0, 0, 0, 0.75);
-      color: var(--primary);
-      font-size: 9px;
-      font-weight: 700;
-      text-align: center;
-      padding: 2px 4px;
-      letter-spacing: -0.2px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .ref-remove-btn {
-      position: absolute;
-      top: 3px;
-      right: 3px;
-      width: 18px;
-      height: 18px;
-      border-radius: 4px;
-      background: rgba(0, 0, 0, 0.7);
-      color: #ef4444;
-      border: none;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      opacity: 0.8;
-      transition: opacity 0.15s, background 0.15s;
-    }
-
-    .ref-remove-btn:hover {
-      opacity: 1;
-      background: #ef4444;
-      color: #fff;
-    }
-
-    .ref-dropzone-hint {
-      font-size: 11px;
-      color: var(--text-dim);
-      text-align: center;
-      padding: 6px;
-      border-radius: var(--radius-sm);
-      background: rgba(255, 255, 255, 0.02);
-      border: 1px dashed rgba(255, 255, 255, 0.06);
-      cursor: pointer;
-      transition: border-color 0.15s;
-    }
-
-    .ref-dropzone-hint:hover {
-      border-color: var(--border-hover);
-      color: var(--text-muted);
-    }
-
-    .ref-section--compact { margin-top: 8px; gap: 5px; }
-    .ref-section--compact .ref-cards-list { gap: 7px; padding: 2px; }
-    .ref-section--compact .ref-card, .ref-section--compact .ref-upload-slot { width: 54px; height: 54px; }
-    .ref-section--compact .ref-upload-slot svg { width: 15px; height: 15px; }
-    .ref-section--compact .ref-upload-slot span { font-size: 9px; }
-    .ref-section--compact .ref-dropzone-hint { text-align: left; font-size: 10px; }
-
-    .ref-picker-overlay {
-      position: fixed;
-      inset: 0;
-      z-index: 10000;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 16px;
-      background: rgba(0, 0, 0, 0.72);
-    }
-
-    .ref-picker-overlay { overflow: auto; }
-    .ref-picker-overlay[hidden] { display: none; }
-
-    .ref-picker-dialog {
-      width: min(620px, 100%);
-      height: min(760px, 92vh);
-      max-height: min(760px, calc(100dvh - 32px));
-      min-height: 0;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-      color: var(--text-primary);
-      background: #202020;
-      border: 1px solid #414141;
-      border-radius: 16px;
-      box-shadow: 0 20px 70px rgba(0, 0, 0, 0.65);
-    }
-
-    .ref-picker-header, .ref-picker-footer {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 14px 18px;
-      flex-shrink: 0;
-    }
-
-    .ref-picker-header { border-bottom: 1px solid #363636; font-weight: 700; }
-    .ref-picker-footer { position: sticky; bottom: 0; z-index: 1; min-height: 62px; box-sizing: border-box; border-top: 1px solid #363636; color: var(--text-muted); background: #202020; font-size: 12px; }
-
-    .ref-picker-close {
-      width: 32px; height: 32px; border: 0; border-radius: 8px;
-      color: var(--text-muted); background: transparent; font-size: 20px; cursor: pointer;
-    }
-
-    .ref-picker-close:hover { color: white; background: #343434; }
-
-    .ref-picker-tabs {
-      display: grid; grid-template-columns: 1fr 1fr; flex-shrink: 0;
-      border-bottom: 1px solid #363636;
-    }
-
-    .ref-picker-tab {
-      padding: 12px 8px; border: 0; border-bottom: 2px solid transparent;
-      color: var(--text-muted); background: transparent; font: inherit; cursor: pointer;
-    }
-
-    .ref-picker-tab.active { color: var(--text-primary); border-bottom-color: var(--primary); }
-
-    .ref-picker-content { flex: 1 1 0; min-height: 0; overflow: auto; padding: 14px 18px; }
-    .ref-picker-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
-    .ref-picker-results { display:flex; justify-content:space-between; align-items:center; gap:10px; margin:0 0 10px; color:var(--text-muted); font-size:11px; }
-    .ref-picker-search {
-      width: 100%; min-width: 0; padding: 9px 11px; color: var(--text-primary);
-      background: #151515; border: 1px solid #383838; border-radius: 8px; outline: none;
-    }
-    .ref-picker-search:focus { border-color: var(--primary); }
-    .ref-picker-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
-    .ref-picker-asset {
-      position: relative; min-width: 0; aspect-ratio: 1; padding: 0; overflow: hidden;
-      color: white; background: #111; border: 2px solid transparent; border-radius: 10px; cursor: pointer;
-    }
-    .ref-picker-asset:hover { border-color: #8aa800; }
-    .ref-picker-asset.selected { border-color: var(--primary); }
-    .ref-picker-asset:disabled { cursor: not-allowed; opacity: 0.5; }
-    .ref-picker-asset img { width: 100%; height: 100%; object-fit: cover; display: block; }
-    .ref-picker-asset-placeholder { height: 100%; display: grid; place-items: center; color: #777; font-size: 26px; }
-    .ref-picker-asset-name {
-      position: absolute; inset: auto 0 0; padding: 16px 5px 5px; overflow: hidden;
-      color: white; text-align: left; text-overflow: ellipsis; white-space: nowrap; font-size: 10px;
-      background: linear-gradient(transparent, rgba(0,0,0,.82));
-    }
-    .ref-picker-check {
-      position: absolute; top: 5px; left: 5px; display: grid; place-items: center;
-      width: 20px; height: 20px; border-radius: 6px; color: #111; background: var(--primary); font-weight: 800;
-    }
-    .ref-picker-message { padding: 36px 12px; color: var(--text-muted); text-align: center; font-size: 12px; }
-    .ref-picker-more { width:100%; margin-top:12px; padding:12px; color:var(--text-muted); background:#1a1a1a; border:1px dashed #414141; border-radius:10px; cursor:pointer; }
-    .ref-picker-more:hover { color:var(--text-primary); border-color:var(--primary); }
-    .ref-picker-drop {
-      min-height: 180px; display: flex; flex-direction: column; align-items: center; justify-content: center;
-      gap: 12px; padding: 20px; border: 1px dashed #4a4a4a; border-radius: 12px; color: var(--text-muted); text-align: center;
-    }
-    .ref-picker-local-list { display: grid; gap: 8px; margin-top: 12px; }
-    .ref-picker-local-row { display: flex; align-items: center; gap: 10px; padding: 7px; background: #171717; border-radius: 8px; font-size: 11px; }
-    .ref-picker-local-row img { width: 42px; height: 42px; object-fit: cover; border-radius: 6px; }
-    .ref-picker-local-row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .video-frame-source-head,.video-frame-assignment-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px}
-    .video-frame-source-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(82px,1fr));gap:8px;margin-top:10px}
-    .video-frame-source-card{position:relative;min-width:0}
-    .video-frame-source{width:100%;min-width:0;padding:4px;background:#181818;border:1px solid #3a3a3a;border-radius:8px;color:var(--text-primary);cursor:pointer;text-align:left}
-    .video-frame-source:hover,.video-frame-source.is-target{border-color:var(--primary)}
-    .video-frame-source img,.video-frame-source__placeholder{display:grid;width:100%;height:64px;object-fit:cover;place-items:center;border-radius:5px;background:#252525;color:#888}
-    .video-frame-source__name{display:block;overflow:hidden;margin-top:4px;font-size:10px;text-overflow:ellipsis;white-space:nowrap}
-    .video-frame-source-actions{position:absolute;top:7px;right:7px;display:flex;gap:3px}
-    .video-frame-source-action{width:22px;height:22px;padding:0;border:0;border-radius:50%;background:#111d;color:#fff;cursor:pointer;font-size:12px}
-    .video-frame-source-action:hover{background:#333}
-    .video-frame-source-action:disabled{opacity:.4;cursor:not-allowed}
-    .video-frame-assignment-toolbar{margin:12px 0 8px}
-    .video-frame-assignment-toolbar .form-select{flex:1;min-width:0}
-    .video-frame-assignment-list{display:grid;gap:8px}
-    .video-frame-assignment{padding:8px;border:1px solid #343434;border-radius:8px;background:#191919}
-    .video-frame-assignment__prompt{overflow:hidden;margin-bottom:7px;color:var(--text-muted);font-size:11px;text-overflow:ellipsis;white-space:nowrap}
-    .video-frame-assignment__slots{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-    .video-frame-slot-wrap{display:flex;min-width:0;gap:4px}
-    .video-frame-slot{display:flex;flex:1;align-items:center;min-width:0;gap:6px;padding:5px;background:#222;border:1px dashed #505050;border-radius:6px;color:var(--text-primary);cursor:pointer;text-align:left}
-    .video-frame-slot.is-active{border-color:var(--primary);box-shadow:0 0 0 1px var(--primary)}
-    .video-frame-slot img,.video-frame-slot__empty{flex:0 0 34px;width:34px;height:34px;object-fit:cover;border-radius:4px;background:#303030;color:#aaa}
-    .video-frame-slot__label{overflow:hidden;font-size:10px;text-overflow:ellipsis;white-space:nowrap}
-    .video-frame-slot-clear{width:24px;padding:0;border:0;background:transparent;color:#999;cursor:pointer}
-
-    @media (max-width: 420px) {
-      .ref-picker-overlay { padding: 8px; }
-      .ref-picker-header, .ref-picker-footer { padding: 11px 13px; }
-      .ref-picker-content { padding: 12px 13px; }
-      .ref-picker-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-    }
-
-    /* Buttons */
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      padding: 10px 14px;
-      font-family: var(--font);
-      font-size: 13px;
-      font-weight: 700;
-      border-radius: var(--radius);
-      cursor: pointer;
-      border: none;
-      transition: all 0.18s ease;
-      width: 100%;
-    }
-
-    .btn:active {
-      transform: scale(0.98);
-    }
-
-    .btn-primary {
-      background: var(--primary);
-      color: var(--primary-fg);
-      box-shadow: 0 2px 10px var(--primary-glow);
-    }
-
-    .btn-primary:hover {
-      background: var(--primary-hover);
-      box-shadow: 0 4px 14px rgba(204, 255, 0, 0.35);
-    }
-
-    .btn-secondary {
-      background: var(--card-elevated);
-      border: 1px solid var(--border);
-      color: var(--text-primary);
-    }
-
-    .btn-secondary:hover {
-      background: #36363c;
-      border-color: var(--border-hover);
-    }
-
-    /* Status Row */
-    .status-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    .status-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 12px;
-      font-weight: 600;
-      padding: 3px 10px;
-      border-radius: var(--radius-pill);
-      background: rgba(255, 255, 255, 0.05);
-      color: var(--text-muted);
-      border: 1px solid var(--border);
-    }
-
-    .status-badge.connected {
-      background: var(--success-bg);
-      color: #4ade80;
-      border: 1px solid rgba(34, 197, 94, 0.3);
-    }
-
-    .status-badge.disconnected {
-      background: var(--danger-bg);
-      color: #f87171;
-      border: 1px solid rgba(239, 68, 68, 0.3);
-    }
-
-    .pulse-dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: currentColor;
-    }
-
-    .status-badge.connected .pulse-dot {
-      animation: pulse 1.8s infinite;
-    }
-
-    @keyframes pulse {
-      0% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.7); }
-      70% { box-shadow: 0 0 0 5px rgba(74, 222, 128, 0); }
-      100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
-    }
-
-    .info-list {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      font-size: 12.5px;
-    }
-
-    .info-item {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      color: var(--text-muted);
-    }
-
-    .info-tag {
-      font-weight: 600;
-      color: var(--text-primary);
-      font-family: ui-monospace, monospace;
-      font-size: 12px;
-      background: rgba(255, 255, 255, 0.04);
-      padding: 2px 7px;
-      border-radius: 4px;
-      border: 1px solid rgba(255, 255, 255, 0.05);
-    }
-
-    /* Logs view */
-    .logs-container {
-      background: #181818;
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      padding: 10px;
-      height: 380px;
-      overflow-y: auto;
-      font-family: ui-monospace, monospace;
-      font-size: 11.5px;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-
-    .log-entry {
-      padding: 6px 8px;
-      border-radius: 4px;
-      background: rgba(255, 255, 255, 0.02);
-      border-left: 2px solid var(--text-dim);
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-    }
-
-    .log-entry.ok {
-      border-left-color: #22c55e;
-    }
-
-    .log-entry.error {
-      border-left-color: #ef4444;
-      background: rgba(239, 68, 68, 0.06);
-    }
-
-    .log-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      color: var(--text-primary);
-      font-weight: 600;
-    }
-
-    .log-time {
-      font-size: 10px;
-      color: var(--text-dim);
-    }
-
-    .log-detail {
-      color: var(--text-muted);
-      font-size: 11px;
-    }
-
-    .logs-empty {
-      color: var(--text-dim);
-      text-align: center;
-      padding: 40px 10px;
-    }
-
-    .feedback-box {
-      font-size: 12px;
-      text-align: center;
-      min-height: 20px;
-      color: #4ade80;
-      font-weight: 600;
-      transition: all 0.2s ease;
-    }
-
-    .image-confirm-dialog {
-      width: min(440px, calc(100vw - 28px));
-      max-height: min(90vh, 720px);
-      margin: auto;
-      padding: 0;
-      overflow: auto;
-      color: var(--text);
-      background: var(--card-elevated);
-      border: 1px solid var(--border-hover);
-      border-radius: 12px;
-      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
-    }
-
-    .image-confirm-dialog::backdrop {
-      background: rgba(5, 7, 10, 0.74);
-      backdrop-filter: blur(2px);
-    }
-
-    .image-confirm-content { padding: 20px; }
-    .image-confirm-title { color: var(--text-primary); font-size: 17px; margin-bottom: 4px; }
-    .image-confirm-description { color: var(--text-muted); font-size: 12px; margin-bottom: 16px; }
-    .image-confirm-summary {
-      display: grid;
-      gap: 1px;
-      margin-bottom: 16px;
-      overflow: hidden;
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      background: var(--border);
-    }
-    .image-confirm-summary-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      min-height: 38px;
-      padding: 8px 10px;
-      background: var(--card);
-    }
-    .image-confirm-summary-row span { color: var(--text-muted); }
-    .image-confirm-summary-row strong { color: var(--text-primary); text-align: right; overflow-wrap: anywhere; }
-    .image-confirm-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .image-confirm-fields .form-group { min-width: 0; }
-    .image-confirm-actions { display: grid; grid-template-columns: 1fr 1.35fr; gap: 8px; margin-top: 18px; }
-    .image-confirm-actions .btn { min-width: 0; padding: 9px 10px; }
-  </style>
+  <title>Toby Flow</title>
+  <!-- Stylesheets matching TobyFlow -->
+  <link rel="stylesheet" href="sidebar.css">
+  <link rel="stylesheet" href="sidebar-light.css">
   <link rel="stylesheet" href="tobyflow-ui.css">
 </head>
-<body class="flow-mcp-sidebar">
-  <!-- Header TobyFlow style (Clean Sparkle Logo) -->
-  <header class="tobyflow-header">
-    <div class="tobyflow-header-brand">
-      <div class="tobyflow-header-logo">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M12 2L14.2 9.8L22 12L14.2 14.2L12 22L9.8 14.2L2 12L9.8 9.8L12 2Z"/>
-        </svg>
-      </div>
-      <span class="tobyflow-header-title">Flow MCP</span>
-      <span class="tobyflow-user-plan-badge">STUDIO</span>
+<body data-tf-rev="b7f3a91c" class="flow-mcp-sidebar">
+  <!-- Loading Overlay -->
+  <div id="tobyflow-loading-overlay" class="tobyflow-loading-overlay hidden">
+    <div class="tobyflow-loading-content">
+      <div class="tobyflow-loading-spinner"></div>
+      <p class="tobyflow-loading-text" id="tobyflow-loading-text">Loading...</p>
     </div>
-    <div class="tobyflow-header-actions">
-      <!-- Language switch -->
-      <button class="tobyflow-header-btn" id="langSwitchBtn" title="Chuyển ngôn ngữ / Switch Language">
-        <span id="langSwitchLabel" style="font-weight: 700; font-size: 11px;">VI</span>
-      </button>
+  </div>
 
-      <!-- Reload button -->
-      <button class="tobyflow-header-btn" id="reloadBtn" title="Làm mới trạng thái">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="23 4 23 10 17 10"></polyline>
-          <polyline points="1 20 1 14 7 14"></polyline>
-          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-        </svg>
-      </button>
+  <!-- Connecting Overlay -->
+  <div id="tobyflow-connecting-overlay" class="tobyflow-connecting-overlay hidden">
+    <div class="tobyflow-connecting-content">
+      <div class="tobyflow-connecting-spinner"></div>
+      <p class="tobyflow-connecting-text">Connecting to Flow...</p>
     </div>
-  </header>
+  </div>
 
-  <!-- Navigation Tabs -->
-  <nav class="tobyflow-tabs" role="tablist" aria-label="Điều hướng Flow MCP">
-    <button class="tobyflow-tab active" id="navCreate" role="tab" aria-selected="true" aria-controls="tab-create" tabindex="0" data-tab="tab-create">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M12 2L14.2 9.8L22 12L14.2 14.2L12 22L9.8 14.2L2 12L9.8 9.8L12 2Z"/>
-      </svg>
-      <span id="tabCreateLabel">Tạo nội dung</span>
-    </button>
-    <button class="tobyflow-tab" id="navWorkflow" role="tab" aria-selected="false" aria-controls="tab-workflow" tabindex="-1" data-tab="tab-workflow">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M4 5h16M4 12h10M4 19h16"/><circle cx="18" cy="12" r="2"/><circle cx="7" cy="5" r="2"/><circle cx="7" cy="19" r="2"/>
-      </svg>
-      <span id="tabWorkflowLabel">Quy trình</span>
-    </button>
-    <button class="tobyflow-tab" id="navPrompts" role="tab" aria-selected="false" aria-controls="tab-prompts" tabindex="-1" data-tab="tab-prompts">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/>
-      </svg>
-      <span id="tabPromptsLabel">Prompt</span>
-    </button>
-    <button class="tobyflow-tab" id="navLibrary" role="tab" aria-selected="false" aria-controls="tab-library" tabindex="-1" data-tab="tab-library">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2h6.5A2.5 2.5 0 0 1 21 9.5v8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z"/><path d="M3 10h18"/>
-      </svg>
-      <span id="tabLibraryLabel">Thư viện</span>
-    </button>
-    <button class="tobyflow-tab" id="navTasks" role="tab" aria-selected="false" aria-controls="tab-tasks" tabindex="-1" data-tab="tab-tasks">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <rect x="3" y="4" width="18" height="17" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M8 14h3M8 17h7"/>
-      </svg>
-      <span id="tabTasksLabel">Tác vụ</span>
-    </button>
-    <button class="tobyflow-tab" id="navHistory" role="tab" aria-selected="false" aria-controls="tab-history" tabindex="-1" data-tab="tab-history">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/><path d="M3 12H1"/>
-      </svg>
-      <span id="tabHistoryLabel">Lịch sử</span>
-    </button>
-    <button class="tobyflow-tab" id="navStatus" role="tab" aria-selected="false" aria-controls="tab-status" tabindex="-1" data-tab="tab-status">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
-      </svg>
-      <span id="tabStatusLabel">Trạng thái</span>
-    </button>
-    <button class="tobyflow-tab" id="navLogs" role="tab" aria-selected="false" aria-controls="tab-logs" tabindex="-1" data-tab="tab-logs">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-        <polyline points="14 2 14 8 20 8"></polyline>
-        <line x1="16" y1="13" x2="8" y2="13"></line>
-        <line x1="16" y1="17" x2="8" y2="17"></line>
-      </svg>
-      <span id="tabLogsLabel">Nhật ký MCP</span>
-    </button>
-    <button class="tobyflow-tab" id="navSettings" role="tab" aria-selected="false" aria-controls="tab-settings" tabindex="-1" data-tab="tab-settings">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="3"></circle>
-        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-      </svg>
-      <span id="tabSettingsLabel">Cài đặt</span>
-    </button>
-  </nav>
-
-  <!-- Panes Content -->
-  <div class="tabs-content">
-    <!-- TAB 1: CREATE (TẠO ẢNH / VIDEO / NHÂN VẬT) -->
-    <div id="tab-create" class="tab-pane active" role="tabpanel" aria-labelledby="navCreate" tabindex="0">
-      <div class="pane-heading">
-        <div><span class="pane-kicker">FLOW MCP</span><h1 id="viewCreateTitle">Tạo nội dung</h1><p id="viewCreateSubtitle">Tạo ảnh, video hoặc nhân vật trên tab Flow đang kết nối.</p></div>
-      </div>
-      <!-- Mode Segment Switcher -->
-      <div class="mode-segments">
-        <button class="mode-segment-btn active" id="btnModeImage" data-mode="image">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-            <circle cx="8.5" cy="8.5" r="1.5"></circle>
-            <polyline points="21 15 16 10 5 21"></polyline>
-          </svg>
-          <span id="txtModeImage">Tạo Ảnh</span>
-        </button>
-        <button class="mode-segment-btn" id="btnModeVideo" data-mode="video">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="m22 8-6 4 6 4V8Z"></path>
-            <rect x="2" y="6" width="14" height="12" rx="2" ry="2"></rect>
-          </svg>
-          <span id="txtModeVideo">Tạo Video</span>
-        </button>
-        <button class="mode-segment-btn" id="btnModeCharacter" data-mode="character">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="7" r="4"></circle>
-            <path d="M5.5 21v-2a6.5 6.5 0 0 1 13 0v2"></path>
-          </svg>
-          <span id="txtModeCharacter">Tạo Nhân Vật</span>
-        </button>
-      </div>
-
-      <!-- FORM TẠO ẢNH (IMAGE) -->
-      <div class="section-card" id="formImage">
-        <div class="form-group">
-          <label class="form-label" id="lblPromptImage">Câu lệnh Prompt:</label>
-          <textarea class="form-textarea" id="inputPromptImage" placeholder="Mô tả bức ảnh bạn muốn tạo..."></textarea>
-          <div class="multi-prompt-tools">
-            <span id="promptCountImage" aria-live="polite">0 prompt</span>
-            <button class="btn btn-secondary" type="button" id="btnImportPromptsImage">Nhập .txt/.csv</button>
-            <input type="file" id="inputImportPromptsImage" accept=".txt,.csv,text/plain,text/csv" hidden>
+  <div id="flow-auto-sidebar-root">
+    <div class="flow-app">
+      <!-- ============================================== -->
+      <!-- HEADER (.tobyflow-header)                      -->
+      <!-- ============================================== -->
+      <header class="tobyflow-header">
+        <div class="tobyflow-header-brand">
+          <div class="tobyflow-header-logo">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2L14.2 9.8L22 12L14.2 14.2L12 22L9.8 14.2L2 12L9.8 9.8L12 2Z"/>
+            </svg>
           </div>
-          <small class="multi-prompt-hint" id="promptBatchHintImage" hidden>Mỗi đoạn cách nhau bằng một dòng trống sẽ thành một tác vụ.</small>
-          <div class="ref-section ref-section--compact">
-            <div class="ref-section-header">
-              <span class="ref-section-title">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                  <circle cx="8.5" cy="8.5" r="1.5"/>
-                  <polyline points="21 15 16 10 5 21"/>
+          <span class="tobyflow-header-title">Toby Flow</span>
+          <span class="tobyflow-user-plan-badge" id="userPlanBadge" data-plan="free" data-i18n-title="settings.planBadgeTooltip" title="Plan &amp; quota">Free</span>
+        </div>
+        <div class="tobyflow-header-actions">
+          <!-- Screen capture (prominent yellow) -->
+          <button class="tobyflow-header-btn tobyflow-header-capture" id="headerCaptureBtn" type="button" data-i18n-tooltip="header.capture" data-tooltip-pos="bottom" title="Chụp màn hình">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="12" cy="12" r="4" stroke="currentColor" fill="currentColor" stroke-width="1.5"></circle>
+              <path d="M22 12C22 16.714 22 19.0711 20.5355 20.5355C19.0711 22 16.714 22 12 22C7.28595 22 4.92893 22 3.46447 20.5355C2 19.0711 2 16.714 2 12C2 7.28595 2 4.92893 3.46447 3.46447C4.92893 2 7.28595 2 12 2C16.714 2 19.0711 2 20.5355 3.46447C21.5093 4.43821 21.8356 5.80655 21.9449 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
+            </svg>
+          </button>
+          <!-- Changelog -->
+          <button class="tobyflow-header-btn tobyflow-announcement-badge-wrap" id="changelogBtn" type="button" data-i18n-tooltip="header.changelog" data-tooltip-pos="bottom" title="Nhật ký cập nhật">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="16" y1="13" x2="8" y2="13" />
+              <line x1="16" y1="17" x2="8" y2="17" />
+              <line x1="10" y1="9" x2="8" y2="9" />
+            </svg>
+            <span class="tobyflow-announcement-badge hidden" id="changelogBadge"></span>
+          </button>
+          <!-- Tip Coffee -->
+          <button class="tobyflow-header-btn tobyflow-tip-coffee-btn" id="tipCoffeeBtn" type="button" data-i18n-tooltip="header.tipCoffee" data-tooltip-pos="bottom" title="Mời cà phê tác giả">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M10 2v2"></path>
+              <path d="M14 2v2"></path>
+              <path d="M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a4 4 0 1 1 0 8h-1"></path>
+              <path d="M6 2v2"></path>
+            </svg>
+          </button>
+          <!-- Language selector -->
+          <button class="tobyflow-header-btn" id="languageBtn" type="button" data-i18n-tooltip="header.language" data-tooltip-pos="bottom" title="Chuyển ngôn ngữ / Switch Language">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="2" y1="12" x2="22" y2="12" />
+              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+            </svg>
+          </button>
+          <span id="langSwitchLabel" class="hidden">VI</span>
+          <!-- Settings Dropdown -->
+          <div class="tobyflow-settings-dropdown" id="settingsDropdown">
+            <button class="tobyflow-header-btn" id="settingsDropdownBtn" type="button" data-i18n-tooltip="header.settings" data-tooltip-pos="bottom" title="Cài đặt">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            </button>
+            <div class="tobyflow-settings-menu hidden" id="settingsMenu">
+              <button class="tobyflow-settings-menu-item" id="openSettingsBtn" type="button">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                  <circle cx="12" cy="12" r="3" />
                 </svg>
-                Ảnh tham chiếu
-              </span>
-              <span class="ref-count-badge" id="refImageCountImage">0/3 ảnh</span>
+                <span data-i18n="header.settings">Settings</span>
+              </button>
+              <button class="tobyflow-settings-menu-item" id="themeToggleBtn" type="button">
+                <svg id="themeIconSun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="hidden">
+                  <circle cx="12" cy="12" r="5" />
+                  <line x1="12" y1="1" x2="12" y2="3" />
+                  <line x1="12" y1="21" x2="12" y2="23" />
+                  <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+                  <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+                  <line x1="1" y1="12" x2="3" y2="12" />
+                  <line x1="21" y1="12" x2="23" y2="12" />
+                  <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+                  <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+                </svg>
+                <svg id="themeIconMoon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                </svg>
+                <span id="themeToggleLabel" data-i18n="header.darkMode">Dark Mode</span>
+              </button>
+              <button class="tobyflow-settings-menu-item" id="extensionLinkBtn" type="button">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="23 4 23 10 17 10"></polyline>
+                  <polyline points="1 20 1 14 7 14"></polyline>
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                </svg>
+                <span data-i18n="header.upgradeExtension">Làm mới kết nối</span>
+              </button>
             </div>
-            <div class="ref-container">
-              <div class="ref-cards-list" id="refCardsListImage">
-                <button class="ref-upload-slot" id="refUploadSlotImage" type="button" title="Chọn ảnh từ Flow hoặc tải ảnh lên" aria-label="Chọn ảnh tham chiếu từ Flow hoặc máy tính">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                    <polyline points="17 8 12 3 7 8"/>
-                    <line x1="12" y1="3" x2="12" y2="15"/>
+          </div>
+          <!-- Hidden compatibility elements -->
+          <button id="langSwitchBtn" class="hidden" type="button"></button>
+          <button id="reloadBtn" class="hidden" type="button"></button>
+        </div>
+      </header>
+
+      <!-- ============================================== -->
+      <!-- NAVIGATION TABS (.tobyflow-tabs-nav)          -->
+      <!-- ============================================== -->
+      <nav class="tobyflow-tabs tobyflow-tabs-nav" role="tablist" aria-label="Toby Flow Navigation">
+        <!-- 1. Gen (Active) -->
+        <button class="tobyflow-tab tab-btn active" data-tab="tab-gen" id="navGen" data-i18n-title="tab.gen" role="tab" aria-selected="true" tabindex="0">
+          <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M11.8525 4.21651L11.7221 3.2387C11.6906 3.00226 11.4889 2.82568 11.2504 2.82568C11.0118 2.82568 10.8102 3.00226 10.7786 3.23869L10.6483 4.21651C10.2658 7.0847 8.00939 9.34115 5.14119 9.72358L4.16338 9.85396C3.92694 9.88549 3.75037 10.0872 3.75037 10.3257C3.75037 10.5642 3.92694 10.7659 4.16338 10.7974L5.14119 10.9278C8.00938 11.3102 10.2658 13.5667 10.6483 16.4349L10.7786 17.4127C10.8102 17.6491 11.0118 17.8257 11.2504 17.8257C11.4889 17.8257 11.6906 17.6491 11.7221 17.4127L11.8525 16.4349C12.2349 13.5667 14.4913 11.3102 17.3595 10.9278L18.3374 10.7974C18.5738 10.7659 18.7504 10.5642 18.7504 10.3257C18.7504 10.0872 18.5738 9.88549 18.3374 9.85396L17.3595 9.72358C14.4913 9.34115 12.2349 7.0847 11.8525 4.21651Z"></path>
+            <path d="M4.6519 14.7568L4.82063 14.2084C4.84491 14.1295 4.91781 14.0757 5.00037 14.0757C5.08292 14.0757 5.15582 14.1295 5.1801 14.2084L5.34883 14.7568C5.56525 15.4602 6.11587 16.0108 6.81925 16.2272L7.36762 16.3959C7.44652 16.4202 7.50037 16.4931 7.50037 16.5757C7.50037 16.6582 7.44652 16.7311 7.36762 16.7554L6.81926 16.9241C6.11587 17.1406 5.56525 17.6912 5.34883 18.3946L5.1801 18.9429C5.15582 19.0218 5.08292 19.0757 5.00037 19.0757C4.91781 19.0757 4.84491 19.0218 4.82063 18.9429L4.65191 18.3946C4.43548 17.6912 3.88486 17.1406 3.18147 16.9241L2.63311 16.7554C2.55421 16.7311 2.50037 16.6582 2.50037 16.5757C2.50037 16.4931 2.55421 16.4202 2.63311 16.3959L3.18148 16.2272C3.88486 16.0108 4.43548 15.4602 4.6519 14.7568Z"></path>
+          </svg>
+          <span data-i18n="tab.gen">Gen</span>
+        </button>
+        <!-- 2. Workflow -->
+        <button class="tobyflow-tab tab-btn" data-tab="tab-workflow" id="navWorkflow" data-i18n-title="tab.workflow" role="tab" aria-selected="false" tabindex="-1">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <g fill="currentColor">
+              <path fill-rule="evenodd" d="M12.123 15.292c-.587-1.927 1.198-3.775 3.158-3.155l5.955 1.848.003.001c2.33.733 2.35 4.024.04 4.801v.001l-1.63.55h-.004a.5.5 0 0 0-.325.322l-.003.01-.55 1.63c-.782 2.339-4.067 2.273-4.792-.052l-1.85-5.95zm2.555-1.248a.52.52 0 0 0-.642.665l1.849 5.943.034.087a.516.516 0 0 0 .952-.075l.001-.003.55-1.63c.237-.718.78-1.27 1.454-1.539l.138-.05 1.626-.55h.002c.487-.163.467-.85-.002-.997l-5.956-1.85z" clip-rule="evenodd"></path>
+              <path d="M15 1c2.599 0 4.678.514 6.082 1.918S23 6.401 23 9v3a1 1 0 1 1-2 0V9c0-2.401-.486-3.822-1.332-4.668S17.401 3 15 3H9c-2.401 0-3.822.486-4.668 1.332S3 6.599 3 9v6c0 2.401.486 3.822 1.332 4.668S6.599 21 9 21h3a1 1 0 1 1 0 2H9c-2.599 0-4.678-.514-6.082-1.918S1 17.599 1 15V9c0-2.599.514-4.678 1.918-6.082S6.401 1 9 1z"></path>
+            </g>
+          </svg>
+          <span data-i18n="tab.workflow">Workflow</span>
+        </button>
+        <!-- 3. Templates & My Prompts -->
+        <button class="tobyflow-tab tab-btn" data-tab="tab-templates" id="tabTemplatesBtn" data-i18n-title="tab.prompts" role="tab" aria-selected="false" tabindex="-1">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path fill="currentColor" d="M9.767 4.045a3.767 3.767 0 0 1 4.63-2.67v.001l4.438 1.189a3.765 3.765 0 0 1 2.669 4.627l-2.29 8.558.002.001a3.767 3.767 0 0 1-4.632 2.672l-.264-.071v1.508a2.87 2.87 0 0 1-2.718 2.87 1 1 0 0 1-.162.02h-5.5a3.784 3.784 0 0 1-3.78-3.78V10.1a3.785 3.785 0 0 1 3.78-3.78h3.215zM5.94 7.82a2.285 2.285 0 0 0-2.28 2.28v8.87a2.284 2.284 0 0 0 2.28 2.28h5.386a1 1 0 0 1 .114-.01c.766 0 1.38-.615 1.38-1.38V10.1a2.285 2.285 0 0 0-2.28-2.28zm8.064-4.997a2.267 2.267 0 0 0-2.788 1.609l-.001.002-.508 1.89A3.785 3.785 0 0 1 14.32 10.1v6.7l.653.173.004.002a2.267 2.267 0 0 0 2.789-1.61l2.29-8.561v-.002a2.267 2.267 0 0 0-1.608-2.789h-.002l-4.44-1.19z"></path>
+          </svg>
+          <span data-i18n="tab.prompts">Prompts</span>
+        </button>
+        <!-- 4. Tasks (Multi-task) -->
+        <button class="tobyflow-tab tab-btn" data-tab="tab-tasks" id="navTasks" data-i18n-title="tab.tasks" role="tab" aria-selected="false" tabindex="-1">
+          <svg width="17" height="17" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path fill="currentColor" d="M13.5 6.188h-9c-1.813 0-2.812.999-2.812 2.812v5.25c0 1.814.999 2.813 2.812 2.813h9c1.813 0 2.813-1 2.813-2.813V9c0-1.814-1-2.812-2.813-2.812m1.688 8.062c0 1.183-.505 1.688-1.688 1.688h-9c-1.183 0-1.687-.505-1.687-1.688V9c0-1.183.504-1.687 1.687-1.687h9c1.183 0 1.688.504 1.688 1.687zM3.938 4.5c0-.31.251-.562.562-.562h9a.563.563 0 0 1 0 1.124h-9a.563.563 0 0 1-.562-.562m1.5-2.25c0-.31.252-.562.562-.562h6a.563.563 0 0 1 0 1.125H6a.563.563 0 0 1-.562-.563m5.792 8.336L8.869 9.141a1.27 1.27 0 0 0-1.93 1.08v2.809c0 .464.24.877.647 1.104a1.27 1.27 0 0 0 1.283-.025l2.36-1.444a1.21 1.21 0 0 0 .584-1.04 1.21 1.21 0 0 0-.583-1.039m-.588 1.118L8.28 13.15a.14.14 0 0 1-.146.003.14.14 0 0 1-.072-.123v-2.81c0-.067.04-.104.072-.123a.14.14 0 0 1 .072-.02q.033 0 .074.023l2.361 1.446h.001q.045.028.045.078a.09.09 0 0 1-.046.08"></path>
+          </svg>
+          <span data-i18n="tab.tasks">Tasks</span>
+        </button>
+        <div class="tobyflow-tab-divider"></div>
+        <!-- 5. Photos -->
+        <button class="tobyflow-tab tab-btn tobyflow-tab--icon-only" data-tab="tab-photos" id="navPhotos" data-i18n-tooltip="tab.photos" aria-label="Photos" role="tab" aria-selected="false" tabindex="-1">
+          <svg width="18" height="18" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M8.958 8.501a1.5 1.5 0 1 1 0 2.999 1.5 1.5 0 0 1 0-2.999"></path>
+            <path fill-rule="evenodd" d="M6.974 3.95a3.065 3.065 0 0 1 3.461-2.608l5.975.84a3.065 3.065 0 0 1 2.608 3.462l-.84 5.975a3.064 3.064 0 0 1-3.46 2.607l-.938-.132.03.206a3.065 3.065 0 0 1-2.608 3.462l-5.975.839a3.065 3.065 0 0 1-3.461-2.607l-.84-5.975a3.065 3.065 0 0 1 2.608-3.462l3.134-.441zm-.517 9.528a1.337 1.337 0 0 0-1.871.263l-1.513 2.007.009.06a1.736 1.736 0 0 0 1.96 1.477l5.45-.767zm3.237-6.443-5.974.838a1.736 1.736 0 0 0-1.477 1.96l.568 4.051.713-.944a2.666 2.666 0 0 1 3.733-.524l4.72 3.557a1.73 1.73 0 0 0 .516-1.487l-.84-5.975a1.735 1.735 0 0 0-1.959-1.476m.557-4.375a1.735 1.735 0 0 0-1.96 1.476l-.252 1.787 1.47-.206a3.066 3.066 0 0 1 3.462 2.61l.617 4.397 1.314.186a1.735 1.735 0 0 0 1.96-1.477l.84-5.975a1.736 1.736 0 0 0-1.478-1.96z" clip-rule="evenodd"></path>
+          </svg>
+        </button>
+        <!-- 6. Tools -->
+        <button class="tobyflow-tab tab-btn tobyflow-tab--icon-only" data-tab="tab-tools" id="navTools" data-i18n-tooltip="tab.tools" aria-label="Tools" role="tab" aria-selected="false" tabindex="-1">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+            <path fill="currentColor" fill-rule="evenodd" d="M5.933 2.754c1.29-2.339 4.661-2.339 5.951 0l2.19 3.97.002.001.718 1.308Q15.144 8 15.5 8a7.5 7.5 0 1 1-7.483 7.996H4.4c-2.577 0-4.224-2.762-2.976-5.03l4.51-8.21zm10.473 8.211c.504.916.535 1.913.225 2.776l-.025.064A3.37 3.37 0 0 1 13.43 16h-3.406a5.5 5.5 0 1 0 5.86-5.986zM10.134 3.72c-.53-.96-1.92-.96-2.45 0l-4.508 8.208a1.396 1.396 0 0 0 1.223 2.068h9.03a1.395 1.395 0 0 0 1.307-1.887l-.083-.177-1.28-2.33-.003-.007-1.047-1.906z" clip-rule="evenodd"></path>
+          </svg>
+        </button>
+        <!-- 7. History -->
+        <button class="tobyflow-tab tab-btn tobyflow-tab--icon-only" data-tab="tab-history" id="navHistory" data-i18n-tooltip="tab.history" aria-label="History" role="tab" aria-selected="false" tabindex="-1">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+            <g fill="currentColor">
+              <path d="M9.624 2.34a10.5 10.5 0 0 1 7.195.518A10.46 10.46 0 0 1 21.982 7.9a10.5 10.5 0 0 1 .697 7.172c-.62 2.402-2.08 4.5-4.1 5.935a10.48 10.48 0 0 1-6.963 1.891 10.52 10.52 0 0 1-6.533-3.039 1 1 0 0 1 1.414-1.414 8.52 8.52 0 0 0 5.288 2.46 8.48 8.48 0 0 0 5.636-1.528 8.52 8.52 0 0 0 3.321-4.805 8.5 8.5 0 0 0-.564-5.807v-.002A8.46 8.46 0 0 0 16 4.684a8.5 8.5 0 0 0-5.825-.422A8.53 8.53 0 0 0 5.45 7.699h-.001a8.6 8.6 0 0 0-1.377 3.66l.51-.61a1 1 0 0 1 1.535 1.282l-2.18 2.61a1 1 0 0 1-1.536-.001l-2.17-2.61a1 1 0 0 1 1.537-1.28l.318.383a10.6 10.6 0 0 1 1.703-4.548v-.002A10.53 10.53 0 0 1 9.625 2.34"></path>
+              <path d="M12 8.401a1 1 0 0 1 1 1v3.55l2.535 1.606a1 1 0 0 1-1.07 1.689l-3-1.9a1 1 0 0 1-.465-.845V9.4a1 1 0 0 1 1-1"></path>
+            </g>
+          </svg>
+        </button>
+        <!-- 8. Queue & Logs -->
+        <button class="tobyflow-tab tab-btn tobyflow-tab--icon-only" data-tab="tab-logs" id="navLogs" data-i18n-tooltip="logs.queue" aria-label="Queue" role="tab" aria-selected="false" tabindex="-1">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="5" cy="6" r="1" />
+            <circle cx="5" cy="12" r="1" />
+            <circle cx="5" cy="18" r="1" />
+            <path d="M9 6h11M9 12h11M9 18h11" />
+          </svg>
+        </button>
+      </nav>
+
+      <!-- ============================================== -->
+      <!-- TABS CONTENT                                   -->
+      <!-- ============================================== -->
+      <div class="tabs-content">
+        <!-- ========================================== -->
+        <!-- TAB 1: GEN                                 -->
+        <!-- ========================================== -->
+        <div id="tab-gen" class="tab-pane active" role="tabpanel">
+          <div class="tab-gen-scroll">
+            <!-- Prompt Input Section -->
+            <section class="section">
+              <div class="section-header">
+                <div style="display:flex;align-items:center;gap:6px;">
+                  <label for="promptsArea" style="margin:0;">
+                    <svg width="16" height="16" viewBox="0 0 20 20" fill="none" style="vertical-align: -2px; margin-right: 4px;">
+                      <path d="M15.0573 10.2551C16.0467 9.31818 17.602 9.33956 18.5656 10.3031C19.5478 11.2856 19.5479 12.8779 18.5656 13.8603L15.0028 17.4239C14.2995 18.1271 13.3674 18.5561 12.3758 18.6324L9.92708 18.8204L10.1118 16.4237C10.1911 15.3933 10.6506 14.4286 11.4009 13.7178L15.0573 10.2551ZM12.4987 2.08211C13.6008 2.08211 14.3368 2.07279 14.958 2.26114C16.2896 2.66509 17.3323 3.70786 17.7363 5.03946C17.9247 5.66064 17.9153 6.39669 17.9153 7.49877H16.2487C16.2487 6.27529 16.2399 5.8479 16.1413 5.52286C15.8988 4.72402 15.2735 4.09857 14.4746 3.8562C14.1495 3.7576 13.7222 3.74877 12.4987 3.74877H8.24902C7.302 3.74877 6.64144 3.74911 6.12744 3.79109C5.62318 3.83229 5.3329 3.90959 5.11344 4.0214C4.6433 4.26102 4.26097 4.64339 4.02132 5.11352C3.90951 5.33296 3.83222 5.6233 3.79101 6.12752C3.74904 6.64149 3.7487 7.30215 3.7487 8.2491V12.0821C3.7487 12.8698 3.74951 13.419 3.77881 13.8489C3.80762 14.2712 3.86136 14.518 3.93913 14.7058C4.19285 15.3181 4.67938 15.8046 5.29166 16.0583C5.47948 16.1361 5.72618 16.1898 6.1486 16.2187C6.57846 16.248 7.1276 16.2488 7.91536 16.2488V17.9154C7.15019 17.9154 6.53446 17.9162 6.03466 17.8821C5.52749 17.8475 5.07913 17.7739 4.65446 17.5981C3.63354 17.1752 2.8223 16.3639 2.39941 15.343C2.22358 14.9184 2.15 14.4699 2.1154 13.9628C2.08131 13.463 2.08203 12.8472 2.08203 12.0821V8.2491C2.08203 7.32952 2.08122 6.58922 2.13005 5.99161C2.17967 5.38442 2.28477 4.85095 2.53613 4.3575C2.93561 3.57354 3.57345 2.93566 4.35742 2.53621C4.8509 2.28485 5.3843 2.17973 5.99153 2.13012C6.58917 2.0813 7.32937 2.08211 8.24902 2.08211H12.4987ZM17.3872 11.4815C17.062 11.1563 16.537 11.149 16.2031 11.4652L12.5467 14.928C12.0966 15.3544 11.8212 15.9333 11.7736 16.5515L11.7378 17.0089L12.248 16.9706C12.8428 16.9248 13.4017 16.6673 13.8236 16.2455L17.3872 12.6819C17.7186 12.3504 17.7186 11.8131 17.3872 11.4815ZM13.332 8.33211H10.832V11.9617L10.2542 12.5094C9.98741 12.7621 9.74707 13.0379 9.53482 13.3321H9.16536V8.33211H6.66536V6.66544H13.332V8.33211Z" fill="currentColor"></path>
+                    </svg>
+                    <span data-i18n="gen.prompt">Prompt</span>
+                  </label>
+                  <div class="prompt-count" style="margin-left:2px;">
+                    <span id="promptCount">0 prompt(s)</span>
+                  </div>
+                </div>
+                <label class="toolbar-toggle wm-toggle" for="multiPromptCheck" data-i18n-tooltip="gen.multiPromptHint" data-tooltip-pos="bottom" data-tooltip-align="end">
+                  <input type="checkbox" id="multiPromptCheck" />
+                  <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                  <span class="toggle-label" data-i18n="gen.multiPrompt">Multi-Prompt</span>
+                </label>
+              </div>
+              <div class="prompt-editor-wrapper">
+                <textarea id="promptsArea" data-i18n-placeholder="gen.promptPlaceholder" placeholder="Enter your prompt here...&#10;&#10;sitting in a cafe&#10;walking on the beach&#10;flying in space"></textarea>
+                <div class="prompt-editor-toolbar">
+                  <button class="prompt-toolbar-icon-btn" id="promptSearchBtn" data-i18n-title="gen.promptSearch" title="Search prompt" type="button">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" role="img" aria-label="Scan">
+                      <g fill="currentColor">
+                        <path d="M2 14.25c.41 0 .75.34.75.75v2.5c0 2.07 1.68 3.75 3.75 3.75H9c.41 0 .75.34.75.75s-.34.75-.75.75H6.5c-2.89 0-5.25-2.35-5.25-5.25V15c0-.41.34-.75.75-.75m20 1c.41 0 .75.34.75.75v1.5c0 2.9-2.36 5.25-5.25 5.25H16c-.41 0-.75-.34-.75-.75s.34-.75.75-.75h1.5c2.07 0 3.75-1.68 3.75-3.75V16c0-.41.34-.75.75-.75"></path>
+                        <path fill-rule="evenodd" d="M14 5.75c2.42 0 3.75 1.33 3.75 3.75v1.75H19c.41 0 .75.34.75.75s-.34.75-.75.75h-1.25v1.75c0 2.42-1.33 3.75-3.75 3.75h-4c-2.42 0-3.75-1.33-3.75-3.75v-1.75H5c-.41 0-.75-.34-.75-.75s.34-.75.75-.75h1.25V9.5c0-2.42 1.33-3.75 3.75-3.75zm-6.25 7v1.75c0 1.58.67 2.25 2.25 2.25h4c1.58 0 2.25-.67 2.25-2.25v-1.75zM10 7.25c-1.58 0-2.25.67-2.25 2.25v1.75h8.5V9.5c0-1.58-.67-2.25-2.25-2.25z" clip-rule="evenodd"></path>
+                        <path d="M9 1.25c.41 0 .75.34.75.75s-.34.75-.75.75H6.5c-2.07 0-3.75 1.68-3.75 3.75V9c0 .41-.34.75-.75.75s-.75-.34-.75-.75V6.5c0-2.9 2.36-5.25 5.25-5.25zm8.5 0c2.89 0 5.25 2.35 5.25 5.25V9c0 .41-.34.75-.75.75s-.75-.34-.75-.75V6.5c0-2.07-1.68-3.75-3.75-3.75H15c-.41 0-.75-.34-.75-.75s.34-.75.75-.75z"></path>
+                      </g>
+                    </svg>
+                  </button>
+                  <button class="btn btn-secondary btn-xs" id="chatAIBtn" data-i18n-title="gen.promptAssistantTitle" title="Prompt Assistant — turn one idea into a batch of prompts" type="button">
+                    <svg width="12" height="12" viewBox="0 0 18 18" fill="none" role="img" aria-label="Prompt Assistant">
+                      <path d="M3.47158 3.7689C4.43604 4.12493 5.19375 4.88096 5.55044 5.84302C5.64791 6.10611 5.89926 6.28072 6.18038 6.28072C6.46138 6.28072 6.71273 6.10611 6.81033 5.84328C7.16715 4.88096 7.92499 4.12493 8.88932 3.7689C9.15287 3.67152 9.32787 3.42073 9.32787 3.14036C9.32787 2.85999 9.15287 2.6092 8.88932 2.51182C7.92499 2.15579 7.16728 1.39976 6.81033 0.437441C6.71273 0.17461 6.46138 0 6.18038 0C5.89926 0 5.64804 0.17461 5.55044 0.437703C5.19362 1.39976 4.43591 2.15579 3.47158 2.51182C3.20803 2.6092 3.03303 2.85999 3.03303 3.14036C3.03303 3.42073 3.20803 3.67152 3.47158 3.7689ZM6.18038 2.07621C6.4783 2.48407 6.83814 2.84324 7.24704 3.14036C6.83801 3.43748 6.4783 3.79639 6.18038 4.20451C5.8826 3.79639 5.52289 3.43748 5.11386 3.14036C5.52276 2.84324 5.8826 2.48407 6.18038 2.07621ZM14.9858 15.163C14.4549 14.967 14.0377 14.5507 13.8412 14.0209C13.7436 13.7578 13.4923 13.5832 13.2113 13.5832C12.9302 13.5832 12.6788 13.7578 12.5813 14.0209C12.385 14.5507 11.9678 14.967 11.4368 15.163C11.1731 15.2604 10.9981 15.5112 10.9981 15.7916C10.9981 16.072 11.1731 16.3228 11.4368 16.4201C11.9678 16.6162 12.385 17.0324 12.5813 17.5623C12.6788 17.8254 12.9302 18 13.2113 18C13.4923 18 13.7436 17.8254 13.8412 17.5623C14.0377 17.0324 14.4549 16.6162 14.9858 16.4201C15.2495 16.3228 15.4245 16.072 15.4245 15.7916C15.4245 15.5112 15.2495 15.2604 14.9858 15.163ZM13.2113 16.0521C13.1293 15.9604 13.0422 15.8735 12.9502 15.7916C13.0422 15.7097 13.1293 15.6227 13.2113 15.5311C13.2934 15.6227 13.3805 15.7097 13.4723 15.7916C13.3805 15.8735 13.2934 15.9604 13.2113 16.0521ZM13.6885 9.89753L15.3237 8.25012C15.8941 7.67524 15.8918 6.74224 15.3186 6.17025L13.5778 4.43331C13.2988 4.15477 12.9277 4.00137 12.5329 4.00137C12.1382 4.00137 11.7671 4.15477 11.4882 4.43331L9.83338 6.08445C9.83292 6.08491 9.83233 6.08523 9.83187 6.08569C9.83145 6.08608 9.83122 6.08661 9.83076 6.08707L2.44678 13.4546C2.32071 13.5803 2.25 13.7507 2.25 13.9285V16.8463C2.25 17.2165 2.55067 17.5165 2.92166 17.5165H5.846C6.02519 17.5165 6.19704 17.445 6.32324 17.3178L13.6885 9.89753ZM12.4381 5.38097C12.5033 5.31578 12.5631 5.31631 12.6279 5.38097L14.3687 7.1179C14.4208 7.17 14.4209 7.25482 14.3691 7.30717L13.2069 8.47813L11.2613 6.55513L12.4381 5.38097ZM5.56592 16.1762H3.59332V14.206L10.3113 7.50299L12.2616 9.4305L5.56592 16.1762Z" fill="currentColor"></path>
+                    </svg>
+                    <span class="prompt-toolbar-btn-label">Prompt Assistant</span>
+                  </button>
+                  <button class="btn btn-secondary btn-xs" id="importTxtBtn" data-i18n-title="gen.importTxtTitle" title="Import prompts from .txt file" type="button">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                      <polyline points="14 2 14 8 20 8"></polyline>
+                      <line x1="12" y1="18" x2="12" y2="12"></line>
+                      <polyline points="9 15 12 12 15 15"></polyline>
+                    </svg>
+                    <span class="prompt-toolbar-btn-label" data-i18n="gen.importTxt">Import .txt</span>
+                  </button>
+                  <input type="file" id="importTxtFile" accept=".txt,.csv" class="hidden" />
+                  <span class="prompt-char-count" id="promptCharCount">0 characters</span>
+                  <button class="prompt-header-save-btn" id="promptSaveBtn" data-i18n-title="gen.promptSave" title="Save current prompt" type="button">
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                      <path d="M10.417 9.752a.665.665 0 1 1 0 1.33h-2.5a.665.665 0 0 1 0-1.33zM12.084 6.419a.665.665 0 0 1 0 1.33H7.917a.665.665 0 0 1 0-1.33z" />
+                      <path fill-rule="evenodd" d="M13.48 1.835A3.465 3.465 0 0 1 16.943 5.3v11.703a.915.915 0 0 1-1.345.808l-.116-.074-2.537-1.886-2.35 2.014a.915.915 0 0 1-1.126.052l-.065-.052-2.352-2.014-2.53 1.885-.116.075a.916.916 0 0 1-1.346-.809V5.3a3.465 3.465 0 0 1 3.465-3.465zm-6.954 1.33A2.135 2.135 0 0 0 4.391 5.3v10.876l2.135-1.59a.915.915 0 0 1 1.142.039l2.332 2 2.333-2a.914.914 0 0 1 1.14-.04l2.14 1.593V5.3a2.135 2.135 0 0 0-2.134-2.135z" clip-rule="evenodd" />
+                    </svg>
+                  </button>
+                </div>
+                <div class="multi-prompt-hint hidden" id="multiPromptHint">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                    <line x1="12" y1="17" x2="12.01" y2="17" />
                   </svg>
-                  <span>Tải ảnh</span>
+                  <span data-i18n="gen.multiPromptHint">Separate each prompt with a blank line</span>
+                </div>
+              </div>
+              <!-- Hidden backward compatibility prompt inputs -->
+              <textarea id="inputPromptImage" class="hidden"></textarea>
+              <textarea id="inputPromptVideo" class="hidden"></textarea>
+              <input type="checkbox" id="multiPromptImage" class="hidden">
+              <input type="checkbox" id="multiPromptVideo" class="hidden">
+            </section>
+
+            <!-- Provider Selector Tabs (#genProviderTabs) -->
+            <section class="section">
+              <div class="provider-tabs" id="genProviderTabs" role="tablist">
+                <button type="button" class="provider-tab provider-tab--active" data-provider="flow" role="tab" aria-selected="true">
+                  <svg class="provider-tab-icon" width="14" height="14" viewBox="0 0 24 24">
+                    <path d="M20.616 10.835a14.147 14.147 0 01-4.45-3.001 14.111 14.111 0 01-3.678-6.452.503.503 0 00-.975 0 14.134 14.134 0 01-3.679 6.452 14.155 14.155 0 01-4.45 3.001c-.65.28-1.318.505-2.002.678a.502.502 0 000 .975c.684.172 1.35.397 2.002.677a14.147 14.147 0 014.45 3.001 14.112 14.112 0 013.679 6.453.502.502 0 00.975 0c.172-.685.397-1.351.677-2.003a14.145 14.145 0 013.001-4.45 14.113 14.113 0 016.453-3.678.503.503 0 000-.975 13.245 13.245 0 01-2.003-.678z" fill="#3186FF" />
+                  </svg>
+                  <span data-provider-label data-i18n="gen.providerFlow">Google Flow</span>
+                </button>
+                <button type="button" class="provider-tab" data-provider="chatgpt" role="tab" aria-selected="false">
+                  <svg class="provider-tab-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646zM2.34 7.896a4.485 4.485 0 0 1 2.366-1.973V11.6a.766.766 0 0 0 .388.676l5.815 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855l-5.833-3.387L15.119 7.2a.076.076 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667zm2.01-3.023l-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.23V6.897a.066.066 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135l-2.02-1.164a.08.08 0 0 1-.038-.057V6.075a4.5 4.5 0 0 1 7.375-3.453l-.142.08L8.704 5.46a.795.795 0 0 0-.393.681zm1.097-2.365l2.602-1.5 2.607 1.5v2.999l-2.597 1.5-2.607-1.5z" />
+                  </svg>
+                  <span data-provider-label data-i18n="gen.providerChatGPT">ChatGPT</span>
+                </button>
+                <button type="button" class="provider-tab" data-provider="grok" role="tab" aria-selected="false">
+                  <svg class="provider-tab-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M9.27 15.29l7.978-5.897c.391-.29.95-.177 1.137.272.98 2.369.542 5.215-1.41 7.169-1.951 1.954-4.667 2.382-7.149 1.406l-2.711 1.257c3.889 2.661 8.611 2.003 11.562-.953 2.341-2.344 3.066-5.539 2.388-8.42l.006.007c-.983-4.232.242-5.924 2.75-9.383.06-.082.12-.164.179-.248l-3.301 3.305v-.01L9.267 15.292" />
+                  </svg>
+                  <span data-provider-label data-i18n="gen.providerGrok">Grok</span>
+                </button>
+                <button type="button" class="provider-tab" data-provider="muse" role="tab" aria-selected="false">
+                  <svg class="provider-tab-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <circle cx="12" cy="12" r="9"/>
+                  </svg>
+                  <span data-provider-label>Muse</span>
+                </button>
+                <button type="button" class="provider-tab" data-provider="gemini" role="tab" aria-selected="false">
+                  <svg class="provider-tab-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2c1.2 5.7 4.3 8.8 10 10-5.7 1.2-8.8 4.3-10 10-1.2-5.7-4.3-8.8-10-10 5.7-1.2 8.8-4.3 10-10Z" />
+                  </svg>
+                  <span data-provider-label data-i18n="gen.providerGemini">Gemini</span>
+                </button>
+                <input type="hidden" id="genProvider" value="flow" />
+              </div>
+            </section>
+
+            <!-- Generation Settings Bar -->
+            <section class="section">
+              <div class="section-header">
+                <label>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; margin-right: 4px;">
+                    <line x1="4" y1="21" x2="4" y2="14"></line>
+                    <line x1="4" y1="10" x2="4" y2="3"></line>
+                    <line x1="12" y1="21" x2="12" y2="12"></line>
+                    <line x1="12" y1="8" x2="12" y2="3"></line>
+                    <line x1="20" y1="21" x2="20" y2="16"></line>
+                    <line x1="20" y1="12" x2="20" y2="3"></line>
+                    <line x1="1" y1="14" x2="7" y2="14"></line>
+                    <line x1="9" y1="8" x2="15" y2="8"></line>
+                    <line x1="17" y1="16" x2="23" y2="16"></line>
+                  </svg>
+                  <span data-i18n="gen.settings">Settings</span>
+                </label>
+                <div class="flow-api-control-group">
+                  <button type="button" class="gen-api-setting-btn" id="genApiSettingBtn" aria-label="Flow API status">
+                    <span class="gen-api-toggle" aria-hidden="true"><span class="gen-api-toggle-thumb"></span></span>
+                    <span class="gen-api-setting-badge" data-i18n="common.flowApiLabel">Flow API</span>
+                    <span class="gen-api-version">V2</span>
+                  </button>
+                  <button type="button" class="gen-api-setting-btn gen-mcp-setting-btn" id="genMcpSettingBtn" aria-label="MCP status">
+                    <span class="gen-api-toggle" aria-hidden="true"><span class="gen-api-toggle-thumb"></span></span>
+                    <span class="gen-api-setting-badge">MCP</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Compact Controls Bar (#genCompactBar) -->
+              <div class="gen-compact-bar" id="genCompactBar" data-gen-mode="image">
+                <!-- Gen Type Toggle: Image / Video -->
+                <div class="gen-compact-item" id="genTypeTabs">
+                  <div class="gen-type-toggle" id="genTypeToggle">
+                    <button type="button" class="gen-type-btn active" data-value="Image" data-i18n-title="gen.typeImage" title="Create image">
+                      <svg width="14" height="14" viewBox="0 0 13 12" fill="none">
+                        <path d="M6.25 1.5H3.9C3.05992 1.5 2.63988 1.5 2.31901 1.66349C2.03677 1.8073 1.8073 2.03677 1.66349 2.31901C1.5 2.63988 1.5 3.05992 1.5 3.9V8.1C1.5 8.94008 1.5 9.36012 1.66349 9.68099C1.8073 9.96323 2.03677 10.1927 2.31901 10.3365C2.63988 10.5 3.05992 10.5 3.9 10.5H8.5C8.96499 10.5 9.19748 10.5 9.38823 10.4489C9.90587 10.3102 10.3102 9.90587 10.4489 9.38823C10.5 9.19748 10.5 8.96499 10.5 8.5M5.25 4.25C5.25 4.80228 4.80228 5.25 4.25 5.25C3.69772 5.25 3.25 4.80228 3.25 4.25C3.25 3.69772 3.69772 3.25 4.25 3.25C4.80228 3.25 5.25 3.69772 5.25 4.25ZM7.49502 5.95907L3.26557 9.80402C3.02768 10.0203 2.90873 10.1284 2.89821 10.2221C2.88909 10.3033 2.92023 10.3838 2.98159 10.4378C3.05239 10.5 3.21314 10.5 3.53464 10.5H8.22799C8.94757 10.5 9.30736 10.5 9.58996 10.3791C9.94472 10.2274 10.2274 9.94472 10.3791 9.58996C10.5 9.30736 10.5 8.94757 10.5 8.22799C10.5 7.98587 10.5 7.86482 10.4735 7.75208C10.4403 7.61039 10.3765 7.47768 10.2866 7.3632C10.2151 7.2721 10.1206 7.19647 9.93154 7.04523L8.53291 5.92633C8.34369 5.77495 8.24908 5.69927 8.1449 5.67256C8.05307 5.64901 7.95643 5.65206 7.86627 5.68135C7.76397 5.71457 7.67432 5.79607 7.49502 5.95907Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"></path>
+                      </svg>
+                    </button>
+                    <button type="button" class="gen-type-btn" data-value="Video" data-i18n-title="gen.typeVideo" title="Create video">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="m22 8-6 4 6 4V8Z"></path>
+                        <rect x="2" y="6" width="14" height="12" rx="2" ry="2"></rect>
+                      </svg>
+                    </button>
+                  </div>
+                  <select id="genType" class="hidden">
+                    <option value="Image">Image</option>
+                    <option value="Video">Video</option>
+                  </select>
+                </div>
+
+                <!-- Image Model select (#imageModel) -->
+                <div class="gen-compact-item" id="imageModelContainer">
+                  <div class="input-group select-group compact-select">
+                    <select id="imageModel">
+                      <option value="nano banana" selected>Nano Banana 2.1</option>
+                      <option value="imagen 3">Imagen 3</option>
+                    </select>
+                    <svg class="select-arrow" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                  </div>
+                  <select id="selectModelImage" class="hidden">
+                    <option value="nano banana">Nano Banana 2.1</option>
+                    <option value="imagen 3">Imagen 3</option>
+                  </select>
+                </div>
+
+                <!-- Video Model select (#videoModel) -->
+                <div class="gen-compact-item hidden" id="videoModelContainer">
+                  <div class="input-group select-group compact-select">
+                    <select id="videoModel">
+                      <option value="veo 3.1" selected>Veo 3.1</option>
+                      <option value="omni 1.1 flash">Omni 1.1 Flash</option>
+                    </select>
+                    <svg class="select-arrow" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                  </div>
+                  <select id="selectModelVideo" class="hidden">
+                    <option value="veo 3.1">Veo 3.1</option>
+                    <option value="omni 1.1 flash">Omni 1.1 Flash</option>
+                  </select>
+                </div>
+
+                <!-- Video Input Type: Ingredients / Frames (#videoInputType) -->
+                <div class="gen-compact-item hidden" id="videoInputTypeContainer">
+                  <div class="input-group select-group compact-select">
+                    <select id="videoInputType">
+                      <option value="Ingredients" selected>Ingredients</option>
+                      <option value="Frames">Frames</option>
+                    </select>
+                    <svg class="select-arrow" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                  </div>
+                  <select id="selectModeVideo" class="hidden">
+                    <option value="ingredients">ingredients</option>
+                    <option value="frames">frames</option>
+                  </select>
+                </div>
+
+                <!-- Flow Video Duration (#flowVideoDuration) -->
+                <div class="gen-compact-item hidden" id="flowVideoDurationContainer">
+                  <div class="input-group select-group compact-select">
+                    <select id="flowVideoDuration" title="Video duration">
+                      <option value="8" selected>8s</option>
+                      <option value="5">5s</option>
+                    </select>
+                    <svg class="select-arrow" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                  </div>
+                  <select id="selectDurationVideo" class="hidden"><option value="8">8</option></select>
+                </div>
+
+                <!-- Flow Video Resolution (#flowVideoResolution) -->
+                <div class="gen-compact-item hidden" id="flowVideoResolutionContainer">
+                  <div class="input-group select-group compact-select">
+                    <select id="flowVideoResolution" title="Video resolution">
+                      <option value="720p" selected>720p</option>
+                      <option value="1080p">1080p</option>
+                    </select>
+                    <svg class="select-arrow" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                  </div>
+                  <select id="selectResolutionVideo" class="hidden"><option value="720p">720p</option></select>
+                </div>
+
+                <!-- Aspect Ratio (#aspectRatio) -->
+                <div class="gen-compact-item" id="ratioSection">
+                  <div class="input-group select-group compact-select">
+                    <select id="aspectRatio">
+                      <option value="16:9" selected>▬ 16:9</option>
+                      <option value="4:3">▭ 4:3</option>
+                      <option value="1:1">□ 1:1</option>
+                      <option value="3:4">▯ 3:4</option>
+                      <option value="9:16">▮ 9:16</option>
+                    </select>
+                    <svg class="select-arrow" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                  </div>
+                  <select id="selectRatioImage" class="hidden">
+                    <option value="16:9">16:9</option>
+                    <option value="9:16">9:16</option>
+                    <option value="1:1">1:1</option>
+                    <option value="4:3">4:3</option>
+                    <option value="3:4">3:4</option>
+                  </select>
+                  <select id="selectRatioVideo" class="hidden">
+                    <option value="16:9">16:9</option>
+                    <option value="9:16">9:16</option>
+                  </select>
+                </div>
+
+                <!-- Quantity: -, select, + (#quantitySection) -->
+                <div class="gen-compact-item" id="quantitySection">
+                  <div class="input-group compact-qty">
+                    <button class="compact-qty-btn" id="genQtyMinus" type="button" title="Giảm số lượng">-</button>
+                    <input type="number" id="quantitySelect" min="1" max="4" value="1" title="Số lượng ảnh" />
+                    <button class="compact-qty-btn" id="genQtyPlus" type="button" title="Tăng số lượng">+</button>
+                  </div>
+                  <select id="selectQtyImage" class="hidden"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select>
+                  <select id="selectCountVideo" class="hidden"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select>
+                </div>
+
+                <!-- Break for line 2 -->
+                <div class="gen-compact-break gen-compact-break--always" aria-hidden="true"></div>
+
+                <!-- Character Trigger (#genCharacterTrigger) -->
+                <div class="gen-compact-item" id="genCharacterContainer">
+                  <button type="button" class="voice-picker-trigger" id="genCharacterTrigger" title="Chọn nhân vật">
+                    <span class="voice-picker-trigger-thumb-svg" id="genCharacterTriggerThumb">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="8" r="4"></circle>
+                        <path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"></path>
+                      </svg>
+                    </span>
+                    <span class="voice-picker-label" id="genCharacterLabel" data-i18n="character.none">Character</span>
+                    <svg class="voice-picker-arrow" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                  </button>
+                  <input type="hidden" id="genCharacterSelect" value="" />
+                  <select id="selectCharImage" class="hidden"><option value="">Không chọn</option></select>
+                  <select id="selectCharVideo" class="hidden"><option value="">Không chọn</option></select>
+                </div>
+
+                <!-- Voice Trigger (#genVideoVoiceTrigger) -->
+                <div class="gen-compact-item hidden" id="genVideoVoiceContainer">
+                  <button type="button" class="voice-picker-trigger" id="genVideoVoiceTrigger" title="Chọn giọng nói">
+                    <span class="voice-picker-trigger-thumb-svg" id="genVideoVoiceTriggerThumb">
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M1.5 5L1.5 7M3.75 5.5V6.5M6 3V9M8.25 1.5V10.5M10.5 5V7"></path>
+                      </svg>
+                    </span>
+                    <span class="voice-picker-label" id="genVideoVoiceLabel" data-i18n="voice.random">Random voice</span>
+                    <svg class="voice-picker-arrow" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                  </button>
+                  <input type="hidden" id="genVideoVoiceSelect" value="" />
+                  <select id="flowVoiceSelect" class="hidden"><option value="">Không dùng giọng nói</option></select>
+                </div>
+
+                <!-- Style Dropdown (#addonPromptTrigger) -->
+                <div class="gen-compact-item">
+                  <div class="addon-prompt-dropdown" id="addonPromptDropdown">
+                    <button type="button" class="addon-prompt-trigger" id="addonPromptTrigger" title="Phong cách / Style">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z"></path>
+                        <path d="M17 4a2 2 0 0 0 2 2a2 2 0 0 0 -2 2a2 2 0 0 0 -2 -2a2 2 0 0 0 2 -2"></path>
+                      </svg>
+                      <span class="addon-prompt-label" id="addonPromptLabel" data-i18n="gen.style">Style</span>
+                      <svg class="addon-prompt-arrow" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                    </button>
+                    <div class="addon-prompt-popup hidden" id="addonPromptPopup">
+                      <div class="addon-prompt-search">
+                        <input type="text" id="addonPromptSearch" placeholder="Tìm phong cách..." />
+                      </div>
+                      <div class="addon-prompt-list" id="addonPromptList"></div>
+                    </div>
+                  </div>
+                  <select id="addonPromptSelect" class="hidden"><option value="">Style</option></select>
+                </div>
+              </div>
+            </section>
+
+            <!-- Reference Section (#refImagesSection) -->
+            <section class="section" id="refImagesSection">
+              <div class="section-header section-header--with-select">
+                <label>
+                  <svg width="18" height="18" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M8.958 8.501a1.5 1.5 0 1 1 0 2.999 1.5 1.5 0 0 1 0-2.999"></path>
+                    <path fill-rule="evenodd" d="M6.974 3.95a3.065 3.065 0 0 1 3.461-2.608l5.975.84a3.065 3.065 0 0 1 2.608 3.462l-.84 5.975a3.064 3.064 0 0 1-3.46 2.607l-.938-.132.03.206a3.065 3.065 0 0 1-2.608 3.462l-5.975.839a3.065 3.065 0 0 1-3.461-2.607l-.84-5.975a3.065 3.065 0 0 1 2.608-3.462l3.134-.441zm-.517 9.528a1.337 1.337 0 0 0-1.871.263l-1.513 2.007.009.06a1.736 1.736 0 0 0 1.96 1.477l5.45-.767zm3.237-6.443-5.974.838a1.736 1.736 0 0 0-1.477 1.96l.568 4.051.713-.944a2.666 2.666 0 0 1 3.733-.524l4.72 3.557a1.73 1.73 0 0 0 .516-1.487l-.84-5.975a1.735 1.735 0 0 0-1.959-1.476m.557-4.375a1.735 1.735 0 0 0-1.96 1.476l-.252 1.787 1.47-.206a3.066 3.066 0 0 1 3.462 2.61l.617 4.397 1.314.186a1.735 1.735 0 0 0 1.96-1.477l.84-5.975a1.736 1.736 0 0 0-1.478-1.96z" clip-rule="evenodd"></path>
+                  </svg>
+                  <span class="gen-ref-label-full" data-i18n="gen.refImages">Reference Images</span>
+                </label>
+                <div class="input-group select-group compact-select ref-mode-select">
+                  <select id="refImageMode" title="Cách gán ảnh tham chiếu">
+                    <option value="all" data-i18n="gen.refModeAll">All</option>
+                    <option value="mention">@Mention</option>
+                    <option value="sequential" data-i18n="gen.refModeSequential">Sequential</option>
+                    <option value="none" data-i18n="gen.refModeNone">None</option>
+                  </select>
+                  <svg class="select-arrow" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                </div>
+                <!-- Hidden compatibility selectors -->
+                <select id="multiRefModeImage" class="hidden"><option value="all">all</option><option value="sequential">sequential</option><option value="mention">mention</option><option value="none">none</option></select>
+                <select id="multiRefModeVideo" class="hidden"><option value="all">all</option><option value="sequential">sequential</option><option value="mention">mention</option><option value="none">none</option></select>
+                <select id="multiRefCountImage" class="hidden"><option value="1">1</option></select>
+                <select id="multiRefCountVideo" class="hidden"><option value="1">1</option></select>
+              </div>
+
+              <!-- Upload action button bar -->
+              <div class="ref-toolbar" id="refToolbarActions">
+                <div class="ref-toolbar-actions ref-toolbar-actions--full">
+                  <button class="ref-btn-upload ref-btn-upload--wide" id="openImagePickerBtn" type="button">
+                    <svg class="ref-btn-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                      <path d="M15 8h.01"></path>
+                      <path d="M12.5 21h-6.5a3 3 0 0 1 -3 -3v-12a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v6.5"></path>
+                      <path d="M3 16l5 -5c.928 -.893 2.072 -.893 3 0l3.5 3.5"></path>
+                      <path d="M14 14l1 -1c.679 -.653 1.473 -.829 2.214 -.526"></path>
+                      <path d="M19 22v-6"></path>
+                      <path d="M22 19l-3 -3l-3 3"></path>
+                    </svg>
+                    <span class="ref-btn-text" data-i18n="gen.selectUploadImage">Select image / Drag here</span>
+                  </button>
+                  <button class="ref-btn-capture" id="screenCaptureBtn" type="button" title="Chụp ảnh màn hình">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                      <circle cx="12" cy="12" r="4" stroke="currentColor" fill="currentColor" stroke-width="1.5"></circle>
+                      <path d="M22 12C22 16.714 22 19.0711 20.5355 20.5355C19.0711 22 16.714 22 12 22C7.28595 22 4.92893 22 3.46447 20.5355C2 19.0711 2 16.714 2 12C2 7.28595 2 4.92893 3.46447 3.46447C4.92893 2 7.28595 2 12 2C16.714 2 19.0711 2 20.5355 3.46447C21.5093 4.43821 21.8356 5.80655 21.9449 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Thumbnails grid (#refImagesPreview) -->
+              <div id="refImagesPreview" class="ref-grid"></div>
+
+              <!-- Hidden card lists for compatibility with reference-picker.js -->
+              <div id="refCardsListImage" class="hidden">
+                <button id="refUploadSlotImage" class="hidden" type="button"></button>
+              </div>
+              <div id="refCardsListVideo" class="hidden">
+                <button id="refUploadSlotVideo" class="hidden" type="button"></button>
+              </div>
+              <span id="refImageCountImage" class="hidden">0/3</span>
+              <span id="refImageCountVideo" class="hidden">0/3</span>
+              <div id="refDropzoneHintImage" class="hidden"></div>
+              <div id="refDropzoneHintVideo" class="hidden"></div>
+
+              <!-- Drag hint & Clear all -->
+              <div class="ref-toolbar" id="refToolbar">
+                <span class="ref-ratio-count" id="refRatioCount"></span>
+                <button type="button" id="clearAllGenRefsBtn" class="ref-clear-all hidden" title="Xóa tất cả">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6" /></svg>
                 </button>
               </div>
-              <div class="ref-dropzone-hint" id="refDropzoneHintImage">Chọn ảnh từ Flow, tải ảnh lên hoặc kéo thả vào đây (Tối đa 3 ảnh)</div>
+
+              <!-- Mention helper bar -->
+              <div class="ref-mention-bar hidden" id="mentionHelper">
+                <span class="ref-mention-label" data-i18n="gen.imageName">Image name:</span>
+                <div class="ref-mention-tags" id="mentionHelperTags"></div>
+              </div>
+
+              <!-- Image count row -->
+              <div class="ref-count-row" id="refCountRow">
+                <div class="ref-count hidden" id="refImagesCount"></div>
+                <button class="ref-btn-album hidden" id="saveToAlbumBtn" title="Lưu vào Album" type="button">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 11V14M12 14V17M12 14H15M12 14H9M6 7H18M8 5H16M6 9H18C19.1046 9 20 9.89543 20 11V17C20 18.1046 19.1046 19 18 19H6C4.89543 19 4 18.1046 4 17V11C4 9.89543 4.89543 9 6 9Z" /></svg>
+                </button>
+              </div>
+            </section>
+
+            <!-- Video Frames Config Section (#videoFramesSection) -->
+            <section class="section hidden" id="videoFramesSection">
+              <div class="section-header">
+                <label>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect>
+                    <line x1="7" y1="2" x2="7" y2="22"></line>
+                    <line x1="17" y1="2" x2="17" y2="22"></line>
+                  </svg>
+                  <span data-i18n="gen.videoFrames">Video Frames</span>
+                </label>
+              </div>
+              <div id="frameSourcePanelContainer"></div>
+              <div id="globalFrameConfig" class="frame-config">
+                <div class="frame-slot" id="genTabFrame1Slot">
+                  <div class="frame-slot-header"><span class="frame-slot-label" data-i18n="gen.frameStart">Start</span></div>
+                  <div class="frame-slot-body" id="genTabFrame1Body">
+                    <div class="frame-dropzone" id="genTabFrame1PickBtn">
+                      <span class="frame-dropzone-text" data-i18n="gen.addFrame">+ Add Start Frame</span>
+                    </div>
+                  </div>
+                  <input type="hidden" id="genTabFrame1FileId" value="" />
+                </div>
+                <div class="frame-slot" id="genTabFrame2Slot">
+                  <div class="frame-slot-header"><span class="frame-slot-label" data-i18n="gen.frameEnd">End</span></div>
+                  <div class="frame-slot-body" id="genTabFrame2Body">
+                    <div class="frame-dropzone" id="genTabFrame2PickBtn">
+                      <span class="frame-dropzone-text" data-i18n="gen.addFrame">+ Add End Frame</span>
+                    </div>
+                  </div>
+                  <input type="hidden" id="genTabFrame2FileId" value="" />
+                </div>
+              </div>
+              <div id="perPromptFramesContainer" class="hidden"></div>
+            </section>
+
+            <!-- Auto Download Options -->
+            <section class="section">
+              <div class="auto-download-row">
+                <span class="gen-dl-line gen-dl-line-params">
+                  <label class="toolbar-toggle wm-toggle" for="genTabAutoDownload" title="Tự động tải ảnh/video">
+                    <input type="checkbox" id="genTabAutoDownload" />
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                    <span class="toggle-label" data-i18n="gen.autoDownload">Auto download</span>
+                  </label>
+                  <span class="gen-dl-subfolder-wrap hidden" id="genTabSubFolderWrap">
+                    <input type="text" id="genTabSubFolder" class="gen-dl-subfolder-input" value="flow-01" placeholder="Folder" />
+                  </span>
+                </span>
+                <span class="gen-dl-line gen-dl-line-toggles">
+                  <span class="wm-toggle-inline" id="genTabWatermarkRow">
+                    <label class="toolbar-toggle wm-toggle wm-toggle--xs" for="genTabWatermarkPill" title="Xóa logo Watermark">
+                      <input type="checkbox" id="genTabWatermarkPill" />
+                      <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                      <span class="toggle-label" data-i18n="gen.removeWatermark">No watermark</span>
+                    </label>
+                  </span>
+                </span>
+              </div>
+            </section>
+          </div><!-- /.tab-gen-scroll -->
+
+          <!-- Submit Bar -->
+          <section class="section actions">
+            <div class="gen-run-mode-row">
+              <button class="gen-run-mode-btn active" id="genRunModeBtn" type="button" title="Chạy song song / tuần tự">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="4" y1="6" x2="20" y2="6"></line>
+                  <line x1="4" y1="12" x2="20" y2="12"></line>
+                  <line x1="4" y1="18" x2="20" y2="18"></line>
+                </svg>
+                <span class="gen-run-mode-label" id="genRunModeLabel" data-i18n="gen.parallel">Parallel</span>
+              </button>
+            </div>
+            <div class="gen-btn-row" id="genBtnRow">
+              <button class="btn btn-generate" id="genSubmitBtn" type="button">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M11.8525 4.21651L11.7221 3.2387C11.6906 3.00226 11.4889 2.82568 11.2504 2.82568C11.0118 2.82568 10.8102 3.00226 10.7786 3.23869L10.6483 4.21651C10.2658 7.0847 8.00939 9.34115 5.14119 9.72358L4.16338 9.85396C3.92694 9.88549 3.75037 10.0872 3.75037 10.3257C3.75037 10.5642 3.92694 10.7659 4.16338 10.7974L5.14119 10.9278C8.00938 11.3102 10.2658 13.5667 10.6483 16.4349L10.7786 17.4127C10.8102 17.6491 11.0118 17.8257 11.2504 17.8257C11.4889 17.8257 11.6906 17.6491 11.7221 17.4127L11.8525 16.4349C12.2349 13.5667 14.4913 11.3102 17.3595 10.9278L18.3374 10.7974C18.5738 10.7659 18.7504 10.5642 18.7504 10.3257C18.7504 10.0872 18.5738 9.88549 18.3374 9.85396L17.3595 9.72358C14.4913 9.34115 12.2349 7.0847 11.8525 4.21651Z"></path>
+                  <path d="M4.6519 14.7568L4.82063 14.2084C4.84491 14.1295 4.91781 14.0757 5.00037 14.0757C5.08292 14.0757 5.15582 14.1295 5.1801 14.2084L5.34883 14.7568C5.56525 15.4602 6.11587 16.0108 6.81925 16.2272L7.36762 16.3959C7.44652 16.4202 7.50037 16.4931 7.50037 16.5757C7.50037 16.6582 7.44652 16.7311 7.36762 16.7554L6.81926 16.9241C6.11587 17.1406 5.56525 17.6912 5.34883 18.3946L5.1801 18.9429C5.15582 19.0218 5.08292 19.0757 5.00037 19.0757C4.91781 19.0757 4.84491 19.0218 4.82063 18.9429L4.65191 18.3946C4.43548 17.6912 3.88486 17.1406 3.18147 16.9241L2.63311 16.7554C2.55421 16.7311 2.50037 16.6582 2.50037 16.5757C2.50037 16.4931 2.55421 16.4202 2.63311 16.3959L3.18148 16.2272C3.88486 16.0108 4.43548 15.4602 4.6519 14.7568Z"></path>
+                </svg>
+                <span id="genSubmitBtnText" data-i18n="gen.generate">Generate</span>
+                <span class="gen-credit-badge" id="genCreditQuote">Free</span>
+                <span class="gen-shortcut-hint">Ctrl+↵</span>
+              </button>
+              <button class="btn btn-secondary gen-stop-btn hidden" id="genStopBtn" type="button" title="Dừng">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2" /></svg>
+              </button>
+            </div>
+            <!-- Backward compatibility submit buttons -->
+            <button id="startBtn" class="hidden" type="button"></button>
+            <button id="btnSubmitImage" class="hidden" type="button"><span id="txtBtnSubmitImage">Tạo ảnh</span></button>
+            <button id="btnSubmitVideo" class="hidden" type="button"><span id="txtBtnSubmitVideo">Tạo video</span></button>
+            <!-- Feedback box -->
+            <div class="feedback-box" id="feedbackBox"></div>
+          </section>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- TAB 2: WORKFLOW                            -->
+        <!-- ========================================== -->
+        <div id="tab-workflow" class="tab-pane" role="tabpanel">
+          <div class="wf-toolbar">
+            <div class="wf-toolbar-left">
+              <button class="btn btn-secondary btn-sm btn-toolbar-icon" id="wfSearchToggle" title="Tìm kiếm" type="button">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path></svg>
+              </button>
+              <button class="btn btn-secondary btn-sm btn-toolbar-icon" id="refreshWorkflowsBtn" title="Làm mới" type="button">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+              </button>
+            </div>
+            <div class="wf-toolbar-right">
+              <button class="btn btn-primary btn-sm btn-icon-text" id="createWorkflowBtn" title="Tạo mới" type="button">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                <span>Add</span>
+              </button>
+            </div>
+          </div>
+          <div class="wf-search-row hidden" id="wfSearchRow">
+            <input type="text" id="wfSearchInput" placeholder="Tìm kiếm workflow..." />
+          </div>
+          <div id="workflowList" class="workflow-list"></div>
+
+          <!-- Workflow Automation Section (Flow MCP Agent Batch / Edit / Continue) -->
+          <section class="section-card flow-workflow-card" style="margin-top:12px;">
+            <div class="form-group">
+              <label class="form-label" for="workflowType" id="lblWorkflowType">Loại quy trình</label>
+              <select class="form-select" id="workflowType">
+                <option value="agent" id="optWorkflowAgent">Agent batch (mỗi dòng một cảnh)</option>
+                <option value="edit" id="optWorkflowEdit">Chỉnh sửa video</option>
+                <option value="continue" id="optWorkflowContinue">Tiếp tục video</option>
+              </select>
+            </div>
+            <div class="form-group" id="workflowScenesGroup">
+              <label class="form-label" for="workflowScenes" id="lblWorkflowScenes">Cảnh / prompt</label>
+              <textarea class="form-textarea" id="workflowScenes" placeholder="Mỗi dòng là một cảnh hoặc prompt"></textarea>
+            </div>
+            <div class="form-group" id="workflowAssetGroup" hidden>
+              <label class="form-label" for="workflowAsset" id="lblWorkflowAsset">Tên video nguồn</label>
+              <input class="form-input" id="workflowAsset" placeholder="Tên video trong Flow">
+            </div>
+            <div class="grid-2">
+              <div class="form-group">
+                <label class="form-label" for="workflowAspect" id="lblWorkflowAspect">Tỷ lệ</label>
+                <select class="form-select" id="workflowAspect">
+                  <option value="16:9">16:9</option>
+                  <option value="9:16">9:16</option>
+                  <option value="1:1">1:1</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="workflowPromptExtra" id="lblWorkflowExtra">Prompt bổ sung</label>
+                <input class="form-input" id="workflowPromptExtra" placeholder="Tùy chọn">
+              </div>
+            </div>
+            <button type="button" class="btn btn-primary" id="btnRunWorkflow">
+              <span id="txtRunWorkflow">Chạy quy trình</span>
+            </button>
+            <p class="flow-inline-note" id="workflowScopeNote">Lệnh được thêm vào hàng đợi; thao tác DOM diễn ra trong tab Flow.</p>
+          </section>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- TAB 3: TEMPLATES & MY PROMPTS              -->
+        <!-- ========================================== -->
+        <div id="tab-templates" class="tab-pane" role="tabpanel">
+          <div class="prompts-subtabs">
+            <button class="prompts-subtab active" data-subtab="subtab-templates" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /></svg>
+              <span data-i18n="tab.templates">Templates</span>
+            </button>
+            <button class="prompts-subtab" data-subtab="subtab-myprompts" type="button">
+              <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><path d="M8.469 15.896c2.206-1.921 5.694-1.953 7.897-.032.32.28.275.772-.055 1.04-.316.254-.773.207-1.088-.048-1.599-1.289-4.017-1.257-5.615.035-.314.254-.77.3-1.085.046-.33-.268-.375-.762-.054-1.042m.447-9.645c.828 0 1.5.784 1.5 1.75s-.672 1.75-1.5 1.75-1.5-.784-1.5-1.75.672-1.75 1.5-1.75"></path></svg>
+              <span data-i18n="templates.myPrompts">My Prompts</span>
+            </button>
+          </div>
+          <!-- Subtab: Templates -->
+          <div id="subtab-templates" class="prompts-subtab-pane active">
+            <div class="template-empty-state">
+              <p style="color:var(--text-muted);font-size:12px;text-align:center;padding:24px;">Chọn mẫu prompt từ thư viện hoặc tạo prompt của riêng bạn.</p>
+            </div>
+          </div>
+          <!-- Subtab: My Prompts -->
+          <div id="subtab-myprompts" class="prompts-subtab-pane">
+            <div class="myprompts-container">
+              <div class="myprompts-toolbar">
+                <div class="input-group">
+                  <input type="text" id="myPromptsSearch" placeholder="Tìm kiếm prompts..." />
+                </div>
+              </div>
+              <section class="section-card" style="margin-top:10px;">
+                <div class="form-group"><label class="form-label" for="promptName" id="lblPromptName">Tên prompt</label><input class="form-input" id="promptName" placeholder="Ví dụ: Product hero"></div>
+                <div class="form-group"><label class="form-label" for="promptDraft" id="lblPromptDraft">Nội dung prompt</label><textarea class="form-textarea" id="promptDraft" placeholder="Nhập prompt cần lưu"></textarea></div>
+                <button type="button" class="btn btn-primary" id="btnSavePrompt"><span id="txtSavePrompt">Lưu prompt</span></button>
+              </section>
+              <div class="myprompts-list" id="myPromptsList" style="margin-top:10px;"></div>
+              <div id="savedPromptsList" class="flow-saved-prompts" style="margin-top:10px;"></div>
+              <p id="savedPromptsEmpty" class="flow-inline-note">Chưa có prompt nào được lưu.</p>
             </div>
           </div>
         </div>
-        <div class="form-group">
-          <label><input type="checkbox" id="multiPromptImage"> <span data-i18n="sidebar.multiPromptToggle">Chia prompt theo đoạn trống và xếp hàng tuần tự</span></label>
-          <label class="form-label" for="multiRefModeImage" data-i18n="sidebar.multiPromptRefs">Gán tham chiếu</label>
-          <select class="form-select" id="multiRefModeImage">
-            <option value="none" data-i18n="sidebar.multiPromptRefsNone">Không dùng tham chiếu</option>
-            <option value="all" selected data-i18n="sidebar.multiPromptRefsAll">Dùng chung cho mỗi prompt</option>
-            <option value="sequential" data-i18n="sidebar.multiPromptRefsSequential">Chia lần lượt, một tham chiếu mỗi prompt</option>
-            <option value="mention" data-i18n="sidebar.multiPromptRefsMention">Theo @tên trong prompt</option>
-          </select>
-          <label class="form-label" for="multiRefCountImage" data-i18n="sidebar.multiPromptRefCount">Số tham chiếu mỗi prompt</label>
-          <select class="form-select" id="multiRefCountImage"><option value="1">1</option><option value="2">2</option><option value="3">3</option></select>
+
+        <!-- ========================================== -->
+        <!-- TAB 4: TASKS (MULTI-TASK)                  -->
+        <!-- ========================================== -->
+        <div id="tab-tasks" class="tab-pane" role="tabpanel">
+          <div class="task-toolbar">
+            <div class="task-toolbar-left">
+              <button class="btn btn-secondary btn-sm btn-toolbar-icon" id="taskSearchToggle" title="Tìm kiếm" type="button">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path></svg>
+              </button>
+              <button class="btn btn-secondary btn-sm btn-toolbar-icon" id="refreshTasksBtn" title="Làm mới" type="button">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+              </button>
+            </div>
+            <div class="task-toolbar-right">
+              <button class="btn btn-secondary btn-sm" id="taskRunModeBtn" type="button">
+                <span class="task-run-mode-label">Parallel</span>
+              </button>
+              <button class="btn btn-secondary btn-sm" id="runAllTasksBtn" type="button">
+                <span>Run All</span>
+              </button>
+              <button class="btn btn-primary btn-sm btn-icon-text" id="addTaskBtn" type="button">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                <span>Add</span>
+              </button>
+            </div>
+          </div>
+          <div id="queuePage" style="margin-top:12px;"></div>
         </div>
 
-        <div class="grid-2">
-          <div class="form-group">
-            <label class="form-label" id="lblRatioImage">Tỷ lệ khung hình:</label>
-            <select class="form-select" id="selectRatioImage">
-              <option value="9:16">9:16 (Dọc TikTok/Shorts)</option>
-              <option value="16:9">16:9 (Ngang YouTube)</option>
-              <option value="1:1">1:1 (Vuông)</option>
-              <option value="4:3">4:3</option>
-              <option value="3:4">3:4</option>
-            </select>
+        <!-- ========================================== -->
+        <!-- TAB 5: PHOTOS                              -->
+        <!-- ========================================== -->
+        <div id="tab-photos" class="tab-pane" role="tabpanel">
+          <div class="photos-subtabs">
+            <button class="photos-subtab active" data-subtab="photos-album" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></svg>
+              <span data-i18n="albums.album">Album</span>
+            </button>
+            <button class="photos-subtab" data-subtab="photos-flow-images" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /></svg>
+              <span data-i18n="albums.flowImages">Flow Images</span>
+            </button>
+            <button class="photos-subtab" data-subtab="photos-search" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+              <span data-i18n="albums.search">Search</span>
+            </button>
           </div>
-          <div class="form-group">
-            <label class="form-label" id="lblQtyImage">Số lượng:</label>
-            <select class="form-select" id="selectQtyImage">
-              <option value="1">1 ảnh</option>
-              <option value="2">2 ảnh</option>
-              <option value="3">3 ảnh</option>
-              <option value="4">4 ảnh</option>
-            </select>
+
+          <!-- Subtab: Album -->
+          <div class="photos-subtab-pane active" id="photos-album">
+            <div class="album-list-container" id="albumListContainer">
+              <p style="color:var(--text-muted);font-size:12px;text-align:center;padding:24px;">Chưa có album nào.</p>
+            </div>
+          </div>
+
+          <!-- Subtab: Flow Images -->
+          <div class="photos-subtab-pane" id="photos-flow-images">
+            <div class="photos-flow-images-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+              <input type="search" class="form-input" id="flowPhotosSearch" placeholder="Tìm kiếm ảnh Flow..." style="flex:1;max-width:200px;">
+              <select class="form-select" id="flowPhotosKind" style="width:auto;margin:0 8px;">
+                <option value="all">Tất cả</option>
+                <option value="image">Ảnh</option>
+                <option value="video">Video</option>
+              </select>
+              <button class="btn btn-secondary btn-sm" id="refreshFlowImagesBtn" type="button" title="Quét lại">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" /></svg>
+                <span data-i18n="albums.refresh">Refresh</span>
+              </button>
+              <button id="btnRefreshPhotos" class="hidden" type="button"></button>
+            </div>
+            <div class="photos-flow-images-grid" id="photosFlowImagesGrid">
+              <div id="flowPhotosGrid" class="flow-photos-grid"></div>
+            </div>
+            <p id="flowPhotosEmpty" class="flow-photos-empty" style="color:var(--text-dim);text-align:center;padding:20px;">Chưa quét media Flow.</p>
+            <button type="button" class="btn btn-secondary flow-photos-more" id="btnMorePhotos" hidden>Xem thêm</button>
+          </div>
+
+          <!-- Subtab: Search -->
+          <div class="photos-subtab-pane" id="photos-search">
+            <div class="photos-search-form">
+              <div class="photos-search-input-wrapper" style="margin-bottom:12px;">
+                <input type="text" id="photosSearchInput" class="form-input" placeholder="Nhập từ khóa tìm kiếm ảnh..." style="width:100%;">
+              </div>
+              <p class="photos-search-hint" style="color:var(--text-muted);font-size:11px;margin-bottom:8px;">Chọn kênh tìm kiếm:</p>
+              <div class="photos-search-channels" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                <button class="photos-channel-btn btn btn-secondary btn-sm" data-channel="pinterest" type="button">Pinterest</button>
+                <button class="photos-channel-btn btn btn-secondary btn-sm" data-channel="youtube" type="button">YouTube</button>
+                <button class="photos-channel-btn btn btn-secondary btn-sm" data-channel="tiktok" type="button">TikTok</button>
+                <button class="photos-channel-btn btn btn-secondary btn-sm" data-channel="google-photos" type="button">Google Photos</button>
+                <button class="photos-channel-btn btn btn-secondary btn-sm" data-channel="facebook" type="button">Facebook</button>
+                <button class="photos-channel-btn btn btn-secondary btn-sm" data-channel="unsplash" type="button">Unsplash</button>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div class="grid-2">
-          <div class="form-group">
-            <label class="form-label" id="lblModelImage">Mô hình AI:</label>
-            <select class="form-select" id="selectModelImage">
-              <option value="nano banana">Nano Banana 2.1 (Tối ưu)</option>
-              <option value="imagen 3">Imagen 3</option>
-            </select>
+        <!-- ========================================== -->
+        <!-- TAB 6: TOOLS                               -->
+        <!-- ========================================== -->
+        <div id="tab-tools" class="tab-pane" role="tabpanel">
+          <div class="tools-grid">
+            <button class="tools-item" id="autoCapcutToolbarBtn" type="button">
+              <div class="tools-item-icon tools-item-icon--cyan">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M7 3l2 4m4-4 2 4m4-4 2 4" /></svg>
+              </div>
+              <span class="tools-item-label" data-i18n="autoCapcut.title">Auto CapCut Builder</span>
+              <span class="tools-item-desc" data-i18n="autoCapcut.description">Căn chỉnh media và kịch bản tạo project CapCut</span>
+            </button>
+            <button class="tools-item" id="watermarkToolbarBtn" type="button">
+              <div class="tools-item-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L14.2 9.8L22 12L14.2 14.2L12 22L9.8 14.2L2 12L9.8 9.8L12 2Z"/></svg>
+              </div>
+              <span class="tools-item-label" data-i18n="tools.watermark">Remove Watermark</span>
+              <span class="tools-item-desc" data-i18n="tools.watermarkDesc">Xóa logo Gemini / Flow khỏi ảnh</span>
+            </button>
+            <button class="tools-item" id="anglesToolbarBtn" type="button">
+              <div class="tools-item-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" /><line x1="22" y1="12" x2="18" y2="12" /><line x1="6" y1="12" x2="2" y2="12" /><line x1="12" y1="6" x2="12" y2="2" /><line x1="12" y1="22" x2="12" y2="18" /></svg>
+              </div>
+              <span class="tools-item-label" data-i18n="tools.angles">Angles</span>
+              <span class="tools-item-desc" data-i18n="tools.anglesDesc">Tạo ảnh đa góc nhìn (multi-angles)</span>
+            </button>
+            <button class="tools-item" id="effectsToolbarBtn" type="button">
+              <div class="tools-item-icon tools-item-icon--cyan">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3" /><path d="M12 2v4m0 12v4M2 12h4m12 0h4" /></svg>
+              </div>
+              <span class="tools-item-label" data-i18n="tools.effects">Effects</span>
+              <span class="tools-item-desc" data-i18n="tools.effectsDesc">Áp dụng hiệu ứng biến đổi hình ảnh</span>
+            </button>
+            <button class="tools-item" id="aiAgentToolbarBtn" type="button">
+              <div class="tools-item-icon tools-item-icon--purple">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2" /><circle cx="8.5" cy="16" r="1.1" fill="currentColor" stroke="none"></circle><circle cx="15.5" cy="16" r="1.1" fill="currentColor" stroke="none"></circle><path d="M12 7V4M9 4h6"></path></svg>
+              </div>
+              <span class="tools-item-label" data-i18n="tools.aiAgent">AI Agent (MCP)</span>
+              <span class="tools-item-desc" data-i18n="tools.aiAgentDesc">Kết nối Claude/Cursor MCP tự động hóa Flow</span>
+            </button>
+            <button class="tools-item" id="telegramToolbarBtn" type="button">
+              <div class="tools-item-icon tools-item-icon--blue">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z" /></svg>
+              </div>
+              <span class="tools-item-label" data-i18n="tools.telegram">Telegram Link</span>
+              <span class="tools-item-desc" data-i18n="tools.telegramDesc">Điều khiển từ xa qua Telegram Bot</span>
+            </button>
           </div>
-          <div class="form-group">
-            <label class="form-label" id="lblCharImage">Nhân vật:</label>
-            <select class="form-select" id="selectCharImage">
-              <option value="">Không chọn (Mặc định)</option>
-            </select>
+
+          <!-- Character Creator Form (in tools tab) -->
+          <div class="section-card" id="formCharacter" style="margin-top:14px;">
+            <div class="section-title">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="7" r="4"></circle><path d="M5.5 21v-2a6.5 6.5 0 0 1 13 0v2"></path></svg>
+              <span>Tạo nhân vật Flow</span>
+            </div>
+            <div class="form-group">
+              <label class="form-label" id="lblCharName">Tên nhân vật:</label>
+              <input type="text" class="form-input" id="inputCharName" placeholder="Ví dụ: Cô gái áo dài, John Doe..." />
+            </div>
+            <div class="form-group">
+              <label class="form-label" id="lblCharDesc">Mô tả ngoại hình:</label>
+              <textarea class="form-textarea" id="inputCharDesc" placeholder="Mô tả khuôn mặt, trang phục, độ tuổi..."></textarea>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Ảnh chân dung tham chiếu (Tùy chọn):</label>
+              <input type="file" id="inputCharFile" accept="image/*" class="form-input" style="padding: 6px;" />
+            </div>
+            <button class="btn btn-primary" id="btnSubmitCharacter" type="button">
+              <span id="txtBtnSubmitChar">Tạo nhân vật Flow</span>
+            </button>
           </div>
+
+          <!-- Flow Library Operations Details -->
+          <details class="section-card" id="flowLibraryTools" style="margin-top:14px;">
+            <summary class="section-title" style="cursor:pointer" data-i18n="sidebar.libraryToolsTitle">Quản lý dự án & Thư viện Flow</summary>
+            <div class="form-group" style="margin-top:10px;">
+              <label class="form-label" for="flowProjectSelect">Dự án</label>
+              <select class="form-select" id="flowProjectSelect"><option value="">Tải danh sách dự án</option></select>
+              <div class="grid-2" style="margin-top:8px">
+                <button type="button" class="btn btn-secondary" id="btnRefreshProjects">Làm mới dự án</button>
+                <button type="button" class="btn btn-secondary" id="btnOpenProject">Mở dự án</button>
+              </div>
+              <button type="button" class="btn btn-primary" id="btnCreateProject" style="margin-top:8px">Tạo dự án mới</button>
+            </div>
+            <div class="form-group" style="margin-top:12px;">
+              <label class="form-label" for="flowAssetSelect">Tài sản (Media)</label>
+              <select class="form-select" id="flowAssetSelect"><option value="">Tải danh sách tài sản</option></select>
+              <div class="grid-2" style="margin-top:8px">
+                <button type="button" class="btn btn-secondary" id="btnRefreshAssets">Làm mới tài sản</button>
+                <button type="button" class="btn btn-secondary" id="btnDownloadAsset">Tải xuống</button>
+              </div>
+              <div class="grid-2" style="margin-top:8px">
+                <input type="text" class="form-input" id="flowAssetNewName" placeholder="Tên mới">
+                <button type="button" class="btn btn-secondary" id="btnRenameAsset">Đổi tên</button>
+              </div>
+              <button type="button" class="btn btn-secondary" id="btnTrashAsset" style="margin-top:8px">Chuyển vào thùng rác</button>
+            </div>
+            <div class="form-group" style="margin-top:12px;">
+              <label class="form-label" for="flowLibraryCharacterSelect">Nhân vật</label>
+              <select class="form-select" id="flowLibraryCharacterSelect"><option value="">Tải danh sách nhân vật</option></select>
+              <button type="button" class="btn btn-secondary" id="btnRefreshLibraryCharacters" style="margin-top:8px">Làm mới nhân vật</button>
+              <input type="text" class="form-input" id="flowCharacterNewName" placeholder="Tên mới" style="margin-top:8px">
+              <textarea class="form-textarea" id="flowCharacterChange" placeholder="Mô tả thay đổi" style="margin-top:8px"></textarea>
+              <button type="button" class="btn btn-secondary" id="btnEditCharacter" style="margin-top:8px">Sửa nhân vật</button>
+            </div>
+            <div class="form-group" style="margin-top:12px;">
+              <label class="form-label" for="flowUploadFile">Tải media lên Flow</label>
+              <input type="file" class="form-input" id="flowUploadFile" accept="image/*,video/*">
+              <button type="button" class="btn btn-secondary" id="btnUploadMedia" style="margin-top:8px">Tải tệp lên</button>
+            </div>
+            <pre id="flowLibraryResult" style="white-space:pre-wrap;font-size:11px;color:var(--text-muted);margin:8px 0 0"></pre>
+          </details>
+          <div id="libraryPage" class="hidden"></div>
         </div>
 
-        <button class="btn btn-primary" id="btnSubmitImage">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12 2L14.2 9.8L22 12L14.2 14.2L12 22L9.8 14.2L2 12L9.8 9.8L12 2Z"/>
-          </svg>
-          <span id="txtBtnSubmitImage">Tạo ảnh ngay</span>
-        </button>
+        <!-- ========================================== -->
+        <!-- TAB 7: HISTORY                             -->
+        <!-- ========================================== -->
+        <div id="tab-history" class="tab-pane" role="tabpanel">
+          <div class="flow-history-toolbar" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <span class="section-title" id="flowHistoryActivity">Hoạt động DOM Flow</span>
+            <div style="display:flex;gap:6px;">
+              <button type="button" class="btn btn-secondary btn-sm" id="btnRefreshHistory">Làm mới</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnClearHistory">Xóa</button>
+            </div>
+          </div>
+          <div id="flowHistoryList" class="flow-history-list" aria-live="polite"></div>
+          <p id="flowHistoryEmpty" class="flow-inline-note">Chưa có lịch sử cục bộ.</p>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- TAB 8: QUEUE & LOGS                        -->
+        <!-- ========================================== -->
+        <div id="tab-logs" class="tab-pane" role="tabpanel">
+          <div class="tobyflow-queue-monitor" id="queueMonitorContent">
+            <!-- FlowQueuePanel mount container -->
+            <div id="flowQueuePanel" aria-label="Hàng đợi Flow"></div>
+          </div>
+          <!-- MCP Debug Logs Section -->
+          <div class="section-card" style="padding:10px;margin-top:14px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+              <span style="font-weight:700;font-size:12px;color:var(--text-muted);" id="lblLogsTitle">Nhật ký MCP</span>
+              <button class="btn btn-secondary" id="btnClearLogs" style="width:auto;padding:4px 10px;font-size:11px;" type="button">Xóa</button>
+            </div>
+            <div class="logs-container" id="logsContainer">
+              <div class="logs-empty" id="logsEmpty">Chưa có hoạt động MCP nào.</div>
+            </div>
+          </div>
+        </div>
+      </div><!-- /.tabs-content -->
+
+      <!-- ============================================== -->
+      <!-- QUEUE PANEL WRAPPER                            -->
+      <!-- ============================================== -->
+      <div class="tobyflow-queue-panel-wrapper" id="queuePanelContainer"></div>
+
+      <!-- ============================================== -->
+      <!-- MODALS & OVERLAYS CONTAINERS                   -->
+      <!-- ============================================== -->
+
+      <!-- CharacterSelectModal Container -->
+      <div id="characterSelectModalContainer"></div>
+
+      <!-- VoiceSelectModal Container -->
+      <div id="voiceSelectModalContainer"></div>
+
+      <!-- ImagePickerModal Container -->
+      <div id="imagePickerModalContainer"></div>
+
+      <!-- ReferencePickerModal (Flow & Local Images Picker) -->
+      <div class="ref-picker-overlay" id="referencePickerModal" hidden>
+        <section class="ref-picker-dialog" role="dialog" aria-modal="true" aria-labelledby="refPickerTitle">
+          <header class="ref-picker-header">
+            <span id="refPickerTitle">Chọn / Tải ảnh lên</span>
+            <button type="button" class="ref-picker-close" id="refPickerClose" aria-label="Đóng">×</button>
+          </header>
+          <nav class="ref-picker-tabs" aria-label="Nguồn ảnh">
+            <button type="button" class="ref-picker-tab active" data-ref-picker-tab="flow">Ảnh trên Flow</button>
+            <button type="button" class="ref-picker-tab" data-ref-picker-tab="upload">Upload</button>
+          </nav>
+          <div class="ref-picker-content" id="refPickerFlowPanel">
+            <div class="ref-picker-toolbar">
+              <input class="ref-picker-search" id="refPickerSearch" type="search" placeholder="Tìm ảnh trên Flow..." aria-label="Tìm ảnh trên Flow">
+              <button type="button" class="btn btn-secondary" id="refPickerRefresh" style="width:auto;white-space:nowrap">Quét lại</button>
+            </div>
+            <div class="ref-picker-results"><span id="refPickerAssetCount">Tìm thấy 0 ảnh</span><span id="refPickerLimitHint">Tối đa 3 ảnh tham chiếu</span></div>
+            <div class="ref-picker-grid" id="refPickerFlowGrid"></div>
+            <button type="button" class="ref-picker-more" id="refPickerMore" hidden></button>
+            <div class="ref-picker-message" id="refPickerFlowMessage">Đang tìm ảnh trong thư viện Flow...</div>
+          </div>
+          <div class="ref-picker-content" id="refPickerUploadPanel" hidden>
+            <div class="ref-picker-drop" id="refPickerDrop">
+              <span>Chọn ảnh từ máy hoặc kéo thả ảnh vào đây</span>
+              <button type="button" class="btn btn-secondary" id="refPickerChooseFiles" style="width:auto">Chọn ảnh</button>
+              <input type="file" id="refPickerFileInput" accept="image/*" multiple hidden>
+              <small id="refPickerUploadHint">Ảnh sẽ được tải lên Flow khi bạn bấm Tạo ảnh hoặc Tạo video.</small>
+            </div>
+            <div class="ref-picker-local-list" id="refPickerLocalList"></div>
+          </div>
+          <footer class="ref-picker-footer">
+            <span id="refPickerCount">0/3 ảnh đã chọn</span>
+            <div style="display:flex;gap:8px">
+              <button type="button" class="btn btn-secondary" id="refPickerCancel" style="width:auto">Hủy</button>
+              <button type="button" class="btn btn-primary" id="refPickerConfirm" style="width:auto">Xác nhận</button>
+            </div>
+          </footer>
+        </section>
       </div>
 
+      <!-- Settings Popup Modal -->
+      <div class="ref-picker-overlay hidden" id="settingsPopup">
+        <section class="ref-picker-dialog" style="max-width:480px;height:auto;max-height:85vh;" role="dialog" aria-modal="true">
+          <header class="ref-picker-header">
+            <span>Cài đặt Toby Flow</span>
+            <button type="button" class="ref-picker-close" id="closeSettingsPopupBtn" aria-label="Đóng">×</button>
+          </header>
+          <div class="ref-picker-content" style="padding:16px;display:flex;flex-direction:column;gap:12px;">
+            <div class="section-card">
+              <div class="status-row">
+                <span class="status-badge" id="wsBadge">
+                  <span class="pulse-dot"></span>
+                  <span id="wsText">Đang kiểm tra…</span>
+                </span>
+                <span class="info-tag" id="bridgeSummary">MCP local · 127.0.0.1:18899</span>
+              </div>
+              <div class="info-list" style="margin-top:8px;">
+                <div class="info-item">
+                  <span id="lblFlowTabs">Tab Google Flow:</span>
+                  <span class="info-tag" id="valFlowTabs">0</span>
+                </div>
+                <div class="info-item">
+                  <span id="lblSelectedTab">Tab điều khiển:</span>
+                  <span class="info-tag" id="valSelectedTab">Chưa chọn</span>
+                </div>
+              </div>
+              <button class="btn btn-primary" id="btnReconnect" style="margin-top:10px;" type="button">
+                <span id="txtBtnReconnect">Kết nối lại tab Flow</span>
+              </button>
+            </div>
+            <div class="section-card">
+              <div class="form-group">
+                <label class="form-label">Tài khoản &amp; Gói cước:</label>
+                <span class="info-tag" id="userPlanSummary">FREE PLAN</span>
+              </div>
+              <button class="btn btn-secondary" id="btnPairSettings" style="margin-top:8px;" type="button">Xác thực tài khoản</button>
+            </div>
+          </div>
+          <footer class="ref-picker-footer" style="justify-content:flex-end;">
+            <button type="button" class="btn btn-primary" id="saveSettingsBtn" style="width:auto;">Đóng</button>
+          </footer>
+        </section>
+      </div>
+
+      <!-- Image Confirm Dialog -->
       <dialog id="imageConfirmDialog" class="image-confirm-dialog" aria-labelledby="imageConfirmTitle" aria-describedby="imageConfirmDescription">
         <div class="image-confirm-content">
           <h2 class="image-confirm-title" id="imageConfirmTitle" data-i18n="sidebar.imageConfirmTitle">Xác nhận tạo ảnh</h2>
@@ -1121,464 +1191,25 @@
         </div>
       </dialog>
 
-      <!-- FORM TẠO VIDEO (VIDEO) -->
-      <div class="section-card" id="formVideo" style="display: none;">
-        <div class="form-group">
-          <label class="form-label" id="lblPromptVideo">Câu lệnh Prompt Video:</label>
-          <textarea class="form-textarea" id="inputPromptVideo" placeholder="Mô tả chuyển động video, góc quay, hành động..."></textarea>
-          <div class="multi-prompt-tools">
-            <span id="promptCountVideo" aria-live="polite">0 prompt</span>
-            <button class="btn btn-secondary" type="button" id="btnImportPromptsVideo">Nhập .txt/.csv</button>
-            <input type="file" id="inputImportPromptsVideo" accept=".txt,.csv,text/plain,text/csv" hidden>
-          </div>
-          <small class="multi-prompt-hint" id="promptBatchHintVideo" hidden>Mỗi đoạn cách nhau bằng một dòng trống sẽ thành một tác vụ.</small>
-        </div>
-        <div class="form-group">
-          <label><input type="checkbox" id="multiPromptVideo"> <span data-i18n="sidebar.multiPromptToggle">Chia prompt theo đoạn trống và xếp hàng tuần tự</span></label>
-          <label class="form-label" id="videoChainOption" hidden><input type="checkbox" id="chainVideoFromPrevious"> <span id="videoChainLabel">Nối mỗi video từ khung cuối của video trước</span></label>
-          <small class="multi-prompt-hint" id="videoChainHint" hidden></small>
-          <div class="form-group" id="videoReferenceOptionsGroup">
-            <label class="form-label" for="multiRefModeVideo" data-i18n="sidebar.multiPromptRefs">Gán tham chiếu</label>
-            <select class="form-select" id="multiRefModeVideo">
-              <option value="none" data-i18n="sidebar.multiPromptRefsNone">Không dùng tham chiếu</option>
-              <option value="all" selected data-i18n="sidebar.multiPromptRefsAll">Dùng chung cho mỗi prompt</option>
-              <option value="sequential" data-i18n="sidebar.multiPromptRefsSequential">Chia lần lượt, một tham chiếu mỗi prompt</option>
-              <option value="mention" data-i18n="sidebar.multiPromptRefsMention">Theo @tên trong prompt</option>
-            </select>
-            <label class="form-label" for="multiRefCountVideo" data-i18n="sidebar.multiPromptRefCount">Số tham chiếu mỗi prompt</label>
-            <select class="form-select" id="multiRefCountVideo"><option value="1">1</option><option value="2">2</option><option value="3">3</option></select>
-          </div>
-        </div>
+      <!-- Flow Photo Preview Dialog -->
+      <dialog id="flowPhotoPreview" class="flow-photo-preview">
+        <form method="dialog"><button class="flow-photo-preview-close" aria-label="Close">×</button></form>
+        <img id="flowPhotoPreviewImage" alt="">
+        <video id="flowPhotoPreviewVideo" class="flow-photo-preview-video" controls playsinline hidden></video>
+        <p id="flowPhotoPreviewName"></p>
+        <p id="flowPhotoPreviewNote" class="flow-photo-preview-note" hidden></p>
+      </dialog>
 
-        <!-- Khung Tải Ảnh Tham Chiếu Cho Video (Reference Images) -->
-        <div class="ref-section" id="videoReferenceSection">
-          <div class="ref-section-header">
-            <span class="ref-section-title">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                <circle cx="8.5" cy="8.5" r="1.5"/>
-                <polyline points="21 15 16 10 5 21"/>
-              </svg>
-              Ảnh tham chiếu (Reference)
-            </span>
-            <span class="ref-count-badge" id="refImageCountVideo">0/3 ảnh</span>
-          </div>
+      <!-- Watermark tool panel inline -->
+      <div class="wmtool-inline hidden" id="watermarkToolPanel"></div>
 
-          <div class="ref-container">
-            <div class="ref-cards-list" id="refCardsListVideo">
-              <div class="ref-upload-slot" id="refUploadSlotVideo" title="Chọn ảnh từ Flow hoặc tải ảnh lên">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                  <polyline points="17 8 12 3 7 8"/>
-                  <line x1="12" y1="3" x2="12" y2="15"/>
-                </svg>
-                <span>Tải ảnh</span>
-              </div>
-            </div>
-            <div class="ref-dropzone-hint" id="refDropzoneHintVideo">Chọn ảnh từ Flow, tải ảnh lên hoặc kéo thả vào đây (Tối đa 3 ảnh)</div>
-          </div>
-        </div>
+      <!-- Hidden compatibility buttons -->
+      <button class="hidden" id="btnPreview" type="button"></button>
+      <button class="hidden" id="btnOpenFlow" type="button"></button>
+    </div><!-- /.flow-app -->
+  </div><!-- /#flow-auto-sidebar-root -->
 
-        <div class="grid-2">
-          <div class="form-group">
-            <label class="form-label" id="lblRatioVideo">Tỷ lệ khung hình:</label>
-            <select class="form-select" id="selectRatioVideo">
-              <option value="9:16">9:16 (Dọc TikTok/Reels)</option>
-              <option value="16:9">16:9 (Ngang YouTube)</option>
-            </select>
-          </div>
-          <div class="form-group" id="videoDurationGroup">
-            <label class="form-label" id="lblDurationVideo">Thời lượng (Duration):</label>
-            <select class="form-select" id="selectDurationVideo">
-              <option value="8" selected>8 giây</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="grid-2">
-          <div class="form-group">
-            <label class="form-label" id="lblModelVideo">Mô hình Video:</label>
-            <select class="form-select" id="selectModelVideo">
-              <option value="veo 3.1">Veo 3.1 (Mới nhất)</option>
-              <option value="omni 1.1 flash">Omni 1.1 Flash</option>
-            </select>
-          </div>
-          <div>
-            <div class="form-group" id="videoResolutionGroup" hidden>
-              <label class="form-label" id="lblResolutionVideo">Độ phân giải:</label>
-              <select class="form-select" id="selectResolutionVideo">
-                <option value="720p" selected>720p</option>
-              </select>
-            </div>
-            <div id="videoCountGroup" hidden>
-              <div class="form-group">
-                <label class="form-label" id="lblQtyVideo" for="selectCountVideo">Số lượng video:</label>
-                <select class="form-select" id="selectCountVideo">
-                  <option value="1" selected>1</option>
-                  <option value="2">2</option>
-                  <option value="3">3</option>
-                  <option value="4">4</option>
-                </select>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="grid-2">
-          <div class="form-group">
-            <label class="form-label" id="lblModeVideo">Chế độ Video:</label>
-            <select class="form-select" id="selectModeVideo">
-              <option value="ingredients">Thành phần (Ingredients)</option>
-              <option value="frames">Khung hình (Frames)</option>
-            </select>
-          </div>
-          <div class="form-group" id="videoCharacterGroup">
-            <label class="form-label" id="lblCharVideo">Nhân vật:</label>
-            <select class="form-select" id="selectCharVideo">
-              <option value="">Không chọn</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="form-group" id="flowVoicePickerGroup">
-          <button type="button" class="btn btn-secondary" id="btnLoadVoices" data-i18n="sidebar.libraryVoices">Xem tùy chọn giọng nói</button>
-          <select class="form-select" id="flowVoiceSelect" style="margin-top:8px"><option value="" data-i18n="sidebar.libraryNoVoice">Không dùng giọng nói</option></select>
-        </div>
-
-        <div class="form-group" id="videoFrameNamesGroup" hidden>
-          <div class="video-frame-source-head">
-            <div><label class="form-label" data-i18n="sidebar.frameSourcesTitle">Nguồn ảnh Frames</label><small id="videoFrameSourceSummary">Chưa chọn ảnh nguồn.</small></div>
-            <button type="button" class="btn btn-secondary" id="btnChooseVideoFrameSources" data-i18n="sidebar.frameChooseSources">Chọn ảnh</button>
-          </div>
-          <div class="video-frame-source-grid" id="videoFrameSourceGrid"></div>
-          <div class="video-frame-assignment-toolbar">
-            <select class="form-select" id="videoFrameAssignmentMode" aria-label="Cách gán ảnh Frames">
-              <option value="start" data-i18n="sidebar.frameAssignStart">Gán ảnh đầu làm khung bắt đầu</option>
-              <option value="chain" data-i18n="sidebar.frameAssignChain">Nối khung liên tiếp</option>
-              <option value="pairs" data-i18n="sidebar.frameAssignPairs">Gán theo cặp</option>
-              <option value="clear" data-i18n="sidebar.frameAssignClear">Xóa gán khung</option>
-            </select>
-            <button type="button" class="btn btn-secondary" id="btnAssignVideoFrames" data-i18n="sidebar.frameApplyAssignment">Áp dụng</button>
-          </div>
-          <div class="video-frame-assignment-list" id="videoFrameAssignments"></div>
-          <small id="videoFrameNamesHint" data-i18n="sidebar.videoFrameNamesHint">Chọn khung đầu cho mỗi prompt. Khung cuối không bắt buộc. Không kết hợp với Ingredients.</small>
-        </div>
-
-        <button class="btn btn-primary" id="btnSubmitVideo">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polygon points="5 3 19 12 5 21 5 3"></polygon>
-          </svg>
-          <span id="txtBtnSubmitVideo">Tạo video ngay</span>
-        </button>
-      </div>
-        </button>
-      </div>
-
-      <!-- FORM TẠO NHÂN VẬT (CHARACTER) -->
-      <div class="section-card" id="formCharacter" style="display: none;">
-        <div class="form-group">
-          <label class="form-label" id="lblCharName">Tên nhân vật:</label>
-          <input type="text" class="form-input" id="inputCharName" placeholder="Ví dụ: Cô gái áo dài, John Doe..." />
-        </div>
-
-        <div class="form-group">
-          <label class="form-label" id="lblCharDesc">Mô tả ngoại hình:</label>
-          <textarea class="form-textarea" id="inputCharDesc" placeholder="Mô tả khuôn mặt, trang phục, phong cách, độ tuổi..."></textarea>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Ảnh chân dung tham chiếu (Tùy chọn):</label>
-          <input type="file" id="inputCharFile" accept="image/*" class="form-input" style="padding: 6px;" />
-        </div>
-
-        <button class="btn btn-primary" id="btnSubmitCharacter">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
-            <circle cx="9" cy="7" r="4"></circle>
-            <line x1="19" y1="8" x2="19" y2="14"></line>
-            <line x1="22" y1="11" x2="16" y2="11"></line>
-          </svg>
-          <span id="txtBtnSubmitChar">Tạo nhân vật Flow</span>
-        </button>
-      </div>
-
-      <div class="feedback-box" id="feedbackBox"></div>
-      <div class="section-card" id="flowQueuePanel" aria-label="Hàng đợi Flow"></div>
-
-      <details class="section-card" id="flowLibraryTools">
-        <summary class="section-title" style="cursor:pointer" data-i18n="sidebar.libraryToolsTitle">Thư viện và thao tác Flow</summary>
-        <div class="form-group">
-          <label class="form-label" for="flowProjectSelect" data-i18n="sidebar.libraryProject">Dự án</label>
-          <select class="form-select" id="flowProjectSelect"><option value="" data-i18n="sidebar.libraryProjectsPlaceholder">Tải danh sách dự án</option></select>
-          <div class="grid-2" style="margin-top:8px">
-            <button type="button" class="btn btn-secondary" id="btnRefreshProjects" data-i18n="sidebar.libraryRefreshProjects">Làm mới dự án</button>
-            <button type="button" class="btn btn-secondary" id="btnOpenProject" data-i18n="sidebar.libraryOpenProject">Mở dự án</button>
-          </div>
-          <button type="button" class="btn btn-primary" id="btnCreateProject" style="margin-top:8px" data-i18n="sidebar.libraryCreateProject">Tạo dự án mới</button>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label" for="flowAssetSelect" data-i18n="sidebar.libraryAsset">Tài sản</label>
-          <select class="form-select" id="flowAssetSelect"><option value="" data-i18n="sidebar.libraryAssetsPlaceholder">Tải danh sách tài sản</option></select>
-          <div class="grid-2" style="margin-top:8px">
-            <button type="button" class="btn btn-secondary" id="btnRefreshAssets" data-i18n="sidebar.libraryRefreshAssets">Làm mới tài sản</button>
-            <button type="button" class="btn btn-secondary" id="btnDownloadAsset" data-i18n="sidebar.libraryDownloadAsset">Tải xuống</button>
-          </div>
-          <div class="grid-2" style="margin-top:8px">
-            <input type="text" class="form-input" id="flowAssetNewName" data-i18n-placeholder="sidebar.libraryNewName" placeholder="Tên mới" aria-label="Tên tài sản mới">
-            <button type="button" class="btn btn-secondary" id="btnRenameAsset" data-i18n="sidebar.libraryRenameAsset">Đổi tên</button>
-          </div>
-          <button type="button" class="btn btn-secondary" id="btnTrashAsset" style="margin-top:8px" data-i18n="sidebar.libraryTrashAsset">Chuyển vào thùng rác</button>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label" for="flowLibraryCharacterSelect" data-i18n="sidebar.libraryCharacter">Nhân vật</label>
-          <select class="form-select" id="flowLibraryCharacterSelect"><option value="" data-i18n="sidebar.libraryCharactersPlaceholder">Tải danh sách nhân vật</option></select>
-          <button type="button" class="btn btn-secondary" id="btnRefreshLibraryCharacters" style="margin-top:8px" data-i18n="sidebar.libraryRefreshCharacters">Làm mới nhân vật</button>
-          <input type="text" class="form-input" id="flowCharacterNewName" data-i18n-placeholder="sidebar.libraryNewCharacterName" placeholder="Tên nhân vật mới" style="margin-top:8px">
-          <textarea class="form-textarea" id="flowCharacterChange" data-i18n-placeholder="sidebar.libraryCharacterChange" placeholder="Mô tả thay đổi cho nhân vật" style="margin-top:8px"></textarea>
-          <button type="button" class="btn btn-secondary" id="btnEditCharacter" style="margin-top:8px" data-i18n="sidebar.libraryEditCharacter">Đưa chỉnh sửa vào hàng đợi</button>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label" for="flowReferenceInput" data-i18n="sidebar.libraryReferences">Gắn tham chiếu (mỗi dòng một tên, ví dụ asset:Tên ảnh)</label>
-          <textarea class="form-textarea" id="flowReferenceInput" data-i18n-placeholder="sidebar.libraryReferencesPlaceholder" placeholder="asset:Tên ảnh\ncharacter:Tên nhân vật"></textarea>
-          <div class="grid-2" style="margin-top:8px">
-            <button type="button" class="btn btn-secondary" id="btnAttachReferences" data-i18n="sidebar.libraryAttachReferences">Gắn tham chiếu</button>
-            <button type="button" class="btn btn-secondary" id="btnClearReferences" data-i18n="sidebar.libraryClearReferences">Xóa tham chiếu</button>
-          </div>
-          <div class="grid-2" style="margin-top:8px">
-            <select class="form-select" id="flowReferenceKindToRemove" aria-label="Loại tham chiếu cần gỡ">
-              <option value="image" data-i18n="sidebar.referenceKindImage">Ảnh</option>
-              <option value="video" data-i18n="sidebar.referenceKindVideo">Video</option>
-              <option value="character" data-i18n="sidebar.referenceKindCharacter">Nhân vật</option>
-              <option value="voice" data-i18n="sidebar.referenceKindVoice">Giọng nói</option>
-            </select>
-            <button type="button" class="btn btn-secondary" id="btnRemoveReferenceKind" data-i18n="sidebar.removeReferenceKind">Gỡ loại đã chọn</button>
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label" for="flowUploadFile" data-i18n="sidebar.libraryUpload">Tải media lên Flow</label>
-          <input type="file" class="form-input" id="flowUploadFile" accept="image/*,video/*">
-          <button type="button" class="btn btn-secondary" id="btnUploadMedia" style="margin-top:8px" data-i18n="sidebar.libraryUploadFile">Tải tệp lên</button>
-        </div>
-
-        <pre id="flowLibraryResult" style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;color:var(--text-muted);margin:8px 0 0"></pre>
-      </details>
-    </div>
-
-    <div id="tab-workflow" class="tab-pane" role="tabpanel" aria-labelledby="navWorkflow" tabindex="0">
-      <div class="pane-heading"><div><span class="pane-kicker">FLOW MCP</span><h1 id="viewWorkflowTitle">Quy trình Flow</h1><p id="viewWorkflowSubtitle">Chạy Agent batch, chỉnh sửa hoặc tiếp tục video bằng DOM Flow.</p></div></div>
-      <section class="section-card flow-workflow-card">
-        <div class="form-group">
-          <label class="form-label" for="workflowType" id="lblWorkflowType">Loại quy trình</label>
-          <select class="form-select" id="workflowType">
-            <option value="agent" id="optWorkflowAgent">Agent batch (mỗi dòng một cảnh)</option>
-            <option value="edit" id="optWorkflowEdit">Chỉnh sửa video</option>
-            <option value="continue" id="optWorkflowContinue">Tiếp tục video</option>
-          </select>
-        </div>
-        <div class="form-group" id="workflowScenesGroup">
-          <label class="form-label" for="workflowScenes" id="lblWorkflowScenes">Cảnh / prompt</label>
-          <textarea class="form-textarea" id="workflowScenes" placeholder="Mỗi dòng là một cảnh hoặc prompt"></textarea>
-        </div>
-        <div class="form-group" id="workflowAssetGroup" hidden>
-          <label class="form-label" for="workflowAsset" id="lblWorkflowAsset">Tên video nguồn</label>
-          <input class="form-input" id="workflowAsset" placeholder="Tên đầy đủ hoặc tiền tố video trong Flow">
-        </div>
-        <div class="grid-2">
-          <div class="form-group"><label class="form-label" for="workflowAspect" id="lblWorkflowAspect">Tỷ lệ</label><select class="form-select" id="workflowAspect"><option value="16:9">16:9</option><option value="9:16">9:16</option><option value="1:1">1:1</option></select></div>
-          <div class="form-group"><label class="form-label" for="workflowPromptExtra" id="lblWorkflowExtra">Prompt bổ sung</label><input class="form-input" id="workflowPromptExtra" placeholder="Tùy chọn"></div>
-        </div>
-        <button type="button" class="btn btn-primary" id="btnRunWorkflow"><span id="txtRunWorkflow">Chạy quy trình</span></button>
-        <p class="flow-inline-note" id="workflowScopeNote">Extension chỉ gửi lệnh vào hàng đợi; thao tác DOM diễn ra trong tab Flow.</p>
-      </section>
-    </div>
-
-    <div id="tab-prompts" class="tab-pane" role="tabpanel" aria-labelledby="navPrompts" tabindex="0">
-      <div class="pane-heading"><div><span class="pane-kicker">FLOW MCP</span><h1 id="viewPromptsTitle">Prompt đã lưu</h1><p id="viewPromptsSubtitle">Lưu prompt cục bộ và đưa lại vào màn hình tạo.</p></div></div>
-      <section class="section-card flow-prompts-card">
-        <div class="form-group"><label class="form-label" for="promptName" id="lblPromptName">Tên prompt</label><input class="form-input" id="promptName" placeholder="Ví dụ: Product hero"></div>
-        <div class="form-group"><label class="form-label" for="promptDraft" id="lblPromptDraft">Prompt</label><textarea class="form-textarea" id="promptDraft" placeholder="Nhập prompt cần lưu"></textarea></div>
-        <button type="button" class="btn btn-primary" id="btnSavePrompt"><span id="txtSavePrompt">Lưu prompt hiện tại</span></button>
-      </section>
-      <section class="section-card"><div id="savedPromptsList" class="flow-saved-prompts" aria-live="polite"></div><p id="savedPromptsEmpty" class="flow-inline-note">Chưa có prompt nào được lưu.</p></section>
-    </div>
-
-    <!-- TAB 2: STATUS & CONTROL -->
-    <div id="tab-library" class="tab-pane" role="tabpanel" aria-labelledby="navLibrary" tabindex="0">
-      <div class="pane-heading"><div><span class="pane-kicker">FLOW MCP</span><h1 id="viewLibraryTitle">Thư viện Flow</h1><p id="viewLibrarySubtitle">Dự án, media, nhân vật và tham chiếu.</p></div></div>
-      <section class="section-card flow-photos-gallery" aria-labelledby="flowPhotosTitle">
-        <div class="flow-photos-heading"><div><h2 id="flowPhotosTitle" data-i18n="sidebar.photosTitle">Ảnh và video Flow</h2><p id="flowPhotosSummary" data-i18n="sidebar.photosSummary">Duyệt media trong project hiện tại.</p></div>
-          <button type="button" class="btn btn-secondary" id="btnRefreshPhotos" data-i18n="sidebar.photosRefresh">Quét lại</button>
-        </div>
-        <div class="flow-photos-filters">
-          <input type="search" class="form-input" id="flowPhotosSearch" data-i18n-placeholder="sidebar.photosSearch" placeholder="Tìm theo tên…">
-          <select class="form-select" id="flowPhotosKind" aria-label="Lọc media Flow">
-            <option value="all" data-i18n="sidebar.photosAll">Tất cả</option>
-            <option value="image" data-i18n="sidebar.photosImages">Ảnh</option>
-            <option value="video" data-i18n="sidebar.photosVideos">Video</option>
-          </select>
-        </div>
-        <div id="flowPhotosGrid" class="flow-photos-grid" aria-live="polite"></div>
-        <p id="flowPhotosEmpty" class="flow-photos-empty" data-i18n="sidebar.photosEmpty">Chưa quét media.</p>
-        <button type="button" class="btn btn-secondary flow-photos-more" id="btnMorePhotos" hidden data-i18n="sidebar.photosMore">Xem thêm</button>
-      </section>
-      <div id="libraryPage"></div>
-    </div>
-
-    <dialog id="flowPhotoPreview" class="flow-photo-preview">
-      <form method="dialog"><button class="flow-photo-preview-close" aria-label="Close">×</button></form>
-      <img id="flowPhotoPreviewImage" alt="">
-      <video id="flowPhotoPreviewVideo" class="flow-photo-preview-video" controls playsinline hidden></video>
-      <p id="flowPhotoPreviewName"></p>
-      <p id="flowPhotoPreviewNote" class="flow-photo-preview-note" hidden></p>
-    </dialog>
-
-    <div id="tab-tasks" class="tab-pane" role="tabpanel" aria-labelledby="navTasks" tabindex="0">
-      <div class="pane-heading"><div><span class="pane-kicker">FLOW MCP</span><h1 id="viewTasksTitle">Tác vụ</h1><p id="viewTasksSubtitle">Theo dõi và điều khiển hàng đợi trên extension.</p></div></div>
-      <div id="queuePage"></div>
-    </div>
-
-    <div id="tab-history" class="tab-pane" role="tabpanel" aria-labelledby="navHistory" tabindex="0">
-      <div class="pane-heading"><div><span class="pane-kicker">FLOW MCP</span><h1 id="viewHistoryTitle">Lịch sử cục bộ</h1><p id="viewHistorySubtitle">Các lệnh đã chạy trên extension, không đồng bộ qua FlowAPI.</p></div></div>
-      <section class="section-card">
-        <div class="flow-history-toolbar"><span class="section-title" id="flowHistoryActivity">Hoạt động DOM Flow</span><div><button type="button" class="btn btn-secondary" id="btnRefreshHistory">Làm mới</button><button type="button" class="btn btn-secondary" id="btnClearHistory">Xóa lịch sử</button></div></div>
-        <div id="flowHistoryList" class="flow-history-list" aria-live="polite"></div>
-        <p id="flowHistoryEmpty" class="flow-inline-note">Chưa có lịch sử cục bộ.</p>
-      </section>
-    </div>
-
-    <div id="tab-status" class="tab-pane" role="tabpanel" aria-labelledby="navStatus" tabindex="0">
-      <div class="pane-heading"><div><span class="pane-kicker">FLOW MCP</span><h1 id="viewStatusTitle">Trạng thái Flow</h1><p id="viewStatusSubtitle">Tab Flow mà extension đang điều khiển.</p></div></div>
-      <div class="section-card">
-        <div class="status-row">
-          <span class="status-badge" id="wsBadge">
-            <span class="pulse-dot"></span>
-            <span id="wsText">Đang kiểm tra…</span>
-          </span>
-          <span class="info-tag" id="bridgeSummary">MCP local · 127.0.0.1:18899</span>
-        </div>
-
-        <div class="info-list">
-          <div class="info-item">
-            <span id="lblFlowTabs">Tab Google Flow:</span>
-            <span class="info-tag" id="valFlowTabs">0</span>
-          </div>
-          <div class="info-item">
-            <span id="lblSelectedTab">Tab điều khiển:</span>
-            <span class="info-tag" id="valSelectedTab">Chưa chọn</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="section-card">
-        <div class="section-title">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
-          </svg>
-          <span id="lblQuickActions">Thao tác nhanh</span>
-        </div>
-
-        <div style="display:flex; flex-direction:column; gap:8px;">
-          <button class="btn btn-primary" id="btnReconnect">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
-              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
-            </svg>
-            <span id="txtBtnReconnect">Kết nối lại tab Flow</span>
-          </button>
-
-          <div class="grid-2">
-            <button class="btn btn-secondary" id="btnPreview">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                <circle cx="12" cy="12" r="3"></circle>
-              </svg>
-              <span id="txtBtnPreview">Xem viền 5s</span>
-            </button>
-
-            <button class="btn btn-secondary" id="btnOpenFlow">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-                <polyline points="15 3 21 3 21 9"></polyline>
-                <line x1="10" y1="14" x2="21" y2="3"></line>
-              </svg>
-              <span id="txtBtnOpenFlow">Mở Flow</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- TAB 3: LOGS -->
-    <div id="tab-logs" class="tab-pane" role="tabpanel" aria-labelledby="navLogs" tabindex="0">
-      <div class="pane-heading"><div><span class="pane-kicker">FLOW MCP</span><h1 id="viewLogsTitle">Nhật ký MCP</h1><p id="viewLogsSubtitle">Các lệnh và kết quả gần đây từ extension.</p></div></div>
-      <div class="section-card" style="padding: 10px;">
-        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-          <span style="font-weight: 700; font-size: 12px; color: var(--text-muted);" id="lblLogsTitle">Nhật ký tác vụ</span>
-          <button class="btn btn-secondary" id="btnClearLogs" style="width: auto; padding: 4px 10px; font-size: 11px;">Xóa</button>
-        </div>
-        <div class="logs-container" id="logsContainer">
-          <div class="logs-empty" id="logsEmpty">Chưa có hoạt động MCP nào.</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- TAB 4: SETTINGS -->
-    <div id="tab-settings" class="tab-pane" role="tabpanel" aria-labelledby="navSettings" tabindex="0">
-      <div class="pane-heading"><div><span class="pane-kicker">FLOW MCP</span><h1 id="viewSettingsTitle">Kết nối</h1><p id="viewSettingsSubtitle">Thiết lập backend mà extension nhận lệnh.</p></div></div>
-      <div class="section-card">
-        <div class="form-group">
-          <label class="form-label">Xác thực tài khoản:</label>
-          <span class="info-tag">https://mcp.shopcongngheso5.io.vn</span>
-          <small style="display:block;margin-top:8px;color:var(--text-muted)">Flow chạy trực tiếp trong extension; AI MCP chạy riêng trên máy này.</small>
-        </div>
-
-        <button class="btn btn-primary" id="btnPairSettings">Đăng nhập tài khoản</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="ref-picker-overlay" id="referencePickerModal" hidden>
-    <section class="ref-picker-dialog" role="dialog" aria-modal="true" aria-labelledby="refPickerTitle">
-      <header class="ref-picker-header">
-        <span id="refPickerTitle">Chọn / Tải ảnh lên</span>
-        <button type="button" class="ref-picker-close" id="refPickerClose" aria-label="Đóng">×</button>
-      </header>
-      <nav class="ref-picker-tabs" aria-label="Nguồn ảnh">
-        <button type="button" class="ref-picker-tab active" data-ref-picker-tab="flow">Ảnh trên Flow</button>
-        <button type="button" class="ref-picker-tab" data-ref-picker-tab="upload">Upload</button>
-      </nav>
-      <div class="ref-picker-content" id="refPickerFlowPanel">
-        <div class="ref-picker-toolbar">
-          <input class="ref-picker-search" id="refPickerSearch" type="search" placeholder="Tìm ảnh trên Flow..." aria-label="Tìm ảnh trên Flow">
-          <button type="button" class="btn btn-secondary" id="refPickerRefresh" style="width:auto;white-space:nowrap">Quét lại</button>
-        </div>
-        <div class="ref-picker-results"><span id="refPickerAssetCount">Tìm thấy 0 ảnh</span><span id="refPickerLimitHint">Tối đa 3 ảnh tham chiếu</span></div>
-        <div class="ref-picker-grid" id="refPickerFlowGrid"></div>
-        <button type="button" class="ref-picker-more" id="refPickerMore" hidden></button>
-        <div class="ref-picker-message" id="refPickerFlowMessage">Đang tìm ảnh trong thư viện Flow...</div>
-      </div>
-      <div class="ref-picker-content" id="refPickerUploadPanel" hidden>
-        <div class="ref-picker-drop" id="refPickerDrop">
-          <span>Chọn ảnh từ máy hoặc kéo thả ảnh vào đây</span>
-          <button type="button" class="btn btn-secondary" id="refPickerChooseFiles" style="width:auto">Chọn ảnh</button>
-          <input type="file" id="refPickerFileInput" accept="image/*" multiple hidden>
-          <small id="refPickerUploadHint">Ảnh sẽ được tải lên Flow khi bạn bấm Tạo ảnh hoặc Tạo video.</small>
-        </div>
-        <div class="ref-picker-local-list" id="refPickerLocalList"></div>
-      </div>
-      <footer class="ref-picker-footer">
-        <span id="refPickerCount">0/3 ảnh đã chọn</span>
-        <div style="display:flex;gap:8px">
-          <button type="button" class="btn btn-secondary" id="refPickerCancel" style="width:auto">Hủy</button>
-          <button type="button" class="btn btn-primary" id="refPickerConfirm" style="width:auto">Xác nhận</button>
-        </div>
-      </footer>
-    </section>
-  </div>
-
+  <!-- Scripts -->
   <script src="../content/shared/i18n.js"></script>
   <script src="flow-upload-client.js"></script>
   <script src="flow-queue-panel.js"></script>

@@ -27,6 +27,8 @@
       return components.chooseNativePickerAsset(assetName, slot, {
         ...options,
         ...(value.expectedId ? { expectedId: value.expectedId } : {}),
+        ...(value.kind ? { kind: value.kind } : {}),
+        ...(value.search_value ? { search_value: value.search_value } : {}),
       });
     }
     async execute(name, payload = {}, command = {}) {
@@ -267,7 +269,19 @@
         const resolveValue = async (value, slot) => {
           if (!value) return;
           requireFlowTime("selecting Flow references", expectedVideoReferenceIds.length + expectedMediaReferenceIds.length + expectedCharacterIds.length > 0);
-          if (value.assetName) return runFlowStage(`selecting asset ${value.assetName}`, ({ signal }) => this.selectFrameAsset(components, value, slot, { deadline: flowDeadline, signal, command }), true);
+          if (value.assetName) {
+            const assetName = String(value.assetName).replace(/^asset:/i, "");
+            const isVideoReference = value.kind === "video" || /\.(mp4|mov|webm)$/i.test(assetName);
+            if (isVideoReference) {
+              if (typeof root.FlowReferenceActions?.attach !== "function") {
+                throw this.error("FLOW_REFERENCE_ATTACH_UNAVAILABLE", "Flow's video reference picker is unavailable; no generation was submitted.", false, false);
+              }
+              return runFlowStage(`selecting video reference ${assetName}`, ({ signal }) => root.FlowReferenceActions.attach(value, slot, {
+                deadline: flowDeadline, signal, command, expectedId: value.expectedId,
+              }), true);
+            }
+            return runFlowStage(`selecting asset ${value.assetName}`, ({ signal }) => this.selectFrameAsset(components, value, slot, { deadline: flowDeadline, signal, command }), true);
+          }
           return uploadAndResolve(value, slot);
         };
 
@@ -278,6 +292,8 @@
           }
           if (selected?.kind === "character") {
             if (selected.id) expectedCharacterIds.push(selected.id);
+          } else if (selected?.kind === "video") {
+            if (selected.id) expectedVideoReferenceIds.push(selected.id);
           } else if (selected?.id) expectedMediaReferenceIds.push(selected.id);
         };
         if (firstFrame) recordSelectedReference(await resolveValue(firstFrame, "start"));
@@ -296,12 +312,27 @@
           ? Number(Boolean(firstFrame)) + Number(Boolean(lastFrame))
           : referenceAttachments.length;
         const isUuid = value => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+        const requestedVideoRefCount = referenceAttachments.filter(item =>
+          (typeof item === "object" && item?.kind === "video") ||
+          (typeof item === "string" && /\.(mp4|mov|webm)$/i.test(item))
+        ).length;
         const validMediaUuids = expectedMediaReferenceIds.filter(isUuid);
         const validCharacterUuids = expectedCharacterIds.filter(isUuid);
         const validVideoUuids = expectedVideoReferenceIds.filter(isUuid);
+        const requestedExactVideoIdCount = framesMode
+          ? Number(Boolean(firstFrame)) + Number(Boolean(lastFrame))
+          : requestedVideoRefCount;
+        if (validVideoUuids.length !== expectedVideoReferenceIds.length || expectedVideoReferenceIds.length < requestedExactVideoIdCount) {
+          throw this.error(
+            "FLOW_SUBMIT_CORRELATION_REFERENCE_ID_UNAVAILABLE",
+            "Flow selected a video or frame reference without a canonical backend UUID. Exact reference identity is required for submit correlation; no generation was submitted.",
+            false,
+            false
+          );
+        }
         const verifiedReferenceUuids = framesMode
           ? validVideoUuids
-          : [...validMediaUuids, ...validCharacterUuids];
+          : [...validMediaUuids, ...validCharacterUuids, ...validVideoUuids];
         const unverifiedUploadRefCount = requestedReferenceCount - verifiedReferenceUuids.length;
 
         if (expectedCharacterIds.length > 0 && expectedCharacterIds.some(id => !isUuid(id))) {
@@ -326,6 +357,32 @@
           throw this.error("FLOW_REFERENCE_ATTACH_UNCONFIRMED", "Flow confirmed fewer reference attachments than requested; no generation was submitted. Inspect the composer before retrying.", false, true);
         }
 
+        if (!framesMode && (requestedVideoRefCount > 0 || expectedVideoReferenceIds.length > 0)) {
+          const composer = (typeof root.flowQuery === "function" ? root.flowQuery("composerRoot") : null) ||
+            document.querySelector?.(".flow-composer, .prompt-box, flow-prompt-box") || document;
+          const videoChipSelector = '.ingredient_video_chip, [data-kind="video"], [data-ingredient-type="video"], [class*="ingredient-video" i], [class*="video-chip" i], flow-video-ingredient-chip';
+          const composerVideoChips = [...(composer?.querySelectorAll?.(videoChipSelector) || [])].filter(root.visible || (() => true));
+          const actionVideoChips = typeof root.FlowReferenceActions?.chips === "function"
+            ? root.FlowReferenceActions.chips().filter(c => c.kind === "video")
+            : [];
+          if (composerVideoChips.length === 0 && actionVideoChips.length === 0) {
+            throw this.error("FLOW_REFERENCE_ATTACH_UNCONFIRMED", "Flow did not confirm the requested video reference chip in the composer; no generation was submitted.", false, true);
+          }
+        }
+
+        if (expectedCharacterIds.length > 0) {
+          const composer = (typeof root.flowQuery === "function" ? root.flowQuery("composerRoot") : null) ||
+            document.querySelector?.(".flow-composer, .prompt-box, flow-prompt-box") || document;
+          const charChipSelector = 'flow-character-ingredient-chip, [data-kind="character"], [data-ingredient-type="character"], [class*="character-chip" i], [class*="ingredient-character" i], .ingredient_character_chip';
+          const composerCharChips = [...(composer?.querySelectorAll?.(charChipSelector) || [])].filter(root.visible || (() => true));
+          const actionCharChips = typeof root.FlowReferenceActions?.chips === "function"
+            ? root.FlowReferenceActions.chips().filter(c => c.kind === "character")
+            : [];
+          if (composerCharChips.length === 0 && actionCharChips.length === 0) {
+            throw this.error("FLOW_CHARACTER_SELECTION_UNCONFIRMED", "Flow did not confirm the character reference chip in the composer; no generation was submitted.", false, true);
+          }
+        }
+
         const activeBox = await runFlowStage("finding the prompt editor", () => editor.preflightGenerationPrompt(payload, framesMode));
         const promptApplied = await runFlowStage("entering the prompt", () => editor.insertNativeFlowPrompt(activeBox, payload.prompt));
         if (!promptApplied) throw this.error("FLOW_PROMPT_INPUT_UNCONFIRMED", "Flow's composer did not confirm the full prompt text. Nothing was submitted.", true, false);
@@ -337,6 +394,17 @@
           if (!selectedVoice?.confirmed) throw this.error("FLOW_VOICE_SELECTION_UNCONFIRMED", "Flow did not confirm the requested voice chip; no generation was submitted.", false, false);
           const promptAfterVoice = editor.getEditorUserText?.(activeBox);
           if (promptAfterVoice !== payload.prompt) throw this.error("FLOW_PROMPT_CHANGED_DURING_VOICE_SELECTION", "Flow's prompt changed while the voice chip was selected; inspect the composer before retrying.", false, false);
+
+          const composer = (typeof root.flowQuery === "function" ? root.flowQuery("composerRoot") : null) ||
+            document.querySelector?.(".flow-composer, .prompt-box, flow-prompt-box") || document;
+          const voiceChipSelector = '[data-ingredient-type="voice"], [data-kind="voice"], [class*="voice-chip" i], [class*="ingredient-voice" i], button[aria-label*="voice" i], button[aria-label*="giọng" i]';
+          const composerVoiceChips = [...(composer?.querySelectorAll?.(voiceChipSelector) || [])].filter(root.visible || (() => true));
+          const actionVoiceChips = typeof root.FlowVoiceActions?.chips === "function"
+            ? root.FlowVoiceActions.chips(composer)
+            : [];
+          if (composerVoiceChips.length === 0 && actionVoiceChips.length === 0) {
+            throw this.error("FLOW_VOICE_SELECTION_UNCONFIRMED", "Flow did not confirm the requested voice chip in the composer; no generation was submitted.", false, false);
+          }
         }
         requireFlowTime("preparing the Flow submit request", expectedVideoReferenceIds.length + expectedMediaReferenceIds.length + expectedCharacterIds.length > 0);
 
