@@ -15,6 +15,11 @@
  * context is armed. Contexts are single-use and expire. Every engaged
  * context reports its outcome (cleaned / original + reason / failed) on
  * the result event, attributed by operation id.
+ *
+ * DL-10: successful cleans record SHA-256(bytes ‖ mime) of the output
+ * in a bounded fingerprint set; input bytes matching a recorded
+ * fingerprint short-circuit with an `already_clean` outcome and are
+ * returned unchanged instead of being re-processed.
  */
 (() => {
   "use strict";
@@ -28,6 +33,7 @@
   // verifies its fetch hook by identity.
   const wrappedFetch = typeof window.fetch === "function" ? window.fetch : null;
   const MAX_CONTEXTS = 12;
+  const MAX_CLEANED_FINGERPRINTS = 64;
   const state = {
     version: 1,
     enabled: false,
@@ -35,6 +41,7 @@
     maskB64: null,
     options: {},
     contexts: [],
+    cleanedFingerprints: [],
     processing: false,
   };
 
@@ -148,6 +155,36 @@
     });
   }
 
+  // DL-10: already-clean fingerprint registry. Every successful clean
+  // records SHA-256(bytes ‖ mime) of its OUTPUT in a bounded set
+  // (oldest-first eviction). Bytes that flow through the pipeline a
+  // second time (cleaned bytes being re-fetched, the manual tool applied
+  // twice) are recognized before the remover runs and short-circuit
+  // with the already-clean outcome instead of being re-processed.
+  // Only cleaned outputs are ever recorded — recording an original or
+  // a failure would poison the set and skip cleaning for dirty bytes.
+  // Fingerprinting is best-effort: without WebCrypto the mechanism
+  // stays off and downloads behave exactly as before.
+  async function fingerprintBlob(blob) {
+    try {
+      const subtle = globalThis.crypto?.subtle;
+      if (!subtle || typeof blob?.arrayBuffer !== "function") return null;
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      const mimeBytes = new TextEncoder().encode(typeof blob.type === "string" ? blob.type : "");
+      const data = new Uint8Array(bytes.length + mimeBytes.length);
+      data.set(bytes, 0);
+      data.set(mimeBytes, bytes.length);
+      const digest = new Uint8Array(await subtle.digest("SHA-256", data));
+      return [...digest].map(value => value.toString(16).padStart(2, "0")).join("");
+    } catch (_) { return null; }
+  }
+
+  function recordCleanedFingerprint(fingerprint) {
+    if (!fingerprint || state.cleanedFingerprints.includes(fingerprint)) return;
+    state.cleanedFingerprints.push(fingerprint);
+    while (state.cleanedFingerprints.length > MAX_CLEANED_FINGERPRINTS) state.cleanedFingerprints.shift();
+  }
+
   // Remover reasons that mean "no watermark present" are a success with
   // the original bytes; anything else that left the bytes unchanged is a
   // cleaning failure and is reported as such, never as a clean success.
@@ -192,6 +229,20 @@
     state.processing = true;
     try {
       const original = await response.blob();
+      // DL-10: bytes already recorded as a cleaned output are clean by
+      // construction — return them unchanged with the already-clean
+      // outcome instead of invoking the remover on them again. This
+      // sits after the original-mode guarantee above (an explicit
+      // original context still reports mode_original) and before mask
+      // resolution (already-clean bytes need no mask).
+      const inputFingerprint = await fingerprintBlob(original);
+      if (inputFingerprint && state.cleanedFingerprints.includes(inputFingerprint)) {
+        if (engaged || explicitMarker) {
+          outcomeEvent(engaged, { kind, url: canonical, event: { ok: true, changed: false, status: "original", reason: "already_clean" } });
+          consumeContext(engaged);
+        }
+        return new Response(original, { status: response.status, statusText: response.statusText, headers: response.headers });
+      }
       if (!state.mask && state.maskB64) state.mask = await window.WatermarkRemover.maskFromAlphaPng(state.maskB64);
       if (!state.mask) {
         if (engaged) {
@@ -210,6 +261,11 @@
         }
         return new Response(result.blob, { status: response.status, statusText: response.statusText, headers: response.headers });
       }
+      // DL-10: record the cleaned output's fingerprint so a second
+      // pass over these exact bytes short-circuits (see above). Only
+      // this changed-and-successful branch records; unchanged results
+      // and failures never enter the registry.
+      recordCleanedFingerprint(await fingerprintBlob(result.blob));
       if (engaged || explicitMarker) {
         outcomeEvent(engaged, { kind, url: canonical, event: { ok: true, changed: true, status: "cleaned", nccBefore: result.nccBefore, nccAfter: result.nccAfter } });
         consumeContext(engaged);
