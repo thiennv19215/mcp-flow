@@ -6,6 +6,7 @@ import { flowDocumentMatchesLocale, flowHomeUrl, flowLocaleFromUrl, flowProjectU
 import { FlowJobQueue } from "./flow-job-queue.js";
 import { FlowBatchDrafts, materializeDraftJobs } from "./flow-batch-drafts.js";
 import { FlowMediaCatalog } from "./flow-media-catalog.js";
+import { revalidateJobReferences } from "./flow-ref-preflight.js";
 import { FlowBridgeClient, readBridgeConfig, postHttpMessage } from "./flow-bridge-client.js";
 import { planFlowAgentBatch, planFlowBatch, planFlowContinue, planFlowEdit } from "./flow-workflows.js";
 import {
@@ -1212,6 +1213,60 @@ async function runExtensionFlowJob(job, hooks) {
   await hooks.progress(queueCompletionProgress(operationResult, "Flow generation completed."));
   return { completed: true, requestDispatched: true, ...quoteFields, result: operationResult };
 }
+const flowMediaCatalog = new FlowMediaCatalog();
+// IMG-04: resolve the project a queued job targets, read-only, mirroring
+// where the runner pins it: the job metadata first (captured at enqueue
+// time or pinned by a previous attempt), then the pinned or selected Flow
+// tab's URL. Deliberately no chooseTab() here — choosing a tab prepares
+// and may adopt it, a side effect a drain-time lookup must not have; with
+// no resolvable target the catalog leg simply abstains.
+async function queueJobProjectId(job) {
+  const metadata = job && typeof job.metadata === "object" && job.metadata ? job.metadata : {};
+  if (typeof metadata.flowProjectId === "string" && metadata.flowProjectId) return metadata.flowProjectId.toLowerCase();
+  const tabId = Number.isInteger(metadata.flowTabId) ? metadata.flowTabId : selectedTabId;
+  if (!Number.isInteger(tabId)) return null;
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  return tab && flowUrl(tab.url) ? flowProjectIdFromUrl(tab.url) : null;
+}
+// IMG-04: the queue-level reference revalidation pass, wired with the
+// dependencies the worker can supply faithfully. The worker owns the
+// IMG-03 media catalog, so the catalog leg resolves here directly — same
+// query shape as the content-stage pass (project, expected id, name).
+// The other two legs cannot be supplied faithfully at drain time:
+// - Existence: the only page scan reachable from the worker
+//   (flow.assets.list) actively scrolls the media grid of whichever
+//   project the tab currently shows for up to 25 s, and the queue drains
+//   before the runner pins and navigates the tab to this job's project —
+//   a negative could condemn an asset that exists in the target project,
+//   and for an uploaded ref the failure would be unrecoverable at this
+//   level. Follow the content pass's own degrade discipline instead: an
+//   absence that cannot be proven is not an absence, so this leg reports
+//   "exists" and the content-stage pass re-checks against the live grid
+//   on the right project before any settings/prompt work.
+// - Re-upload: no content operation re-uploads retained staged bytes by
+//   catalog identity — flow.media.upload requires the original transfer
+//   id and the exact staged file name, and a queued library ref carries
+//   neither. The by-name retained-bytes recovery exists only inside the
+//   submit path, so recovery stays with the content-stage pass and this
+//   leg reports "bytes not retained".
+function createQueueRefPreflight(environment) {
+  const catalog = environment && environment.catalog ? environment.catalog : null;
+  const projectIdForJob = environment && typeof environment.projectIdForJob === "function" ? environment.projectIdForJob : async () => null;
+  return job => revalidateJobReferences(job, {
+    catalogLookup: async ref => {
+      if (!catalog) return null;
+      const projectId = await projectIdForJob(job);
+      if (!projectId) return null;
+      return catalog.lookup({
+        projectId,
+        ...(ref.expectedId ? { mediaId: ref.expectedId } : {}),
+        name: ref.assetName,
+      });
+    },
+    assetExists: async () => true,
+    reupload: async () => null,
+  });
+}
 // Keep a small cooldown between generations to avoid hammering Flow while
 // removing most of the previous 5–10 second idle wait between queued jobs.
 const flowJobQueue = new FlowJobQueue(runExtensionFlowJob, {
@@ -1228,9 +1283,12 @@ const flowJobQueue = new FlowJobQueue(runExtensionFlowJob, {
       return null;
     }
   },
+  // IMG-04: revalidate generation references at job start against the
+  // worker's media catalog (see createQueueRefPreflight for exactly which
+  // legs are live at this level and which stay with the content stage).
+  refPreflight: createQueueRefPreflight({ catalog: flowMediaCatalog, projectIdForJob: queueJobProjectId }),
 });
 const flowBatchDrafts = new FlowBatchDrafts();
-const flowMediaCatalog = new FlowMediaCatalog();
 flowJobQueue.subscribe((snapshot, reason) => {
   broadcastFlowQueue(snapshot, reason);
   // Failures during queue preflight happen before the download runner can mark
