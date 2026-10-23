@@ -105,6 +105,7 @@ export class FlowJobQueue {
         job.retrySafe = false;
         job.error = undefined;
         job.errorCode = undefined;
+        job.diagnostics = undefined;
         job.finishedAt = undefined;
         job.progress = {
           ...(job.progress && typeof job.progress === "object" ? job.progress : {}),
@@ -119,6 +120,7 @@ export class FlowJobQueue {
         job.retrySafe = false;
         job.error = undefined;
         job.errorCode = undefined;
+        job.diagnostics = undefined;
         job.finishedAt = undefined;
         job.progress = {
           ...(job.progress && typeof job.progress === "object" ? job.progress : {}),
@@ -321,6 +323,7 @@ export class FlowJobQueue {
         job.status = "pending";
         job.error = undefined;
         job.errorCode = undefined;
+        job.diagnostics = undefined;
         job.finishedAt = undefined;
         job.retrySafe = false;
         job.progress = undefined;
@@ -628,6 +631,7 @@ export class FlowJobQueue {
     job.status = "pending";
     job.error = undefined;
     job.errorCode = undefined;
+    job.diagnostics = undefined;
     job.finishedAt = undefined;
     job.retrySafe = false;
     job.autoRetryCount = 0;
@@ -931,6 +935,7 @@ export class FlowJobQueue {
           if (error?.serverAcceptanceObserved === true) job.serverAcceptanceObserved = true;
           if (typeof error?.credits === "number") job.credits = error.credits;
           if (typeof error?.creditQuoteVerified === "boolean") job.creditQuoteVerified = error.creditQuoteVerified;
+          if (error?.diagnostics && typeof error.diagnostics === "object") job.diagnostics = clone(error.diagnostics);
           job.error = String(error.message || error).slice(0, 2000);
           job.errorCode = error.code || (unknown ? "FLOW_SUBMIT_OUTCOME_UNKNOWN" : "FLOW_JOB_FAILED");
           // A job that declares its own retry budget (MCP scenes carry

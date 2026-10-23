@@ -709,19 +709,29 @@ async function insertNativeFlowPrompt(el, value) {
 var FLOW_CREDIT_QUOTE_REGEX = /(?:\b(?:generating\s+)?will\s+use\s+([\d,]+(?:\.\d+)?)\s+credits?\b|(?:quá trình tạo\s+)?(?:sẽ\s+dùng|sẽ\s+sử\s+dụng|tiêu\s+tốn)\s+([\d,]+(?:\.\d+)?)\s+(?:tín\s+dụng|điểm\s+tín\s+dụng|credits?))/i;
 
 function readGenerationCreditQuote() {
-  const pageText = (document.body?.innerText || "").replace(/\s+/g, " ").trim();
-  const pageUsage = pageText.match(FLOW_CREDIT_QUOTE_REGEX);
-  if (pageUsage) return Number((pageUsage[1] || pageUsage[2]).replace(/,/g, ""));
+  // This legacy fallback (used when FlowEditor is not loaded) cannot scope to
+  // the composer, so it must never under-read: collect every explicit usage
+  // quote on the page and return the MAXIMUM. The regex only matches the
+  // "will use N credits" phrasing, so a balance label is never a candidate;
+  // picking the cheapest quote here would silently bypass the credit cap.
+  const values = [];
+  const collect = (text) => {
+    if (!text) return;
+    const globalQuoteRegex = new RegExp(FLOW_CREDIT_QUOTE_REGEX.source, "gi");
+    for (const match of text.matchAll(globalQuoteRegex)) {
+      const raw = match[1] || match[2];
+      if (!raw) continue;
+      const value = Number(raw.replace(/,/g, ""));
+      if (Number.isFinite(value)) values.push(value);
+    }
+  };
+  collect((document.body?.innerText || "").replace(/\s+/g, " ").trim());
   const candidates = [...document.querySelectorAll("a,button,[role],p,span")]
     .filter(visible)
     .map(el => (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim())
     .filter(Boolean);
-  // Prefer Flow's explicit usage quote; a balance or unrelated "N credits" label is not a quote.
-  const usage = candidates.map(text => ({ text, match: text.match(FLOW_CREDIT_QUOTE_REGEX) }))
-    .filter(item => item.match)
-    .sort((a, b) => a.text.length - b.text.length)[0];
-  if (usage) return Number((usage.match[1] || usage.match[2]).replace(/,/g, ""));
-  return undefined;
+  for (const text of candidates) collect(text);
+  return values.length ? Math.max(...values) : undefined;
 }
 
 async function waitForGenerationCreditQuote(timeoutMs = 8000) {

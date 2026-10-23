@@ -78,7 +78,7 @@ const BUSY = "A generation is running in the Flow tab. Wait for it to finish (fl
 type ExtensionQueueJob = {
   id: string; operation: string; payload?: Record<string, any>; metadata?: Record<string, any>;
   label?: string; status: string; result?: any; progress?: any; error?: string; errorCode?: string;
-  outcomeUnknown?: boolean; retrySafe?: boolean; attempts?: number; addedAt?: number;
+  outcomeUnknown?: boolean; retrySafe?: boolean; attempts?: number; addedAt?: number; diagnostics?: any;
   requestDispatched?: boolean; serverAcceptanceObserved?: boolean; creditQuoteVerified?: boolean; credits?: number;
 };
 type ExtensionQueueSnapshot = { jobs: ExtensionQueueJob[]; items?: ExtensionQueueJob[]; isRunning?: boolean; isPaused?: boolean; isStopped?: boolean };
@@ -129,8 +129,8 @@ function extensionJobAsLegacy(job: ExtensionQueueJob): Job {
     outcomeUnknown: job.outcomeUnknown === true,
     requestDispatched: job.requestDispatched === true || job.result?.requestDispatched === true,
     serverAcceptanceObserved: job.serverAcceptanceObserved === true || job.result?.result?.serverAcceptanceObserved === true,
-    requestDiagnostics: undefined,
-    operationDiagnostics: undefined,
+    requestDiagnostics: job.diagnostics?.requestDiagnostics,
+    operationDiagnostics: job.diagnostics?.operationDiagnostics,
   } as unknown as Job;
 }
 
