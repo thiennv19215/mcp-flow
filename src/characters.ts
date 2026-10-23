@@ -2,7 +2,6 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileS
 import { randomUUID } from "node:crypto";
 import { dirname, extname, join } from "node:path";
 import { castDirForContext, HOME_DIR } from "./paths.js";
-import { currentDeviceContext } from "./request-context.js";
 import type { CharacterParams, NativeMedia } from "./types.js";
 import type { Job } from "./job-types.js";
 import { nativeOperation, requireCapabilities } from "./flow.js";
@@ -11,10 +10,7 @@ import { downloadNativeResults, extensionOf, nativeDownloadIds, waitForNativeDow
 
 const ASSET_PREFIX = "asset:";
 const normalizeCharacterName = (name: string): string => name.replace(/\s+/g, " ").trim().toLowerCase();
-const looksFile = () => {
-  const context = currentDeviceContext();
-  return context ? join(HOME_DIR, "users", context.userId, context.deviceId, "characters.json") : join(HOME_DIR, "characters.json");
-};
+const looksFile = () => join(HOME_DIR, "characters.json");
 
 export const loadLooks = (): Record<string, string> => {
   try {

@@ -3,12 +3,10 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import type { Core } from "./core.js";
 import { createFlowMcpServer } from "./mcp-tools.js";
 import { RemoteCore } from "./remote.js";
-import { PORT, PUBLIC_URL } from "./server.js";
 import { startFlowServer } from "./bootstrap.js";
 
-const { role, forwarding } = await startFlowServer();
-const core: Core = role === "client" ? new RemoteCore() : forwarding;
-const studio = role === "none" ? undefined : PUBLIC_URL ?? `http://127.0.0.1:${PORT}`;
+const { role, local } = await startFlowServer();
+const core: Core = role === "client" ? new RemoteCore() : local;
 
-const server = createFlowMcpServer(core, studio);
+const server = createFlowMcpServer(core);
 await server.connect(new StdioServerTransport());

@@ -86,7 +86,7 @@ test('RemoteCore forwards asset rename to the owner API endpoint', async t => {
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(() => new Promise(resolve => server.close(resolve)));
-  const remote = new RemoteCore({ baseUrl: `http://127.0.0.1:${server.address().port}`, deviceToken: 'test-device-token' });
+  const remote = new RemoteCore(`http://127.0.0.1:${server.address().port}`);
   assert.deepEqual(await remote.rename_asset({ name: 'old', new_name: 'new', id: assetId }), { renamed: 'old', name: 'new', id: assetId });
   assert.deepEqual(calls, [{ url: '/api/rename_asset', body: { name: 'old', new_name: 'new', id: assetId } }]);
 });

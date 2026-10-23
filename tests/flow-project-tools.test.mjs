@@ -61,7 +61,7 @@ test('RemoteCore routes project listing and opening to the existing local API en
   await once(server, 'listening');
   t.after(() => new Promise(resolve => server.close(resolve)));
 
-  const remote = new RemoteCore({ baseUrl: `http://127.0.0.1:${server.address().port}`, deviceToken: 'test-device-token' });
+  const remote = new RemoteCore(`http://127.0.0.1:${server.address().port}`);
   const projects = await remote.projects();
   const opened = await remote.open_project({ project_id: '01234567-89ab-4cde-8f01-23456789abcd', language: 'en' });
 

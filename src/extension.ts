@@ -1,7 +1,6 @@
 import type { WebSocket } from "ws";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { currentDeviceContext } from "./request-context.js";
 
 type ExtensionError = { code?: string; message?: string; retryable?: boolean; outcome_unknown?: boolean; diagnostics?: unknown };
 type ExtensionResult = { ok: boolean; value?: unknown; error?: string | ExtensionError };
@@ -88,7 +87,7 @@ export function extensionSendEvent(connection: Connection, method: string, param
   enqueue(connection, { type: "event", method, params });
 }
 
-const selectedDevice = () => currentDeviceContext()?.deviceId ?? "local";
+const selectedDevice = () => "local";
 const selectedConnection = () => connections.get(selectedDevice());
 
 export function onExtensionProgress(listener: (progress: { requestId: string; tabId?: number; progress: unknown; deviceId?: string }) => void): () => void {
@@ -97,9 +96,7 @@ export function onExtensionProgress(listener: (progress: { requestId: string; ta
 }
 
 export function extensionConnected(): boolean {
-  const context = currentDeviceContext();
-  const available = context ? [connections.get(context.deviceId)] : [...connections.values()];
-  return available.some(isConnected);
+  return [...connections.values()].some(isConnected);
 }
 
 export function extensionSupportsCapability(capability: string): boolean {
@@ -108,33 +105,14 @@ export function extensionSupportsCapability(capability: string): boolean {
 }
 
 export function extensionStatus() {
-  const context = currentDeviceContext();
-  if (!context) {
-    const connected = [...connections.values()].filter(isConnected);
-    const transports = [...new Set(connected.map((item) => item.transport))];
-    return {
-      connected: connected.length > 0,
-      connectors: connected.length,
-      transport: transports.length === 1 ? transports[0] : transports.length ? "mixed" : "none",
-      protocol: transports.includes("http-poll") ? 3 : 2,
-    };
-  }
-  const connection = selectedConnection();
+  const connected = [...connections.values()].filter(isConnected);
+  const transports = [...new Set(connected.map((item) => item.transport))];
   return {
-    connected: isConnected(connection),
-    device_id: context.deviceId,
-    transport: connection?.transport ?? "none",
-    protocol: connection?.transport === "http-poll" ? 3 : 2,
-    extension_version: connection?.version,
-    error: lastErrors.get(context.deviceId),
+    connected: connected.length > 0,
+    connectors: connected.length,
+    transport: transports.length === 1 ? transports[0] : transports.length ? "mixed" : "none",
+    protocol: transports.includes("http-poll") ? 3 : 2,
   };
-}
-
-export function extensionRevokeDeviceConnection(deviceId: string): void {
-  const connection = connections.get(deviceId);
-  if (!connection) return;
-  dispose(connection, "This device's backend credential was revoked.");
-  try { connection.ws?.close(1008, "Device credential revoked"); } catch {}
 }
 
 export type ExtensionDownload = { id: number; filename: string; state: string; error?: string; bytesReceived: number; totalBytes: number; url?: string; finalUrl?: string; referrer?: string };

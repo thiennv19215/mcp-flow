@@ -36,13 +36,12 @@
     "https://*.googleapis.com/*",
     "https://storage.googleapis.com/*",
     "https://*.usercontent.goog/*",
-    "https://mcp.shopcongngheso5.io.vn/*",
     "http://127.0.0.1:18899/*",
     "http://localhost:18899/*",
     "http://127.0.0.1:18898/*"
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' data: blob: https://flow.google.com https://labs.google https://*.googleusercontent.com https://*.googleapis.com https://storage.googleapis.com https://*.usercontent.goog; connect-src 'self' http://127.0.0.1:18898 http://127.0.0.1:18899 http://localhost:18899 https://flow.google.com https://labs.google https://*.googleusercontent.com https://*.googleapis.com https://storage.googleapis.com https://*.usercontent.goog https://mcp.shopcongngheso5.io.vn"
+    "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' data: blob: https://flow.google.com https://labs.google https://*.googleusercontent.com https://*.googleapis.com https://storage.googleapis.com https://*.usercontent.goog; connect-src 'self' http://127.0.0.1:18898 http://127.0.0.1:18899 http://localhost:18899 https://flow.google.com https://labs.google https://*.googleusercontent.com https://*.googleapis.com https://storage.googleapis.com https://*.usercontent.goog"
   },
   "background": {
     "service_worker": "background/service-worker.js",
@@ -110,8 +109,12 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["flow-model-capabilities.json"],
-      "matches": ["https://flow.google.com/*"]
+      "resources": [
+        "flow-model-capabilities.json"
+      ],
+      "matches": [
+        "https://flow.google.com/*"
+      ]
     }
   ],
   "options_page": "ui/options.html",

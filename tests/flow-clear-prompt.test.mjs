@@ -139,7 +139,7 @@ test('RemoteCore forwards flow_clear_prompt to the local owner API', async t => 
   await once(server, 'listening');
   t.after(() => new Promise(resolve => server.close(resolve)));
 
-  const remote = new RemoteCore({ baseUrl: `http://127.0.0.1:${server.address().port}`, deviceToken: 'test-device-token' });
+  const remote = new RemoteCore(`http://127.0.0.1:${server.address().port}`);
   assert.deepEqual(await remote.clear_prompt({ expected_prompt: 'known test prompt' }), { cleared: true, confirmed: true });
   assert.deepEqual(calls, [{ method: 'POST', url: '/api/clear_prompt', body: { expected_prompt: 'known test prompt' } }]);
 });

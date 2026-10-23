@@ -236,12 +236,6 @@ export class LocalCore implements Core {
     finally { this.mediaUploadActive = false; }
   }
 
-  suspendDevice(): void {
-    void extensionQueueSnapshot().then(snapshot => Promise.all(snapshot.jobs.filter(job => job.status === "pending").map(job =>
-      extensionQueueCall("flow.queue.cancel", { id: job.id }, 10_000),
-    ))).catch(() => {});
-  }
-
   async generate({ project, scenes }: Args<"generate">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     const invalid = scenes.findIndex((s, i) => s.chain_previous && (i === 0 || s.first_frame || s.type === "image"));
