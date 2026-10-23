@@ -92,6 +92,14 @@ The one missing piece was the admission half, now aligned:
   not rejected (MCP callers may omit or name future models; the run-time
   content check decides), and an unreadable registry skips preflight
   instead of blocking the queue.
+- **Item identity across enqueue**: the reference persists a mapping from
+  batch items to runtime job IDs at admission so cross-item references
+  stay valid. The panel handlers (`flow-queue:add` / `flow-queue:add-batch`)
+  silently dropped client-assigned job IDs while the bridge path kept
+  them, which orphaned every `dependsOnId` edge — chained videos from the
+  panel ran their first prompt, then cancelled the rest as
+  dependency-skipped. The panel handlers now forward job IDs like the
+  bridge path does.
 
 ## Deliberately not ported
 

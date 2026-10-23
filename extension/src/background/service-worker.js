@@ -1342,6 +1342,10 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
         case "flow-queue:add": {
           const source = message.job || {};
           addedJob = await flowJobQueue.add({
+            // Preserve a client-assigned job id: chained submissions name
+            // their jobs up front and reference them from dependsOnId, so
+            // dropping the id would orphan every dependency edge.
+            ...(typeof source.id === "string" && source.id ? { id: source.id } : {}),
             operation: source.operation,
             payload: source.payload,
             label: source.label || source.name,
@@ -1360,6 +1364,7 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
           const source = Array.isArray(message.jobs) ? message.jobs : [];
           const metadata = { source: "extension", ...await captureFlowTargetMetadata() };
           addedJob = await flowJobQueue.addBatch(source.map(job => ({
+            ...(typeof job?.id === "string" && job.id ? { id: job.id } : {}),
             operation: job?.operation,
             payload: job?.payload,
             label: job?.label || job?.name,
