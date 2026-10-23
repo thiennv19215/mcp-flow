@@ -13,11 +13,13 @@
       if (typeof value === "string" && value.trim()) return { assetName: value.replace(/^asset:/i, "").trim() };
       if (!value || typeof value !== "object") return undefined;
       if (typeof value.assetName === "string" && value.assetName.trim()) {
+        const kind = String(value.kind || "image").trim().toLowerCase();
+        if (kind !== "image") return null;
         const expectedId = value.expectedId;
         const isUuid = typeof expectedId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(expectedId);
         const isAsb = typeof expectedId === "string" && expectedId.startsWith("asb:");
         if (expectedId !== undefined && !isUuid && !isAsb) return null;
-        return { assetName: value.assetName.trim(), ...(expectedId ? { expectedId: isUuid ? String(expectedId).toLowerCase() : String(expectedId) } : {}) };
+        return { assetName: value.assetName.trim(), ...(value.kind ? { kind: value.kind } : {}), ...(expectedId ? { expectedId: isUuid ? String(expectedId).toLowerCase() : String(expectedId) } : {}) };
       }
       if (root.validStagedLocalImage?.(value, /(?:start|end)/)) return value;
       return null;
@@ -284,12 +286,15 @@
             const assetName = String(value.assetName).replace(/^asset:/i, "");
             const isVideoReference = value.kind === "video" || /\.(mp4|mov|webm)$/i.test(assetName);
             if (isVideoReference) {
-              if (typeof root.FlowReferenceActions?.attach !== "function") {
-                throw this.error("FLOW_REFERENCE_ATTACH_UNAVAILABLE", "Flow's video reference picker is unavailable; no generation was submitted.", false, false);
+              if (typeof root.FlowReferenceActions?.attach === "function") {
+                return runFlowStage(`selecting video reference ${assetName}`, ({ signal }) => root.FlowReferenceActions.attach(value, slot, {
+                  deadline: flowDeadline, signal, command, expectedId: value.expectedId,
+                }), true);
               }
-              return runFlowStage(`selecting video reference ${assetName}`, ({ signal }) => root.FlowReferenceActions.attach(value, slot, {
-                deadline: flowDeadline, signal, command, expectedId: value.expectedId,
-              }), true);
+              if (typeof components?.chooseNativePickerAsset === "function") {
+                return runFlowStage(`selecting video reference ${assetName}`, ({ signal }) => this.selectFrameAsset(components, value, slot, { deadline: flowDeadline, signal, command }), true);
+              }
+              throw this.error("FLOW_REFERENCE_ATTACH_UNAVAILABLE", "Flow's video reference picker is unavailable; no generation was submitted.", false, false);
             }
             return runFlowStage(`selecting asset ${value.assetName}`, ({ signal }) => this.selectFrameAsset(components, value, slot, { deadline: flowDeadline, signal, command }), true);
           }

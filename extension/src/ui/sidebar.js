@@ -4,6 +4,11 @@
   let cachedStatus = null;
   const logs = [];
   let currentCharacters = [];
+  const characterUuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const characterEntityUuid = character => {
+    const value = typeof character === "object" && typeof character?.uuid === "string" ? character.uuid.trim() : "";
+    return characterUuidPattern.test(value) ? value.toLowerCase() : "";
+  };
   let flowProjects = [];
   let flowAssets = [];
   let flowPhotosVisibleLimit = 30;
@@ -698,10 +703,10 @@
       const found = charMap.get(key) || charMap.get(key.replace(/_/g, " ")) || charMap.get(key.replace(/\s+/g, "_"));
       if (found) {
         const name = typeof found === "string" ? found : found.name;
-        const uuid = typeof found === "object" && typeof found.uuid === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(found.uuid.trim())
-          ? found.uuid.trim().toLowerCase() : "";
+        const uuid = characterEntityUuid(found);
         return {
           name,
+          identityAvailable: Boolean(uuid),
           attachment: {
             assetName: `character:${name}`,
             kind: "character",
@@ -733,7 +738,7 @@
     }
 
     const name = typeof charObj === "string" ? charObj : charObj.name;
-    const uuid = typeof charObj === "object" && charObj.uuid ? charObj.uuid.toLowerCase() : "";
+    const uuid = characterEntityUuid(charObj);
     const val = uuid ? `flow-character:${uuid}` : `flow-character-name:${name}`;
 
     label.textContent = name;
@@ -773,13 +778,17 @@
         const name = typeof c === "string" ? c : c.name;
         if (!name) return;
         const opt = document.createElement("option");
-        const uuid = typeof c === "object" && typeof c.uuid === "string" ? c.uuid.trim().toLowerCase() : "";
+        const uuid = characterEntityUuid(c);
         // Preserve the selected Flow character entity, not just its display
         // name. Names can be duplicated or renamed between list refreshes.
         opt.value = uuid ? `flow-character:${uuid}` : `flow-character-name:${name}`;
         opt.dataset.characterName = name;
         if (uuid) opt.dataset.characterUuid = uuid;
-        opt.textContent = `👤 ${name}`;
+        if (!uuid) {
+          opt.disabled = true;
+          opt.title = "Flow không cung cấp ID nhân vật; không thể dùng nhân vật này để tạo ảnh/video.";
+        }
+        opt.textContent = uuid ? `👤 ${name}` : `👤 ${name} · ID không khả dụng`;
         const restoreByIdentity = opt.value === currentVal;
         const restoreByLegacyName = restoreLegacyName && !legacySelectionRestored && name === currentName;
         if (restoreByIdentity || restoreByLegacyName) {
@@ -824,21 +833,33 @@
         name = option.textContent?.replace(/^👤\s*/, "").trim();
       }
       const id = String(option?.dataset?.characterUuid || "").trim();
-      uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id) ? id.toLowerCase() : "";
+      uuid = characterUuidPattern.test(id) ? id.toLowerCase() : "";
       if (!uuid && option?.value?.startsWith?.("flow-character:")) {
         const parsed = option.value.replace("flow-character:", "").trim();
-        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(parsed)) uuid = parsed.toLowerCase();
+        if (characterUuidPattern.test(parsed)) uuid = parsed.toLowerCase();
       }
     }
     if (!name || (sel.tagName !== "INPUT" && !sel.value)) return null;
     return {
       name,
+      identityAvailable: Boolean(uuid),
       attachment: {
         assetName: `character:${name}`,
         kind: "character",
         ...(uuid ? { expectedId: uuid } : {}),
       },
     };
+  }
+
+  function validateCharacterSelections(prompts, selectedCharacter, type) {
+    for (const prompt of prompts || []) {
+      const character = findCharacterMentionInPrompt(prompt, currentCharacters) || selectedCharacter;
+      if (character && !character.identityAvailable && !character.attachment?.expectedId) {
+        setFeedback(`Flow không cung cấp ID nhân vật cho "${character.name}". Hãy đồng bộ lại nhân vật hoặc bỏ chọn nhân vật trước khi tạo ${type}.`, false);
+        return false;
+      }
+    }
+    return true;
   }
 
   document.querySelector("#flowVoiceSelect")?.addEventListener("change", event => {
@@ -987,7 +1008,6 @@
           : document.querySelector("#txtBtnSubmitVideo");
         if (btnTextEl) btnTextEl.textContent = msg.progress;
       }
-    }
   });
 
   async function executeGenerationTask({ type, prompt, prompts, aspect_ratio, count = 1, model, autoDownload = false, attachments = [], attachmentsPerPrompt, firstFramesPerPrompt, lastFramesPerPrompt, video_settings, chainVideo = false, btn, btnTextEl, defaultTextKey }) {
@@ -1061,6 +1081,22 @@
   let videoFrameAssignments = [];
   let activeVideoFrameSlot = null;
 
+  function bindFrameThumbnail(container, source, placeholderClass) {
+    if (!container || !source) return false;
+    const image = document.createElement("img");
+    image.alt = "";
+    image.loading = "lazy";
+    const placeholder = document.createElement("span");
+    placeholder.className = placeholderClass;
+    placeholder.textContent = "▧";
+    container.append(image);
+    const bound = referencePicker.bindThumbnail(image, source, () => {
+      if (image.isConnected) image.replaceWith(placeholder);
+    });
+    if (!bound && image.isConnected) image.replaceWith(placeholder);
+    return true;
+  }
+
   function currentVideoPromptsForFrames() {
     const prompt = document.querySelector("#inputPromptVideo")?.value.trim() || "";
     if (!prompt) return [];
@@ -1081,15 +1117,7 @@
       button.type = "button";
       button.className = "video-frame-source";
       button.title = t("sidebar.frameAssignSourceTitle", { name: source.name || source.file?.name || "" });
-      const imageUrl = source.source === "flow" ? source.thumbnailUrl : source.previewUrl;
-      if (imageUrl) {
-        const image = document.createElement("img");
-        image.src = imageUrl;
-        image.alt = "";
-        image.loading = "lazy";
-        image.onerror = () => image.remove();
-        button.append(image);
-      } else {
+      if (!bindFrameThumbnail(button, source, "video-frame-source__placeholder")) {
         const placeholder = document.createElement("span");
         placeholder.className = "video-frame-source__placeholder";
         placeholder.textContent = "▧";
@@ -1153,6 +1181,7 @@
   function syncVideoFrameAssignmentCount() {
     const prompts = currentVideoPromptsForFrames();
     while (videoFrameAssignments.length < prompts.length) videoFrameAssignments.push({ first: null, last: null });
+    if (videoFrameAssignments.length > prompts.length) videoFrameAssignments.length = prompts.length;
     if (activeVideoFrameSlot && activeVideoFrameSlot.index >= prompts.length) activeVideoFrameSlot = null;
     renderVideoFrameAssignments();
   }
@@ -1163,6 +1192,7 @@
     const prompts = currentVideoPromptsForFrames();
     container.replaceChildren();
     while (videoFrameAssignments.length < prompts.length) videoFrameAssignments.push({ first: null, last: null });
+    if (videoFrameAssignments.length > prompts.length) videoFrameAssignments.length = prompts.length;
     const chainVideo = document.querySelector("#chainVideoFromPrevious")?.checked === true &&
       document.querySelector("#selectModeVideo")?.value === "frames";
     prompts.forEach((prompt, index) => {
@@ -1183,12 +1213,7 @@
         slot.type = "button";
         slot.className = `video-frame-slot${activeVideoFrameSlot?.index === index && activeVideoFrameSlot?.key === key ? " is-active" : ""}`;
         slot.title = source?.name || source?.file?.name || t(labelKey);
-        if (source?.thumbnailUrl || source?.previewUrl) {
-          const image = document.createElement("img");
-          image.src = source.thumbnailUrl || source.previewUrl;
-          image.alt = "";
-          slot.append(image);
-        } else {
+        if (!bindFrameThumbnail(slot, source, "video-frame-slot__empty")) {
           const empty = document.createElement("span");
           empty.className = "video-frame-slot__empty";
           empty.textContent = "▧";
@@ -1223,6 +1248,19 @@
     });
   }
 
+  function syncVideoFrameSources(sources) {
+    videoFrameSources = Array.isArray(sources) ? sources : [];
+    const availableSources = new Set(videoFrameSources);
+    videoFrameAssignments = videoFrameAssignments.map(assignment => ({
+      first: availableSources.has(assignment?.first) ? assignment.first : null,
+      last: availableSources.has(assignment?.last) ? assignment.last : null,
+    }));
+    renderVideoFrameSources();
+    renderVideoFrameAssignments();
+  }
+
+  referencePicker.setFrameSourcesChanged(syncVideoFrameSources);
+
   function applyVideoFrameAssignment(mode) {
     const prompts = currentVideoPromptsForFrames();
     while (videoFrameAssignments.length < prompts.length) videoFrameAssignments.push({ first: null, last: null });
@@ -1249,10 +1287,7 @@
   }
 
   document.querySelector("#btnChooseVideoFrameSources")?.addEventListener("click", () => {
-    referencePicker.openFrames(sources => {
-      videoFrameSources = sources;
-      renderVideoFrameSources();
-    });
+    referencePicker.openFrames(syncVideoFrameSources);
   });
   document.querySelector("#btnAssignVideoFrames")?.addEventListener("click", () => {
     applyVideoFrameAssignment(document.querySelector("#videoFrameAssignmentMode")?.value || "start");
@@ -1447,6 +1482,7 @@
     }
     const selectedCharacter = selectedFlowCharacter(document.querySelector("#selectCharImage") || document.querySelector("#genCharacterSelect"));
     const character = selectedCharacter?.name || "";
+    if (!validateCharacterSelections(prompts, selectedCharacter, "ảnh")) return;
 
     const commonAttachments = [];
     const referenceAttachments = [];
@@ -1553,6 +1589,18 @@
       setFeedback("Không đọc được cấu hình model cục bộ của extension. Hãy tải lại extension rồi thử lại.", false);
       return;
     }
+    const visibleVideoModel = document.querySelector("#videoModel")?.value || "";
+    const submitVideoModel = document.querySelector("#selectModelVideo")?.value || "";
+    if (visibleVideoModel && submitVideoModel && visibleVideoModel !== submitVideoModel) {
+      setFeedback("Mô hình video hiển thị chưa đồng bộ với lựa chọn gửi lên Flow. Hãy chọn lại mô hình rồi thử lại.", false);
+      return;
+    }
+    const visibleVideoMode = String(document.querySelector("#videoInputType")?.value || "").toLowerCase();
+    const submitVideoMode = String(document.querySelector("#selectModeVideo")?.value || "ingredients").toLowerCase();
+    if (visibleVideoMode && visibleVideoMode !== submitVideoMode) {
+      setFeedback("Chế độ Video/Frames hiển thị chưa đồng bộ với lựa chọn gửi lên Flow. Hãy chọn lại chế độ rồi thử lại.", false);
+      return;
+    }
     const aspect_ratio = document.querySelector("#selectRatioVideo").value;
     const model = document.querySelector("#selectModelVideo")?.value || "veo 3.1";
     const modelRule = getFlowModelRule("video", model);
@@ -1575,6 +1623,7 @@
     let prompts;
     try { prompts = promptsForGeneration(prompt, document.querySelector("#multiPromptVideo")?.checked === true); }
     catch (error) { setFeedback(error.message, false); return; }
+    if (!validateCharacterSelections(prompts, selectedCharacter, "video")) return;
     const selectedReferenceMode = document.querySelector("#multiRefModeVideo")?.value || "all";
     const referenceMode = mode === "frames" ? "none" : selectedReferenceMode;
     const referencesPerPrompt = Number(document.querySelector("#multiRefCountVideo")?.value) || 1;
@@ -2446,27 +2495,29 @@
 
     document.querySelector("#genTabFrame1Slot")?.addEventListener("click", () => {
       referencePicker.openFrames(sources => {
-        videoFrameSources = sources;
-        renderVideoFrameSources();
+        syncVideoFrameSources(sources);
         if (sources[0]) {
           applyVideoFrameAssignment("start");
-          const img = document.querySelector("#genTabFrame1Slot img") || document.createElement("img");
-          img.src = sources[0].source === "flow" ? sources[0].thumbnailUrl : sources[0].previewUrl;
-          document.querySelector("#genTabFrame1Slot")?.replaceChildren(img);
+          const slot = document.querySelector("#genTabFrame1Slot");
+          if (slot) {
+            slot.replaceChildren();
+            bindFrameThumbnail(slot, sources[0], "video-frame-slot__empty");
+          }
         }
       });
     });
 
     document.querySelector("#genTabFrame2Slot")?.addEventListener("click", () => {
       referencePicker.openFrames(sources => {
-        videoFrameSources = sources;
-        renderVideoFrameSources();
+        syncVideoFrameSources(sources);
         if (sources[1]) {
           if (!videoFrameAssignments[0]) videoFrameAssignments[0] = { first: null, last: null };
           videoFrameAssignments[0].last = sources[1];
-          const img = document.querySelector("#genTabFrame2Slot img") || document.createElement("img");
-          img.src = sources[1].source === "flow" ? sources[1].thumbnailUrl : sources[1].previewUrl;
-          document.querySelector("#genTabFrame2Slot")?.replaceChildren(img);
+          const slot = document.querySelector("#genTabFrame2Slot");
+          if (slot) {
+            slot.replaceChildren();
+            bindFrameThumbnail(slot, sources[1], "video-frame-slot__empty");
+          }
         }
       });
     });
@@ -2602,14 +2653,17 @@
         </div>`,
         ...currentCharacters.map(c => {
           const name = typeof c === "string" ? c : c.name;
-          const uuid = typeof c === "object" && c.uuid ? c.uuid : "";
+          const uuid = characterEntityUuid(c);
+          const thumbnailUrl = typeof c === "object" && typeof c.thumbnailUrl === "string" && /^https:\/\//i.test(c.thumbnailUrl) ? c.thumbnailUrl : "";
+          const identityAvailable = Boolean(uuid);
           const val = uuid ? `flow-character:${uuid}` : `flow-character-name:${name}`;
           const isSelected = val === currentVal || name === currentVal;
           return `
-            <div class="style-modal-item ${isSelected ? "selected" : ""}" data-val="${escapeHtml(val)}" data-name="${escapeHtml(name)}">
-              <div class="style-modal-item-icon">👤</div>
+            <div class="style-modal-item ${isSelected ? "selected" : ""} ${identityAvailable ? "" : "disabled"}" data-val="${escapeHtml(val)}" data-name="${escapeHtml(name)}" data-identity-available="${identityAvailable}" title="${identityAvailable ? "" : "Flow không cung cấp ID nhân vật; không thể dùng nhân vật này để tạo ảnh/video."}">
+              <div class="style-modal-item-icon">${thumbnailUrl ? `<img src="${escapeHtml(thumbnailUrl)}" alt="" style="width:100%;height:100%;border-radius:inherit;object-fit:cover;" />` : "👤"}</div>
               <div class="voice-modal-item-info">
                 <span class="style-modal-item-name">${escapeHtml(name)}</span>
+                ${identityAvailable ? "" : '<span class="voice-modal-item-desc">Flow chưa cung cấp ID nhân vật</span>'}
               </div>
               ${isSelected ? '<svg class="style-modal-item-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>' : ''}
             </div>
@@ -2660,16 +2714,13 @@
       overlay?.querySelectorAll(".style-modal-item").forEach(item => {
         item.addEventListener("click", () => {
           const val = item.dataset.val || "";
-          const name = item.dataset.name || "";
-          const charSelect = document.querySelector("#genCharacterSelect");
-          const charLabel = document.querySelector("#genCharacterLabel");
-          if (charSelect) charSelect.value = val;
-          if (charLabel) charLabel.textContent = name || "Character";
-
-          const selectCharImage = document.querySelector("#selectCharImage");
-          const selectCharVideo = document.querySelector("#selectCharVideo");
-          if (selectCharImage) selectCharImage.value = val;
-          if (selectCharVideo) selectCharVideo.value = val;
+          if (val && item.dataset.identityAvailable !== "true") {
+            setFeedback(`Flow không cung cấp ID nhân vật cho "${item.dataset.name || "nhân vật này"}". Chọn nhân vật có ID hoặc bỏ chọn nhân vật.`, false);
+            return;
+          }
+          const character = val ? currentCharacters.find(candidate =>
+            typeof candidate === "object" && candidate?.uuid && `flow-character:${candidate.uuid.toLowerCase()}` === val) : null;
+          updateCharacterUiState(character);
           close();
         });
       });

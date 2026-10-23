@@ -802,15 +802,37 @@
     const name = cleanCharacterName(tile?.innerText || tile?.textContent || "");
     if (!name) return null;
     // The portrait's media UUID identifies its image, not the saved character.
-    // Only character-specific identity attributes may be exposed as UUIDs.
+    // data-id is accepted only here because this scanner receives the actual
+    // flow-character-tile element, where it identifies the character entity.
     const candidates = [
+      String(tile?.tagName || "").toLowerCase() === "flow-character-tile" ? tile.getAttribute?.("data-id") : null,
       tile.getAttribute?.("data-character-id"),
       tile.getAttribute?.("data-character-uuid"),
       tile.querySelector?.("[data-character-id]")?.getAttribute?.("data-character-id"),
       tile.querySelector?.("[data-character-uuid]")?.getAttribute?.("data-character-uuid"),
     ];
     const uuid = candidates.find(value => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value))?.toLowerCase();
-    return { name, ...(uuid ? { uuid } : {}) };
+    const imageRoots = [tile];
+    const visitedRoots = new Set();
+    const images = [];
+    while (imageRoots.length) {
+      const current = imageRoots.shift();
+      if (!current?.querySelectorAll || visitedRoots.has(current)) continue;
+      visitedRoots.add(current);
+      images.push(...current.querySelectorAll("img"));
+      for (const element of current.querySelectorAll("*")) if (element.shadowRoot) imageRoots.push(element.shadowRoot);
+    }
+    let thumbnailUrl = images.map(image => image.currentSrc || image.getAttribute("src") || "")
+      .find(value => value && !/^(?:data:|blob:|chrome-extension:)/i.test(value) && !/(?:placeholder|spinner|loading|skeleton)/i.test(value)) || "";
+    if (thumbnailUrl) {
+      try {
+        const parsed = new URL(thumbnailUrl, location.href);
+        thumbnailUrl = parsed.protocol === "https:" ? parsed.href : "";
+      } catch { thumbnailUrl = ""; }
+    }
+    // A portrait URL is returned only as display data and is never treated as
+    // the character entity's UUID.
+    return { name, ...(uuid ? { uuid } : {}), ...(thumbnailUrl ? { thumbnailUrl } : {}) };
   }
 
   function collectVisibleCharacterTiles(tiles, target, container) {

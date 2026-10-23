@@ -2,13 +2,28 @@
 (() => {
   "use strict";
   const root = globalThis;
+  function deepQueryAll(scope, selector) {
+    if (!scope?.querySelectorAll) return [];
+    const results = [];
+    const pending = [scope];
+    const visited = new Set();
+    while (pending.length) {
+      const current = pending.shift();
+      if (!current || visited.has(current)) continue;
+      visited.add(current);
+      try { results.push(...current.querySelectorAll(selector)); } catch {}
+      try {
+        for (const element of current.querySelectorAll("*")) {
+          if (element.shadowRoot && !visited.has(element.shadowRoot)) pending.push(element.shadowRoot);
+        }
+      } catch {}
+    }
+    return [...new Set(results)];
+  }
   function listOptions(list, checkVis = true) {
     if (!list) return [];
-    if (typeof root.flowQueryAll === "function") {
-      const results = root.flowQueryAll("components.optionItem", list, { checkVisible: checkVis });
-      if (results && results.length) return results;
-    }
-    const raw = [...(list.querySelectorAll?.('[role="option"]') || [])];
+    const configured = typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.optionItem", list, { checkVisible: checkVis }) : [];
+    const raw = [...new Set([...configured, ...deepQueryAll(list, '[role="option"]')])];
     return checkVis ? raw.filter(el => typeof root.visible !== "function" || root.visible(el)) : raw;
   }
 async function chooseNativePickerAsset(assetName, slot, config = {}) {
@@ -22,22 +37,65 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
     const state = [list.getAttribute?.("aria-label"), list.getAttribute?.("data-state"), list.getAttribute?.("data-testid"), list.innerText, list.textContent]
       .map(fold).join(" ");
     return /no (?:assets|items|results)(?: were)? found|nothing (?:is )?here|no results|khong (?:co|tim thay)|khong tim thay|danh sach trong|khong co ket qua/.test(state) ||
-      list.querySelector?.('[data-empty="true"],[aria-label*="empty" i],[data-testid*="empty" i]') != null;
+      deepQueryAll(list, '[data-empty="true"],[aria-label*="empty" i],[data-testid*="empty" i]').length > 0;
   };
   const categorySynonyms = { all: ["all", "tất cả", "tat ca"], ingredients: ["ingredients", "thành phần", "nguyên liệu"], uploads: ["uploads", "tải lên", "tai len"] };
   requireTime("opening the Flow asset picker");
   if (!slot) return globalThis.FlowReferenceActions.attach(assetName, undefined, { ...config, deadline });
   const wanted = String(assetName || "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
   if (!wanted || !["start", "end"].includes(slot)) throw flowError("FLOW_INVALID_ARGUMENT", "Frame selection requires an exact asset title and a Start or End slot.", false, false);
-  const buttonForSlot = () => flowButton(slot === "start" ? "Start" : "End");
+  const buttonForSlot = () => {
+    const label = slot === "start" ? "Start" : "End";
+    const composer = (typeof root.flowQuery === "function" ? root.flowQuery("composerRoot") : null) || document;
+    const roots = [composer];
+    for (let index = 0; index < roots.length; index++) {
+      const current = roots[index];
+      if (current.shadowRoot && !roots.includes(current.shadowRoot)) roots.push(current.shadowRoot);
+      try {
+        for (const element of current.querySelectorAll("*")) if (element.shadowRoot && !roots.includes(element.shadowRoot)) roots.push(element.shadowRoot);
+      } catch {}
+    }
+    for (const scope of roots) {
+      const candidate = root.flowButton?.(label, scope);
+      if (candidate) return candidate;
+    }
+    return null;
+  };
+  const controlledByOpener = (opener, id) => {
+    const scope = opener?.getRootNode?.() || document;
+    return scope.getElementById?.(id) || deepQueryAll(scope, "[id]").find(element => element.id === id) || document.getElementById(id);
+  };
   const listForOpener = (opener, priorLists) => {
     const ids = [opener?.getAttribute("aria-controls"), opener?.getAttribute("aria-owns")].filter(Boolean).flatMap(value => value.split(/\s+/));
-    const controlled = [...new Set(ids.map(id => document.getElementById(id)).filter(el => el?.getAttribute("role") === "listbox" && visible(el)))];
+    const controlled = [...new Set(ids.map(id => controlledByOpener(opener, id)).filter(el => el?.getAttribute("role") === "listbox" && visible(el)))];
     if (controlled.length === 1) return controlled[0];
     if (controlled.length > 1) return null;
-    const lists = [...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.listBox", document) : null) || document.querySelectorAll('[role="listbox"]'))].filter(visible);
+    const configuredLists = typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.listBox", document) : [];
+    const lists = [...new Set([...configuredLists, ...deepQueryAll(document, '[role="listbox"]')])].filter(visible);
     const newlyOpened = lists.filter(el => !priorLists.has(el));
     return newlyOpened.length === 1 ? newlyOpened[0] : null;
+  };
+  const pickerScopeRoots = activeList => {
+    if (!activeList) return [];
+    const treeRoot = activeList.getRootNode?.();
+    const surface = activeList.closest?.('[role="dialog"],mat-dialog-container,flow-dialog,.cdk-overlay-pane,[class*="picker" i],[class*="surface" i]') ||
+      (treeRoot && treeRoot !== document ? treeRoot : activeList.parentElement) || activeList;
+    const roots = [surface];
+    for (let index = 0; index < roots.length; index++) {
+      const current = roots[index];
+      if (current.shadowRoot && !roots.includes(current.shadowRoot)) roots.push(current.shadowRoot);
+      try {
+        for (const element of current.querySelectorAll("*")) if (element.shadowRoot && !roots.includes(element.shadowRoot)) roots.push(element.shadowRoot);
+      } catch {}
+    }
+    return roots;
+  };
+  const scopedPickerElements = (activeList, selector, configuredKey) => {
+    const roots = pickerScopeRoots(activeList);
+    const configured = typeof root.flowQueryAll === "function" && configuredKey
+      ? root.flowQueryAll(configuredKey, roots[0]) : [];
+    return [...new Set([...(configured || []), ...roots.flatMap(scope => deepQueryAll(scope, selector))])]
+      .filter(element => roots.some(scope => scope === element || scope.contains?.(element)));
   };
   const pickerSettled = async (listGetter, timeoutMs = 15_000, outcomeUnknown = false) => {
     const settleDeadline = Math.min(deadline, Date.now() + timeoutMs);
@@ -45,7 +103,7 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
     while (Date.now() < settleDeadline) {
       const list = listGetter();
       const loading = (typeof root.flowQueryVisible === "function" && Boolean(root.flowQueryVisible("common.loadingIndicator", document))) ||
-        [...document.querySelectorAll('[role="progressbar"],[aria-busy="true"]')].some(visible);
+        deepQueryAll(document, '[role="progressbar"],[aria-busy="true"]').some(visible);
       if (list && !loading) {
         const options = listOptions(list);
         if (options.length || explicitEmptyState(list)) return list;
@@ -57,20 +115,25 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
     requireTime(`waiting for Flow's ${slot} frame picker`, outcomeUnknown);
     throw flowError("FLOW_ASSET_PICKER_LOADING", `Flow's ${slot} frame picker did not finish loading. Nothing was selected.`, true, outcomeUnknown);
   };
-  const findTab = name => {
+  const findTab = (name, activeList = listGetter()) => {
     const norm = normalize(name);
     const synonyms = categorySynonyms[norm] || [norm];
-    const tabs = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.categoryTabs", document) : null) ||
-      [...document.querySelectorAll('[role="tab"]')];
-    return tabs.find(tab => {
+    const tabs = scopedPickerElements(activeList, '[role="tab"],button,[role="button"],mat-chip,[class*="chip"]', "components.categoryTabs");
+    const matches = tabs.filter(tab => {
       if (!visible(tab)) return false;
       const label = normalize(accessibleName(tab)).replace(/^(?:accessibility_new|dashboard|face)\s*/, "");
-      return synonyms.includes(label) || synonyms.some(syn => label.includes(syn));
+      return synonyms.includes(label) || synonyms.some(syn => label.startsWith(`${syn} `));
     });
+    const explicitTabs = matches.filter(tab => tab.getAttribute("role") === "tab");
+    const candidates = explicitTabs.length ? explicitTabs : matches;
+    if (candidates.length > 1) {
+      throw flowError("FLOW_ASSET_CATEGORY_AMBIGUOUS", `Flow's active ${slot} picker has multiple matching ${name} tabs; no category was selected.`, false, false);
+    }
+    return candidates[0] || null;
   };
   const optionNames = option => {
     const values = [accessibleName(option), option.getAttribute("aria-label"), option.getAttribute("title")];
-    for (const node of option.querySelectorAll("[aria-label],[title],img[alt],flow-grid-tile-container")) {
+    for (const node of deepQueryAll(option, "[aria-label],[title],img[alt],flow-grid-tile-container")) {
       values.push(node.getAttribute("aria-label"), node.getAttribute("title"), node.getAttribute("alt"));
     }
     return [...new Set(values.map(value => String(value || "").replace(/\s+/g, " ").trim().toLocaleLowerCase()).filter(Boolean))];
@@ -78,22 +141,25 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
   const isExactOption = option => optionNames(option).some(label => label === wanted ||
     label.replace(/\s+(?:image|video|character|avatar)$/i, "") === wanted);
   const optionIdentity = (option, pageIndex, itemIndex, scroller) => {
-    const tile = option.querySelector("flow-grid-tile-container");
+    const tile = deepQueryAll(option, "flow-grid-tile-container")[0];
     const id = tile && mediaId(tile);
     if (id && !id.startsWith("title:")) return id;
-    const image = option.querySelector("img");
-    return image?.currentSrc || image?.src || option.getAttribute("data-media-id") || option.id ||
+    const image = deepQueryAll(option, "img")[0];
+    const mediaIdAttribute = deepQueryAll(option, "[data-media-id]")[0]?.getAttribute("data-media-id");
+    return image?.currentSrc || image?.src || mediaIdAttribute || option.getAttribute("data-media-id") || option.id ||
       option.getAttribute("aria-posinset") || `${wanted}|${Math.floor((scroller?.scrollTop || 0) / Math.max(1, scroller?.clientHeight || 1))}|${pageIndex}|${itemIndex}`;
   };
   const slotSignature = () => {
     const opener = buttonForSlot();
     if (!opener) return "missing";
     const container = opener.parentElement?.parentElement || opener;
+    const media = deepQueryAll(container, "img,video");
+    const labels = deepQueryAll(container, "[aria-label],[title]");
     return JSON.stringify({
       label: opener.getAttribute("aria-label"), title: opener.getAttribute("title"), text: (opener.innerText || "").replace(/\s+/g, " ").trim(),
       expanded: opener.getAttribute("aria-expanded"),
-      media: [...container.querySelectorAll("img,video")].map(el => el.currentSrc || el.getAttribute("src") || el.getAttribute("alt") || ""),
-      names: [...container.querySelectorAll("[aria-label],[title]")].map(el => el.getAttribute("aria-label") || el.getAttribute("title")),
+      media: media.map(el => el.currentSrc || el.getAttribute("src") || el.getAttribute("alt") || ""),
+      names: labels.map(el => el.getAttribute("aria-label") || el.getAttribute("title")),
     });
   };
   const sanitizeFrameDiagnosticUrl = value => {
@@ -133,7 +199,7 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
         disabled: Boolean(opener.disabled || opener.getAttribute("aria-disabled") === "true"),
         className: String(opener.className?.baseVal || opener.className || "").slice(0, 100),
       } : null,
-      slotContent: slotContainer ? [...slotContainer.querySelectorAll("img,video")].slice(0, 4).map(el => ({
+      slotContent: slotContainer ? deepQueryAll(slotContainer, "img,video").slice(0, 4).map(el => ({
         alt: el.getAttribute("alt") || null,
         title: el.getAttribute("title") || null,
         src: sanitizeFrameDiagnosticUrl(el.currentSrc || el.getAttribute("src")),
@@ -144,7 +210,7 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
         id: exactList.id || null,
         role: exactList.getAttribute("role"),
         ariaLabel: exactList.getAttribute("aria-label") || null,
-        optionCount: exactList.querySelectorAll('[role="option"]').length,
+        optionCount: deepQueryAll(exactList, '[role="option"]').length,
         options: options.map(option => ({
           label: accessibleName(option) || option.getAttribute("aria-label") || option.getAttribute("title") || null,
           ariaSelected: option.getAttribute("aria-selected"),
@@ -169,7 +235,7 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
     requireTime(`opening Flow's ${slot} frame picker`);
     opener = buttonForSlot();
     if (!opener) break;
-    const priorLists = new Set(document.querySelectorAll('[role="listbox"]'));
+    const priorLists = new Set(deepQueryAll(document, '[role="listbox"]'));
     const controlledIds = [opener.getAttribute("aria-controls"), opener.getAttribute("aria-owns")].filter(Boolean).flatMap(value => value.split(/\s+/));
     frameControlledIds = controlledIds;
     opener.click();
@@ -190,7 +256,7 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
     const currentIds = [currentOpener?.getAttribute("aria-controls"), currentOpener?.getAttribute("aria-owns")]
       .filter(Boolean).flatMap(value => value.split(/\s+/));
     const ids = [...new Set([...frameControlledIds, ...currentIds])];
-    const controlled = [...new Set(ids.map(id => document.getElementById(id)).filter(item => item?.getAttribute("role") === "listbox" && visible(item)))];
+    const controlled = [...new Set(ids.map(id => controlledByOpener(currentOpener, id)).filter(item => item?.getAttribute("role") === "listbox" && visible(item)))];
     if (controlled.length === 1) return controlled[0];
     if (controlled.length > 1) return null;
     return list?.isConnected !== false && visible(list) ? list : null;
@@ -203,8 +269,13 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
   let pageIndex = 0;
   let operationError;
   try {
-    let search = (typeof root.flowQueryVisible === "function" ? root.flowQueryVisible("components.searchInput", document) : null) ||
-      [...document.querySelectorAll('input,[role="textbox"]')].find(el => visible(el) && /(?:search assets|tìm kiếm)/i.test(accessibleName(el) || el.placeholder || ""));
+    const findSearchInput = () => {
+      const matches = scopedPickerElements(listGetter(), 'input,[role="textbox"]', "components.searchInput")
+        .filter(el => visible(el) && /(?:search assets|tìm kiếm)/i.test(accessibleName(el) || el.placeholder || ""));
+      if (matches.length > 1) throw flowError("FLOW_ASSET_SEARCH_AMBIGUOUS", `Flow's active ${slot} picker has multiple search fields; nothing was typed.`, false, false);
+      return matches[0] || null;
+    };
+    let search = findSearchInput();
     if (search) {
       setEditable(search, assetName);
       await boundedWait(650, `searching for "${assetName}" in Flow's ${slot} picker`);
@@ -226,15 +297,14 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
       }
       list = listGetter();
       if (!list) continue;
-      search = (typeof root.flowQueryVisible === "function" ? root.flowQueryVisible("components.searchInput", document) : null) ||
-        [...document.querySelectorAll('input,[role="textbox"]')].find(el => visible(el) && /(?:search assets|tìm kiếm)/i.test(accessibleName(el) || el.placeholder || ""));
+      search = findSearchInput();
       if (search && String(search.value ?? "") !== assetName) {
         setEditable(search, assetName);
         await boundedWait(650, `searching for "${assetName}" in Flow's ${slot} picker`);
         await pickerSettled(listGetter);
       }
       list = listGetter();
-      scroller = list && [list, ...list.querySelectorAll("*")].find(el => el.clientHeight > 0 && el.scrollHeight > el.clientHeight + 5);
+      scroller = list && [list, ...deepQueryAll(list, "*")].find(el => el.clientHeight > 0 && el.scrollHeight > el.clientHeight + 5);
       if (scroller) scroller.scrollTop = 0;
       matches = new Map();
       for (pageIndex = 0; pageIndex < (scroller ? 150 : 1) && Date.now() < deadline; pageIndex++) {
@@ -264,14 +334,15 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
     // wrapper instead of inside it. Match only one exact title in this picker
     // list (the reference-chip picker uses the same scoped fallback).
     const optionTile = (typeof root.flowQuery === "function" ? root.flowQuery("tiles.container", option, { checkVisible: false }) : null) ||
-      option.querySelector("flow-grid-tile-container");
-    const listTiles = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", list, { checkVisible: false }) : null) ||
-      [...(list?.querySelectorAll("flow-grid-tile-container") || [])];
+      deepQueryAll(option, "flow-grid-tile-container")[0];
+    const configuredTiles = typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", list, { checkVisible: false }) : [];
+    const listTiles = [...new Set([...configuredTiles, ...deepQueryAll(list, "flow-grid-tile-container")])];
     const listTileMatches = optionTile ? [] : listTiles
       .filter(tile => normalize(tile.getAttribute("aria-label")) === wanted);
     const selectedTile = optionTile || (listTileMatches.length === 1 ? listTileMatches[0] : null);
     const tileId = selectedTile && mediaId(selectedTile);
-    let selectedId = (tileId && !tileId.startsWith("title:") ? tileId : null) || option.getAttribute("data-media-id") || option.querySelector("[data-media-id]")?.getAttribute("data-media-id") || tileId || undefined;
+    let selectedId = (tileId && !tileId.startsWith("title:") ? tileId : null) || option.getAttribute("data-media-id") ||
+      deepQueryAll(option, "[data-media-id]")[0]?.getAttribute("data-media-id") || tileId || undefined;
     selectedId = await globalThis.resolveNativeMediaUuid?.(selectedId, "image") || selectedId;
     const expectedId = await globalThis.resolveNativeMediaUuid?.(config.expectedId, "image") || config.expectedId;
     const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -292,7 +363,7 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
     let attached = false;
     while (Date.now() < selectionDeadline) {
       const currentList = listGetter();
-      const selected = currentList && [...currentList.querySelectorAll('[role="option"]')].find(item => isExactOption(item) &&
+      const selected = currentList && deepQueryAll(currentList, '[role="option"]').find(item => isExactOption(item) &&
         (item.getAttribute("aria-selected") === "true" || item.getAttribute("aria-checked") === "true" || item.getAttribute("data-state") === "checked"));
       const slotChanged = slotSignature() !== beforeSlot;
       if (selected || (slotChanged && !currentList)) {

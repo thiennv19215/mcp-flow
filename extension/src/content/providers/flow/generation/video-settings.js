@@ -13,17 +13,47 @@
     frames: ["frames", "khung hình", "khung", "frame"],
   };
 
+  function deepQueryAll(scope, selector) {
+    if (!scope?.querySelectorAll) return [];
+    const results = [];
+    const pending = [scope];
+    const visited = new Set();
+    while (pending.length) {
+      const current = pending.shift();
+      if (!current || visited.has(current)) continue;
+      visited.add(current);
+      try { results.push(...current.querySelectorAll(selector)); } catch {}
+      try {
+        for (const element of current.querySelectorAll("*")) {
+          if (element.shadowRoot && !visited.has(element.shadowRoot)) pending.push(element.shadowRoot);
+        }
+      } catch {}
+    }
+    return [...new Set(results)];
+  }
+
   function exactModeControl(name) {
     const rawWanted = foldLabel(name);
     const aliases = (MODE_ALIASES[rawWanted] || [rawWanted]).map(foldLabel);
-    const candidates = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", document, { checkVisible: false }) : null) ||
-      [...document.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')];
-    return candidates
-      .find(element => {
-        if (!root.visible?.(element) || isNavControl(element)) return false;
-        const cName = foldLabel(String(root.accessibleName?.(element) || "").replace(/^(?:accessibility_new|dashboard|face)\s*/i, ""));
-        return aliases.includes(cName) || aliases.some(a => cName.endsWith(` ${a}`));
-      });
+    const configured = typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", document, { checkVisible: false }) : [];
+    const candidates = [...new Set([...configured, ...deepQueryAll(document, '[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')])];
+    const visibleCandidates = [...new Set(candidates)].filter(element => root.visible?.(element) && !isNavControl(element));
+    const suffix = rawWanted === "frames" ? "VIDEO_FRAMES" : rawWanted === "ingredients" ? "VIDEO_REFERENCES" : "";
+    if (suffix) {
+      const byId = visibleCandidates.find(element => String(element.id || "").endsWith(`-trigger-${suffix}`));
+      if (byId) return byId;
+      const byPanel = visibleCandidates.find(element => String(element.getAttribute?.("aria-controls") || "").includes(suffix));
+      if (byPanel) return byPanel;
+    }
+    return visibleCandidates.find(element => {
+      const cName = foldLabel(String(root.accessibleName?.(element) || "").replace(/^(?:accessibility_new|dashboard|face)\s*/i, ""));
+      return aliases.includes(cName) || aliases.some(a => cName.endsWith(` ${a}`));
+    });
+  }
+
+  function modeControlSelected(control) {
+    return Boolean(control && (nativeRadioSelected(control) || control.getAttribute("aria-selected") === "true" ||
+      control.getAttribute("data-state") === "active"));
   }
 
   function isDisabledModeControl(control) {
@@ -39,12 +69,9 @@
       throw unavailableError(`Flow's exact ${name} mode control is visible but disabled. Nothing was submitted.`);
     }
     if (!control) {
-      const hasFrameControls = () => Boolean(root.flowButton?.("Start") && root.flowButton?.("End"));
-      if (framesMode && hasFrameControls()) return;
       throw unavailableError(`Flow does not offer the exact ${name} mode for the selected model. Nothing was submitted.`);
     }
-    if (!nativeRadioSelected(control) && control.getAttribute("aria-selected") !== "true") control.click();
-    const hasFrameControls = () => Boolean(root.flowButton?.("Start") && root.flowButton?.("End"));
+    if (!modeControlSelected(control)) control.click();
     const deadline = Math.min(Date.now() + 5000, Number.isFinite(options.deadline) ? options.deadline : Infinity);
     let confirmed = false;
     while (Date.now() < deadline) {
@@ -53,7 +80,7 @@
       if (isDisabledModeControl(control)) {
         throw unavailableError(`Flow's exact ${name} mode control became disabled before selection could be confirmed. Nothing was submitted.`);
       }
-      if (control && (nativeRadioSelected(control) || control.getAttribute("aria-selected") === "true" || (framesMode && hasFrameControls()))) { confirmed = true; break; }
+      if (modeControlSelected(control)) { confirmed = true; break; }
       if (!flowSettingsPanelVisible()) await openFlowSettings(options);
       await waitPreparation(options, 100, `confirming Flow ${name} mode`);
     }
@@ -62,13 +89,11 @@
       if (isDisabledModeControl(control)) {
         throw unavailableError(`Flow's exact ${name} mode control is disabled. Nothing was submitted.`);
       }
-      if (framesMode && hasFrameControls()) confirmed = true;
-      else {
-        const code = framesMode ? "FLOW_FRAMES_MODE_UNCONFIRMED" : "FLOW_VIDEO_MODE_UNCONFIRMED";
-        throw root.flowError(code, `Flow did not confirm that ${name} mode is selected. Nothing was submitted.`, true, false);
-      }
+      const code = framesMode ? "FLOW_FRAMES_MODE_UNCONFIRMED" : "FLOW_VIDEO_MODE_UNCONFIRMED";
+      throw root.flowError(code, `Flow did not confirm that ${name} mode is selected. Nothing was submitted.`, true, false);
     }
     if (framesMode) {
+      const hasFrameControls = () => Boolean(root.flowButton?.("Start") && root.flowButton?.("End"));
       const controlsDeadline = Math.min(Date.now() + 4000, Number.isFinite(options.deadline) ? options.deadline : Infinity);
       while (Date.now() < controlsDeadline && !hasFrameControls()) await waitPreparation(options, 100, "waiting for Flow frame controls");
       if (!hasFrameControls()) {

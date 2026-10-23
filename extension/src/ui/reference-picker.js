@@ -9,6 +9,7 @@
     let pickerType = "image";
     let pickerPurpose = "references";
     let onFrameSourcesChanged = null;
+    let onFramesConfirmed = null;
     let pickerFlowAssets = [];
     let pickerFlowSelection = new Map();
     let pickerLocalFiles = [];
@@ -23,6 +24,10 @@
     let pickerScanLimit = 120;
     let pickerScannedCount = 0;
     const flowThumbnailProxyCache = new Map();
+
+    function notifyFrameSourcesChanged() {
+      onFrameSourcesChanged?.([...frameSources]);
+    }
 
     const modal = document.querySelector("#referencePickerModal");
     const flowGrid = document.querySelector("#refPickerFlowGrid");
@@ -446,7 +451,7 @@
             removedFrameSource = true;
           }
         }
-        if (removedFrameSource) onFrameSourcesChanged?.([...frameSources]);
+        if (removedFrameSource) notifyFrameSourcesChanged();
       }
 
       pickerProjectId = nextProjectId;
@@ -677,7 +682,8 @@
           return;
         }
         frameSources.push(...additions);
-        onFrameSourcesChanged?.([...frameSources]);
+        notifyFrameSourcesChanged();
+        onFramesConfirmed?.([...frameSources]);
         close({ confirmed: true });
         return;
       }
@@ -718,6 +724,7 @@
         if (index < 0) return [...frameSources];
         const [removed] = frameSources.splice(index, 1);
         if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+        notifyFrameSourcesChanged();
         return [...frameSources];
       },
       moveFrameSource: (source, delta) => {
@@ -726,7 +733,27 @@
         if (index >= 0 && target !== index) frameSources.splice(target, 0, frameSources.splice(index, 1)[0]);
         return [...frameSources];
       },
-      openFrames: onChanged => { onFrameSourcesChanged = onChanged; open("video", "frames"); },
+      openFrames: onChanged => { onFramesConfirmed = typeof onChanged === "function" ? onChanged : null; open("video", "frames"); },
+      setFrameSourcesChanged: onChanged => {
+        onFrameSourcesChanged = typeof onChanged === "function" ? onChanged : null;
+        onFrameSourcesChanged?.([...frameSources]);
+      },
+      bindThumbnail: (img, source, onUnavailable) => {
+        if (!img || !source) return false;
+        const url = source.source === "flow"
+          ? normalizeFlowThumbnailUrl(source)
+          : String(source.previewUrl || "");
+        if (!url) {
+          onUnavailable?.();
+          return false;
+        }
+        if (source.source === "flow") bindFlowThumbnail(img, url, onUnavailable);
+        else {
+          img.onerror = () => onUnavailable?.();
+          img.src = url;
+        }
+        return true;
+      },
       open: (type = "image", purpose = "references") => open(type, purpose),
       renderReferenceCards,
       addLocalFilesToReferences,

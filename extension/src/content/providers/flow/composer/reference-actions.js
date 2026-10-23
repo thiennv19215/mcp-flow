@@ -499,14 +499,37 @@
     };
   }
   const characterUuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  function deepCharacterNodes(node, selector) {
+    if (!node) return [];
+    const results = [];
+    const pending = [node];
+    const visited = new Set();
+    while (pending.length) {
+      const current = pending.shift();
+      if (!current || visited.has(current)) continue;
+      visited.add(current);
+      if (current.matches?.(selector)) results.push(current);
+      try { results.push(...(current.querySelectorAll?.(selector) || [])); } catch {}
+      if (current.shadowRoot && !visited.has(current.shadowRoot)) pending.push(current.shadowRoot);
+      try {
+        for (const element of current.querySelectorAll?.("*") || []) if (element.shadowRoot && !visited.has(element.shadowRoot)) pending.push(element.shadowRoot);
+      } catch {}
+    }
+    return [...new Set(results)];
+  }
   function explicitCharacterUuid(...nodes) {
     for (const node of nodes.filter(Boolean)) {
+      // `data-id` is accepted only on Flow's character entity element. Generic
+      // tile/media IDs and portrait image IDs identify a different resource.
+      const characterTile = deepCharacterNodes(node, "flow-character-tile")[0];
+      const tileId = characterTile?.getAttribute?.("data-id");
+      if (typeof tileId === "string" && characterUuidPattern.test(tileId.trim())) return tileId.trim().toLowerCase();
       for (const attr of ["data-character-id", "data-character-uuid"]) {
         const value = node.getAttribute?.(attr);
         if (typeof value === "string" && characterUuidPattern.test(value.trim())) return value.trim().toLowerCase();
       }
       for (const attr of ["[data-character-id]", "[data-character-uuid]"]) {
-        const child = node.querySelector?.(attr);
+        const child = deepCharacterNodes(node, attr)[0];
         const value = child?.getAttribute?.(attr.slice(1, -1));
         if (typeof value === "string" && characterUuidPattern.test(value.trim())) return value.trim().toLowerCase();
       }
@@ -1410,17 +1433,31 @@
       list?.closest?.('[class*="picker"], [class*="surface"]') ||
       list || null;
   }
+  function scopedDeepQueryAll(scope, selector) {
+    if (!scope?.querySelectorAll) return [];
+    const results = [];
+    const pending = [scope];
+    const visited = new Set();
+    while (pending.length) {
+      const current = pending.shift();
+      if (!current || visited.has(current)) continue;
+      visited.add(current);
+      try { results.push(...current.querySelectorAll(selector)); } catch {}
+      if (current.shadowRoot && !visited.has(current.shadowRoot)) pending.push(current.shadowRoot);
+      try {
+        for (const element of current.querySelectorAll("*")) if (element.shadowRoot && !visited.has(element.shadowRoot)) pending.push(element.shadowRoot);
+      } catch {}
+    }
+    return [...new Set(results)];
+  }
   function pickerCategoryTabs(name) {
     const norm = normalize(name);
     const synonyms = CATEGORY_SYNONYMS[norm] || [norm];
     const surface = pickerSurface();
     if (!surface) return [];
     const queriedTabs = typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.categoryTabs", surface) : null;
-    const candidates = [...new Set([
-      ...(queriedTabs || []),
-      ...(surface?.querySelectorAll?.('[role="tab"],button,[role="button"],mat-chip,[class*="chip"]') || []),
-    ])].filter(el => {
-      if (el !== surface && !surface.contains?.(el)) return false;
+    const scopedTabs = scopedDeepQueryAll(surface, '[role="tab"],button,[role="button"],mat-chip,[class*="chip"]');
+    const filterCandidate = el => {
       if (!visible(el)) return false;
       const rawText = accessibleName(el) || el.getAttribute?.("aria-label") || el.getAttribute?.("title") || el.innerText || el.textContent || "";
       const label = normalize(rawText)
@@ -1429,7 +1466,11 @@
       const icon = normalize(el.querySelector?.("mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined")?.textContent);
       return synonyms.includes(label) || synonyms.some(syn => label.startsWith(`${syn} `)) ||
         norm === "voices" && ["voice_selection", "graphic_eq", "record_voice_over"].includes(icon);
-    });
+    };
+    let candidates = [...new Set([
+      ...(queriedTabs || []),
+      ...scopedTabs,
+    ])].filter(el => (el === surface || surface.contains?.(el) || scopedTabs.includes(el)) && filterCandidate(el));
     // Prefer explicit tabs over their nested button/chip wrappers. Only treat
     // multiple actual tab controls as ambiguous; wrapper duplicates are one
     // semantic category, not separate choices.
@@ -1742,7 +1783,25 @@
         throw error;
       }
       await search("", deadline, config.signal);
-      const names = new Map(chips().filter(chip => chip.kind === "character" && chip.name).map(chip => [normalize(chip.name), chip.name]));
+      const characters = new Map();
+      const addCharacter = (rawName, element) => {
+        const name = String(rawName || "").replace(/\s+/g, " ").trim();
+        if (!name || /^(?:characters?|no characters found)$/i.test(name)) return;
+        const uuid = explicitCharacterUuid(element);
+        const image = element?.querySelector?.("img,[role='img']");
+        const thumbnailUrl = image?.currentSrc || image?.src || image?.getAttribute?.("src") || "";
+        const previous = characters.get(normalize(name));
+        // A portrait source is display-only. Never infer the saved character
+        // entity UUID from the image or its media attributes.
+        characters.set(normalize(name), {
+          name,
+          ...(uuid || previous?.uuid ? { uuid: uuid || previous.uuid } : {}),
+          ...(thumbnailUrl || previous?.thumbnailUrl ? { thumbnailUrl: thumbnailUrl || previous.thumbnailUrl } : {}),
+        });
+      };
+      for (const chip of chips()) {
+        if (chip.kind === "character" && chip.name) addCharacter(chip.name, chip.element || chip.owner);
+      }
       let list = picker();
       const scroller = list && [list, ...list.querySelectorAll("*")].find(el => el.clientHeight > 0 && el.scrollHeight > el.clientHeight + 5);
       if (scroller) scroller.scrollTop = 0;
@@ -1751,7 +1810,7 @@
         list = await settled(deadline, config.signal);
         for (const option of options()) {
           const name = (accessibleName(option) || option.innerText || option.textContent || "").replace(/\s+/g, " ").trim();
-          if (name && !/^(?:characters?|no characters found)$/i.test(name)) names.set(normalize(name), name);
+          if (name) addCharacter(name, option);
         }
         if (!scroller || scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 2) { reachedEnd = true; break; }
         const previous = scroller.scrollTop;
@@ -1761,9 +1820,9 @@
       }
       requireTime(deadline, "scanning Flow characters");
       if (!reachedEnd) throw flowError("FLOW_CHARACTER_SCAN_LIMIT", "Flow's character picker exceeded the scan page limit; no partial list was returned.", true);
-      const result = [...names.values()].filter(Boolean);
+      const result = [...characters.values()].filter(character => character.name);
       updateReferenceActionDiagnostics({ phase: "completed", step: "characters listed", lastResult: { count: result.length } });
-      return result;
+      return config.includeIdentities === true ? result : result.map(character => character.name);
     } catch (error) {
       operationError = error;
       updateReferenceActionDiagnostics({ phase: "failed", step: "character listing failed", error: `${error?.code || "FLOW_CHARACTER_LIST_ERROR"}: ${error?.message || String(error)}` });
@@ -1789,14 +1848,26 @@
       // Flow excludes already attached characters from its picker. Check our
       // confirmed provenance first, before requiring the option to exist again.
       const reusableCandidates = chips().filter(chip => (normalize(chip.name) === normalize(ref.name) || (ref.search_value && normalize(chip.name) === normalize(ref.search_value))) && (!ref.kind || chip.kind === ref.kind));
+      if (!config.expectedId && reusableCandidates.some(chip => chip.kind === "character")) {
+        throw flowError("FLOW_CHARACTER_ID_UNAVAILABLE", `Flow already has a same-name character chip for "${ref.name}", but this request has no character entity UUID to prove it is the intended character. No generation was submitted.`, false, false);
+      }
       let reusable = null;
       for (const chip of reusableCandidates) {
+        if (chip.kind === "character") {
+          const requestedCharacterId = String(config.expectedId || "").trim();
+          const existingCharacterId = explicitCharacterUuid(chip.element) ||
+            (chip.mediaIdSource === "character_identity_attribute" ? chip.mediaId : undefined);
+          if (characterUuidPattern.test(requestedCharacterId) && characterUuidPattern.test(String(existingCharacterId || "")) &&
+              requestedCharacterId.toLowerCase() === String(existingCharacterId).toLowerCase()) {
+            reusable = chip;
+            break;
+          }
+          continue;
+        }
         if (!config.expectedId) { reusable = chip; break; }
         const mediaType = chip.kind === "video" ? "video" : "image";
         const expectedId = await resolveReferenceMediaIdentity(config.expectedId, mediaType);
-        const existingId = chip.kind === "character"
-          ? explicitCharacterUuid(chip.element) || (chip.mediaIdSource === "character_identity_attribute" ? chip.mediaId : undefined)
-          : chip.mediaId || chipMediaUuids(chip)[0];
+        const existingId = chip.mediaId || chipMediaUuids(chip)[0];
         const resolvedExistingId = await resolveReferenceMediaIdentity(existingId, mediaType);
         if (expectedId && resolvedExistingId && resolvedExistingId.toLowerCase() === expectedId.toLowerCase()) {
           reusable = chip;
@@ -1816,9 +1887,18 @@
         if (reusable.kind === "character" && !reusableId) {
           throw flowError("FLOW_CHARACTER_ID_UNAVAILABLE", `Flow did not expose an explicit character identity for "${ref.name}". No selection or generation was submitted.`, false, false);
         }
-        const requestedReusableId = config.expectedId
-          ? await resolveReferenceMediaIdentity(config.expectedId, reusable.kind === "video" ? "video" : "image")
-          : null;
+        let requestedReusableId = null;
+        if (config.expectedId) {
+          if (reusable.kind === "character") {
+            const characterId = String(config.expectedId).trim();
+            if (!characterUuidPattern.test(characterId)) {
+              throw flowError("FLOW_CHARACTER_ID_UNAVAILABLE", `The selected character identity for "${ref.name}" is not a verified entity UUID. No generation was submitted.`, false, false);
+            }
+            requestedReusableId = characterId.toLowerCase();
+          } else {
+            requestedReusableId = await resolveReferenceMediaIdentity(config.expectedId, reusable.kind === "video" ? "video" : "image");
+          }
+        }
         if (config.expectedId && !requestedReusableId && reusable.kind === "video") {
           throw flowError("FLOW_ASSET_ID_UNAVAILABLE", `Flow could not canonicalize the requested video identity for "${ref.name}". No generation was submitted.`, false, false);
         }
@@ -1880,18 +1960,37 @@
         error.diagnostics = referenceScanEvidence({ pages: scan?.pages || 0, endReached: scan?.reachedEnd === true, optionCount: scan?.optionCount || 0, errorCode: error.code });
         throw error;
       }
-      const tile = option.querySelector("flow-grid-tile-container") || [...document.querySelectorAll("flow-grid-tile-container")].find(el => normalize(el.getAttribute("aria-label")) === normalize(ref.name));
+      const optionTile = (typeof root.flowQuery === "function" ? root.flowQuery("tiles.container", option, { checkVisible: false }) : null) ||
+        option.querySelector("flow-grid-tile-container");
+      const kind = ref.kind || (optionTile?.querySelector("flow-character-tile") || /\bCharacter$/i.test(accessibleName(option)) ? "character" : "image");
+      // Character identity must stay scoped to the exact unique picker option;
+      // a same-title tile elsewhere in the document can be a different entity.
+      const tile = kind === "character" ? optionTile : optionTile ||
+        [...document.querySelectorAll("flow-grid-tile-container")].find(el => normalize(el.getAttribute("aria-label")) === normalize(ref.name));
       const tileId = tile && mediaId(tile);
-      const kind = ref.kind || (tile?.querySelector("flow-character-tile") || /\bCharacter$/i.test(accessibleName(option)) ? "character" : "image");
       // A character tile's generic mediaId is its portrait asset in some Flow
       // builds. Only character-specific identity attributes prove the entity.
       let selectedId = kind === "character"
         ? explicitCharacterUuid(option, tile)
         : referenceOptionMediaId(option);
+      let expectedId = config.expectedId;
+      if (kind === "character") {
+        const expectedCharacterId = String(expectedId || "").trim();
+        if (expectedCharacterId && !characterUuidPattern.test(expectedCharacterId)) {
+          throw flowError("FLOW_CHARACTER_ID_UNAVAILABLE", `The selected character identity for "${ref.name}" is not a verified entity UUID. No selection or generation was submitted.`, false, false);
+        }
+        if (selectedId && expectedCharacterId && selectedId.toLowerCase() !== expectedCharacterId.toLowerCase()) {
+          throw flowError("FLOW_CHARACTER_ID_MISMATCH", `Flow's exact character option for "${ref.name}" does not match the selected character entity. Nothing was attached.`, false, false);
+        }
+        // Some picker builds expose only the character name. The UI's expectedId
+        // comes from the verified flow-character-tile[data-id] library entry;
+        // it is safe to use only after scanExactReferenceOption found one exact
+        // unique option above. Never substitute a portrait/media UUID here.
+        if (!selectedId && characterUuidPattern.test(expectedCharacterId)) selectedId = expectedCharacterId.toLowerCase();
+      }
       if (kind === "character" && !selectedId) {
         throw flowError("FLOW_CHARACTER_ID_UNAVAILABLE", `Flow did not expose an explicit character identity for "${ref.name}". No selection or generation was submitted.`, false, false);
       }
-      let expectedId = config.expectedId;
       if (kind === "image") {
         selectedId = await resolveNativeMediaUuid(selectedId, "image") || selectedId;
         expectedId = await resolveNativeMediaUuid(expectedId, "image") || expectedId;
@@ -1905,7 +2004,10 @@
           throw flowError("FLOW_ASSET_ID_UNAVAILABLE", `Flow could not canonicalize the requested video identity for "${ref.name}". No generation was submitted.`, false, false);
         }
       }
-      if (expectedId && selectedId !== expectedId) {
+      const identityMatches = expectedId && selectedId && uuidPattern.test(String(expectedId)) && uuidPattern.test(String(selectedId))
+        ? String(selectedId).toLowerCase() === String(expectedId).toLowerCase()
+        : selectedId === expectedId;
+      if (expectedId && !identityMatches) {
         throw flowError("FLOW_ASSET_ID_MISMATCH", `Flow's reference picker did not prove that "${ref.name}" matches the completed upload ID. No generation was submitted.`, false, false);
       }
       const before = chips();
@@ -1914,6 +2016,17 @@
       // Only reuse a chip whose selection provenance this driver recorded.
       const existing = before.find(chip => chip.name === ref.name && chip.kind === kind);
       if (existing) {
+        if (kind === "character") {
+          const existingCharacterId = explicitCharacterUuid(existing.element, existing.owner) ||
+            (existing.mediaIdSource === "character_identity_attribute" && characterUuidPattern.test(String(existing.mediaId || ""))
+              ? String(existing.mediaId).toLowerCase() : undefined);
+          if (!existingCharacterId) {
+            throw flowError("FLOW_CHARACTER_ID_UNAVAILABLE", `Flow already has a same-name character chip for "${ref.name}" but its entity UUID cannot be verified. No generation was submitted.`, false, false);
+          }
+          if (existingCharacterId.toLowerCase() !== String(selectedId).toLowerCase()) {
+            throw flowError("FLOW_CHARACTER_ID_MISMATCH", `Flow already has a different character entity attached under the name "${ref.name}". No generation was submitted.`, false, false);
+          }
+        }
         const result = { name: ref.name, kind, source: existing.source, id: kind === "character" || kind === "video" ? selectedId : existing.mediaId || selectedId, confirmed: true, reused: true };
         updateReferenceActionDiagnostics({ phase: "completed", step: "existing reference reused", lastResult: { name: result.name, id: result.id || null } });
         return result;
@@ -1930,6 +2043,12 @@
         const added = addedReferenceChips(before, currentChips);
         const chip = added.length === 1 && added[0].kind === kind ? added[0] : null;
         if (chip) {
+          if (kind === "character") {
+            const attachedCharacterId = explicitCharacterUuid(chip.element, chip.owner);
+            if (attachedCharacterId && attachedCharacterId.toLowerCase() !== selectedId.toLowerCase()) {
+              throw flowError("FLOW_CHARACTER_ID_MISMATCH", `Flow attached a different character entity than the exact option selected for "${ref.name}". No generation was submitted.`, false, false);
+            }
+          }
           const result = { name: ref.name, kind: chip.kind, source: chip.source, id: selectedId, confirmed: true };
           metadata.set(chip.element, { name: ref.name, mediaId: selectedId, ...(kind === "character" ? { mediaIdSource: "character_identity_attribute" } : {}) });
           updateReferenceActionDiagnostics({ phase: "completed", step: "reference chip confirmed", lastResult: { name: result.name, id: result.id || null } });

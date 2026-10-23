@@ -204,8 +204,8 @@
         }
         if (kind === "character") {
           if (typeof root.FlowReferenceActions?.listCharacters !== "function") throw this.error("FLOW_CHARACTER_PICKER_UNAVAILABLE", "Flow's character picker inspection is unavailable.", false, false);
-          const names = await root.FlowReferenceActions.listCharacters({ deadline, signal: command.signal, command });
-          return { components: names.map(name => ({ name, kind: "character" })), count: names.length, source: "flow_dom_picker", readOnly: true };
+          const characters = await root.FlowReferenceActions.listCharacters({ deadline, signal: command.signal, command, includeIdentities: true });
+          return { components: characters.map(character => ({ ...character, kind: "character" })), count: characters.length, source: "flow_dom_picker", readOnly: true };
         }
         const composer = editor?.getVisibleFlowPromptEditor?.()?.closest?.(".flow-composer,flow-base-prompt-box,form,[class*='composer']") || document;
         const chips = root.FlowReferenceActions?.chips?.(composer) || [];
