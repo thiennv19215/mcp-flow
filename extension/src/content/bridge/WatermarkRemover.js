@@ -149,6 +149,8 @@
         refineStep: 0.25,
         darkBackgroundThreshold: 72,
         darkDenoise: true,
+        edgeSmoothing: true,
+        edgeSmoothWidth: 3,
         nccSampleStep: 2,
         searchCornersFirst: true,
         ...options,
@@ -283,7 +285,13 @@
       return count ? score / count : Number.POSITIVE_INFINITY;
     }
 
-    _estimateGain(image, mask, x, y) {
+    // Patch-based gain estimate (the original estimator): hill-climb the
+    // gain that minimizes _roughness. Its known weakness (DL-11): the
+    // roughness criterion compares each restored pixel against neighbors in
+    // the still-watermarked image, so on dense alpha patterns — where most
+    // neighbors carry the watermark too — it settles far below the true
+    // gain and the removal fails verification.
+    _estimateGainFromPatch(image, mask, x, y) {
       let bestGain = 1;
       let bestScore = Number.POSITIVE_INFINITY;
       for (let pass = 0; pass < 3; pass++) {
@@ -297,6 +305,118 @@
         }
       }
       return bestGain;
+    }
+
+    // Surround-based gain estimate: for each watermarked pixel, estimate
+    // the underlying background from nearby pixels the watermark does not
+    // touch (expanding ring search, first ring with enough clean samples),
+    // then invert the blend model observed = bg + alpha*gain*(255 - bg)
+    // per pixel and take the median — independent of the watermarked
+    // neighbors that bias the patch estimate. Returns null when too few
+    // pixels have a usable surround (caller falls back to the patch gain).
+    _estimateGainFromSurround(image, mask, x, y) {
+      const gains = [];
+      const maxRing = 6;
+      for (let my = 0; my < mask.height; my++) {
+        for (let mx = 0; mx < mask.width; mx++) {
+          const alpha = alphaAt(mask, mx, my);
+          if (alpha < 0.15) continue;
+          const ix = Math.round(x + mx);
+          const iy = Math.round(y + my);
+          if (ix < 1 || iy < 1 || ix >= image.width - 1 || iy >= image.height - 1) continue;
+          let background = null;
+          for (let ring = 1; ring <= maxRing && background === null; ring++) {
+            let sum = 0;
+            let count = 0;
+            for (let dy = -ring; dy <= ring; dy++) {
+              for (let dx = -ring; dx <= ring; dx++) {
+                if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue;
+                const nx = ix + dx;
+                const ny = iy + dy;
+                if (nx < 0 || ny < 0 || nx >= image.width || ny >= image.height) continue;
+                if (alphaAt(mask, Math.round(nx - x), Math.round(ny - y)) >= 0.05) continue;
+                sum += pixelLuma(image, nx, ny);
+                count++;
+              }
+            }
+            if (count >= 3) background = sum / count;
+          }
+          if (background === null || background >= 250) continue;
+          const denominator = alpha * (255 - background);
+          if (denominator <= 1) continue;
+          const gain = (pixelLuma(image, ix, iy) - background) / denominator;
+          if (Number.isFinite(gain)) gains.push(gain);
+        }
+      }
+      if (gains.length < 8) return null;
+      gains.sort((a, b) => a - b);
+      return clamp(gains[Math.floor(gains.length / 2)], 0.35, 1.65);
+    }
+
+    // Post-apply roughness of one gain candidate: the candidate is applied
+    // to a patch-local copy (mask bbox plus a 1px margin — never a
+    // full-image rescan) and scored against its OWN cleaned neighbors,
+    // which is the surface a viewer actually sees. Luma restore is exact
+    // here because every channel shares the same alpha.
+    _postApplyRoughness(image, mask, x, y, gain) {
+      const ox = Math.round(x);
+      const oy = Math.round(y);
+      const rx = Math.max(0, ox - 1);
+      const ry = Math.max(0, oy - 1);
+      const rw = Math.min(image.width, ox + mask.width + 1) - rx;
+      const rh = Math.min(image.height, oy + mask.height + 1) - ry;
+      if (rw <= 0 || rh <= 0) return Number.POSITIVE_INFINITY;
+      const region = new Float64Array(rw * rh);
+      for (let j = 0; j < rh; j++) {
+        for (let i = 0; i < rw; i++) region[j * rw + i] = pixelLuma(image, rx + i, ry + j);
+      }
+      for (let my = 0; my < mask.height; my++) {
+        for (let mx = 0; mx < mask.width; mx++) {
+          const alpha = clamp(alphaAt(mask, mx, my) * gain, 0, 0.98);
+          if (alpha < 0.01) continue;
+          const ix = ox + mx;
+          const iy = oy + my;
+          if (ix < 0 || iy < 0 || ix >= image.width || iy >= image.height) continue;
+          const index = (iy - ry) * rw + (ix - rx);
+          region[index] = clamp((region[index] - 255 * alpha) / Math.max(0.02, 1 - alpha), 0, 255);
+        }
+      }
+      let score = 0;
+      let count = 0;
+      for (let my = 0; my < mask.height; my++) {
+        for (let mx = 0; mx < mask.width; mx++) {
+          if (alphaAt(mask, mx, my) < 0.05) continue;
+          const i = ox + mx - rx;
+          const j = oy + my - ry;
+          if (i <= 0 || j <= 0 || i >= rw - 1 || j >= rh - 1) continue;
+          const index = j * rw + i;
+          const neighbor = (region[index - 1] + region[index + 1] + region[index - rw] + region[index + rw]) / 4;
+          score += Math.abs(region[index] - neighbor);
+          count++;
+        }
+      }
+      return count ? score / count : Number.POSITIVE_INFINITY;
+    }
+
+    // Dual gain estimate (DL-11): both estimators run on the located patch
+    // and the winner is the candidate whose APPLIED result is smoother.
+    // Ties (and a missing surround estimate) keep the patch gain, so the
+    // choice is deterministic and the legacy behavior survives wherever
+    // the surround offers no improvement. Estimation and scoring snap to
+    // the integer origin the removal actually applies on — the apply loop
+    // maps mask pixels by Math.round(x + mx) === Math.round(x) + mx, so a
+    // fractional (refined) position has exactly one applied grid, and
+    // estimating on any other grid misaligns the per-pixel alpha the
+    // surround estimator and the scorer rely on.
+    _estimateGain(image, mask, x, y) {
+      const gx = Math.round(x);
+      const gy = Math.round(y);
+      const patchGain = this._estimateGainFromPatch(image, mask, gx, gy);
+      const surroundGain = this._estimateGainFromSurround(image, mask, gx, gy);
+      if (surroundGain === null || Math.abs(surroundGain - patchGain) < 1e-9) return patchGain;
+      const patchScore = this._postApplyRoughness(image, mask, gx, gy, patchGain);
+      const surroundScore = this._postApplyRoughness(image, mask, gx, gy, surroundGain);
+      return surroundScore < patchScore ? surroundGain : patchGain;
     }
 
     _refineByRoughness(image, mask, point) {
@@ -344,7 +464,11 @@
       if (!best || best.ncc < Number(this.options.nccThreshold)) return null;
       best.gain = this._estimateGain(image, mask, best.x, best.y);
       const refined = this._refineByRoughness(image, mask, best);
-      return { ...refined, variant, scale, mask };
+      // The gain the removal will use is re-estimated at the refined
+      // position: the coarse scan position can sit a pixel off the true
+      // placement, and a gain estimated there scores/applies on the wrong
+      // pixels (DL-11).
+      return { ...refined, variant, scale, mask, gain: this._estimateGain(image, mask, refined.x, refined.y) };
     }
 
     locate(image, mask) {
@@ -375,7 +499,8 @@
       const point = { x: winner.x, y: winner.y, ncc: winner.ncc };
       point.gain = this._estimateGain(image, winner.mask, point.x, point.y);
       const refined = this._refineByRoughness(image, winner.mask, point);
-      return { ...refined, variant: winner.variant, scale: winner.scale, mask: winner.mask };
+      // Re-estimate at the refined position, as in _locateWithMask.
+      return { ...refined, variant: winner.variant, scale: winner.scale, mask: winner.mask, gain: this._estimateGain(image, winner.mask, refined.x, refined.y) };
     }
 
     _applyDarkDenoise(image, original, mask, point) {
@@ -394,6 +519,56 @@
           for (let channel = 0; channel < 3; channel++) {
             const neighbors = [image.data[center - 4 + channel], image.data[center + 4 + channel], image.data[center - image.width * 4 + channel], image.data[center + image.width * 4 + channel]];
             image.data[center + channel] = neighbors.reduce((sum, value) => sum + value, image.data[center + channel]) / 5;
+          }
+        }
+      }
+    }
+
+    // Edge smoothing (DL-11): blend the patch's border band toward the
+    // local neighbor mean of the cleaned image, strongest at the very edge
+    // (weight 1/2) and fading to zero at edgeSmoothWidth pixels in — this
+    // closes the gradient step the reverse-alpha pass leaves where the
+    // patch meets untouched surround (the halo ring). Reads come from a
+    // snapshot of the patch region (bbox plus a 1px margin), so the pass
+    // has no directional bias; pixels at distance >= edgeSmoothWidth from
+    // the border (the interior) and everything outside the patch are never
+    // written.
+    _smoothPatchEdges(image, mask, point) {
+      if (this.options.edgeSmoothing === false) return;
+      const width = Math.max(1, Math.round(Number(this.options.edgeSmoothWidth) || 3));
+      const ox = Math.round(point.x);
+      const oy = Math.round(point.y);
+      const rx = Math.max(0, ox - 1);
+      const ry = Math.max(0, oy - 1);
+      const rw = Math.min(image.width, ox + mask.width + 1) - rx;
+      const rh = Math.min(image.height, oy + mask.height + 1) - ry;
+      if (rw <= 0 || rh <= 0) return;
+      const snapshot = new Uint8ClampedArray(rw * rh * 4);
+      for (let j = 0; j < rh; j++) {
+        for (let i = 0; i < rw; i++) {
+          const source = ((ry + j) * image.width + (rx + i)) * 4;
+          const target = (j * rw + i) * 4;
+          for (let channel = 0; channel < 4; channel++) snapshot[target + channel] = image.data[source + channel];
+        }
+      }
+      const snapAt = (ix, iy, channel) => {
+        const i = clamp(ix, rx, rx + rw - 1) - rx;
+        const j = clamp(iy, ry, ry + rh - 1) - ry;
+        return snapshot[(j * rw + i) * 4 + channel];
+      };
+      for (let my = 0; my < mask.height; my++) {
+        for (let mx = 0; mx < mask.width; mx++) {
+          const distance = Math.min(mx, my, mask.width - 1 - mx, mask.height - 1 - my);
+          if (distance >= width) continue;
+          if (alphaAt(mask, mx, my) < 0.01) continue;
+          const ix = ox + mx;
+          const iy = oy + my;
+          if (ix < 0 || iy < 0 || ix >= image.width || iy >= image.height) continue;
+          const weight = 0.5 * (1 - distance / width);
+          const offset = (iy * image.width + ix) * 4;
+          for (let channel = 0; channel < 3; channel++) {
+            const neighbor = (snapAt(ix - 1, iy, channel) + snapAt(ix + 1, iy, channel) + snapAt(ix, iy - 1, channel) + snapAt(ix, iy + 1, channel)) / 4;
+            image.data[offset + channel] = (1 - weight) * image.data[offset + channel] + weight * neighbor;
           }
         }
       }
@@ -435,6 +610,7 @@
         }
       }
       this._applyDarkDenoise(cleaned, original, mask, point);
+      this._smoothPatchEdges(cleaned, mask, point);
       const nccAfter = this._nccAt(cleaned, mask, point.x, point.y);
       if (nccAfter > Number(this.options.minNccAfter)) return { changed: false, reason: "verification_failed", nccBefore: point.ncc, nccAfter, image: original, variant, scale };
       return { changed: true, image: cleaned, x: point.x, y: point.y, gain: point.gain, nccBefore: point.ncc, nccAfter, variant, scale };
