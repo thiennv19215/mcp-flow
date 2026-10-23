@@ -725,9 +725,17 @@ export class FlowJobQueue {
   async remove(id) {
     await this.ready;
     const index = this.jobs.findIndex(job => job.id === id);
-    if (index < 0 || this.jobs[index].status === "running") return false;
-    if (this.jobs[index].status === "waiting_for_user") return false;
+    if (index < 0) return false;
     if (this.jobs.some(job => job.metadata?.dependsOnId === id && ["pending", "running", "waiting_for_user"].includes(job.status))) return false;
+    const job = this.jobs[index];
+    if (job.status === "running") {
+      job.metadata = { ...(job.metadata || {}), removeAfterRun: true };
+      this.controller?.abort(new Error("Queue job removed by user."));
+      await this.#persist();
+      this.#emit("job-remove-requested");
+      return true;
+    }
+    if (job.status === "waiting_for_user") return false;
     this.jobs.splice(index, 1);
     await this.#persist();
     this.#emit("removed");
@@ -984,6 +992,10 @@ export class FlowJobQueue {
             }
             autoRetryQueued = true;
           }
+        }
+        if (job.metadata?.removeAfterRun === true) {
+          const removeIndex = this.jobs.indexOf(job);
+          if (removeIndex >= 0) this.jobs.splice(removeIndex, 1);
         }
         if (!waitingForUser && !autoRetryQueued) job.finishedAt = Date.now();
         this.controller = null;

@@ -1123,7 +1123,16 @@ chrome.downloads?.onDeterminingFilename?.addListener((downloadItem, suggest) => 
   disarmQueueFilenameOverride(ticket);
   suggest({ filename: ticket.assignedFilename, conflictAction: "uniquify" });
 });
-async function waitForQueueFlowDownload(beforeIds, title, timeoutMs = 12 * 60_000, filenameTicket = null) {
+async function throwIfQueueDownloadAborted(signal, title, downloadId = null) {
+  if (!signal?.aborted) return;
+  if (Number.isInteger(downloadId)) {
+    try { await chrome.downloads?.cancel?.(downloadId); } catch {}
+  }
+  throw Object.assign(new Error(`Queue stopped waiting for the browser download of "${title}". The generated media remains in Flow.`), {
+    code: "FLOW_QUEUE_CANCELLED", outcomeUnknown: false, outcome_unknown: false,
+  });
+}
+async function waitForQueueFlowDownload(beforeIds, title, timeoutMs = 12 * 60_000, filenameTicket = null, signal = null) {
   if (!chrome.downloads?.search) throw Object.assign(new Error("Chrome download tracking is unavailable; the generated media remains in Flow."), {
     code: "FLOW_DOWNLOAD_TRACKING_UNAVAILABLE", outcomeUnknown: false, outcome_unknown: false,
   });
@@ -1131,6 +1140,7 @@ async function waitForQueueFlowDownload(beforeIds, title, timeoutMs = 12 * 60_00
   const titleKey = flowDownloadTitleKey(title);
   let lastNew = [];
   while (Date.now() < deadline) {
+    await throwIfQueueDownloadAborted(signal, title, filenameTicket?.downloadId);
     if (Number.isInteger(filenameTicket?.downloadId)) {
       const [claimed] = await chrome.downloads.search({ id: filenameTicket.downloadId });
       if (claimed?.state === "interrupted") throw Object.assign(new Error(`Chrome download failed for "${title}": ${claimed.error || "unknown error"}. The media remains in Flow.`), {
@@ -1170,7 +1180,7 @@ async function waitForQueueFlowDownload(beforeIds, title, timeoutMs = 12 * 60_00
         code: "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
       });
       if (candidate?.state === "complete" && candidate.filename) return { id: candidate.id, filename: candidate.filename, matchedByQueueTicket: true, ...(matchedByTriggeredFilename ? { matchedBy: "triggered_flow_filename" } : {}) };
-      await new Promise(resolve => setTimeout(resolve, 750));
+      await new Promise(resolve => setTimeout(resolve, 250));
       continue;
     }
     const flowItems = newItems.filter(item => flowUrl(item.referrer) || flowUrl(item.url) || flowUrl(item.finalUrl));
@@ -1201,7 +1211,7 @@ async function waitForQueueFlowDownload(beforeIds, title, timeoutMs = 12 * 60_00
     });
     const complete = candidates.find(item => item.state === "complete" && item.filename);
     if (complete) return { id: complete.id, filename: complete.filename };
-    await new Promise(resolve => setTimeout(resolve, 750));
+    await new Promise(resolve => setTimeout(resolve, 250));
   }
   const active = lastNew.find(item => item.state === "in_progress");
   const detail = active ? `Chrome download ${active.bytesReceived || 0}/${active.totalBytes || "?"} bytes` : "Chrome did not report a new Flow download";
@@ -1224,10 +1234,11 @@ async function findExistingQueueFlowDownload(flowMediaId, flowTabId, flowProject
     matching.find(item => item.state === "in_progress") ||
     matching.find(item => item.state === "interrupted") || null;
 }
-async function waitForExistingQueueFlowDownload(downloadId, flowMediaId, flowTabId, flowProjectId, title, timeoutMs = 3 * 60_000) {
+async function waitForExistingQueueFlowDownload(downloadId, flowMediaId, flowTabId, flowProjectId, title, timeoutMs = 3 * 60_000, signal = null) {
   const ticket = { flowMediaId: String(flowMediaId), flowTabId, flowProjectId: String(flowProjectId || "") };
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    await throwIfQueueDownloadAborted(signal, title, downloadId);
     const items = await chrome.downloads.search({ id: downloadId });
     const item = items.find(candidate => candidate.id === downloadId);
     if (!item) throw Object.assign(new Error(`Chrome no longer reports the in-progress download for "${title}". The generated media remains in Flow.`), {
@@ -1240,7 +1251,7 @@ async function waitForExistingQueueFlowDownload(downloadId, flowMediaId, flowTab
       code: "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
     });
     if (item.state === "complete" && item.filename) return { id: item.id, filename: item.filename, matchedByQueueTicket: true };
-    await new Promise(resolve => setTimeout(resolve, 750));
+    await new Promise(resolve => setTimeout(resolve, 250));
   }
   throw Object.assign(new Error(`Chrome download for "${title}" was still in progress after the resume timeout. The generated media remains in Flow.`), {
     code: "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
@@ -1268,7 +1279,7 @@ async function downloadQueueMedia(media, outputDir, fileStem, quality, invoke, h
       const existing = await findExistingQueueFlowDownload(flowMediaId, flowTabId, flowProjectId);
       if (existing) {
         const resumed = existing.state === "in_progress"
-          ? await waitForExistingQueueFlowDownload(existing.id, flowMediaId, flowTabId, flowProjectId, title, quality === "upscaled" ? 12 * 60_000 : 3 * 60_000)
+          ? await waitForExistingQueueFlowDownload(existing.id, flowMediaId, flowTabId, flowProjectId, title, quality === "upscaled" ? 12 * 60_000 : 3 * 60_000, hooks.signal)
           : existing.state === "complete" && existing.filename
             ? { id: existing.id, filename: existing.filename, matchedByQueueTicket: true }
             : null;
@@ -1322,7 +1333,7 @@ async function downloadQueueMedia(media, outputDir, fileStem, quality, invoke, h
         });
         let download;
         try {
-          download = await waitForQueueFlowDownload(beforeIds, title, quality === "upscaled" ? 12 * 60_000 : 3 * 60_000, filenameTicket);
+          download = await waitForQueueFlowDownload(beforeIds, title, quality === "upscaled" ? 12 * 60_000 : 3 * 60_000, filenameTicket, hooks.signal);
         } catch (cause) {
           throw Object.assign(new Error(String(cause?.message || cause)), {
             code: cause?.code || "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
