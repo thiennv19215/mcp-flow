@@ -184,8 +184,9 @@
     const visible = el => Boolean(el && root.visible?.(el));
     const normalize = value => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
       .replace(/[đĐ]/g, "d").toLowerCase().replace(/\s+/g, " ").trim();
+    const dialogSelector = '[role="dialog"],[role="alertdialog"],dialog[open],mat-dialog-container,flow-dialog,[aria-modal="true"]';
     const overlaySelector = [
-      '[role="dialog"]', 'mat-dialog-container', 'flow-dialog', '[aria-modal="true"]',
+      dialogSelector,
       '[role="menu"]', '[role="listbox"]', 'mat-menu-panel', '.mat-mdc-menu-panel', 'mat-select-panel',
       '.cdk-overlay-pane',
     ].join(",");
@@ -223,7 +224,6 @@
       const knownDialogs = root.FlowAgent?.visibleAgentInstructionDialogs?.() || [];
       return knownDialogs.some(dialog => dialog === surface || surface?.contains?.(dialog) || dialog?.contains?.(surface));
     };
-    const dialogSelector = '[role="dialog"],mat-dialog-container,flow-dialog,[aria-modal="true"]';
     const isRiskyConfirmationDialog = surface => /\b(?:are you sure|confirm(?:ation)?|delete|remove|discard|overwrite|unsaved changes|cancel generation|stop generation|submit|purchase|billing|payment|xoa|huy tao|gui lenh|xac nhan)\b/i
       .test(normalize(`${root.accessibleName?.(surface) || ""} ${surface?.innerText || surface?.textContent || ""}`));
     const isKnownDismissibleSurface = el => isMediaPicker(el) || isKnownPopupMenu(el);
@@ -272,12 +272,6 @@
         if (candidates.size !== 1) return false;
         return [...candidates][0];
       }
-      // A close icon is not enough to dismiss a confirmation or unsaved-work
-      // prompt: closing those surfaces can itself discard or confirm work.
-      // The exact Agent-instruction dialog above has its own verified Done
-      // control; every generic dialog must pass this guard before any close or
-      // acknowledgement action is considered.
-      if (isRiskyConfirmationDialog(surface)) return false;
       const closeIcons = controls.filter(button => {
         const labels = controlLabels(button);
         const iconLabels = [...(button.querySelectorAll?.('mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined,[aria-label],[data-icon]') || [])]
@@ -288,6 +282,14 @@
       });
       if (closeIcons.length === 1) return closeIcons[0];
       if (closeIcons.length > 1) return false;
+
+      // A confirmation dialog may be dismissed only through an explicit
+      // cancel-style action. Never choose its positive or ambiguous action.
+      if (isRiskyConfirmationDialog(surface)) {
+        const cancelControls = controls.filter(button => controlLabels(button).some(label =>
+          /^(?:cancel|not now|later|huy|de sau|khong phai luc nay)$/.test(label)));
+        return cancelControls.length === 1 ? cancelControls[0] : false;
+      }
 
       const safeActions = controls.filter(button => controlLabels(button).some(label =>
         /^(?:got it|okay|ok|understood|not now|later|done|xong|hoan tat|dong|bo qua)$/.test(label)));
@@ -388,7 +390,7 @@
       settingsOpen: state.settingsOpen,
     });
 
-    for (let attempt = 0; attempt < 4; attempt++) {
+    for (let attempt = 0; attempt < 8; attempt++) {
       checkTime("checking Flow popups before the next operation");
       const state = snapshot();
       const hasBlockingPopup = state.referencePickerOpen || state.overlays.length > 0 || state.blockingBackdrop;
@@ -402,6 +404,14 @@
       }
 
       const surface = state.overlays.find(el => !isSettingsDialog(el));
+      if (!surface && state.blockingBackdrop) {
+        // A popup can briefly expose its backdrop before its surface mounts.
+        // Escape only cancels the topmost transient layer; then re-scan.
+        root.dispatchEscapeKey?.();
+        dismissedAny = true;
+        await pause(150, "closing a Flow popup backdrop");
+        continue;
+      }
       const isDialog = surface && isDialogSurface(surface);
       let explicitDialogButton = isDialog ? clickExplicitDialogClose(surface) : null;
       if (surface && !isKnownDismissibleSurface(surface) && !explicitDialogButton) {
@@ -423,6 +433,23 @@
                   continue;
                 }
               } catch { /* Keep the unknown-surface blocker if safe dismissal is not confirmed. */ }
+            }
+            // If this is another popup type, Escape dismisses the topmost
+            // layer without selecting a menu item. Verify it before continuing.
+            root.dispatchEscapeKey?.();
+            if (await waitForNonDialogOwnerToClose(surface)) {
+              dismissedAny = true;
+              await pause(100, "finishing Flow notification dismissal");
+              continue;
+            }
+          } else {
+            // Escape cancels rather than accepts a modal action. This covers
+            // notice/alert variants whose close control is absent or unlabeled.
+            root.dispatchEscapeKey?.();
+            if (await waitForDialogToClose(surface, null)) {
+              dismissedAny = true;
+              await pause(100, "finishing Flow notification dismissal");
+              continue;
             }
           }
           const message = isDialogSurface(surface)
@@ -471,12 +498,11 @@
         continue;
       }
 
-      // Escape may close a positively identified Flow picker/menu only. A
-      // backdrop by itself is ambiguous, so never send Escape in that case.
-      if (state.settingsOpen || !surface || !isKnownDismissibleSurface(surface)) {
-        const message = state.settingsOpen
-          ? "A Flow settings panel remains open alongside another popup. It was not dismissed with Escape; close the other popup in Flow before starting another operation."
-          : "A Flow overlay is visible but its type could not be identified. The queue paused to protect later tasks; inspect and dismiss it, then resume the queue.";
+      // Escape is safe for a positively identified picker/menu even when the
+      // non-modal generation settings panel is also open: Flow closes the
+      // topmost popup first. A backdrop by itself remains ambiguous.
+      if (!surface || !isKnownDismissibleSurface(surface)) {
+        const message = "A Flow overlay is visible but its type could not be identified or dismissed safely. The queue paused to protect later tasks; inspect and dismiss it, then resume the queue.";
         const error = root.flowError
           ? root.flowError("FLOW_UNKNOWN_OVERLAY_BLOCKING", message, false, false)
           : new Error(message);
@@ -511,7 +537,7 @@
     const referencePicker = (() => {
       try { return root.FlowReferenceActions?.inspectDiagnostics?.()?.pickerOpen === true; } catch { return false; }
     })();
-    const overlays = [...new Set(document.querySelectorAll('[role="dialog"],mat-dialog-container,flow-dialog,[aria-modal="true"],[role="menu"],[role="listbox"],mat-menu-panel,.mat-mdc-menu-panel,mat-select-panel,.cdk-overlay-pane'))]
+    const overlays = [...new Set(document.querySelectorAll('[role="dialog"],[role="alertdialog"],dialog[open],mat-dialog-container,flow-dialog,[aria-modal="true"],[role="menu"],[role="listbox"],mat-menu-panel,.mat-mdc-menu-panel,mat-select-panel,.cdk-overlay-pane'))]
       .filter(el => root.visible?.(el) && !isSettingsDialogForPreflight(el));
     if (referencePicker || overlays.length) {
       const error = root.flowError("FLOW_OPERATION_PREFLIGHT_FAILED", "Flow still has an open popup. The requested operation was not started.", true, false);
