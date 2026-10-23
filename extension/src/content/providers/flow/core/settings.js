@@ -613,7 +613,7 @@
         await waitPreparation(options, 100, `confirming Flow ${name} mode`);
       }
     }
-    throw root.flowError("FLOW_OPTION_SELECTION_FAILED", `Flow did not confirm that "${name}" was selected. Nothing was submitted.", true`);
+    throw root.flowError("FLOW_OPTION_SELECTION_FAILED", `Flow did not confirm that "${name}" was selected. Nothing was submitted.`, true, false);
   }
 
   async function chooseNativeVariantCount(count, options = {}) {
