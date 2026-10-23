@@ -930,9 +930,17 @@ export class FlowJobQueue {
           if (typeof error?.creditQuoteVerified === "boolean") job.creditQuoteVerified = error.creditQuoteVerified;
           job.error = String(error.message || error).slice(0, 2000);
           job.errorCode = error.code || (unknown ? "FLOW_SUBMIT_OUTCOME_UNKNOWN" : "FLOW_JOB_FAILED");
+          // A job that declares its own retry budget (MCP scenes carry
+          // `retries`, and submit_only work forces it to 0) gets exactly
+          // that budget; the planner's zero must win over the global cap,
+          // or a submit-only request could be attempted more than once.
+          const declaredRetries = job.payload?.params?.retries ?? job.payload?.retries;
+          const retryBudget = Number.isInteger(declaredRetries) && declaredRetries >= 0
+            ? Math.min(declaredRetries, AUTO_RETRY_MAX)
+            : AUTO_RETRY_MAX;
           const canAutoRetry = explicitlyRetryable &&
             !downloadFailure && !unknown && !this.stopRequested && !this.controller?.signal.aborted &&
-            (job.autoRetryCount || 0) < AUTO_RETRY_MAX;
+            (job.autoRetryCount || 0) < retryBudget;
           const canRecheckUnknownOverlay = error.code === "FLOW_UNKNOWN_OVERLAY_BLOCKING" && explicitlySafe &&
             !unknown && !downloadFailure && !this.stopRequested && !this.controller?.signal.aborted &&
             error.noRetry !== true && error.noReplay !== true && !mayHaveDispatched(job) &&
