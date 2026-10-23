@@ -59,6 +59,17 @@
           matchKind: typeof rawReceipt.matchKind === "string" ? rawReceipt.matchKind : null,
         };
         if (prepared.submitOnly === true) tiles.releaseSubmitOnlyCorrelation?.(attemptId, true);
+        await tiles.emitFlowProgress(command, "Flow accepted the manual generation request; saved a recovery checkpoint.", {
+          generationObservation: {
+            before: Array.isArray(prepared.before) ? prepared.before : [],
+            kind: prepared.type === "image" ? "image" : "video",
+            expectedCount: Math.max(1, Math.min(4, Number(prepared.expectedCount) || 1)),
+            correlationAttemptId: attemptId,
+            credits: Number.isFinite(prepared.credits) ? prepared.credits : null,
+            timeoutMs: prepared.type === "image" ? 300_000 : 600_000,
+            submitOnly: prepared.submitOnly === true,
+          },
+        });
         return {
           submitted: true,
           before: Array.isArray(prepared.before) ? prepared.before : [],
@@ -546,6 +557,17 @@
         const dispatchReceipt = payload.submitOnly === true
           ? tiles.releaseSubmitOnlyCorrelation?.(correlationAttemptId, acknowledged) || null
           : null;
+        await tiles.emitFlowProgress(command, "Flow accepted the generation request; saved a recovery checkpoint.", {
+          generationObservation: {
+            before,
+            kind: payload.type === "image" ? "image" : "video",
+            expectedCount: variants,
+            correlationAttemptId,
+            credits: Number.isFinite(credits) ? credits : null,
+            timeoutMs: payload.type === "video" ? 600_000 : 300_000,
+            submitOnly: payload.submitOnly === true || payload.submit_only === true,
+          },
+        });
         return {
           submitted: true,
           before,
@@ -743,8 +765,11 @@
               const titleOnly = picked.some(item => !item.id || item.id.startsWith("title:"));
               const signature = picked.map(item => item.id || `title:${item.title}`).join("|");
               if (!titleOnly || signature === lastTitleOnlyResult) {
-                tiles.emitFlowProgress(command, kind === "video" ? "Tạo video hoàn tất 100%" : "Tạo ảnh hoàn tất 100%");
-                return { media: picked.map(({ id, title, kind: mediaKind }) => ({ id, title, kind: mediaKind })) };
+                const media = picked.map(({ id, title, kind: mediaKind }) => ({ id, title, kind: mediaKind }));
+                await tiles.emitFlowProgress(command, kind === "video" ? "Tạo video hoàn tất 100%" : "Tạo ảnh hoàn tất 100%", {
+                  generationResult: { media },
+                });
+                return { media };
               }
               lastTitleOnlyResult = signature;
               tiles.emitFlowProgress(command, "Flow đang cập nhật tiêu đề file...");

@@ -259,7 +259,7 @@
     nativeFlowCorrelationMap().delete(entry.attemptId);
   }
 
-  function emitFlowProgress(command, progress) {
+  function emitFlowProgress(command, progress, details = {}) {
     try {
       const requestId = command.requestId || command.request_id || command.id || command.commandId || command.command_id;
       const message = {
@@ -268,6 +268,7 @@
         commandId: requestId,
         jobId: command.job_id || command.jobId,
         progress,
+        ...(details && typeof details === "object" ? details : {}),
       };
       const pending = chrome.runtime.sendMessage(message);
       return Promise.resolve(pending).then(receipt => {

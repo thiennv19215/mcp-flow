@@ -1064,6 +1064,43 @@ async function waitForQueueFlowDownload(beforeIds, title, timeoutMs = 12 * 60_00
     code: "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
   });
 }
+async function findExistingQueueFlowDownload(flowMediaId, flowTabId, flowProjectId) {
+  if (!chrome.downloads?.search || !flowMediaId || !Number.isInteger(flowTabId)) return null;
+  const ticket = {
+    flowMediaId: String(flowMediaId),
+    flowTabId,
+    flowProjectId: String(flowProjectId || ""),
+  };
+  const items = await chrome.downloads.search({ query: String(flowMediaId), orderBy: ["-startTime"], limit: 100 });
+  const matching = items.filter(item => queueDownloadMatchesTicket(item, ticket));
+  // A completed exact-UUID download is already a successful hand-off. Reuse it
+  // after a service-worker restart instead of starting a duplicate download.
+  return matching.find(item => item.state === "complete") ||
+    matching.find(item => item.state === "in_progress") ||
+    matching.find(item => item.state === "interrupted") || null;
+}
+async function waitForExistingQueueFlowDownload(downloadId, flowMediaId, flowTabId, flowProjectId, title, timeoutMs = 3 * 60_000) {
+  const ticket = { flowMediaId: String(flowMediaId), flowTabId, flowProjectId: String(flowProjectId || "") };
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const items = await chrome.downloads.search({ id: downloadId });
+    const item = items.find(candidate => candidate.id === downloadId);
+    if (!item) throw Object.assign(new Error(`Chrome no longer reports the in-progress download for "${title}". The generated media remains in Flow.`), {
+      code: "FLOW_DOWNLOAD_TRACKING_UNAVAILABLE", outcomeUnknown: false, outcome_unknown: false,
+    });
+    if (!queueDownloadMatchesTicket(item, ticket)) throw Object.assign(new Error(`Chrome download identity changed while resuming "${title}"; refusing to attach an unrelated file. The generated media remains in Flow.`), {
+      code: "FLOW_DOWNLOAD_IDENTITY_MISMATCH", outcomeUnknown: false, outcome_unknown: false,
+    });
+    if (item.state === "interrupted") throw Object.assign(new Error(`Chrome download failed for "${title}": ${item.error || "unknown error"}. The media remains in Flow.`), {
+      code: "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
+    });
+    if (item.state === "complete" && item.filename) return { id: item.id, filename: item.filename, matchedByQueueTicket: true };
+    await new Promise(resolve => setTimeout(resolve, 750));
+  }
+  throw Object.assign(new Error(`Chrome download for "${title}" was still in progress after the resume timeout. The generated media remains in Flow.`), {
+    code: "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
+  });
+}
 async function downloadQueueMedia(media, outputDir, fileStem, quality, invoke, hooks, sceneNumbers = [], jobId = "", flowTabId, flowProjectId = "", generationState = null) {
   if (!chrome.downloads?.search) throw Object.assign(new Error("Chrome download tracking is unavailable; the generated media remains in Flow."), {
     code: "FLOW_DOWNLOAD_TRACKING_UNAVAILABLE", outcomeUnknown: false, outcome_unknown: false,
@@ -1083,6 +1120,29 @@ async function downloadQueueMedia(media, outputDir, fileStem, quality, invoke, h
       const outputStem = Number.isSafeInteger(sceneNumber) && sceneNumber > 0
         ? `scene-${String(sceneNumber).padStart(2, "0")}`
         : media.length > 1 ? `${fileStem}-v${index + 1}` : fileStem;
+      const existing = await findExistingQueueFlowDownload(flowMediaId, flowTabId, flowProjectId);
+      if (existing) {
+        const resumed = existing.state === "in_progress"
+          ? await waitForExistingQueueFlowDownload(existing.id, flowMediaId, flowTabId, flowProjectId, title, quality === "upscaled" ? 12 * 60_000 : 3 * 60_000)
+          : existing.state === "complete" && existing.filename
+            ? { id: existing.id, filename: existing.filename, matchedByQueueTicket: true }
+            : null;
+        if (resumed) {
+          browserDownloads.push({
+            ...resumed,
+            downloadId: resumed.id,
+            flowMediaId,
+            taskId: String(jobId || "").trim() || undefined,
+            title,
+            filenameOverrideApplied: false,
+            fileStem: outputStem,
+          });
+          continue;
+        }
+        if (existing.state === "interrupted") throw Object.assign(new Error(`Chrome download failed for "${title}": ${existing.error || "unknown error"}. The media remains in Flow.`), {
+          code: "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
+        });
+      }
       const before = await chrome.downloads.search({ orderBy: ["-startTime"], limit: 100 });
       const beforeIds = new Set(before.map(download => download.id));
       let filenameTicket = null;
@@ -1182,6 +1242,20 @@ async function withQueueDownloads(job, payload, operationResult, invoke, hooks) 
       kind: String(item?.kind || item?.type || kind).toLowerCase(),
     })),
   };
+  const autoDownloadValues = [payload.autoDownload, payload.auto_download, params.autoDownload, params.auto_download];
+  const autoDownload = autoDownloadValues.some(value => value === false)
+    ? false
+    : autoDownloadValues.some(value => value === true) ? true : undefined;
+  if (autoDownload === false) {
+    await hooks.progress({
+      phase: "generation_complete",
+      message: `Flow generated ${media.length} result${media.length === 1 ? "" : "s"}. Automatic download is off.`,
+      percent: 100,
+      generation: generationState,
+      download: { state: "skipped", completed: 0, total: media.length },
+    });
+    return { ...operationResult, autoDownload: false };
+  }
   await hooks.progress({
     phase: "generation_complete",
     message: `Flow generation completed: ${media.length} result${media.length === 1 ? "" : "s"}. Starting download…`,
@@ -1203,9 +1277,8 @@ async function withQueueDownloads(job, payload, operationResult, invoke, hooks) 
     });
     return { ...operationResult, browserDownloads };
   } catch (error) {
-    // The media already exists in Flow, but the requested hand-off did not
-    // complete. Let the queue mark this job failed so the UI cannot claim that
-    // generation succeeded while the file is still missing locally.
+    // Generation succeeded independently of the optional browser download.
+    // Preserve that success and report the separate download outcome.
     const downloadedCount = Array.isArray(error?.browserDownloads) ? error.browserDownloads.length : 0;
     try {
       await hooks.progress({
@@ -1218,11 +1291,12 @@ async function withQueueDownloads(job, payload, operationResult, invoke, hooks) 
     } catch (progressError) {
       console.warn("[FlowQueue] Could not persist generated/download stage details:", progressError?.message || progressError);
     }
-    error.downloadError = String(error?.message || error);
-    error.downloadErrorCode = String(error?.code || "FLOW_DOWNLOAD_FAILED");
-    error.outcomeUnknown = false;
-    error.outcome_unknown = false;
-    throw error;
+    return {
+      ...operationResult,
+      browserDownloads: Array.isArray(error?.browserDownloads) ? error.browserDownloads : [],
+      downloadError: String(error?.message || error),
+      downloadErrorCode: String(error?.code || "FLOW_DOWNLOAD_FAILED"),
+    };
   }
 }
 async function runExtensionFlowJob(job, hooks) {
@@ -1308,6 +1382,23 @@ async function runExtensionFlowJob(job, hooks) {
       delete payload.attachments;
     }
   }
+  if (operation === "flow.generation.submit" && Array.isArray(job.metadata?.generationResultCheckpoint?.media)) {
+    const checkpoint = job.metadata.generationResultCheckpoint;
+    const recoveredResult = {
+      media: checkpoint.media,
+      ...(checkpoint.quoteFields && typeof checkpoint.quoteFields === "object" ? checkpoint.quoteFields : {}),
+      recoveredAfterWorkerRestart: true,
+    };
+    await hooks.progress({
+      phase: "generation_complete",
+      message: `Flow confirmed ${checkpoint.media.length} generated result${checkpoint.media.length === 1 ? "" : "s"}; resuming the remaining queue steps.`,
+      percent: 89,
+      generation: { state: "completed", count: checkpoint.media.length, media: checkpoint.media },
+    });
+    const operationResult = await withQueueDownloads(job, payload, recoveredResult, invoke, hooks);
+    await hooks.progress({ phase: "complete", message: "Flow generation completed.", percent: 100 });
+    return { completed: true, requestDispatched: true, ...checkpoint.quoteFields, result: operationResult };
+  }
   await hooks.progress({ phase: "submit", message: "Submitting to Google Flow…", percent: 5 });
   if (operation !== "flow.generation.submit") {
     try {
@@ -1324,7 +1415,18 @@ async function runExtensionFlowJob(job, hooks) {
   }
   let submitted;
   try {
-    if (job.metadata?.manualSubmitPhase === "confirm") {
+    const savedObservation = job.metadata?.generationObservation;
+    if (savedObservation?.correlationAttemptId && !savedObservation.submitOnly) {
+      submitted = {
+        submitted: true,
+        before: savedObservation.before || [],
+        type: savedObservation.kind,
+        expectedCount: savedObservation.expectedCount,
+        correlationAttemptId: savedObservation.correlationAttemptId,
+        credits: savedObservation.credits,
+        requestDispatched: true,
+      };
+    } else if (job.metadata?.manualSubmitPhase === "confirm") {
       const prepared = job.result?.prepared || job.result;
       const confirmation = await invoke("flow.generation.manual.confirm", {
         attemptId: prepared?.correlationAttemptId,
@@ -1376,24 +1478,42 @@ async function runExtensionFlowJob(job, hooks) {
     await hooks.progress({ phase: "submitted", message: "Flow accepted the request; rendering was not awaited.", percent: 100 });
     return { completed: true, requestDispatched: true, ...quoteFields, result: { ...submitted, ...quoteFields } };
   }
-  const count = Math.max(1, Number(payload.variants ?? payload.count ?? submitted?.expectedCount ?? 1));
+  const observation = {
+    before: Array.isArray(submitted?.before) ? submitted.before : [],
+    kind: isVideo ? "video" : "image",
+    expectedCount: Math.max(1, Number(submitted?.expectedCount ?? payload.variants ?? payload.count ?? 1)),
+    correlationAttemptId: String(submitted?.correlationAttemptId || ""),
+    credits: Number.isFinite(submitted?.credits) ? submitted.credits : null,
+    timeoutMs: isVideo ? 600_000 : 300_000,
+  };
+  if (observation.correlationAttemptId) {
+    await flowJobQueue.checkpointGenerationObservation(job.id, observation);
+    await flowJobQueue.updateMetadata(job.id, { generationQuoteFields: quoteFields });
+    job.metadata = { ...(job.metadata || {}), generationObservation: observation, generationQuoteFields: quoteFields };
+  }
+  const count = Math.max(1, Number(observation.expectedCount || payload.variants || payload.count || 1));
   await hooks.progress({ phase: "render", message: "Submitted; waiting for Flow to finish rendering…", percent: 10 });
   let observed;
   try {
     observed = await invoke("flow.generation.observe", {
-      before: submitted?.before || [],
+      before: observation.before,
       expectedCount: count,
       variants: count,
-      correlationAttemptId: submitted?.correlationAttemptId,
-      kind: payload.type || "image",
+      correlationAttemptId: observation.correlationAttemptId,
+      kind: observation.kind,
       retries: payload.retries,
-      timeoutMs: payload.type === "video" ? 600_000 : 300_000,
+      timeoutMs: observation.timeoutMs,
     });
   } catch (error) {
     throw Object.assign(error, {
       outcomeUnknown: true,
       requestDispatched: true,
       code: error?.code || "FLOW_RENDER_OUTCOME_UNKNOWN",
+    });
+  }
+  if (Array.isArray(observed?.media) && observed.media.length) {
+    await flowJobQueue.checkpointGenerationResult(job.id, observed.media).catch(error => {
+      console.warn("[FlowQueue] Could not persist the worker-side generation result checkpoint:", error?.message || error);
     });
   }
   const operationResult = await withQueueDownloads(job, payload, { ...observed, ...quoteFields }, invoke, hooks);
@@ -1404,6 +1524,9 @@ async function runExtensionFlowJob(job, hooks) {
 // removing most of the previous 5–10 second idle wait between queued jobs.
 const flowJobQueue = new FlowJobQueue(runExtensionFlowJob, { minDelayMs: 1_000, maxDelayMs: 2_000 });
 flowJobQueue.subscribe((snapshot, reason) => broadcastFlowQueue(snapshot, reason));
+void flowJobQueue.ready.then(() => flowJobQueue.resumeRecovered()).catch(error => {
+  console.error("[FlowQueue] Could not resume a checkpointed job after worker restart:", error?.message || error);
+});
 async function fetchBackend(url, token, body, timeoutMs = 15_000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -1807,14 +1930,24 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
       if (queueJobId) {
         const progressMessage = String(message.progress || "Flow đang xử lý…");
         const progressPercent = progressMessage.match(/(?:^|\D)(\d{1,3})\s*%(?:\D|$)/)?.[1];
-        void flowJobQueue.updateProgress(queueJobId, {
-          phase: "render",
-          message: progressMessage,
-          ...(progressPercent !== undefined ? { percent: Math.max(0, Math.min(100, Number(progressPercent))) } : {}),
-        }).catch(() => {});
+        void (async () => {
+          if (message.generationObservation && typeof message.generationObservation === "object") {
+            await flowJobQueue.checkpointGenerationObservation(queueJobId, message.generationObservation);
+          }
+          if (message.generationResult && Array.isArray(message.generationResult.media)) {
+            await flowJobQueue.checkpointGenerationResult(queueJobId, message.generationResult.media);
+          } else if (!message.generationObservation) {
+            await flowJobQueue.updateProgress(queueJobId, {
+              phase: "render",
+              message: progressMessage,
+              ...(progressPercent !== undefined ? { percent: Math.max(0, Math.min(100, Number(progressPercent))) } : {}),
+            });
+          }
+          respond({ ok: true, local: true, checkpointed: Boolean(message.generationObservation || message.generationResult) });
+        })().catch(error => respond({ ok: false, error: String(error?.message || error) }));
       }
-      respond({ ok: true, local: true });
-      return;
+      if (!queueJobId) respond({ ok: false, error: "FLOW_QUEUE_JOB_ID_MISSING" });
+      return true;
     }
 
     const isInteractive = activeInteractiveRequests.get(String(requestId)) === tabId;

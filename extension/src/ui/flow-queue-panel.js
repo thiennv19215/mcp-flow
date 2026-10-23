@@ -54,10 +54,11 @@
       mcp: "AI · MCP", manual: "THỦ CÔNG", moveUp: "Chuyển tác vụ {n} lên", moveDown: "Chuyển tác vụ {n} xuống", retry: "Thử lại", remove: "Xóa",
       pending: "Đang chờ", runningStatus: "Đang chạy", completedStatus: "Hoàn tất", failed: "Thất bại", cancelled: "Đã hủy",
       needsAttention: "Cần xử lý",
-      generationComplete: "Flow đã tạo {count} kết quả", downloadQueued: "Chờ tải {done}/{total}", downloadingCount: "Đang tải {done}/{total}", downloadedCount: "Đã tải {done}/{total}", downloadFailedCount: "Tải lỗi {done}/{total}",
+      generationComplete: "Flow đã tạo {count} kết quả", downloadQueued: "Chờ tải {done}/{total}", downloadingCount: "Đang tải {done}/{total}", downloadedCount: "Đã tải {done}/{total}", downloadFailedCount: "Tải lỗi {done}/{total}", downloadSkipped: "Đã bỏ qua tải",
       waitingForUser: "Chờ bạn bấm Tạo", continueManual: "Đã bấm Tạo · tiếp tục", cancelManual: "Bỏ qua", manualSubmitLabel: "Tôi sẽ tự bấm Tạo trên Flow",
       noConnection: "Không thể kết nối với tiện ích Flow.", updateFailed: "Không thể cập nhật hàng đợi Flow.",
       assetRequired: "Nhập tên video cần chỉnh sửa hoặc nối tiếp.", scenesRequired: "Nhập ít nhất một cảnh, mỗi cảnh trên một dòng.",
+      autoDownloadLabel: "Tự động tải kết quả về máy",
       editLabel: "Sửa", continueLabel: "Nối tiếp", agentLabel: "Agent", scenes: "cảnh",
       retryBatch: "Thử lại {n} tác vụ lỗi an toàn",
     },
@@ -87,10 +88,11 @@
       mcp: "AI · MCP", manual: "MANUAL", moveUp: "Move task {n} up", moveDown: "Move task {n} down", retry: "Retry", remove: "Remove",
       pending: "Pending", runningStatus: "Running", completedStatus: "Completed", failed: "Failed", cancelled: "Cancelled",
       needsAttention: "Needs attention",
-      generationComplete: "Flow created {count} result(s)", downloadQueued: "Download queued {done}/{total}", downloadingCount: "Downloading {done}/{total}", downloadedCount: "Downloaded {done}/{total}", downloadFailedCount: "Download failed {done}/{total}",
+      generationComplete: "Flow created {count} result(s)", downloadQueued: "Download queued {done}/{total}", downloadingCount: "Downloading {done}/{total}", downloadedCount: "Downloaded {done}/{total}", downloadFailedCount: "Download failed {done}/{total}", downloadSkipped: "Download skipped",
       waitingForUser: "Waiting for your submit", continueManual: "I clicked Create · continue", cancelManual: "Skip", manualSubmitLabel: "I will click Create in Flow",
       noConnection: "Cannot connect to the Flow extension.", updateFailed: "Could not update the Flow queue.",
       assetRequired: "Enter the video name to edit or continue.", scenesRequired: "Enter at least one scene, one per line.",
+      autoDownloadLabel: "Automatically download results",
       editLabel: "Edit", continueLabel: "Continue", agentLabel: "Agent", scenes: "scenes",
       retryBatch: "Retry {n} safe failed tasks",
     },
@@ -333,6 +335,12 @@
       }
       const submit = makeElement("button", "", text.submit);
       submit.type = "submit";
+      const autoDownloadLabel = makeElement("label", "flow-queue-panel__manual");
+      const autoDownloadCheckbox = makeElement("input");
+      autoDownloadCheckbox.type = "checkbox";
+      autoDownloadCheckbox.name = "auto_download";
+      autoDownloadCheckbox.checked = true;
+      autoDownloadLabel.append(autoDownloadCheckbox, makeElement("span", "", text.autoDownloadLabel));
       const manualLabel = makeElement("label", "flow-queue-panel__manual");
       const manualCheckbox = makeElement("input");
       manualCheckbox.type = "checkbox";
@@ -343,7 +351,7 @@
       batchCheckbox.type = "checkbox";
       batchCheckbox.name = "batch_mode";
       batchLabel.append(batchCheckbox, makeElement("span", "", text.batchLabel));
-      form.append(input, type, this.assetInput, ratio, refsInput, refMode, refCountWrap, firstFramesInput, lastFramesInput, submit, manualLabel, batchLabel);
+      form.append(input, type, this.assetInput, ratio, refsInput, refMode, refCountWrap, firstFramesInput, lastFramesInput, submit, autoDownloadLabel, manualLabel, batchLabel);
 
       this.error = makeElement("div", "flow-queue-panel__error");
       this.error.setAttribute("role", "alert");
@@ -373,6 +381,7 @@
         asset: this.assetInput?.value || "",
         ratio: this.panel?.querySelector('[name="aspect_ratio"]')?.value || "",
         manualSubmit: this.panel?.querySelector('[name="manual_submit"]')?.checked === true,
+        autoDownload: this.panel?.querySelector('[name="auto_download"]')?.checked !== false,
         batchMode: this.panel?.querySelector('[name="batch_mode"]')?.checked === true,
         references: this.referencesInput?.value || "",
         referenceMode: this.referenceModeInput?.value || "none",
@@ -387,6 +396,7 @@
       this.assetInput.value = previous.asset;
       this.panel.querySelector('[name="aspect_ratio"]').value = previous.ratio;
       this.panel.querySelector('[name="manual_submit"]').checked = previous.manualSubmit;
+      this.panel.querySelector('[name="auto_download"]').checked = previous.autoDownload;
       this.panel.querySelector('[name="batch_mode"]').checked = previous.batchMode;
       this.referencesInput.value = previous.references;
       this.referenceModeInput.value = previous.referenceMode;
@@ -513,6 +523,7 @@
         const downloadKey = state === "completed" ? "downloadedCount"
           : state === "failed" ? "downloadFailedCount"
           : state === "downloading" ? "downloadingCount"
+          : state === "skipped" ? "downloadSkipped"
           : "downloadQueued";
         const milestone = makeElement(
           "div",
@@ -653,6 +664,9 @@
         const original = makePayload;
         makePayload = itemPrompt => ({ ...original(itemPrompt), manualSubmit });
       }
+      const autoDownload = form.elements.namedItem("auto_download")?.checked !== false;
+      const downloadAwareMakePayload = makePayload;
+      makePayload = (...args) => ({ ...downloadAwareMakePayload(...args), autoDownload });
       if (batchMode && prompts.length > 1) {
         const jobs = prompts.map((itemPrompt, index) => ({ operation, payload: makePayload(itemPrompt, index), label: makeLabel(itemPrompt) }));
         const response = await this._send(MESSAGE.addBatch, { jobs, batchLabel: this._text("batchName") });
@@ -672,7 +686,7 @@
       const needsAsset = ["edit", "continue"].includes(this.typeInput.value);
       this.assetInput.hidden = !needsAsset;
       this.assetInput.required = needsAsset;
-      const manualLabel = this.panel?.querySelector(".flow-queue-panel__manual");
+      const manualLabel = this.panel?.querySelector('[name="manual_submit"]')?.closest("label");
       if (manualLabel) manualLabel.hidden = needsAsset || this.typeInput.value === "agent";
       const batchLabel = this.panel?.querySelector('[name="batch_mode"]')?.closest("label");
       if (batchLabel) batchLabel.hidden = this.typeInput.value === "agent";

@@ -78,6 +78,7 @@ export class FlowJobQueue {
     this.controller = null;
     this.stopRequested = false;
     this.restartRequested = false;
+    this.recoveryResumeRequested = false;
     this.listeners = new Set();
     this.writeChain = Promise.resolve();
     this.ready = this.#restore();
@@ -89,20 +90,62 @@ export class FlowJobQueue {
     if (!state || state.version !== 1 || !Array.isArray(state.jobs)) return this.#snapshot();
     this.jobs = state.jobs.filter(job => job && typeof job.id === "string" && typeof job.status === "string").map(job => clone(job));
     const interrupted = this.jobs.filter(job => job.status === "running");
+    const unresolved = [];
+    let recovered = false;
     for (const job of interrupted) {
-      job.status = "failed";
-      job.outcomeUnknown = true;
-      job.retrySafe = false;
-      job.error = "The extension worker restarted while this operation was running. Check Flow before retrying.";
-      job.errorCode = "FLOW_QUEUE_INTERRUPTED_UNKNOWN";
-      job.finishedAt = Date.now();
+      const generationCheckpoint = job.metadata?.generationResultCheckpoint;
+      const observationCheckpoint = job.metadata?.generationObservation;
+      if (Array.isArray(generationCheckpoint?.media) && generationCheckpoint.media.length > 0) {
+        job.status = "pending";
+        job.outcomeUnknown = false;
+        job.retrySafe = false;
+        job.error = undefined;
+        job.errorCode = undefined;
+        job.finishedAt = undefined;
+        job.progress = {
+          ...(job.progress && typeof job.progress === "object" ? job.progress : {}),
+          phase: "recovering_generation_result",
+          message: "Flow already confirmed the generated result. Resuming the remaining queue steps…",
+          generation: { state: "completed", count: generationCheckpoint.media.length, media: clone(generationCheckpoint.media) },
+        };
+        recovered = true;
+      } else if (observationCheckpoint?.correlationAttemptId && !observationCheckpoint.submitOnly) {
+        job.status = "pending";
+        job.outcomeUnknown = false;
+        job.retrySafe = false;
+        job.error = undefined;
+        job.errorCode = undefined;
+        job.finishedAt = undefined;
+        job.progress = {
+          ...(job.progress && typeof job.progress === "object" ? job.progress : {}),
+          phase: "recovering_generation_observation",
+          message: "Resuming the Flow result check without submitting the prompt again…",
+        };
+        recovered = true;
+      } else if (observationCheckpoint?.submitOnly && job.operation === "flow.generation.submit") {
+        job.status = "completed";
+        job.outcomeUnknown = false;
+        job.retrySafe = false;
+        job.result = { completed: true, requestDispatched: true, result: { submitted: true, recoveredAfterWorkerRestart: true } };
+        job.progress = { phase: "submitted", message: "Flow accepted the request before the worker restarted.", percent: 100 };
+        job.finishedAt = Date.now();
+        recovered = true;
+      } else {
+        job.status = "failed";
+        job.outcomeUnknown = true;
+        job.retrySafe = false;
+        job.error = "The extension worker restarted before Flow confirmed this operation. Check Flow before retrying.";
+        job.errorCode = "FLOW_QUEUE_INTERRUPTED_UNKNOWN";
+        job.finishedAt = Date.now();
+        unresolved.push(job);
+      }
     }
-    // A worker restart is a pause boundary. Never resume queued operations in the
-    // background; require an explicit user action after recovering the active item.
-    this.paused = state.paused === true || state.running === true || interrupted.length > 0;
+    // Resume a queue after restart only when its active task has a durable Flow
+    // receipt. Ambiguous submissions still stop the queue for user inspection.
+    this.paused = state.paused === true || unresolved.length > 0;
     this.attention = state.attention && typeof state.attention === "object" ? clone(state.attention) : null;
-    if (interrupted.length > 0) {
-      const job = interrupted[0];
+    if (unresolved.length > 0) {
+      const job = unresolved[0];
       this.attention = {
         type: "flow-outcome-unknown",
         jobId: job.id,
@@ -111,12 +154,23 @@ export class FlowJobQueue {
         occurredAt: Date.now(),
         retryOnResume: false,
       };
+    } else if (recovered) {
+      this.attention = null;
     }
     this.running = false;
-    this.stopped = state.stopRequested === true || (state.stopped === true && interrupted.length === 0);
+    this.stopRequested = state.stopRequested === true;
+    this.stopped = this.stopRequested || (state.stopped === true && interrupted.length === 0);
     this.currentJobId = null;
+    this.recoveryResumeRequested = state.running === true && state.paused !== true && !this.stopRequested && unresolved.length === 0;
     if (interrupted.length > 0) await this.#persist();
     return this.#snapshot();
+  }
+
+  async resumeRecovered() {
+    await this.ready;
+    if (!this.recoveryResumeRequested || this.paused || this.stopRequested || this.running) return this.#snapshot();
+    this.recoveryResumeRequested = false;
+    return this.start();
   }
 
   #snapshot() {
@@ -284,14 +338,85 @@ export class FlowJobQueue {
     return clone(job);
   }
 
+  async checkpointGenerationObservation(id, checkpoint) {
+    await this.ready;
+    const job = this.jobs.find(item => item.id === String(id));
+    if (!job || job.status !== "running") return null;
+    const correlationAttemptId = String(checkpoint?.correlationAttemptId || "").trim();
+    if (!correlationAttemptId || correlationAttemptId.length > 160) {
+      throw Object.assign(new Error("Flow did not provide a valid generation correlation receipt."), { code: "FLOW_GENERATION_CORRELATION_UNAVAILABLE" });
+    }
+    const before = Array.isArray(checkpoint?.before)
+      ? checkpoint.before.filter(value => typeof value === "string").slice(-2000)
+      : [];
+    job.metadata = {
+      ...(job.metadata || {}),
+      generationObservation: {
+        correlationAttemptId,
+        before,
+        kind: checkpoint?.kind === "video" ? "video" : "image",
+        expectedCount: Math.max(1, Math.min(20, Number(checkpoint?.expectedCount) || 1)),
+        timeoutMs: Math.max(1000, Math.min(15 * 60_000, Number(checkpoint?.timeoutMs) || 5 * 60_000)),
+        ...(typeof checkpoint?.credits === "number" && Number.isFinite(checkpoint.credits) ? { credits: checkpoint.credits } : {}),
+        submitOnly: checkpoint?.submitOnly === true,
+        recordedAt: Date.now(),
+      },
+    };
+    await this.#persist();
+    this.#emit("generation-observation-checkpoint");
+    return clone(job);
+  }
+
+  async checkpointGenerationResult(id, media) {
+    await this.ready;
+    const job = this.jobs.find(item => item.id === String(id));
+    if (!job || job.status !== "running") return null;
+    if (!Array.isArray(media) || media.length < 1 || media.length > 20) {
+      throw Object.assign(new Error("Flow returned an invalid generated-media result checkpoint."), { code: "FLOW_GENERATION_RESULT_INVALID" });
+    }
+    const normalizedMedia = media.map(item => ({
+      id: String(item?.id || "").trim(),
+      title: String(item?.title || item?.name || "").trim(),
+      kind: String(item?.kind || item?.type || "").toLowerCase(),
+    }));
+    if (normalizedMedia.some(item => !item.id || !item.title || !["image", "video"].includes(item.kind))) {
+      throw Object.assign(new Error("Flow returned generated media without a verified ID, title, and type."), { code: "FLOW_GENERATION_RESULT_INVALID" });
+    }
+    const quoteFields = job.metadata?.generationQuoteFields && typeof job.metadata.generationQuoteFields === "object"
+      ? clone(job.metadata.generationQuoteFields)
+      : {};
+    job.metadata = {
+      ...(job.metadata || {}),
+      generationResultCheckpoint: { media: normalizedMedia, quoteFields, recordedAt: Date.now() },
+    };
+    delete job.metadata.generationObservation;
+    const previousProgress = job.progress && typeof job.progress === "object" ? job.progress : {};
+    const downloadEnabled = job.payload?.autoDownload !== false && job.payload?.auto_download !== false &&
+      job.payload?.params?.autoDownload !== false && job.payload?.params?.auto_download !== false;
+    job.progress = {
+      ...previousProgress,
+      phase: "generation_complete",
+      message: `Flow confirmed ${normalizedMedia.length} generated result${normalizedMedia.length === 1 ? "" : "s"}.`,
+      percent: 89,
+      generation: { state: "completed", count: normalizedMedia.length, media: normalizedMedia },
+      download: downloadEnabled
+        ? (previousProgress.download || { state: "queued", completed: 0, total: normalizedMedia.length })
+        : { state: "skipped", completed: 0, total: normalizedMedia.length },
+    };
+    await this.#persist();
+    this.#emit("generation-result-checkpoint");
+    return clone(job);
+  }
+
   async updateProgress(id, progress) {
     await this.ready;
     const job = this.jobs.find(item => item.id === String(id));
     if (!job || job.status !== "running") return null;
-    const next = progress && typeof progress === "object"
+    const requested = progress && typeof progress === "object"
       ? clone(progress)
       : { phase: "render", message: String(progress || "") };
     const previous = job.progress && typeof job.progress === "object" ? job.progress : {};
+    const next = { ...previous, ...requested };
     if (JSON.stringify(previous) === JSON.stringify(next)) return clone(job);
     job.progress = next;
     await this.#persist();
@@ -347,6 +472,7 @@ export class FlowJobQueue {
 
   async start() {
     await this.ready;
+    this.recoveryResumeRequested = false;
     if (this.running) {
       // A new item may arrive after #drain has checked for pending work but
       // before its finally block marks the queue idle. Remember that start
@@ -454,6 +580,11 @@ export class FlowJobQueue {
     job.overlayRecheckCount = 0;
     job.progress = undefined;
     job.result = undefined;
+    if (job.metadata) {
+      delete job.metadata.generationObservation;
+      delete job.metadata.generationResultCheckpoint;
+      delete job.metadata.generationQuoteFields;
+    }
     this.#restoreDependencyDescendants([job.id]);
     await this.#persist();
     this.#emit("retried");
@@ -476,6 +607,11 @@ export class FlowJobQueue {
       job.overlayRecheckCount = 0;
       job.progress = undefined;
       job.result = undefined;
+      if (job.metadata) {
+        delete job.metadata.generationObservation;
+        delete job.metadata.generationResultCheckpoint;
+        delete job.metadata.generationQuoteFields;
+      }
     }
     if (retryable.length) {
       this.#restoreDependencyDescendants(retryable.map(job => job.id));
