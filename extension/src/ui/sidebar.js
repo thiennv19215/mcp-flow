@@ -2101,23 +2101,28 @@
     finally { button.disabled = false; }
   };
 
-  document.querySelector("#btnAttachReferences").onclick = event => runLibraryAction(event.currentTarget, async () => {
-    const references = document.querySelector("#flowReferenceInput").value.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
-    if (!references.length) throw new Error("Nhập ít nhất một tham chiếu.");
-    await assertQueueIdleForDirectAction();
-    return dispatchFlowOperation("flow.references.attach", { references });
-  });
+  const attachReferencesButton = document.querySelector("#btnAttachReferences");
+  const referenceInput = document.querySelector("#flowReferenceInput");
+  if (attachReferencesButton && referenceInput) {
+    attachReferencesButton.addEventListener("click", event => runLibraryAction(event.currentTarget, async () => {
+      const references = referenceInput.value.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+      if (!references.length) throw new Error("Nhập ít nhất một tham chiếu.");
+      await assertQueueIdleForDirectAction();
+      return dispatchFlowOperation("flow.references.attach", { references });
+    }));
+  }
 
-  document.querySelector("#btnClearReferences").onclick = event => runLibraryAction(event.currentTarget, async () => {
+  document.querySelector("#btnClearReferences")?.addEventListener("click", event => runLibraryAction(event.currentTarget, async () => {
     await assertQueueIdleForDirectAction();
     return dispatchFlowOperation("flow.references.clear", {});
-  });
+  }));
 
-  document.querySelector("#btnRemoveReferenceKind").onclick = event => runLibraryAction(event.currentTarget, async () => {
+  document.querySelector("#btnRemoveReferenceKind")?.addEventListener("click", event => runLibraryAction(event.currentTarget, async () => {
     await assertQueueIdleForDirectAction();
-    const kind = document.querySelector("#flowReferenceKindToRemove").value;
+    const kind = document.querySelector("#flowReferenceKindToRemove")?.value;
+    if (!kind) throw new Error("Chọn loại tham chiếu cần gỡ.");
     return dispatchFlowOperation("flow.references.remove", { kind });
-  });
+  }));
 
   document.querySelector("#btnUploadMedia").onclick = event => runLibraryAction(event.currentTarget, async () => {
     const file = document.querySelector("#flowUploadFile").files?.[0];
@@ -2130,7 +2135,7 @@
     return uploaded;
   });
 
-  document.querySelector("#btnLoadVoices").onclick = event => runLibraryAction(event.currentTarget, async () => {
+  document.querySelector("#btnLoadVoices")?.addEventListener("click", event => runLibraryAction(event.currentTarget, async () => {
     const result = await dispatchFlowOperation("flow.voices.options");
     const voices = Array.isArray(result?.voices) ? result.voices : [];
     fillSelect(document.querySelector("#flowVoiceSelect"), voices,
@@ -2138,7 +2143,7 @@
       voice => typeof voice === "string" ? voice : voice.name,
       "Không dùng giọng nói");
     return result;
-  });
+  }));
 
   // Language switch
   document.querySelector("#langSwitchBtn").onclick = async () => {
@@ -2233,8 +2238,7 @@
       updateThemeUI(theme === "dark");
     }).catch(() => {});
 
-    document.querySelector("#themeToggleBtn")?.addEventListener("click", async e => {
-      e.stopPropagation();
+    document.querySelector("#themeToggleBtn")?.addEventListener("click", async () => {
       const root = document.querySelector("#flow-auto-sidebar-root");
       const isCurrentlyLight = root?.classList.contains("theme-light");
       const newTheme = isCurrentlyLight ? "dark" : "light";
@@ -2256,22 +2260,23 @@
   function initSettingsAndHeader() {
     const dropdown = document.querySelector("#settingsDropdown");
     const dropdownBtn = document.querySelector("#settingsDropdownBtn");
-    const menu = document.querySelector("#settingsMenu");
     const popup = document.querySelector("#settingsPopup");
+    const closeMenu = () => dropdown?.classList.remove("open");
 
     dropdownBtn?.addEventListener("click", e => {
       e.stopPropagation();
-      menu?.classList.toggle("hidden");
+      dropdown?.classList.toggle("open");
     });
 
     document.addEventListener("click", e => {
-      if (menu && !dropdown?.contains(e.target)) {
-        menu.classList.add("hidden");
-      }
+      if (dropdown && !dropdown.contains(e.target)) closeMenu();
+    });
+    dropdown?.addEventListener("click", e => {
+      if (e.target.closest?.(".tobyflow-settings-menu-item")) closeMenu();
     });
 
     document.querySelector("#openSettingsBtn")?.addEventListener("click", () => {
-      menu?.classList.add("hidden");
+      closeMenu();
       popup?.classList.remove("hidden");
     });
 
@@ -2297,7 +2302,7 @@
 
     // Extension reload button
     document.querySelector("#extensionLinkBtn")?.addEventListener("click", () => {
-      menu?.classList.add("hidden");
+      closeMenu();
       document.querySelector("#reloadBtn")?.click();
     });
   }
