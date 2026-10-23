@@ -947,6 +947,7 @@ function armQueueFilenameOverride({ jobId, flowMediaId, fileStem, flowTabId, flo
     flowTabId,
     flowProjectId: String(flowProjectId || ""),
     armedAt: Date.now(),
+    baselineAt: Date.now(),
     expiresAt: Date.now() + 5 * 60_000,
     downloadId: null,
     assignedFilename: null,
@@ -958,6 +959,23 @@ function disarmQueueFilenameOverride(ticket) {
   const index = pendingQueueFilenameOverrides.indexOf(ticket);
   if (index >= 0) pendingQueueFilenameOverrides.splice(index, 1);
 }
+function queueDownloadProjectId(downloadItem) {
+  const sourceUrl = `${downloadItem?.url || ""} ${downloadItem?.finalUrl || ""} ${downloadItem?.referrer || ""}`;
+  return sourceUrl.match(/\/project\/([0-9a-f-]{36})(?:[/?#\s]|$)/i)?.[1]?.toLowerCase() || "";
+}
+function queueDownloadMatchesTicket(downloadItem, ticket, allowTabTimeMatch = false) {
+  if (!downloadItem || !ticket) return false;
+  const sourceUrl = `${downloadItem.url || ""} ${downloadItem.finalUrl || ""} ${downloadItem.referrer || ""}`.toLowerCase();
+  const mediaIdMatch = sourceUrl.includes(ticket.flowMediaId.toLowerCase());
+  const sameTab = downloadItem.tabId === ticket.flowTabId;
+  if (!sameTab && !(mediaIdMatch && downloadItem.tabId === -1)) return false;
+  const projectId = queueDownloadProjectId(downloadItem);
+  if (projectId && ticket.flowProjectId && projectId !== ticket.flowProjectId.toLowerCase()) return false;
+  if (mediaIdMatch) return true;
+  if (!allowTabTimeMatch || !sameTab) return false;
+  const startedAt = Date.parse(downloadItem.startTime || "");
+  return Number.isFinite(startedAt) && startedAt >= ticket.baselineAt - 1_000;
+}
 chrome.downloads?.onDeterminingFilename?.addListener((downloadItem, suggest) => {
   const now = Date.now();
   for (let i = pendingQueueFilenameOverrides.length - 1; i >= 0; i--) {
@@ -966,21 +984,15 @@ chrome.downloads?.onDeterminingFilename?.addListener((downloadItem, suggest) => 
   if (downloadItem?.byExtensionId && downloadItem.byExtensionId !== chrome.runtime.id) return;
   if (!Number.isInteger(downloadItem?.id) || !Number.isInteger(downloadItem?.tabId)) return;
   const sourceUrl = `${downloadItem.url || ""} ${downloadItem.finalUrl || ""} ${downloadItem.referrer || ""}`;
-  const flowOrigin = flowUrl(downloadItem.url) || flowUrl(downloadItem.finalUrl) || flowUrl(downloadItem.referrer);
-  if (!flowOrigin) return;
   const mediaIdCandidates = pendingQueueFilenameOverrides.filter(ticket =>
     sourceUrl.toLowerCase().includes(ticket.flowMediaId.toLowerCase())
   );
   // The generation observer has already correlated this media UUID to the API
   // request. Titles can be placeholders or differ from the downloaded filename,
   // so use the UUID, pinned tab, and project as the download identity.
-  if (mediaIdCandidates.length !== 1) return;
-  const sourceProjectId = sourceUrl.match(/\/project\/([0-9a-f-]{36})(?:[/?#\s]|$)/i)?.[1]?.toLowerCase();
-  const candidates = pendingQueueFilenameOverrides.filter(ticket => {
-    if (ticket.flowTabId !== downloadItem.tabId) return false;
-    if (sourceProjectId && ticket.flowProjectId && sourceProjectId !== ticket.flowProjectId.toLowerCase()) return false;
-    return ticket === mediaIdCandidates[0];
-  });
+  const candidates = mediaIdCandidates.length
+    ? mediaIdCandidates.filter(ticket => queueDownloadMatchesTicket(downloadItem, ticket))
+    : [];
   if (candidates.length !== 1) return;
   const ticket = candidates[0];
   const extension = queueDownloadExtension(downloadItem);
@@ -999,12 +1011,29 @@ async function waitForQueueFlowDownload(beforeIds, title, timeoutMs = 12 * 60_00
   let lastNew = [];
   while (Date.now() < deadline) {
     const items = await chrome.downloads.search({ orderBy: ["-startTime"], limit: 100 });
-    const newItems = items.filter(item => !beforeIds.has(item.id) && (flowUrl(item.referrer) || flowUrl(item.url) || flowUrl(item.finalUrl)));
-    lastNew = newItems;
+    const newItems = items.filter(item => !beforeIds.has(item.id));
+    if (filenameTicket) {
+      const matching = newItems.filter(item => item.id === filenameTicket.downloadId || queueDownloadMatchesTicket(item, filenameTicket, true));
+      lastNew = matching;
+      if (matching.length > 1) {
+        throw Object.assign(new Error(`Chrome reported multiple new downloads from the Flow queue tab for "${title}"; refusing to attach an ambiguous file to this job. The media remains in Flow.`), {
+          code: "FLOW_DOWNLOAD_AMBIGUOUS", outcomeUnknown: false, outcome_unknown: false,
+        });
+      }
+      const candidate = matching[0];
+      if (candidate?.state === "interrupted") throw Object.assign(new Error(`Chrome download failed for "${title}": ${candidate.error || "unknown error"}. The media remains in Flow.`), {
+        code: "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
+      });
+      if (candidate?.state === "complete" && candidate.filename) return { id: candidate.id, filename: candidate.filename, matchedByQueueTicket: true };
+      await new Promise(resolve => setTimeout(resolve, 750));
+      continue;
+    }
+    const flowItems = newItems.filter(item => flowUrl(item.referrer) || flowUrl(item.url) || flowUrl(item.finalUrl));
+    lastNew = flowItems;
     const matching = titleKey
-      ? newItems.filter(item => flowDownloadTitleKey(item.filename) === titleKey)
+      ? flowItems.filter(item => flowDownloadTitleKey(item.filename) === titleKey)
       : [];
-    if (newItems.length > 1 || matching.length > 1) {
+    if (flowItems.length > 1 || matching.length > 1) {
       throw Object.assign(new Error(`Chrome reported multiple possible Flow downloads for "${title}"; refusing to attach an ambiguous file to this queue job. The media remains in Flow.`), {
         code: "FLOW_DOWNLOAD_AMBIGUOUS", outcomeUnknown: false, outcome_unknown: false,
       });
@@ -1020,7 +1049,7 @@ async function waitForQueueFlowDownload(beforeIds, title, timeoutMs = 12 * 60_00
     }
     // A lone new Flow download is not proof that it belongs to this task. Only
     // accept a unique filename match; otherwise leave the generated result in Flow.
-    const candidates = newItems.length === 1 && matching.length === 1 ? matching : [];
+    const candidates = flowItems.length === 1 && matching.length === 1 ? matching : [];
     const interrupted = candidates.find(item => item.state === "interrupted");
     if (interrupted) throw Object.assign(new Error(`Chrome download failed for "${title}": ${interrupted.error || "unknown error"}. The media remains in Flow.`), {
       code: "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
@@ -1086,9 +1115,14 @@ async function downloadQueueMedia(media, outputDir, fileStem, quality, invoke, h
             code: cause?.code || "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
           });
         }
-        if (filenameTicket.downloadId !== download.id || !filenameTicket.assignedFilename) throw Object.assign(new Error(`Chrome downloaded Flow media "${title}" but its exact task/media filename assignment could not be confirmed; the original browser filename was preserved. The generated media remains in Flow.`), {
+        if (filenameTicket.downloadId && filenameTicket.downloadId !== download.id) throw Object.assign(new Error(`Chrome returned a different download ID than the Flow queue ticket for "${title}"; refusing to attach an unrelated file to this job. The media remains in Flow.`), {
           code: "FLOW_DOWNLOAD_FILENAME_UNCONFIRMED", outcomeUnknown: false, outcome_unknown: false,
         });
+        if (download.matchedByQueueTicket !== true && filenameTicket.downloadId !== download.id) throw Object.assign(new Error(`Chrome downloaded Flow media "${title}" but its exact queue download could not be confirmed; the original browser filename was preserved. The generated media remains in Flow.`), {
+          code: "FLOW_DOWNLOAD_FILENAME_UNCONFIRMED", outcomeUnknown: false, outcome_unknown: false,
+        });
+        if (!filenameTicket.downloadId) filenameTicket.downloadId = download.id;
+        const filenameOverrideApplied = Boolean(filenameTicket.assignedFilename && filenameTicket.downloadId === download.id);
         browserDownloads.push({
           ...download,
           // `id` remains Chrome's download ID for the backend's chunk relay.
@@ -1096,7 +1130,7 @@ async function downloadQueueMedia(media, outputDir, fileStem, quality, invoke, h
           flowMediaId,
           taskId: String(jobId || "").trim() || undefined,
           title,
-          filenameOverrideApplied: true,
+          filenameOverrideApplied,
           fileStem: outputStem,
         });
       } finally {
