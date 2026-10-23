@@ -1,4 +1,5 @@
 import { validateFlowJobPayloads, preflightError } from "./flow-queue-preflight.js";
+import { validateChatGptJobPayloads, isChatGptOperation } from "./chatgpt-queue-preflight.js";
 
 const STORAGE_KEY = "flowMcpJobQueueV1";
 const AUTO_RETRY_MAX = 2;
@@ -73,13 +74,15 @@ const normalizeFailedOutputs = value => {
  * normal add; callers that intentionally pause the queue can resume it later.
  */
 export class FlowJobQueue {
-  constructor(runner, { storageKey = STORAGE_KEY, storage = globalThis.chrome?.storage?.local, minDelayMs = 5_000, maxDelayMs = 10_000, loadCapabilityRegistry = null, refPreflight = null } = {}) {
+  constructor(runner, { storageKey = STORAGE_KEY, storage = globalThis.chrome?.storage?.local, minDelayMs = 5_000, maxDelayMs = 10_000, loadCapabilityRegistry = null, loadChatGptCapabilityRegistry = null, refPreflight = null } = {}) {
     if (typeof runner !== "function") throw new TypeError("FlowJobQueue requires a runner(job, hooks).");
     if (!storage?.get || !storage?.set) throw new TypeError("FlowJobQueue requires chrome.storage.local or a compatible storage adapter.");
     this.runner = runner;
     this.loadCapabilityRegistry = typeof loadCapabilityRegistry === "function" ? loadCapabilityRegistry : null;
+    this.loadChatGptCapabilityRegistry = typeof loadChatGptCapabilityRegistry === "function" ? loadChatGptCapabilityRegistry : null;
     this.refPreflight = typeof refPreflight === "function" ? refPreflight : null;
     this.capabilityRegistryPromise = null;
+    this.chatGptCapabilityRegistryPromise = null;
     this.storage = storage;
     this.storageKey = storageKey;
     this.minDelayMs = Math.max(0, Number(minDelayMs) || 0);
@@ -253,15 +256,30 @@ export class FlowJobQueue {
   // registry loader is configured or the registry cannot be read; the
   // content-side capability check at run time remains the backstop.
   async #preflight(jobs) {
-    if (!this.loadCapabilityRegistry) return;
-    if (!this.capabilityRegistryPromise) {
-      this.capabilityRegistryPromise = Promise.resolve()
-        .then(() => this.loadCapabilityRegistry())
-        .catch(() => null);
+    const problems = [];
+    if (this.loadCapabilityRegistry) {
+      if (!this.capabilityRegistryPromise) {
+        this.capabilityRegistryPromise = Promise.resolve()
+          .then(() => this.loadCapabilityRegistry())
+          .catch(() => null);
+      }
+      const registry = await this.capabilityRegistryPromise;
+      if (registry) problems.push(...validateFlowJobPayloads(jobs, registry));
     }
-    const registry = await this.capabilityRegistryPromise;
-    if (!registry) return;
-    const problems = validateFlowJobPayloads(jobs, registry);
+    // GPT-09: preflight dispatch by operation prefix — chatgpt.* jobs are
+    // admitted by the ChatGPT validator against the ChatGPT capability
+    // registry, alongside the Flow validator above. The ChatGPT registry
+    // is only loaded when the submission actually carries a chatgpt job,
+    // and an unreadable registry skips the check exactly like Flow's.
+    if (this.loadChatGptCapabilityRegistry && jobs.some(job => isChatGptOperation(job?.operation))) {
+      if (!this.chatGptCapabilityRegistryPromise) {
+        this.chatGptCapabilityRegistryPromise = Promise.resolve()
+          .then(() => this.loadChatGptCapabilityRegistry())
+          .catch(() => null);
+      }
+      const chatGptRegistry = await this.chatGptCapabilityRegistryPromise;
+      if (chatGptRegistry) problems.push(...validateChatGptJobPayloads(jobs, chatGptRegistry));
+    }
     if (problems.length > 0) throw preflightError(problems);
   }
 
