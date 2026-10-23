@@ -1608,9 +1608,9 @@
       setFeedback("Model video chưa có capability DOM được xác nhận trong cấu hình local.", false);
       return;
     }
-    const duration = Number(modelRule.fixedDuration ?? document.querySelector("#selectDurationVideo").value) || undefined;
-    const resolution = modelRule.resolutions?.includes(document.querySelector("#selectResolutionVideo")?.value)
-      ? document.querySelector("#selectResolutionVideo").value : undefined;
+    const duration = Number(modelRule.fixedDuration ?? document.querySelector("#flowVideoDuration")?.value ?? document.querySelector("#selectDurationVideo")?.value) || undefined;
+    const selectedResolution = document.querySelector("#flowVideoResolution")?.value ?? document.querySelector("#selectResolutionVideo")?.value;
+    const resolution = modelRule.resolutions?.includes(selectedResolution) ? selectedResolution : undefined;
     const count = getVideoQuantity(modelRule, document.querySelector("#selectCountVideo")?.value);
     const mode = document.querySelector("#selectModeVideo").value || "ingredients";
     const selectedCharacter = mode === "frames" ? null : selectedFlowCharacter(document.querySelector("#genCharacterSelect") || document.querySelector("#selectCharVideo"));
@@ -2452,6 +2452,23 @@
         sel.dispatchEvent(new Event("change", { bubbles: true }));
       }
     });
+
+    for (const [visibleSelector, nativeSelector] of [
+      ["#flowVideoDuration", "#selectDurationVideo"],
+      ["#flowVideoResolution", "#selectResolutionVideo"],
+    ]) {
+      const visibleSelect = document.querySelector(visibleSelector);
+      const nativeSelect = document.querySelector(nativeSelector);
+      visibleSelect?.addEventListener("change", () => {
+        if (nativeSelect && nativeSelect.value !== visibleSelect.value) {
+          nativeSelect.value = visibleSelect.value;
+          nativeSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      });
+      nativeSelect?.addEventListener("change", () => {
+        if (visibleSelect && visibleSelect.value !== nativeSelect.value) visibleSelect.value = nativeSelect.value;
+      });
+    }
 
     // Aspect ratio synchronization
     document.querySelector("#aspectRatio")?.addEventListener("change", function () {

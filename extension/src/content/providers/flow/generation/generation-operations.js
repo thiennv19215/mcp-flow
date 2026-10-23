@@ -200,7 +200,11 @@
         const attachments = Array.isArray(payload.attachments) ? payload.attachments : [];
         const variants = Math.max(1, Math.min(4, Number(payload.variants || payload.count || 1)));
         const firstFrame = this.frameValue(payload.firstFrame), lastFrame = this.frameValue(payload.lastFrame);
-        const framesMode = payload.type === "video" && Boolean(firstFrame || lastFrame);
+        const requestedVideoMode = String(payload.video_settings?.mode || payload.mode || "").trim().toLowerCase();
+        const framesMode = payload.type === "video" && (requestedVideoMode === "frames" || Boolean(firstFrame || lastFrame));
+        if (framesMode && !firstFrame && !lastFrame) {
+          throw this.error("FLOW_FRAMES_INPUT_MISSING", "Frames mode requires a Start frame or End frame; nothing was submitted.", false, false);
+        }
         if (framesMode && attachments.length) {
           throw this.error("FLOW_FRAMES_INPUT_CONFLICT", "Flow Frames mode accepts firstFrame and lastFrame inputs only; remove ingredients attachments. Nothing was submitted.", false, false);
         }
@@ -699,7 +703,7 @@
             const fresh = allMedia.filter(item =>
               !before.includes(item.id || `title:${item.title}`) &&
               !item.title.startsWith("fm-") &&
-              (!kind || item.kind === kind || item.failed) &&
+              (!kind || item.kind === kind || (kind === "video" && item.kind === "scene") || item.failed) &&
               item.id && correlatedIds.has(item.id.toLowerCase())
             );
 

@@ -1003,7 +1003,7 @@ function queueDownloadExtension(downloadItem) {
   if (/\.html?$/i.test(nameExtension || "") && !byMime.has(mime)) return "";
   return byMime.get(mime) || nameExtension?.toLowerCase() || "";
 }
-function armQueueFilenameOverride({ jobId, flowMediaId, fileStem, flowTabId, flowProjectId }) {
+function armQueueFilenameOverride({ jobId, flowMediaId, fileStem, flowTabId, flowProjectId, mediaKind }) {
   const stem = safeQueueFilenameStem(fileStem);
   if (!stem || !String(jobId || "").trim() || !Number.isInteger(flowTabId) || !flowMediaId) return null;
   const ticket = {
@@ -1012,8 +1012,11 @@ function armQueueFilenameOverride({ jobId, flowMediaId, fileStem, flowTabId, flo
     fileStem: stem,
     flowTabId,
     flowProjectId: String(flowProjectId || ""),
+    mediaKind: String(mediaKind || "").toLowerCase(),
     armedAt: Date.now(),
     baselineAt: Date.now(),
+    triggerStartedAt: null,
+    triggerConfirmedAt: null,
     expiresAt: Date.now() + 5 * 60_000,
     downloadId: null,
     assignedFilename: null,
@@ -1050,6 +1053,24 @@ function queueDownloadMatchesTicket(downloadItem, ticket, allowTabTimeMatch = fa
   if (!allowTabTimeMatch || !sameTab) return false;
   const startedAt = Date.parse(downloadItem.startTime || "");
   return Number.isFinite(startedAt) && startedAt >= ticket.baselineAt - 1_000;
+}
+function queueDownloadMatchesTriggeredFlowItem(downloadItem, ticket, title) {
+  if (!downloadItem || !ticket || downloadItem.tabId !== -1 || downloadItem.byExtensionId && downloadItem.byExtensionId !== chrome.runtime.id) return false;
+  const projectId = queueDownloadProjectId(downloadItem);
+  if (projectId && ticket.flowProjectId && projectId !== ticket.flowProjectId.toLowerCase()) return false;
+  const startedAt = Date.parse(downloadItem.startTime || "");
+  const lowerBound = Number(ticket.triggerStartedAt) || Number(ticket.baselineAt);
+  const upperBound = (Number(ticket.triggerConfirmedAt) || Date.now()) + 30_000;
+  if (!Number.isFinite(startedAt) || startedAt < lowerBound - 1_500 || startedAt > upperBound) return false;
+  const extension = queueDownloadExtension(downloadItem);
+  const compatibleExtension = ticket.mediaKind === "video"
+    ? [".mp4", ".webm", ".mov"].includes(extension)
+    : ticket.mediaKind === "image" && [".png", ".jpg", ".jpeg", ".webp", ".gif"].includes(extension);
+  if (!compatibleExtension) return false;
+  const titleKey = flowDownloadTitleKey(title);
+  const filenameKey = flowDownloadTitleKey(downloadItem.filename);
+  // Flow's browser filename often appends a timestamp to the asset title.
+  return Boolean(titleKey && filenameKey.startsWith(titleKey));
 }
 chrome.downloads?.onDeterminingFilename?.addListener((downloadItem, suggest) => {
   const now = Date.now();
@@ -1088,7 +1109,19 @@ async function waitForQueueFlowDownload(beforeIds, title, timeoutMs = 12 * 60_00
     const items = await chrome.downloads.search({ orderBy: ["-startTime"], limit: 100 });
     const newItems = items.filter(item => !beforeIds.has(item.id));
     if (filenameTicket) {
-      const matching = newItems.filter(item => item.id === filenameTicket.downloadId || queueDownloadMatchesTicket(item, filenameTicket, true, true));
+      let matching = newItems.filter(item => item.id === filenameTicket.downloadId || queueDownloadMatchesTicket(item, filenameTicket, true, true));
+      let matchedByTriggeredFilename = false;
+      if (!matching.length) {
+        const triggeredMatches = newItems.filter(item => queueDownloadMatchesTriggeredFlowItem(item, filenameTicket, title));
+        if (triggeredMatches.length === 1) {
+          matching = triggeredMatches;
+          matchedByTriggeredFilename = true;
+        } else if (triggeredMatches.length > 1) {
+          throw Object.assign(new Error(`Chrome reported multiple new ${filenameTicket.mediaKind || "Flow"} downloads matching "${title}" after the Flow download action; refusing to attach an ambiguous file to this job.`), {
+            code: "FLOW_DOWNLOAD_AMBIGUOUS", outcomeUnknown: false, outcome_unknown: false,
+          });
+        }
+      }
       lastNew = matching;
       if (matching.length > 1) {
         throw Object.assign(new Error(`Chrome reported multiple new downloads from the Flow queue tab for "${title}"; refusing to attach an ambiguous file to this job. The media remains in Flow.`), {
@@ -1099,7 +1132,7 @@ async function waitForQueueFlowDownload(beforeIds, title, timeoutMs = 12 * 60_00
       if (candidate?.state === "interrupted") throw Object.assign(new Error(`Chrome download failed for "${title}": ${candidate.error || "unknown error"}. The media remains in Flow.`), {
         code: "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
       });
-      if (candidate?.state === "complete" && candidate.filename) return { id: candidate.id, filename: candidate.filename, matchedByQueueTicket: true };
+      if (candidate?.state === "complete" && candidate.filename) return { id: candidate.id, filename: candidate.filename, matchedByQueueTicket: true, ...(matchedByTriggeredFilename ? { matchedBy: "triggered_flow_filename" } : {}) };
       await new Promise(resolve => setTimeout(resolve, 750));
       continue;
     }
@@ -1232,14 +1265,16 @@ async function downloadQueueMedia(media, outputDir, fileStem, quality, invoke, h
           download: { state: "downloading", completed: index, total: media.length, current: { id: flowMediaId, title } },
         });
         filenameTicket = armQueueFilenameOverride({
-          jobId, flowMediaId, fileStem: outputStem, flowTabId, flowProjectId,
+          jobId, flowMediaId, fileStem: outputStem, flowTabId, flowProjectId, mediaKind: itemKind,
         });
         if (!filenameTicket) throw Object.assign(new Error(`Could not safely arm the requested filename for task ${jobId || "(unknown)"} and Flow media ${flowMediaId}; no download was started.`), {
           code: "FLOW_DOWNLOAD_FILENAME_ARM_FAILED", outcomeUnknown: false, outcome_unknown: false,
         });
         let triggered;
         try {
+          filenameTicket.triggerStartedAt = Date.now();
           triggered = await invoke("flow.asset.download", { id: item.id, name: title, quality });
+          filenameTicket.triggerConfirmedAt = Date.now();
         } catch (cause) {
           throw Object.assign(new Error(`Flow generated "${title}", but did not start its download: ${String(cause?.message || cause)}. The media remains in Flow.`), {
             code: cause?.code || "FLOW_DOWNLOAD_TRIGGER_FAILED", outcomeUnknown: false, outcome_unknown: false,
