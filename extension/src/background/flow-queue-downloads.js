@@ -574,6 +574,33 @@ export async function waitForExistingQueueFlowDownload(downloadId, flowMediaId, 
 // (by mode, by config, or because no watermark was found), "failed" when
 // a cleaning attempt ran and failed, and "unknown" when an armed clean
 // produced no attributable outcome — never an invented success.
+// DL-02 (W11): video watermark cleaning NEVER runs in this service
+// worker. The frame pipeline lives in a page context
+// (content/bridge/video-watermark-cleaner.js); the background's job is
+// only to route the request there and record the outcome the page
+// reports (queueWatermarkResult below). Callers treat the delegation
+// as a routing signal, not as a failure of the media.
+export const FLOW_VIDEO_WATERMARK_MAX_INPUT_BYTES = 300 * 1024 * 1024;
+
+export function queueVideoWatermarkRoute({ kind, mode } = {}) {
+  const normalizedKind = String(kind || "").toLowerCase() === "scene" ? "video" : String(kind || "").toLowerCase();
+  const normalizedMode = typeof mode === "string" && mode ? mode : "original";
+  if (normalizedMode !== "clean") {
+    return { route: "none", context: "page", serviceWorker: false, delegated: false, kind: normalizedKind || null, mode: normalizedMode, reason: "clean_not_requested" };
+  }
+  if (normalizedKind === "video") {
+    return { route: "video-frame-pipeline", context: "page", serviceWorker: false, delegated: true, kind: "video", mode: "clean", reason: "video_cleaning_page_context_only", maxInputBytes: FLOW_VIDEO_WATERMARK_MAX_INPUT_BYTES };
+  }
+  return { route: "media-interceptor", context: "page", serviceWorker: false, delegated: true, kind: normalizedKind || null, mode: "clean", reason: "image_cleaning_page_context_only" };
+}
+
+// DL-02: the video fields that may ride an op watermark outcome into
+// the recorded job result — the page cleaner's output bookkeeping
+// (frames, re-detections, untouched audio packets, source duration).
+// Only finite numbers (and the warning string) are recorded; anything
+// else the page sent is dropped rather than persisted verbatim.
+const QUEUE_VIDEO_WATERMARK_FIELDS = ["framesProcessed", "framesCleaned", "framesWithoutWatermark", "verificationFailures", "redetections", "redetectionRatio", "audioPacketsCopied", "durationMs", "sampleCount"];
+
 export function queueWatermarkResult(opWatermark) {
   if (!opWatermark || typeof opWatermark !== "object") return undefined;
   const mode = typeof opWatermark.mode === "string" ? opWatermark.mode : "original";
@@ -588,7 +615,7 @@ export function queueWatermarkResult(opWatermark) {
   const outcomeReason = typeof opWatermark.outcomeReason === "string" && opWatermark.outcomeReason ? opWatermark.outcomeReason : null;
   const armReason = typeof opWatermark.reason === "string" && opWatermark.reason ? opWatermark.reason : null;
   const reason = status === "cleaned" ? outcomeReason : (outcomeReason || armReason);
-  return {
+  const recorded = {
     mode,
     armed,
     cleaned,
@@ -596,6 +623,19 @@ export function queueWatermarkResult(opWatermark) {
     ...(reason ? { reason } : {}),
     ...(typeof opWatermark.operationId === "string" && opWatermark.operationId ? { operationId: opWatermark.operationId } : {}),
   };
+  // DL-02: kind + video bookkeeping are recorded only when the op
+  // outcome actually carried them — the DL-01/DL-03 image shape above
+  // is byte-identical for image downloads.
+  if (typeof opWatermark.kind === "string" && opWatermark.kind) recorded.kind = opWatermark.kind;
+  if (opWatermark.video && typeof opWatermark.video === "object") {
+    const video = {};
+    for (const field of QUEUE_VIDEO_WATERMARK_FIELDS) {
+      if (Number.isFinite(opWatermark.video[field])) video[field] = opWatermark.video[field];
+    }
+    if (typeof opWatermark.video.warning === "string" && opWatermark.video.warning) video.warning = opWatermark.video.warning;
+    if (Object.keys(video).length) recorded.video = video;
+  }
+  return recorded;
 }
 
 // DL-06: extract the optional filename-plan settings (template, root
