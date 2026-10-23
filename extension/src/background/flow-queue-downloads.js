@@ -212,6 +212,74 @@ export function initQueueDownloadListeners() {
   });
 }
 
+// DL-05: interrupted-download classification + in-place resume (study
+// D16/D17). Chrome reports an interruption reason on the download item;
+// only transient network/transport-class reasons may resume, and only
+// when Chrome itself says the download can resume. Identity/provenance,
+// auth/policy and integrity reasons never resume; unknown reasons fail
+// closed as fatal. (The reference reads its retry budget from server
+// execution config — blocked, DL-B5 — so ours is a small local constant,
+// mirrored in src/native-downloads.ts.)
+export const FLOW_DOWNLOAD_RESUME_BUDGET = 3;
+
+const TRANSIENT_DOWNLOAD_INTERRUPTIONS = new Set([
+  "NETWORK_FAILED", "NETWORK_TIMEOUT", "NETWORK_DISCONNECTED", "NETWORK_SERVER_DOWN",
+  "SERVER_FAILED", "SERVER_UNREACHABLE", "SERVER_NO_RANGE", "SERVER_CONTENT_LENGTH_MISMATCH",
+  "FILE_TRANSIENT_ERROR", "CRASH",
+]);
+
+export function classifyDownloadInterruption(error, canResume) {
+  const reason = String(error || "").trim().toUpperCase() || "UNKNOWN";
+  const transient = TRANSIENT_DOWNLOAD_INTERRUPTIONS.has(reason);
+  return {
+    category: transient ? "transient" : "fatal",
+    reason,
+    resumable: transient && canResume === true,
+  };
+}
+
+function queueDownloadFailure(title, item, classification, resumeAttempts) {
+  return Object.assign(new Error(`Chrome download failed for "${title}": ${item?.error || "unknown error"}. The media remains in Flow.`), {
+    code: "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
+    downloadInterruption: {
+      reason: classification.reason,
+      category: classification.category,
+      canResume: item?.canResume === true,
+      resumable: classification.resumable,
+      resumeAttempts,
+      resumeBudget: FLOW_DOWNLOAD_RESUME_BUDGET,
+    },
+  });
+}
+
+// Resume one interrupted download in place, or throw the standard
+// FLOW_DOWNLOAD_FAILED carrying the last error. The caller has already
+// matched the item to its ticket on this poll, and its loop re-runs the
+// same matching after the resume — ticket identity is re-verified before
+// the download can complete. A resume re-arms nothing watermark-related:
+// DL-03 contexts are single-use and belong to the original attempt, and
+// the recorded watermark outcome stays the original trigger's.
+async function resumeInterruptedQueueDownload(resumeState, item, title) {
+  const classification = classifyDownloadInterruption(item?.error, item?.canResume);
+  if (!classification.resumable || resumeState.attempts >= FLOW_DOWNLOAD_RESUME_BUDGET ||
+      !Number.isInteger(item?.id) || typeof chrome.downloads?.resume !== "function") {
+    throw queueDownloadFailure(title, item, classification, resumeState.attempts);
+  }
+  resumeState.attempts += 1;
+  let resumeRefused = false;
+  try { await chrome.downloads.resume(item.id); } catch { resumeRefused = true; }
+  if (!resumeRefused) return;
+  // Chrome refused the resume call itself. Believe that only when the
+  // item is still interrupted — a lagging snapshot can show the
+  // pre-resume state for an item that is already moving again.
+  let current = null;
+  try { [current] = await chrome.downloads.search({ id: item.id }); } catch {}
+  if (current?.state === "interrupted") {
+    throw queueDownloadFailure(title, current, classifyDownloadInterruption(current.error, current.canResume), resumeState.attempts);
+  }
+  if (!current) throw queueDownloadFailure(title, item, classification, resumeState.attempts);
+}
+
 export async function throwIfQueueDownloadAborted(signal, title, downloadId = null) {
   if (!signal?.aborted) return;
   if (Number.isInteger(downloadId)) {
@@ -229,13 +297,12 @@ export async function waitForQueueFlowDownload(beforeIds, title, timeoutMs = 12 
   const deadline = Date.now() + timeoutMs;
   const titleKey = flowDownloadTitleKey(title);
   let lastNew = [];
+  const resumeState = { attempts: 0 };
   while (Date.now() < deadline) {
     await throwIfQueueDownloadAborted(signal, title, filenameTicket?.downloadId);
     if (Number.isInteger(filenameTicket?.downloadId)) {
       const [claimed] = await chrome.downloads.search({ id: filenameTicket.downloadId });
-      if (claimed?.state === "interrupted") throw Object.assign(new Error(`Chrome download failed for "${title}": ${claimed.error || "unknown error"}. The media remains in Flow.`), {
-        code: "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
-      });
+      if (claimed?.state === "interrupted") await resumeInterruptedQueueDownload(resumeState, claimed, title);
       if (claimed?.state === "complete" && claimed.filename) return {
         id: claimed.id,
         filename: claimed.filename,
@@ -280,9 +347,7 @@ export async function waitForQueueFlowDownload(beforeIds, title, timeoutMs = 12 
         });
       }
       const candidate = matching[0];
-      if (candidate?.state === "interrupted") throw Object.assign(new Error(`Chrome download failed for "${title}": ${candidate.error || "unknown error"}. The media remains in Flow.`), {
-        code: "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
-      });
+      if (candidate?.state === "interrupted") await resumeInterruptedQueueDownload(resumeState, candidate, title);
       if (candidate?.state === "complete" && candidate.filename) {
         if (!filenameTicket.downloadId) filenameTicket.downloadId = candidate.id;
         return { id: candidate.id, filename: candidate.filename, matchedByQueueTicket: true, ...(matchedByTriggeredFilename ? { matchedBy: "triggered_flow_filename" } : {}) };
@@ -302,18 +367,14 @@ export async function waitForQueueFlowDownload(beforeIds, title, timeoutMs = 12 
     }
     if (Number.isInteger(filenameTicket?.downloadId)) {
       const exact = newItems.find(item => item.id === filenameTicket.downloadId);
-      if (exact?.state === "interrupted") throw Object.assign(new Error(`Chrome download failed for "${title}": ${exact.error || "unknown error"}. The media remains in Flow.`), {
-        code: "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
-      });
+      if (exact?.state === "interrupted") await resumeInterruptedQueueDownload(resumeState, exact, title);
       if (exact?.state === "complete" && exact.filename) return { id: exact.id, filename: exact.filename };
       await new Promise(resolve => setTimeout(resolve, 750));
       continue;
     }
     const candidates = flowItems.length === 1 && matching.length === 1 ? matching : [];
     const interrupted = candidates.find(item => item.state === "interrupted");
-    if (interrupted) throw Object.assign(new Error(`Chrome download failed for "${title}": ${interrupted.error || "unknown error"}. The media remains in Flow.`), {
-      code: "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
-    });
+    if (interrupted) await resumeInterruptedQueueDownload(resumeState, interrupted, title);
     const complete = candidates.find(item => item.state === "complete" && item.filename);
     if (complete) return { id: complete.id, filename: complete.filename };
     await new Promise(resolve => setTimeout(resolve, 250));
@@ -342,6 +403,7 @@ export async function findExistingQueueFlowDownload(flowMediaId, flowTabId, flow
 export async function waitForExistingQueueFlowDownload(downloadId, flowMediaId, flowTabId, flowProjectId, title, timeoutMs = 3 * 60_000, signal = null) {
   const ticket = { flowMediaId: String(flowMediaId), flowTabId, flowProjectId: String(flowProjectId || "") };
   const deadline = Date.now() + timeoutMs;
+  const resumeState = { attempts: 0 };
   while (Date.now() < deadline) {
     await throwIfQueueDownloadAborted(signal, title, downloadId);
     const items = await chrome.downloads.search({ id: downloadId });
@@ -352,9 +414,9 @@ export async function waitForExistingQueueFlowDownload(downloadId, flowMediaId, 
     if (!queueDownloadMatchesTicket(item, ticket)) throw Object.assign(new Error(`Chrome download identity changed while resuming "${title}"; refusing to attach an unrelated file. The generated media remains in Flow.`), {
       code: "FLOW_DOWNLOAD_IDENTITY_MISMATCH", outcomeUnknown: false, outcome_unknown: false,
     });
-    if (item.state === "interrupted") throw Object.assign(new Error(`Chrome download failed for "${title}": ${item.error || "unknown error"}. The media remains in Flow.`), {
-      code: "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
-    });
+    // Identity was verified for this sighting above; after a resume the
+    // loop re-verifies it before the item can complete (DL-05).
+    if (item.state === "interrupted") await resumeInterruptedQueueDownload(resumeState, item, title);
     if (item.state === "complete" && item.filename) return { id: item.id, filename: item.filename, matchedByQueueTicket: true };
     await new Promise(resolve => setTimeout(resolve, 250));
   }

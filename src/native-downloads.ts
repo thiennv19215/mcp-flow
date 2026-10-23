@@ -42,6 +42,45 @@ export function hasFlowDownloadProvenance(item: { url?: string; finalUrl?: strin
   return isFlowUrl(item.url) || isFlowUrl(item.finalUrl) || isFlowUrl(item.referrer);
 }
 
+// DL-05: interrupted-download classification, mirrored from the extension
+// queue's download module (flow-queue-downloads.js) so both waiters speak
+// the same vocabulary. Only transient network/transport-class reasons may
+// resume, and only when Chrome says the download can resume; identity/
+// provenance, auth/policy and integrity reasons never resume, and unknown
+// reasons fail closed as fatal. The resume itself (chrome.downloads.resume
+// under FLOW_DOWNLOAD_RESUME_BUDGET per wait) lives in the extension
+// background, the only side with direct chrome.downloads access — the
+// connector bridge exposes no resume method and does not forward
+// canResume — so the native waiters attach this classification to the
+// interruption errors they throw instead of resuming from here.
+export const FLOW_DOWNLOAD_RESUME_BUDGET = 3;
+
+const TRANSIENT_DOWNLOAD_INTERRUPTIONS = new Set([
+  "NETWORK_FAILED", "NETWORK_TIMEOUT", "NETWORK_DISCONNECTED", "NETWORK_SERVER_DOWN",
+  "SERVER_FAILED", "SERVER_UNREACHABLE", "SERVER_NO_RANGE", "SERVER_CONTENT_LENGTH_MISMATCH",
+  "FILE_TRANSIENT_ERROR", "CRASH",
+]);
+
+export function classifyDownloadInterruption(error?: string, canResume?: boolean): { category: "transient" | "fatal"; reason: string; resumable: boolean } {
+  const reason = String(error || "").trim().toUpperCase() || "UNKNOWN";
+  const transient = TRANSIENT_DOWNLOAD_INTERRUPTIONS.has(reason);
+  return {
+    category: transient ? "transient" : "fatal",
+    reason,
+    resumable: transient && canResume === true,
+  };
+}
+
+function downloadInterruptionDiagnostics(item: { error?: string; canResume?: boolean }): { reason: string; category: "transient" | "fatal"; canResume: boolean; resumable: boolean } {
+  const classification = classifyDownloadInterruption(item.error, item.canResume);
+  return {
+    reason: classification.reason,
+    category: classification.category,
+    canResume: item.canResume === true,
+    resumable: classification.resumable,
+  };
+}
+
 /** Pick the completed Flow download out of a poll of Chrome downloads. The
  * user's own unrelated download finishing in the same window must never be
  * materialized as the scene's output file. */
@@ -67,6 +106,7 @@ export async function waitForNativeDownload(
     const failed = items.find(item => item.state === "interrupted");
     if (failed) throw Object.assign(new Error(`Chrome download failed: ${failed.error ?? "unknown error"} (${failed.bytesReceived}/${failed.totalBytes} bytes). The media remains in Flow.`), {
       code: "FLOW_DOWNLOAD_FAILED", retryable: false, outcome_unknown: false,
+      downloadInterruption: downloadInterruptionDiagnostics(failed as { error?: string; canResume?: boolean }),
     });
 
     const active = items.find(item => item.state === "in_progress");
@@ -206,6 +246,7 @@ export async function materializeQueuedNativeDownloads(
       if (download.state === "interrupted") {
         throw Object.assign(new Error(`Chrome download failed: ${download.error ?? "unknown error"} (${download.bytesReceived}/${download.totalBytes} bytes). The media remains in Flow.`), {
           code: "FLOW_DOWNLOAD_FAILED", retryable: false, outcome_unknown: false,
+          downloadInterruption: downloadInterruptionDiagnostics(download as { error?: string; canResume?: boolean }),
         });
       }
       job && (job.progress = download.totalBytes > 0
