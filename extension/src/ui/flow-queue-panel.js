@@ -515,7 +515,7 @@
       item.dataset.flowQueueItem = id;
       const head = makeElement("div", "flow-queue-panel__item-head");
       const label = task?.label ?? task?.title ?? task?.name ?? task?.prompt ?? task?.payload?.prompt ?? task?.job?.label ?? task?.job?.payload?.prompt ?? task?.task?.prompt ?? `Task ${index + 1}`;
-      const source = task?.metadata?.source || (String(label).toLowerCase().includes("ai") || String(label).toLowerCase().includes("mcp") ? "mcp" : "manual");
+      const source = task?.metadata?.source || "manual";
       const sourceBadge = makeElement("span", "flow-queue-panel__badge", source === "mcp" ? this._text("mcp") : this._text("manual"));
       sourceBadge.style.cssText = source === "mcp"
         ? "font-size:10px;padding:2px 6px;border-radius:4px;background:rgba(204,255,0,0.15);color:var(--primary,#ccff00);margin-right:6px;border:1px solid rgba(204,255,0,0.3);font-weight:600"
@@ -685,15 +685,23 @@
           : [];
         return names.map(assetName => ({ assetName }));
       };
-      let makePayload = (itemPrompt, itemIndex) => ({
-        type, prompt: itemPrompt, aspect_ratio: aspectRatio, variants: 1,
-        attachments: hasFrames ? [] : attachmentsForPrompt(itemIndex),
-        ...(hasFrames ? {
-          ...(firstFrames[itemIndex] ? { firstFrame: { assetName: firstFrames.length === 1 ? firstFrames[0] : firstFrames[itemIndex] } } : {}),
-          ...(lastFrames[itemIndex] ? { lastFrame: { assetName: lastFrames.length === 1 ? lastFrames[0] : lastFrames[itemIndex] } } : {}),
-        } : {}),
-        video_settings: {},
-      });
+      // A single frame line is shared by every prompt; otherwise each prompt
+      // uses its own line. (Reading firstFrames[itemIndex] directly dropped
+      // the shared frame for prompts 2..n because those indexes are undefined.)
+      const frameForPrompt = (frames, itemIndex) => frames[itemIndex] ?? (frames.length === 1 ? frames[0] : undefined);
+      let makePayload = (itemPrompt, itemIndex) => {
+        const firstFrame = hasFrames ? frameForPrompt(firstFrames, itemIndex) : undefined;
+        const lastFrame = hasFrames ? frameForPrompt(lastFrames, itemIndex) : undefined;
+        return {
+          type, prompt: itemPrompt, aspect_ratio: aspectRatio, variants: 1,
+          attachments: hasFrames ? [] : attachmentsForPrompt(itemIndex),
+          ...(hasFrames ? {
+            ...(firstFrame ? { firstFrame: { assetName: firstFrame } } : {}),
+            ...(lastFrame ? { lastFrame: { assetName: lastFrame } } : {}),
+          } : {}),
+          video_settings: {},
+        };
+      };
       let makeLabel = itemPrompt => itemPrompt.slice(0, 96);
       if (type === "edit" || type === "continue") {
         if (!asset) { this._showError(this._text("assetRequired")); return; }

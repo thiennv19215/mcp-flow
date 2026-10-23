@@ -575,10 +575,10 @@
     entry.className = `log-entry ${isOk ? "ok" : "error"}`;
     entry.innerHTML = `
       <div class="log-head">
-        <span>${name}</span>
-        <span class="log-time">${time}</span>
+        <span>${escapeHtml(name)}</span>
+        <span class="log-time">${escapeHtml(time)}</span>
       </div>
-      <div class="log-detail">${detail}</div>
+      <div class="log-detail">${escapeHtml(detail)}</div>
     `;
     container.insertBefore(entry, container.firstChild);
     logs.push({ name, detail, isOk, time });
@@ -679,7 +679,13 @@
     const avatar = typeof charObj === "object" ? (charObj.avatarUrl || charObj.thumbnailUrl || charObj.image) : null;
     if (thumb) {
       if (avatar && typeof avatar === "string" && avatar.startsWith("http")) {
-        thumb.innerHTML = `<img src="${avatar}" style="width:14px;height:14px;border-radius:50%;object-fit:cover;" alt="" />`;
+        // Assign via DOM properties: interpolating the URL into innerHTML
+        // would let a quote in the URL break out of the src attribute.
+        const img = document.createElement("img");
+        img.src = avatar;
+        img.alt = "";
+        img.style.cssText = "width:14px;height:14px;border-radius:50%;object-fit:cover;";
+        thumb.replaceChildren(img);
       } else {
         thumb.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"></circle><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"></path></svg>`;
       }
@@ -937,7 +943,7 @@
       setFeedback(`⏳ ${msg.progress}`, true);
       addLog("Tiến trình", msg.progress, true);
       if (isGenerating) {
-        const isImage = document.querySelector("#formImage")?.style.display !== "none";
+        const isImage = (document.querySelector("#genType")?.value || "image") === "image";
         const btnTextEl = isImage
           ? document.querySelector("#txtBtnSubmitImage")
           : document.querySelector("#txtBtnSubmitVideo");
@@ -1035,6 +1041,15 @@
     });
     if (!bound && image.isConnected) image.replaceWith(placeholder);
     return true;
+  }
+
+  // Render a picked frame into a Gen-tab slot's body only. Replacing the
+  // whole slot would destroy its header, label and hidden file input.
+  function renderGenTabFrameSlot(bodySelector, source) {
+    const body = document.querySelector(bodySelector);
+    if (!body || !source) return;
+    body.replaceChildren();
+    bindFrameThumbnail(body, source, "video-frame-slot__empty");
   }
 
   function currentVideoPromptsForFrames() {
@@ -2451,26 +2466,23 @@
         syncVideoFrameSources(sources);
         if (sources[0]) {
           applyVideoFrameAssignment("start");
-          const slot = document.querySelector("#genTabFrame1Slot");
-          if (slot) {
-            slot.replaceChildren();
-            bindFrameThumbnail(slot, sources[0], "video-frame-slot__empty");
-          }
+          renderGenTabFrameSlot("#genTabFrame1Body", sources[0]);
         }
       });
     });
 
     document.querySelector("#genTabFrame2Slot")?.addEventListener("click", () => {
+      const previousSources = referencePicker.getFrameSources();
       referencePicker.openFrames(sources => {
         syncVideoFrameSources(sources);
-        if (sources[1]) {
+        // The picker returns the cumulative source pool, so a single pick on
+        // the End slot may sit at index 0. Prefer the source this pick added;
+        // fall back to the second pool entry, then the only entry.
+        const picked = [...sources].reverse().find(source => !previousSources.includes(source)) || sources[1] || sources[0];
+        if (picked) {
           if (!videoFrameAssignments[0]) videoFrameAssignments[0] = { first: null, last: null };
-          videoFrameAssignments[0].last = sources[1];
-          const slot = document.querySelector("#genTabFrame2Slot");
-          if (slot) {
-            slot.replaceChildren();
-            bindFrameThumbnail(slot, sources[1], "video-frame-slot__empty");
-          }
+          videoFrameAssignments[0].last = picked;
+          renderGenTabFrameSlot("#genTabFrame2Body", picked);
         }
       });
     });

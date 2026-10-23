@@ -553,6 +553,20 @@
                   <select id="addonPromptSelect" class="hidden"><option value="">Style</option></select>
                 </div>
               </div>
+
+              <!-- Video chain option (#genChainSection): continue each video from the previous video -->
+              <div id="genChainSection">
+                <div id="videoChainOption" hidden>
+                  <div class="gen-chain-row">
+                    <label class="toolbar-toggle wm-toggle" for="chainVideoFromPrevious">
+                      <input type="checkbox" id="chainVideoFromPrevious" />
+                      <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                      <span class="toggle-label" id="videoChainLabel">Nối video từ video trước</span>
+                    </label>
+                  </div>
+                </div>
+                <p class="section-hint" id="videoChainHint" hidden></p>
+              </div>
             </section>
 
             <!-- Reference Section (#refImagesSection) -->
