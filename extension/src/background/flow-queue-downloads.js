@@ -677,6 +677,88 @@ export function queueVideoWatermarkRoute({ kind, mode } = {}) {
 // else the page sent is dropped rather than persisted verbatim.
 const QUEUE_VIDEO_WATERMARK_FIELDS = ["framesProcessed", "framesCleaned", "framesWithoutWatermark", "verificationFailures", "redetections", "redetectionRatio", "audioPacketsCopied", "durationMs", "sampleCount"];
 
+// DL-12: download phase visibility. The short phase vocabulary the
+// content side records (media-menu's honest sequence, built from the
+// interceptor's attributed TOBY_FLOW_WATERMARK_PHASE signals) and the
+// progress.phase each short phase maps onto in the queue op's EXISTING
+// progress stream. download.state never leaves its existing vocabulary
+// ("downloading" until the withQueueDownloads terminal states) — the
+// phase distinction rides progress.phase + download.phase instead.
+export const QUEUE_DOWNLOAD_PHASES = ["fetching", "cleaning", "original", "saving", "cleaning_failed"];
+export const QUEUE_DOWNLOAD_PHASE_PROGRESS = {
+  fetching: "download_fetching",
+  cleaning: "download_cleaning",
+  original: "download_original",
+  saving: "download_saving",
+  cleaning_failed: "download_cleaning_failed",
+};
+const QUEUE_DOWNLOAD_PHASE_RANK = { fetching: 0, cleaning: 1, original: 1, cleaning_failed: 2, saving: 3 };
+
+// Sanitize an op-supplied phase list against the recorded outcome.
+// Attribution first: an entry carrying a DIFFERENT operationId than
+// the watermark outcome's is dropped — a concurrent download's phases
+// never move this job. Honesty second, mirroring the DL-03 outcome
+// vocabulary: an original outcome never carries a cleaning (or
+// cleaning-failed) phase, a cleaned outcome always carries cleaning
+// before saving, and a failed outcome ends on cleaning_failed with
+// no saving claim after it.
+function sanitizeDownloadPhases(rawPhases, status, operationId) {
+  const phases = [];
+  for (const entry of Array.isArray(rawPhases) ? rawPhases : []) {
+    const name = typeof entry === "string" ? entry : (entry && typeof entry === "object" ? entry.phase : null);
+    if (!name || !QUEUE_DOWNLOAD_PHASES.includes(name)) continue;
+    const entryOperationId = entry && typeof entry === "object" && typeof entry.operationId === "string" && entry.operationId
+      ? entry.operationId : null;
+    if (entryOperationId && operationId && entryOperationId !== operationId) continue;
+    if (!phases.includes(name)) phases.push(name);
+  }
+  phases.sort((a, b) => QUEUE_DOWNLOAD_PHASE_RANK[a] - QUEUE_DOWNLOAD_PHASE_RANK[b]);
+  if (status === "original") {
+    const filtered = phases.filter(phase => phase !== "cleaning" && phase !== "cleaning_failed");
+    if (!filtered.includes("original")) {
+      const savingAt = filtered.indexOf("saving");
+      if (savingAt >= 0) filtered.splice(savingAt, 0, "original");
+      else filtered.push("original");
+    }
+    return filtered;
+  }
+  if (status === "cleaned") {
+    const filtered = phases.filter(phase => phase !== "original" && phase !== "cleaning_failed");
+    if (!filtered.includes("cleaning")) {
+      const savingAt = filtered.indexOf("saving");
+      if (savingAt >= 0) filtered.splice(savingAt, 0, "cleaning");
+      else filtered.push("cleaning");
+    }
+    return filtered;
+  }
+  if (status === "failed") {
+    const filtered = phases.filter(phase => phase !== "original" && phase !== "saving" && phase !== "cleaning_failed");
+    filtered.push("cleaning_failed");
+    return filtered;
+  }
+  return phases;
+}
+
+// The ordered short phases for one download's op watermark: the
+// op-supplied list (sanitized above) when present, otherwise the
+// honest sequence derived from the recorded outcome alone (legacy op
+// results without a phases list): cleaned → fetching/cleaning/saving,
+// original → fetching/original/saving, failed →
+// fetching/cleaning/cleaning_failed, unknown → fetching only (the
+// click happened; no terminal phase is invented).
+export function queueDownloadPhases(opWatermark) {
+  if (!opWatermark || typeof opWatermark !== "object") return [];
+  const status = queueWatermarkResult(opWatermark)?.status || null;
+  if (Array.isArray(opWatermark.phases)) {
+    return sanitizeDownloadPhases(opWatermark.phases, status, opWatermark.operationId);
+  }
+  if (status === "cleaned") return ["fetching", "cleaning", "saving"];
+  if (status === "original") return ["fetching", "original", "saving"];
+  if (status === "failed") return ["fetching", "cleaning", "cleaning_failed"];
+  if (status === "unknown") return ["fetching"];
+  return [];
+}
+
 export function queueWatermarkResult(opWatermark) {
   if (!opWatermark || typeof opWatermark !== "object") return undefined;
   const mode = typeof opWatermark.mode === "string" ? opWatermark.mode : "original";
@@ -710,6 +792,13 @@ export function queueWatermarkResult(opWatermark) {
     }
     if (typeof opWatermark.video.warning === "string" && opWatermark.video.warning) video.warning = opWatermark.video.warning;
     if (Object.keys(video).length) recorded.video = video;
+  }
+  // DL-12: the phase sequence is recorded only when the op actually
+  // supplied one (sanitized against this outcome) — op results without
+  // a phases list keep the exact pre-DL-12 recorded shape.
+  if (Array.isArray(opWatermark.phases)) {
+    const phases = sanitizeDownloadPhases(opWatermark.phases, status, opWatermark.operationId);
+    if (phases.length) recorded.phases = phases;
   }
   return recorded;
 }
@@ -843,6 +932,36 @@ export async function downloadQueueMedia(media, outputDir, fileStem, quality, in
         if (!triggered?.downloadTriggered) throw Object.assign(new Error(`Flow generated "${title}", but did not confirm that its download started. The media remains in Flow.`), {
           code: "FLOW_DOWNLOAD_TRIGGER_FAILED", outcomeUnknown: false, outcome_unknown: false,
         });
+        // DL-12: forward this download's phases onto the job's existing
+        // progress stream, in order, before the browser-save wait (the
+        // wait IS the saving stage). Phases come only from THIS item's
+        // op result — queueDownloadPhases drops any entry attributed
+        // to a different operationId — and download.state stays
+        // "downloading": the distinction rides progress.phase and
+        // download.phase, never a renamed state.
+        const downloadPhases = triggered?.watermark ? queueDownloadPhases(triggered.watermark) : [];
+        const downloadPhaseMessages = {
+          fetching: `Fetching ${mediaLabel} ${index + 1}/${media.length} from Flow…`,
+          cleaning: `Cleaning the watermark from ${mediaLabel} ${index + 1}/${media.length}…`,
+          original: `No watermark cleaning for ${mediaLabel} ${index + 1}/${media.length}; saving the original…`,
+          saving: `Saving ${mediaLabel} ${index + 1}/${media.length}…`,
+          cleaning_failed: `Watermark cleaning failed for ${mediaLabel} ${index + 1}/${media.length}; the download continues with the original file…`,
+        };
+        const downloadPhaseFractions = { fetching: 0, cleaning: 0.34, original: 0.34, cleaning_failed: 0.67, saving: 0.67 };
+        for (const phase of downloadPhases) {
+          await hooks.progress({
+            phase: QUEUE_DOWNLOAD_PHASE_PROGRESS[phase],
+            message: downloadPhaseMessages[phase],
+            percent: 90 + Math.floor((index + (downloadPhaseFractions[phase] || 0)) * 9 / Math.max(1, media.length)),
+            generation: generationState,
+            download: {
+              state: "downloading", completed: index, total: media.length,
+              current: { id: flowMediaId, title },
+              phase,
+              ...(triggered?.watermark ? { watermarkStatus: queueWatermarkResult(triggered.watermark)?.status || null } : {}),
+            },
+          });
+        }
         let download;
         try {
           download = await waitForQueueFlowDownload(beforeIds, title, quality === "upscaled" ? 12 * 60_000 : 3 * 60_000, filenameTicket, hooks.signal);
@@ -859,6 +978,11 @@ export async function downloadQueueMedia(media, outputDir, fileStem, quality, in
         });
         if (!filenameTicket.downloadId) filenameTicket.downloadId = download.id;
         const filenameOverrideApplied = Boolean(filenameTicket.assignedFilename && filenameTicket.downloadId === download.id);
+        // DL-12: the recorded watermark is exactly queueWatermarkResult
+        // — it carries phases only when the op supplied them; the
+        // outcome-derived phases above are a progress-stream
+        // presentation, not an added recorded fact.
+        const recordedWatermark = triggered?.watermark ? queueWatermarkResult(triggered.watermark) : undefined;
         browserDownloads.push({
           ...download,
           downloadId: download.id,
@@ -867,7 +991,7 @@ export async function downloadQueueMedia(media, outputDir, fileStem, quality, in
           title,
           filenameOverrideApplied,
           fileStem: outputStem,
-          ...(triggered?.watermark ? { watermark: queueWatermarkResult(triggered.watermark) } : {}),
+          ...(recordedWatermark ? { watermark: recordedWatermark } : {}),
         });
       } finally {
         if (filenameTicket) disarmQueueFilenameOverride(filenameTicket);

@@ -20,6 +20,16 @@
  * in a bounded fingerprint set; input bytes matching a recorded
  * fingerprint short-circuit with an `already_clean` outcome and are
  * returned unchanged instead of being re-processed.
+ *
+ * DL-12: phase signals are dispatched on TOBY_FLOW_WATERMARK_PHASE
+ * alongside the outcome event, attributed by the same operation id:
+ * "fetching" when a governed fetch/anchor download starts, "cleaning"
+ * when the remover starts on the bytes, "saving" when cleaned bytes
+ * are handed back for the browser save, "original" as the terminal
+ * signal for a no-watermark outcome (original mode / not found /
+ * already clean — never a cleaning claim), and "cleaning_failed" as
+ * the terminal signal when a cleaning attempt fails, so no download
+ * is left sitting in a stuck "cleaning" state.
  */
 (() => {
   "use strict";
@@ -72,6 +82,19 @@
 
   const requestUrl = input => typeof input === "string" ? input : input?.url || "";
   const resultEvent = detail => window.dispatchEvent(new CustomEvent("TOBY_FLOW_WATERMARK_RESULT", { detail }));
+  // DL-12: phase signals ride a sibling window event with the same
+  // attribution shape as the outcome event (operationId + kind + url).
+  const phaseEvent = detail => window.dispatchEvent(new CustomEvent("TOBY_FLOW_WATERMARK_PHASE", { detail }));
+
+  function phaseEventFor(context, fields) {
+    phaseEvent({
+      kind: context?.kind || fields.kind || "image",
+      ...(context ? { operationId: context.operationId, url: context.url || fields.url || null } : { operationId: fields.operationId ?? null, url: fields.url || null }),
+      phase: fields.phase,
+      ...(fields.reason ? { reason: fields.reason } : {}),
+      ...(fields.status ? { status: fields.status } : {}),
+    });
+  }
 
   function syncPublicState() {
     window.__tobyFlowWatermarkState = {
@@ -218,6 +241,7 @@
     // of content type (it exists purely to suppress cleaning).
     if (engaged && engaged.mode === "original") {
       consumeContext(engaged);
+      phaseEventFor(engaged, { kind, url: canonical, phase: "original", reason: "mode_original", status: "original" });
       outcomeEvent(engaged, { kind, url: canonical, event: { ok: true, changed: false, status: "original", reason: "mode_original" } });
       return response;
     }
@@ -238,6 +262,7 @@
       const inputFingerprint = await fingerprintBlob(original);
       if (inputFingerprint && state.cleanedFingerprints.includes(inputFingerprint)) {
         if (engaged || explicitMarker) {
+          phaseEventFor(engaged, { kind, url: canonical, phase: "original", reason: "already_clean", status: "original" });
           outcomeEvent(engaged, { kind, url: canonical, event: { ok: true, changed: false, status: "original", reason: "already_clean" } });
           consumeContext(engaged);
         }
@@ -246,16 +271,24 @@
       if (!state.mask && state.maskB64) state.mask = await window.WatermarkRemover.maskFromAlphaPng(state.maskB64);
       if (!state.mask) {
         if (engaged) {
+          // Cleaning never started (no mask): the terminal phase is the
+          // failure itself — no "cleaning" phase is claimed.
+          phaseEventFor(engaged, { kind, url: canonical, phase: "cleaning_failed", reason: "mask_not_configured", status: "failed" });
           outcomeEvent(engaged, { kind, url: canonical, event: { ok: false, changed: false, status: "failed", reason: "mask_not_configured" } });
           consumeContext(engaged);
         }
         return response;
       }
       const remover = new window.WatermarkRemover({ mask: state.mask, ...state.options });
+      if (engaged || explicitMarker) phaseEventFor(engaged, { kind, url: canonical, phase: "cleaning" });
       const result = await remover.processBlob(original);
       if (!result.changed) {
         const outcome = classifyUnchanged(result);
         if (engaged || explicitMarker) {
+          // Honest terminal phase: an original outcome ends on
+          // "original" (never a cleaning-done claim); a failed attempt
+          // ends on "cleaning_failed" (never a stuck "cleaning").
+          phaseEventFor(engaged, { kind, url: canonical, phase: outcome.status === "original" ? "original" : "cleaning_failed", reason: outcome.reason, status: outcome.status });
           outcomeEvent(engaged, { kind, url: canonical, event: { ok: outcome.ok, changed: false, status: outcome.status, reason: outcome.reason, ...(result.nccBefore !== undefined ? { nccBefore: result.nccBefore } : {}), ...(result.nccAfter !== undefined ? { nccAfter: result.nccAfter } : {}) } });
           consumeContext(engaged);
         }
@@ -267,12 +300,15 @@
       // and failures never enter the registry.
       recordCleanedFingerprint(await fingerprintBlob(result.blob));
       if (engaged || explicitMarker) {
+        // The cleaned bytes are now handed back for the browser save.
+        phaseEventFor(engaged, { kind, url: canonical, phase: "saving", status: "cleaned" });
         outcomeEvent(engaged, { kind, url: canonical, event: { ok: true, changed: true, status: "cleaned", nccBefore: result.nccBefore, nccAfter: result.nccAfter } });
         consumeContext(engaged);
       }
       return new Response(result.blob, { status: response.status, statusText: response.statusText, headers: response.headers });
     } catch (error) {
       if (engaged || explicitMarker) {
+        phaseEventFor(engaged, { kind, url: canonical, phase: "cleaning_failed", reason: "error", status: "failed" });
         outcomeEvent(engaged, { kind, url: canonical, event: { ok: false, changed: false, status: "failed", reason: "error", error: String(error?.message || error) } });
         consumeContext(engaged);
       }
@@ -284,6 +320,11 @@
 
   if (nativeFetch) {
     const watermarkFetch = async function flowMcpWatermarkFetch(input, init) {
+      // DL-12: a governed fetch announces its fetching phase before the
+      // request goes out (peek only — matching here consumes nothing;
+      // cleanResponse re-matches and owns consumption/outcome).
+      const governed = matchFetchContext(input);
+      if (governed) phaseEventFor(governed, { phase: "fetching", url: canonicalMediaUrl(requestUrl(input)) });
       const response = await nativeFetch(input, init);
       return cleanResponse(response, { input, init });
     };
@@ -307,6 +348,8 @@
       // Guarantee the original: never intercept; the native click
       // proceeds with the untouched bytes. Report and consume.
       consumeContext(context);
+      phaseEventFor(context, { kind: context.kind, url: canonical, phase: "fetching" });
+      phaseEventFor(context, { kind: context.kind, url: canonical, phase: "original", reason: "mode_original", status: "original" });
       outcomeEvent(context, { kind: context.kind, url: canonical, event: { ok: true, changed: false, status: "original", reason: "mode_original" } });
       return;
     }
@@ -316,10 +359,13 @@
         // world: cleaning cannot run. Say so against the operation and
         // let the native download proceed with the original bytes.
         consumeContext(context);
+        phaseEventFor(context, { kind: context.kind, url: canonical, phase: "fetching" });
+        phaseEventFor(context, { kind: context.kind, url: canonical, phase: "cleaning_failed", reason: "mask_not_configured", status: "failed" });
         outcomeEvent(context, { kind: context.kind, url: canonical, event: { ok: false, changed: false, status: "failed", reason: "mask_not_configured" } });
       }
       return;
     }
+    if (context) phaseEventFor(context, { kind: context.kind, url: canonical, phase: "fetching" });
     event.preventDefault();
     event.stopImmediatePropagation();
     const href = anchor.href;
@@ -338,6 +384,7 @@
         setTimeout(() => URL.revokeObjectURL(blobUrl), 10_000);
       } catch (error) {
         if (context) {
+          phaseEventFor(context, { kind: context.kind, url: canonical, phase: "cleaning_failed", reason: "error", status: "failed" });
           outcomeEvent(context, { kind: context.kind, url: canonical, event: { ok: false, changed: false, status: "failed", reason: "error", error: String(error?.message || error) } });
           consumeContext(context);
         } else {

@@ -42,6 +42,85 @@
     });
   } catch (_) {}
 
+  // DL-12: the interceptor also dispatches phase signals
+  // (TOBY_FLOW_WATERMARK_PHASE: fetching / cleaning / saving /
+  // original / cleaning_failed) while a download runs. They are
+  // recorded per operation id with the same attribution discipline as
+  // outcomes: an event carrying an operation id belongs to exactly
+  // that download; an event WITHOUT one may be claimed only by the one
+  // download currently awaiting an outcome, and only when the kind
+  // matches. Signals from another concurrent download are stored under
+  // THEIR operation id and never move this download's phases.
+  const WATERMARK_PHASE_NAMES = new Set(["fetching", "cleaning", "saving", "original", "cleaning_failed"]);
+  const watermarkPhaseSignals = new Map();
+  function recordWatermarkPhase(detail) {
+    const phase = typeof detail.phase === "string" ? detail.phase : null;
+    if (!phase || !WATERMARK_PHASE_NAMES.has(phase)) return;
+    const at = Date.now();
+    let operationId = typeof detail.operationId === "string" && detail.operationId ? detail.operationId : null;
+    if (!operationId && pendingWatermarkClaim && at >= pendingWatermarkClaim.armedAt &&
+        (!detail.kind || !pendingWatermarkClaim.kind || detail.kind === pendingWatermarkClaim.kind)) {
+      operationId = pendingWatermarkClaim.operationId;
+    }
+    if (!operationId) return;
+    let entry = watermarkPhaseSignals.get(operationId);
+    if (!entry) {
+      entry = { at, phases: [] };
+      watermarkPhaseSignals.set(operationId, entry);
+    }
+    entry.at = at;
+    if (entry.phases.at(-1) !== phase) entry.phases.push(phase);
+    for (const [key, value] of watermarkPhaseSignals) {
+      if (at - value.at > 5 * 60_000 || watermarkPhaseSignals.size > 20) watermarkPhaseSignals.delete(key);
+    }
+  }
+  try {
+    root.addEventListener?.("TOBY_FLOW_WATERMARK_PHASE", event => {
+      const detail = event?.detail;
+      if (!detail || typeof detail !== "object") return;
+      recordWatermarkPhase(detail);
+    });
+  } catch (_) {}
+
+  // DL-12: build the HONEST phase sequence for one armed download from
+  // its attributed outcome (DL-03) plus its own phase signals:
+  //  - cleaned:  fetching → cleaning → saving
+  //  - original: fetching → original → saving — the original/saving
+  //    sequence replaces cleaning entirely; a detection attempt may
+  //    have signalled a cleaning stage, but the saved bytes were not
+  //    cleaned, so no cleaning phase is ever recorded for them.
+  //  - failed:   fetching → cleaning → cleaning_failed — a terminal
+  //    phase consistent with the recorded outcome, never a stuck
+  //    "cleaning" state (when the failure happened before cleaning
+  //    could start, e.g. no mask, the cleaning stage is omitted).
+  //  - unknown / no outcome yet: only the stages this download's own
+  //    signals actually proved are shown; no terminal phase is
+  //    invented.
+  function downloadPhaseSequence(outcome, attribution) {
+    if (!outcome?.armed) return [];
+    const signals = outcome.operationId ? (watermarkPhaseSignals.get(outcome.operationId)?.phases || []) : [];
+    const status = attribution?.status || null;
+    const phases = [];
+    const push = phase => { if (!phases.includes(phase)) phases.push(phase); };
+    push("fetching");
+    if (status === "cleaned") {
+      push("cleaning");
+      push("saving");
+    } else if (status === "original") {
+      push("original");
+      push("saving");
+    } else if (status === "failed") {
+      if (!signals.length || signals.includes("cleaning")) push("cleaning");
+      push("cleaning_failed");
+    } else {
+      if (signals.includes("cleaning")) push("cleaning");
+      if (signals.includes("cleaning_failed")) push("cleaning_failed");
+      else if (signals.includes("original")) push("original");
+      else if (signals.includes("saving")) push("saving");
+    }
+    return phases;
+  }
+
   // Structural gate for a locally supplied mask: the value must be base64
   // (optionally a data: URL) decoding to a PNG whose IHDR carries an alpha
   // channel (color type 4/6) or that declares a tRNS chunk before IDAT.
@@ -545,6 +624,9 @@
         status: "original",
         outcomeReason: "direct_bytes_fallback",
         reason: arm.reason,
+        // DL-12: the fallback itself fetched and saved original bytes —
+        // its honest phase sequence is fetching → original → saving.
+        phases: ["fetching", "original", "saving"],
       },
     };
   }
@@ -982,6 +1064,7 @@
         throw menuFailure;
       }
       const watermarkAttribution = await settleWatermarkOutcome(watermarkOutcome, helpers);
+      const downloadPhases = downloadPhaseSequence(watermarkOutcome, watermarkAttribution);
       return {
         title,
         kind: scene ? "scene" : tile.querySelector("flow-video-tile") ? "video" : "image",
@@ -995,6 +1078,7 @@
           ...(watermarkOutcome?.operationId ? { operationId: watermarkOutcome.operationId } : {}),
           ...(watermarkAttribution.status ? { status: watermarkAttribution.status } : {}),
           ...(watermarkAttribution.outcomeReason ? { outcomeReason: watermarkAttribution.outcomeReason } : {}),
+          ...(downloadPhases.length ? { phases: downloadPhases } : {}),
         },
       };
     })();
@@ -1648,6 +1732,7 @@
     DOWNLOAD_TILE_SWEEP_COOLDOWN_MS,
     DOWNLOAD_TILE_RECOVERY_TIMEOUT_MS,
     resolveWatermarkArm,
+    downloadPhaseSequence,
     watermarkMaskHasAlpha,
     sniffMediaBytes,
     directBytesTargetUrl,
