@@ -2,7 +2,7 @@
 
 The Chrome extension owns Flow operations and its queue. A separate local stdio MCP process remains available for AI clients. The VPS service handles account and device verification only. Unsupported extension inputs fail before dispatch. See [ARCHITECTURE.md](ARCHITECTURE.md) and [NATIVE-MIGRATION-RUNBOOK.md](NATIVE-MIGRATION-RUNBOOK.md) for operation coverage and limitations.
 
-The side panel follows the Toby-style layout with local Create, Workflows, Prompts, Library, Tasks, History, Status, Logs, and Settings tabs. Prompts and local history use `chrome.storage.local`; Flow actions still enter the shared extension queue and execute through native DOM operations in the selected Flow tab.
+The side panel uses the Flow MCP Native interface, with Create, Prompts, Tasks, Photos and Flow Images, History, Queue, and Settings. Prompts and local history use `chrome.storage.local`; Flow actions still enter the shared extension queue and execute through native DOM operations in the selected Flow tab.
 
 Windows: double-click **Start Flow.cmd** to build and start Studio in the background. Double-click **Stop Flow.cmd** to stop that Studio and release port **18899** (or `FLOW_MCP_PORT`). Logs are saved under `%LOCALAPPDATA%\FlowMCP\port-18899`. If another launcher already owns the port, close it first so both shortcuts can manage the same process.
 

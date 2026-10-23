@@ -3,8 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Toby Flow</title>
-  <!-- Stylesheets matching TobyFlow -->
+  <title>Flow MCP</title>
   <link rel="stylesheet" href="sidebar.css">
   <link rel="stylesheet" href="sidebar-light.css">
   <link rel="stylesheet" href="tobyflow-ui.css">
@@ -34,11 +33,9 @@
       <header class="tobyflow-header">
         <div class="tobyflow-header-brand">
           <div class="tobyflow-header-logo">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 2L14.2 9.8L22 12L14.2 14.2L12 22L9.8 14.2L2 12L9.8 9.8L12 2Z"/>
-            </svg>
+            <img src="../icons/icon-48.png" alt="" />
           </div>
-          <span class="tobyflow-header-title">Toby Flow</span>
+          <span class="tobyflow-header-title">Flow MCP</span>
           <span class="tobyflow-user-plan-badge" id="userPlanBadge" data-plan="free" data-i18n-title="settings.planBadgeTooltip" title="Plan &amp; quota">Free</span>
         </div>
         <div class="tobyflow-header-actions">
@@ -130,7 +127,7 @@
       <!-- ============================================== -->
       <!-- NAVIGATION TABS (.tobyflow-tabs-nav)          -->
       <!-- ============================================== -->
-      <nav class="tobyflow-tabs tobyflow-tabs-nav" role="tablist" aria-label="Toby Flow Navigation">
+      <nav class="tobyflow-tabs tobyflow-tabs-nav" role="tablist" aria-label="Flow MCP Navigation">
         <!-- 1. Gen (Active) -->
         <button class="tobyflow-tab tab-btn active" data-tab="tab-gen" id="navGen" data-i18n-title="tab.gen" role="tab" aria-selected="true" tabindex="0">
           <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor">
@@ -161,13 +158,7 @@
             <path fill-rule="evenodd" d="M6.974 3.95a3.065 3.065 0 0 1 3.461-2.608l5.975.84a3.065 3.065 0 0 1 2.608 3.462l-.84 5.975a3.064 3.064 0 0 1-3.46 2.607l-.938-.132.03.206a3.065 3.065 0 0 1-2.608 3.462l-5.975.839a3.065 3.065 0 0 1-3.461-2.607l-.84-5.975a3.065 3.065 0 0 1 2.608-3.462l3.134-.441zm-.517 9.528a1.337 1.337 0 0 0-1.871.263l-1.513 2.007.009.06a1.736 1.736 0 0 0 1.96 1.477l5.45-.767zm3.237-6.443-5.974.838a1.736 1.736 0 0 0-1.477 1.96l.568 4.051.713-.944a2.666 2.666 0 0 1 3.733-.524l4.72 3.557a1.73 1.73 0 0 0 .516-1.487l-.84-5.975a1.735 1.735 0 0 0-1.959-1.476m.557-4.375a1.735 1.735 0 0 0-1.96 1.476l-.252 1.787 1.47-.206a3.066 3.066 0 0 1 3.462 2.61l.617 4.397 1.314.186a1.735 1.735 0 0 0 1.96-1.477l.84-5.975a1.736 1.736 0 0 0-1.478-1.96z" clip-rule="evenodd"></path>
           </svg>
         </button>
-        <!-- 6. Tools -->
-        <button class="tobyflow-tab tab-btn tobyflow-tab--icon-only" data-tab="tab-tools" id="navTools" data-i18n-tooltip="tab.tools" aria-label="Tools" role="tab" aria-selected="false" tabindex="-1">
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
-            <path fill="currentColor" fill-rule="evenodd" d="M5.933 2.754c1.29-2.339 4.661-2.339 5.951 0l2.19 3.97.002.001.718 1.308Q15.144 8 15.5 8a7.5 7.5 0 1 1-7.483 7.996H4.4c-2.577 0-4.224-2.762-2.976-5.03l4.51-8.21zm10.473 8.211c.504.916.535 1.913.225 2.776l-.025.064A3.37 3.37 0 0 1 13.43 16h-3.406a5.5 5.5 0 1 0 5.86-5.986zM10.134 3.72c-.53-.96-1.92-.96-2.45 0l-4.508 8.208a1.396 1.396 0 0 0 1.223 2.068h9.03a1.395 1.395 0 0 0 1.307-1.887l-.083-.177-1.28-2.33-.003-.007-1.047-1.906z" clip-rule="evenodd"></path>
-          </svg>
-        </button>
-        <!-- 7. History -->
+        <!-- 6. History -->
         <button class="tobyflow-tab tab-btn tobyflow-tab--icon-only" data-tab="tab-history" id="navHistory" data-i18n-tooltip="tab.history" aria-label="History" role="tab" aria-selected="false" tabindex="-1">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
             <g fill="currentColor">
@@ -176,7 +167,7 @@
             </g>
           </svg>
         </button>
-        <!-- 8. Queue & Logs -->
+        <!-- 7. Queue & Logs -->
         <button class="tobyflow-tab tab-btn tobyflow-tab--icon-only" data-tab="tab-logs" id="navLogs" data-i18n-tooltip="logs.queue" aria-label="Queue" role="tab" aria-selected="false" tabindex="-1">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="5" cy="6" r="1" />
@@ -810,6 +801,47 @@
             </div>
             <p id="flowPhotosEmpty" class="flow-photos-empty" style="color:var(--text-dim);text-align:center;padding:20px;">Chưa quét media Flow.</p>
             <button type="button" class="btn btn-secondary flow-photos-more" id="btnMorePhotos" hidden>Xem thêm</button>
+            <div id="libraryPage" class="photos-library-actions">
+              <details class="section-card" id="flowLibraryTools" style="margin-top:14px;">
+                <summary class="section-title" style="cursor:pointer" data-i18n="sidebar.libraryToolsTitle">Quản lý dự án &amp; Thư viện Flow</summary>
+                <div class="form-group" style="margin-top:10px;">
+                  <label class="form-label" for="flowProjectSelect">Dự án</label>
+                  <select class="form-select" id="flowProjectSelect"><option value="">Tải danh sách dự án</option></select>
+                  <div class="grid-2" style="margin-top:8px">
+                    <button type="button" class="btn btn-secondary" id="btnRefreshProjects">Làm mới dự án</button>
+                    <button type="button" class="btn btn-secondary" id="btnOpenProject">Mở dự án</button>
+                  </div>
+                  <button type="button" class="btn btn-primary" id="btnCreateProject" style="margin-top:8px">Tạo dự án mới</button>
+                </div>
+                <div class="form-group" style="margin-top:12px;">
+                  <label class="form-label" for="flowAssetSelect">Tài sản (Media)</label>
+                  <select class="form-select" id="flowAssetSelect"><option value="">Tải danh sách tài sản</option></select>
+                  <div class="grid-2" style="margin-top:8px">
+                    <button type="button" class="btn btn-secondary" id="btnRefreshAssets">Làm mới tài sản</button>
+                    <button type="button" class="btn btn-secondary" id="btnDownloadAsset">Tải xuống</button>
+                  </div>
+                  <div class="grid-2" style="margin-top:8px">
+                    <input type="text" class="form-input" id="flowAssetNewName" placeholder="Tên mới">
+                    <button type="button" class="btn btn-secondary" id="btnRenameAsset">Đổi tên</button>
+                  </div>
+                  <button type="button" class="btn btn-secondary" id="btnTrashAsset" style="margin-top:8px">Chuyển vào thùng rác</button>
+                </div>
+                <div class="form-group" style="margin-top:12px;">
+                  <label class="form-label" for="flowLibraryCharacterSelect">Nhân vật</label>
+                  <select class="form-select" id="flowLibraryCharacterSelect"><option value="">Tải danh sách nhân vật</option></select>
+                  <button type="button" class="btn btn-secondary" id="btnRefreshLibraryCharacters" style="margin-top:8px">Làm mới nhân vật</button>
+                  <input type="text" class="form-input" id="flowCharacterNewName" placeholder="Tên mới" style="margin-top:8px">
+                  <textarea class="form-textarea" id="flowCharacterChange" placeholder="Mô tả thay đổi" style="margin-top:8px"></textarea>
+                  <button type="button" class="btn btn-secondary" id="btnEditCharacter" style="margin-top:8px">Sửa nhân vật</button>
+                </div>
+                <div class="form-group" style="margin-top:12px;">
+                  <label class="form-label" for="flowUploadFile">Tải media lên Flow</label>
+                  <input type="file" class="form-input" id="flowUploadFile" accept="image/*,video/*">
+                  <button type="button" class="btn btn-secondary" id="btnUploadMedia" style="margin-top:8px">Tải tệp lên</button>
+                </div>
+                <pre id="flowLibraryResult" style="white-space:pre-wrap;font-size:11px;color:var(--text-muted);margin:8px 0 0"></pre>
+              </details>
+            </div>
           </div>
 
           <!-- Subtab: Search -->
@@ -832,122 +864,7 @@
         </div>
 
         <!-- ========================================== -->
-        <!-- TAB 5: TOOLS                               -->
-        <!-- ========================================== -->
-        <div id="tab-tools" class="tab-pane" role="tabpanel">
-          <div class="tools-grid">
-            <button class="tools-item" id="autoCapcutToolbarBtn" type="button">
-              <div class="tools-item-icon tools-item-icon--cyan">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M7 3l2 4m4-4 2 4m4-4 2 4" /></svg>
-              </div>
-              <span class="tools-item-label" data-i18n="autoCapcut.title">Auto CapCut Builder</span>
-              <span class="tools-item-desc" data-i18n="autoCapcut.description">Căn chỉnh media và kịch bản tạo project CapCut</span>
-            </button>
-            <button class="tools-item" id="watermarkToolbarBtn" type="button">
-              <div class="tools-item-icon">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L14.2 9.8L22 12L14.2 14.2L12 22L9.8 14.2L2 12L9.8 9.8L12 2Z"/></svg>
-              </div>
-              <span class="tools-item-label" data-i18n="tools.watermark">Remove Watermark</span>
-              <span class="tools-item-desc" data-i18n="tools.watermarkDesc">Xóa logo Gemini / Flow khỏi ảnh</span>
-            </button>
-            <button class="tools-item" id="anglesToolbarBtn" type="button">
-              <div class="tools-item-icon">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" /><line x1="22" y1="12" x2="18" y2="12" /><line x1="6" y1="12" x2="2" y2="12" /><line x1="12" y1="6" x2="12" y2="2" /><line x1="12" y1="22" x2="12" y2="18" /></svg>
-              </div>
-              <span class="tools-item-label" data-i18n="tools.angles">Angles</span>
-              <span class="tools-item-desc" data-i18n="tools.anglesDesc">Tạo ảnh đa góc nhìn (multi-angles)</span>
-            </button>
-            <button class="tools-item" id="effectsToolbarBtn" type="button">
-              <div class="tools-item-icon tools-item-icon--cyan">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3" /><path d="M12 2v4m0 12v4M2 12h4m12 0h4" /></svg>
-              </div>
-              <span class="tools-item-label" data-i18n="tools.effects">Effects</span>
-              <span class="tools-item-desc" data-i18n="tools.effectsDesc">Áp dụng hiệu ứng biến đổi hình ảnh</span>
-            </button>
-            <button class="tools-item" id="aiAgentToolbarBtn" type="button">
-              <div class="tools-item-icon tools-item-icon--purple">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2" /><circle cx="8.5" cy="16" r="1.1" fill="currentColor" stroke="none"></circle><circle cx="15.5" cy="16" r="1.1" fill="currentColor" stroke="none"></circle><path d="M12 7V4M9 4h6"></path></svg>
-              </div>
-              <span class="tools-item-label" data-i18n="tools.aiAgent">AI Agent (MCP)</span>
-              <span class="tools-item-desc" data-i18n="tools.aiAgentDesc">Kết nối Claude/Cursor MCP tự động hóa Flow</span>
-            </button>
-            <button class="tools-item" id="telegramToolbarBtn" type="button">
-              <div class="tools-item-icon tools-item-icon--blue">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z" /></svg>
-              </div>
-              <span class="tools-item-label" data-i18n="tools.telegram">Telegram Link</span>
-              <span class="tools-item-desc" data-i18n="tools.telegramDesc">Điều khiển từ xa qua Telegram Bot</span>
-            </button>
-          </div>
-
-          <!-- Character Creator Form (in tools tab) -->
-          <div class="section-card" id="formCharacter" style="margin-top:14px;">
-            <div class="section-title">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="7" r="4"></circle><path d="M5.5 21v-2a6.5 6.5 0 0 1 13 0v2"></path></svg>
-              <span>Tạo nhân vật Flow</span>
-            </div>
-            <div class="form-group">
-              <label class="form-label" id="lblCharName">Tên nhân vật:</label>
-              <input type="text" class="form-input" id="inputCharName" placeholder="Ví dụ: Cô gái áo dài, John Doe..." />
-            </div>
-            <div class="form-group">
-              <label class="form-label" id="lblCharDesc">Mô tả ngoại hình:</label>
-              <textarea class="form-textarea" id="inputCharDesc" placeholder="Mô tả khuôn mặt, trang phục, độ tuổi..."></textarea>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Ảnh chân dung tham chiếu (Tùy chọn):</label>
-              <input type="file" id="inputCharFile" accept="image/*" class="form-input" style="padding: 6px;" />
-            </div>
-            <button class="btn btn-primary" id="btnSubmitCharacter" type="button">
-              <span id="txtBtnSubmitChar">Tạo nhân vật Flow</span>
-            </button>
-          </div>
-
-          <!-- Flow Library Operations Details -->
-          <details class="section-card" id="flowLibraryTools" style="margin-top:14px;">
-            <summary class="section-title" style="cursor:pointer" data-i18n="sidebar.libraryToolsTitle">Quản lý dự án & Thư viện Flow</summary>
-            <div class="form-group" style="margin-top:10px;">
-              <label class="form-label" for="flowProjectSelect">Dự án</label>
-              <select class="form-select" id="flowProjectSelect"><option value="">Tải danh sách dự án</option></select>
-              <div class="grid-2" style="margin-top:8px">
-                <button type="button" class="btn btn-secondary" id="btnRefreshProjects">Làm mới dự án</button>
-                <button type="button" class="btn btn-secondary" id="btnOpenProject">Mở dự án</button>
-              </div>
-              <button type="button" class="btn btn-primary" id="btnCreateProject" style="margin-top:8px">Tạo dự án mới</button>
-            </div>
-            <div class="form-group" style="margin-top:12px;">
-              <label class="form-label" for="flowAssetSelect">Tài sản (Media)</label>
-              <select class="form-select" id="flowAssetSelect"><option value="">Tải danh sách tài sản</option></select>
-              <div class="grid-2" style="margin-top:8px">
-                <button type="button" class="btn btn-secondary" id="btnRefreshAssets">Làm mới tài sản</button>
-                <button type="button" class="btn btn-secondary" id="btnDownloadAsset">Tải xuống</button>
-              </div>
-              <div class="grid-2" style="margin-top:8px">
-                <input type="text" class="form-input" id="flowAssetNewName" placeholder="Tên mới">
-                <button type="button" class="btn btn-secondary" id="btnRenameAsset">Đổi tên</button>
-              </div>
-              <button type="button" class="btn btn-secondary" id="btnTrashAsset" style="margin-top:8px">Chuyển vào thùng rác</button>
-            </div>
-            <div class="form-group" style="margin-top:12px;">
-              <label class="form-label" for="flowLibraryCharacterSelect">Nhân vật</label>
-              <select class="form-select" id="flowLibraryCharacterSelect"><option value="">Tải danh sách nhân vật</option></select>
-              <button type="button" class="btn btn-secondary" id="btnRefreshLibraryCharacters" style="margin-top:8px">Làm mới nhân vật</button>
-              <input type="text" class="form-input" id="flowCharacterNewName" placeholder="Tên mới" style="margin-top:8px">
-              <textarea class="form-textarea" id="flowCharacterChange" placeholder="Mô tả thay đổi" style="margin-top:8px"></textarea>
-              <button type="button" class="btn btn-secondary" id="btnEditCharacter" style="margin-top:8px">Sửa nhân vật</button>
-            </div>
-            <div class="form-group" style="margin-top:12px;">
-              <label class="form-label" for="flowUploadFile">Tải media lên Flow</label>
-              <input type="file" class="form-input" id="flowUploadFile" accept="image/*,video/*">
-              <button type="button" class="btn btn-secondary" id="btnUploadMedia" style="margin-top:8px">Tải tệp lên</button>
-            </div>
-            <pre id="flowLibraryResult" style="white-space:pre-wrap;font-size:11px;color:var(--text-muted);margin:8px 0 0"></pre>
-          </details>
-          <div id="libraryPage" class="hidden"></div>
-        </div>
-
-        <!-- ========================================== -->
-        <!-- TAB 6: HISTORY                             -->
+        <!-- TAB 5: HISTORY                             -->
         <!-- ========================================== -->
         <div id="tab-history" class="tab-pane" role="tabpanel">
           <div class="flow-history-toolbar" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
@@ -962,7 +879,7 @@
         </div>
 
         <!-- ========================================== -->
-        <!-- TAB 7: QUEUE & LOGS                        -->
+        <!-- TAB 6: QUEUE & LOGS                        -->
         <!-- ========================================== -->
         <div id="tab-logs" class="tab-pane" role="tabpanel">
           <div class="tobyflow-queue-monitor" id="queueMonitorContent">
@@ -1044,7 +961,7 @@
       <div class="ref-picker-overlay hidden" id="settingsPopup">
         <section class="ref-picker-dialog" style="max-width:480px;height:auto;max-height:85vh;" role="dialog" aria-modal="true">
           <header class="ref-picker-header">
-            <span>Cài đặt Toby Flow</span>
+            <span>Cài đặt Flow MCP</span>
             <button type="button" class="ref-picker-close" id="closeSettingsPopupBtn" aria-label="Đóng">×</button>
           </header>
           <div class="ref-picker-content" style="padding:16px;display:flex;flex-direction:column;gap:12px;">

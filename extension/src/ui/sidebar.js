@@ -845,7 +845,7 @@
     updateVoiceUiState(event.target.value);
   });
 
-  // Toby-style views with roving focus for keyboard users.
+  // Tab views with roving focus for keyboard users.
   const tabs = [...document.querySelectorAll(".tobyflow-tab")];
   const activateTab = tab => {
       if (!tab) return;
@@ -1716,34 +1716,6 @@
     }
   };
 
-  // SUBMIT TẠO NHÂN VẬT (CREATE CHARACTER)
-  document.querySelector("#btnSubmitCharacter").onclick = async () => {
-    const name = document.querySelector("#inputCharName").value.trim();
-    if (!name) {
-      setFeedback("Vui lòng nhập tên nhân vật!", false);
-      return;
-    }
-    const description = document.querySelector("#inputCharDesc").value.trim();
-
-    setFeedback(t("sidebar.creatingChar"), true);
-    addLog("flow.queue.add", `Tạo nhân vật: ${name}`, true);
-
-    try {
-      const res = await chrome.runtime.sendMessage({
-        type: "flow-queue:add",
-        job: { operation: "flow.character.create", payload: { name, describe: description }, label: `Nhân vật: ${name}` }
-      });
-      if (!res?.ok) throw new Error(res?.error?.message || "Không thể thêm tác vụ tạo nhân vật vào hàng đợi");
-      rememberSubmittedQueueJob(res);
-      setFeedback(t("sidebar.workflowQueued"), true);
-      document.querySelector("#inputCharName").value = "";
-      document.querySelector("#inputCharDesc").value = "";
-    } catch (err) {
-      setFeedback(err.message, false);
-      addLog("flow.character.create.error", err.message, false);
-    }
-  };
-
   document.querySelector("#btnRefreshProjects").onclick = event => runLibraryAction(event.currentTarget, async () => {
     const result = await dispatchFlowOperation("flow.projects.list");
     flowProjects = Array.isArray(result) ? result : (result?.projects || []);
@@ -2205,10 +2177,10 @@
 
     // Tip coffee & changelog
     document.querySelector("#tipCoffeeBtn")?.addEventListener("click", () => {
-      setFeedback("☕ Cảm ơn bạn đã đồng hành và ủng hộ Toby Flow Studio!", true);
+      setFeedback("☕ Cảm ơn bạn đã đồng hành và ủng hộ Flow MCP!", true);
     });
     document.querySelector("#changelogBtn")?.addEventListener("click", () => {
-      setFeedback("Toby Flow Studio v1.3.103 · Hỗ trợ tạo ảnh, tạo video, tham chiếu, frames & đa tác vụ", true);
+      setFeedback("Flow MCP · Tạo ảnh, video, tham chiếu, frames và đa tác vụ", true);
     });
 
     // Extension reload button
@@ -2259,7 +2231,7 @@
   }
 
   // 5. Gen Tab Controls
-  function initTobyGenControls() {
+  function initGenerationControls() {
     const promptsArea = document.querySelector("#promptsArea");
     const multiPromptCheck = document.querySelector("#multiPromptCheck");
     const promptCharCount = document.querySelector("#promptCharCount");
@@ -2770,7 +2742,7 @@
   const libraryTools = document.querySelector("#flowLibraryTools");
   const libraryPage = document.querySelector("#libraryPage");
   if (libraryTools && libraryPage) {
-    libraryTools.open = true;
+    libraryTools.open = false;
     libraryPage.append(libraryTools);
   }
   if (queueContainer && window.FlowQueuePanel) flowQueuePanel = new window.FlowQueuePanel(queueContainer).mount();
@@ -2779,7 +2751,7 @@
     initSettingsAndHeader();
     initScreenCapture();
     initSubtabs();
-    initTobyGenControls();
+    initGenerationControls();
     initStyleDropdown();
     initCharacterAndVoiceModals();
     await loadFlowModelCapabilities();
