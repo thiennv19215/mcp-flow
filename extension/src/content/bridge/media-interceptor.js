@@ -13,6 +13,10 @@
   if (window.__flowMcpMediaInterceptor?.version >= 1) return;
 
   const nativeFetch = window.fetch?.bind(window);
+  // The exact function being wrapped (pre-bind), so the wrapper below can
+  // identify it: the correlation observer loads before this script and
+  // verifies its fetch hook by identity.
+  const wrappedFetch = typeof window.fetch === "function" ? window.fetch : null;
   const state = {
     version: 1,
     enabled: false,
@@ -81,10 +85,16 @@
   }
 
   if (nativeFetch) {
-    window.fetch = async function flowMcpWatermarkFetch(input, init) {
+    const watermarkFetch = async function flowMcpWatermarkFetch(input, init) {
       const response = await nativeFetch(input, init);
       return cleanResponse(response, { input, init, kind: state.armed?.kind });
     };
+    // Tag the wrapper with the function it wrapped. The correlation
+    // observer's identity check would otherwise report its fetch hook as
+    // dead forever (this script loads after it), which blocks every strict
+    // generation from arming on a fresh page load.
+    watermarkFetch.__flowMcpWrappedFetch = wrappedFetch;
+    window.fetch = watermarkFetch;
   }
 
   document.addEventListener("click", event => {

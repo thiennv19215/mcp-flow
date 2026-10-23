@@ -1692,6 +1692,18 @@
       }
       candidates.push(attempt);
     }
+    if (candidates.length > 1) {
+      // One dispatched request matches several live attempts and cannot be
+      // attributed safely. Surface it as interference — the same treatment
+      // as the retired-overlap case above — instead of letting every
+      // candidate expire as if nothing was sent.
+      for (const attempt of candidates) {
+        attempt.interfered = true;
+        recordRequestDiagnostic(attempt, call, call.transport, call.requestPath, ["attempt_interfered"]);
+        emit(attempt, "acceptance_unknown", { reason: "ambiguous_live_request" });
+      }
+      return null;
+    }
     return candidates.length === 1 ? candidates[0] : null;
   };
   const matchGenerationCall = (calls) => {
@@ -2021,7 +2033,7 @@
       expectedQuantity,
       promptFingerprint: d.promptFingerprint,
       xhrHookActive: XMLHttpRequest.prototype.send === patchedSend,
-      fetchHookActive: !!nativeFetch && window.fetch === patchedFetch,
+      fetchHookActive: fetchHookActiveNow(),
     });
     const conflict =
       retired.saturated ||
@@ -2037,7 +2049,7 @@
       xhrHookActive:
         XMLHttpRequest.prototype.open === patchedOpen &&
         XMLHttpRequest.prototype.send === patchedSend,
-      fetchHookActive: !!nativeFetch && window.fetch === patchedFetch,
+      fetchHookActive: fetchHookActiveNow(),
       reason: conflict ? "ambiguous_retired_request" : null,
     });
   };
@@ -2270,6 +2282,17 @@
         .catch(() => {});
       return result;
     };
+  // The fetch hook is intact while window.fetch is this observer's patched
+  // function — or the media interceptor's wrapper around it. The
+  // interceptor loads after this observer (manifest order) and wraps fetch
+  // to post-process media downloads; it tags its wrapper with the exact
+  // function it wrapped (__flowMcpWrappedFetch), and calls still flow
+  // through this observer's hook, so the hook must report active.
+  function fetchHookActiveNow() {
+    if (!nativeFetch) return false;
+    if (window.fetch === patchedFetch) return true;
+    return typeof window.fetch === "function" && window.fetch.__flowMcpWrappedFetch === patchedFetch;
+  }
   let disposed = false;
   const dispose = () => {
     disposed = true;
@@ -2306,7 +2329,7 @@
     const xhrHookActive =
       XMLHttpRequest.prototype.open === patchedOpen &&
       XMLHttpRequest.prototype.send === patchedSend;
-    const fetchHookActive = !!nativeFetch && window.fetch === patchedFetch;
+    const fetchHookActive = fetchHookActiveNow();
     pruneRequestDiagnostics();
     const requestDiagnostics = requestDiagnosticStore.events.map((entry) => ({
       observedAt: entry.observedAt,

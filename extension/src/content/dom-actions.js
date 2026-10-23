@@ -46,6 +46,26 @@
         const controller = new AbortController();
         if (requestId) {
           for (const [id, expiresAt] of cancelledFlowCommands) if (expiresAt <= Date.now()) cancelledFlowCommands.delete(id);
+          // The background issues one requestId per command (caller-supplied
+          // or a random UUID) and cancels by that id. A second execute with
+          // an already-active id is a duplicate: overwriting the registry
+          // entry would orphan the first command's AbortController and make
+          // it uncancellable, so reject the duplicate and leave the first
+          // command's registration untouched.
+          if (activeFlowCommands.has(requestId)) {
+            safeRespond({
+              ok: false,
+              error: {
+                code: "FLOW_COMMAND_ALREADY_ACTIVE",
+                message: `A Flow command with request id "${requestId}" is already running; the duplicate was not started.`,
+                retryable: true,
+                outcome_unknown: false,
+                noRetry: false,
+                noReplay: false,
+              },
+            });
+            return;
+          }
           activeFlowCommands.set(requestId, controller);
           if (cancelledFlowCommands.has(requestId)) {
             cancelledFlowCommands.delete(requestId);

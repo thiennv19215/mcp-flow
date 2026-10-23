@@ -59,7 +59,13 @@
         const detail = event?.detail;
         if (String(detail?.projectId || "").toLowerCase() !== projectId || !Array.isArray(detail?.entries)) return;
         const matches = detail.entries.filter(entry => entry?.asb === asb && entry?.mediaType === expectedType && uuidPattern.test(String(entry?.mediaUuid || "")));
-        finish(matches.length === 1 ? String(matches[0].mediaUuid).toLowerCase() : undefined);
+        // A publish that does not contain this ASB yet is not proof it will
+        // never arrive: right after an upload the observer republishes as
+        // identities hydrate. Only settle early on an exact match (or on
+        // ambiguity, which can never resolve to one UUID); otherwise keep
+        // waiting for a later publish until the window expires.
+        if (matches.length === 1) finish(String(matches[0].mediaUuid).toLowerCase());
+        else if (matches.length > 1) finish(undefined);
       };
       const timer = setTimeout(() => finish(undefined), 500);
       window.addEventListener(identitiesEvent, onIdentities);
@@ -1839,6 +1845,25 @@
       }
     }
   }
+  // Content signature of a start/end frame slot, mirroring the native frame
+  // picker's confirmation evidence: the slot opener's label/text plus the
+  // media and named descendants inside the slot container. Volatile state
+  // (aria-expanded flips when the picker opens/closes) is deliberately
+  // excluded so picker visibility alone never looks like a slot change.
+  function frameSlotSignature(slot) {
+    const button = slot === "start" ? flowButton("Start") : slot === "end" ? flowButton("End") : null;
+    if (!button) return "missing";
+    const container = button.parentElement?.parentElement || button.parentElement || button;
+    const media = [...(container.querySelectorAll?.("img,video") || [])];
+    const labels = [...(container.querySelectorAll?.("[aria-label],[title]") || [])];
+    return JSON.stringify({
+      label: button.getAttribute?.("aria-label") || null,
+      title: button.getAttribute?.("title") || null,
+      text: String(button.innerText || button.textContent || "").replace(/\s+/g, " ").trim(),
+      media: media.map(el => el.currentSrc || el.getAttribute?.("src") || el.getAttribute?.("alt") || ""),
+      names: labels.map(el => el.getAttribute?.("aria-label") || el.getAttribute?.("title") || ""),
+    });
+  }
   async function attach(value, slot, config = {}) {
     const ref = parse(value);
     const deadline = config.deadline || makeDeadline(config.command, 45_000, 10_000);
@@ -2017,6 +2042,7 @@
         throw flowError("FLOW_ASSET_ID_MISMATCH", `Flow's reference picker did not prove that "${ref.name}" matches the completed upload ID. No generation was submitted.`, false, false);
       }
       const before = chips();
+      const slotSignatureBefore = slot ? frameSlotSignature(slot) : null;
       // A character thumbnail can be on flow-content.google while its chip is on
       // /asb/. Those are different representations, not interchangeable IDs.
       // Only reuse a chip whose selection provenance this driver recorded.
@@ -2061,9 +2087,16 @@
           return result;
         }
         if (slot && !picker()) {
-          const result = { name: ref.name, kind, confirmed: true, slot };
-          updateReferenceActionDiagnostics({ phase: "completed", step: "frame slot confirmed", lastResult: { name: result.name, slot } });
-          return result;
+          // The picker closing is not proof of a frame selection: a backdrop
+          // click or a re-render can dismiss it without choosing anything.
+          // Confirm only when the slot's content signature actually changed
+          // (the native frame picker requires the same evidence); otherwise
+          // keep waiting and let the loop fail as unconfirmed.
+          if (frameSlotSignature(slot) !== slotSignatureBefore) {
+            const result = { name: ref.name, kind, confirmed: true, slot };
+            updateReferenceActionDiagnostics({ phase: "completed", step: "frame slot confirmed", lastResult: { name: result.name, slot } });
+            return result;
+          }
         }
         const add = findPickerAddToPromptButton();
         if (!confirmedClick && add && !isFlowActionDisabled(add) && picker()) {

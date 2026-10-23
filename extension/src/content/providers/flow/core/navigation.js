@@ -29,6 +29,11 @@
 
   const ALL_MEDIA_ICONS = ["dashboard", "perm_media", "movie", "video_library", "photo_library", "grid_view", "auto_awesome_motion", "folder", "collections", "video_settings"];
   let projectNavigationPending = null;
+  // The project this page session was last verified to be operating in.
+  // Operations bind to a project when they start; if the tab later leaves
+  // that project mid-operation (user navigation, a Flow redirect), recovery
+  // must return to THIS project — never to an arbitrary one.
+  let lastVerifiedProjectId = null;
 
   function configuredNavigationItem(label) {
     const key = normalizeNavigationLabel(label) === "all media" ? "allMediaButton" :
@@ -576,7 +581,7 @@
         }
       }
 
-      await ensureFlowProjectEditor(options);
+      await ensureFlowProjectEditor({ ...options, expectedProjectId: target.projectId });
     }
   }
 
@@ -589,6 +594,7 @@
 
     // 1. In project root editor
     if (target?.isProjectEditor) {
+      if (target.projectId) lastVerifiedProjectId = target.projectId;
       return { success: true, isProjectEditor: true, projectId: target.projectId };
     }
 
@@ -608,7 +614,7 @@
       if (doneOrBack) {
         doneOrBack.click();
         const leftSubRoute = await waitForFlowRoute(() => describe()?.isProjectEditor === true, 2000, "", waitOptions).catch(() => false);
-        if (leftSubRoute) return { success: true, isProjectEditor: true, projectId: target.projectId };
+        if (leftSubRoute) { lastVerifiedProjectId = target.projectId; return { success: true, isProjectEditor: true, projectId: target.projectId }; }
       }
 
       const allMedia = configuredNavigationItem("All media");
@@ -623,7 +629,7 @@
           if (root.FlowUiDeadline?.boundedWait) await root.FlowUiDeadline.boundedWait(100, clickDeadline, "waiting for the Flow project editor", false, options.signal);
           else await root.wait?.(100);
         }
-        if (leftSubRoute) return { success: true, isProjectEditor: true, projectId: target.projectId };
+        if (leftSubRoute) { lastVerifiedProjectId = target.projectId; return { success: true, isProjectEditor: true, projectId: target.projectId }; }
       }
 
       if (!sameProject()) throw root.flowError("FLOW_EXECUTION_TARGET_CHANGED", "The Flow project changed before navigation recovery. No further action was taken.", false, false);
@@ -634,6 +640,14 @@
     }
 
     // 3. Outside of project
+    // When the operation is bound to a specific project — passed explicitly
+    // via options.expectedProjectId, or the project this page session was
+    // last verified to be operating in — recovery must land in exactly that
+    // project. Creating a new project or opening an arbitrary first card
+    // would silently continue the operation (uploads, generations) in the
+    // wrong project, so with a target set those shortcuts are forbidden and
+    // a mismatch fails as FLOW_EXECUTION_TARGET_CHANGED, mirroring case 2.
+    const expectedProjectId = String(options.expectedProjectId || "").trim() || lastVerifiedProjectId;
     console.log("[FlowNavigation] Outside of project. Finding New project button or existing project...");
     const navConfig = root.FlowSelectors?.navigation?.newProjectButton;
     const navTextRegex = navConfig?.textRegex || /new project|tạo dự án|dự án mới|create project/i;
@@ -645,11 +659,29 @@
         (hasAddIcon && (root.matchesFlowUiRegex?.(label, /project|dự án/i) || /project|dự án/i.test(label)));
     });
 
+    if (expectedProjectId) {
+      const projectCards = [...document.querySelectorAll('a[href*="/project/"]')].filter(card => root.visible?.(card));
+      const targetCard = projectCards.find(card => String(card.getAttribute?.("href") || "").includes(`/project/${expectedProjectId}`));
+      if (!targetCard) {
+        throw root.flowError("FLOW_EXECUTION_TARGET_CHANGED", "The Flow tab left the target project and that project could not be reopened. No further action was taken.", false, false);
+      }
+      console.log("[FlowNavigation] Reopening the operation's target project...");
+      targetCard.click();
+      await waitForFlowRoute(() => describe()?.isProjectEditor === true, 15000, "Flow did not open the target project editor.", waitOptions);
+      target = describe();
+      if (target?.projectId !== expectedProjectId) {
+        throw root.flowError("FLOW_EXECUTION_TARGET_CHANGED", "Flow opened a different project than the operation's target. No further action was taken.", false, false);
+      }
+      lastVerifiedProjectId = target.projectId;
+      return { success: true, isProjectEditor: true, projectId: target.projectId };
+    }
+
     if (newProjectBtn) {
       console.log("[FlowNavigation] Clicking New project button...");
       newProjectBtn.click();
       await waitForFlowRoute(() => describe()?.isProjectEditor === true, 15000, "Flow did not open a new project editor.", waitOptions);
       target = describe();
+      if (target?.projectId) lastVerifiedProjectId = target.projectId;
       return { success: true, isProjectEditor: true, projectId: target?.projectId || null };
     }
 
@@ -659,6 +691,7 @@
       firstProjectCard.click();
       await waitForFlowRoute(() => describe()?.isProjectEditor === true, 15000, "Flow did not open existing project editor.", waitOptions);
       target = describe();
+      if (target?.projectId) lastVerifiedProjectId = target.projectId;
       return { success: true, isProjectEditor: true, projectId: target?.projectId || null };
     }
 
