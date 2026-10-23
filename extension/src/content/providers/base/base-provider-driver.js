@@ -2,10 +2,15 @@
   "use strict";
 
   class BaseProviderDriver {
-    constructor({ key, origin, context, operationHandler, operations = [] } = {}) {
+    constructor({ key, origin, context, operationHandler, operations = [], requiresProject = true } = {}) {
       if (!key || !origin) throw new TypeError("BaseProviderDriver requires key and origin");
       this.key = key;
       this.origin = origin;
+      // Per-provider definition, not a per-call option: providers without a
+      // project concept (ChatGPT) construct with requiresProject:false and
+      // address work by conversationId instead. Only an explicit false opts
+      // out; every other value keeps the Flow default.
+      this.requiresProject = requiresProject !== false;
       this.context = Object.freeze({ ...(context || {}) });
       this.operationHandler = operationHandler;
       this.operations = new Set(operations);
@@ -22,7 +27,7 @@
       if (command?.signal?.aborted) {
         return Promise.reject(this.error("FLOW_OPERATION_CANCELLED", "The Flow operation was cancelled before it started.", false, false));
       }
-      if (operation !== "flow.state" && operation !== "flow.context" && operation !== "flow.projects.list" && operation !== "flow.project.create" && !this.context.projectId) {
+      if (this.requiresProject && operation !== "flow.state" && operation !== "flow.context" && operation !== "flow.projects.list" && operation !== "flow.project.create" && !this.context.projectId) {
         return Promise.reject(this.error("FLOW_PROJECT_REQUIRED", "Open a project before running this operation.", true));
       }
       const expected = command?._flowTarget || command?.flowTarget || command?._target || command?.target;
@@ -38,9 +43,10 @@
         ["origin", this.origin, "FLOW_ORIGIN_MISMATCH"],
         ["projectId", this.context.projectId || null, "FLOW_PROJECT_MISMATCH"],
         ["routePrefix", this.context.routePrefix || "", "FLOW_ROUTE_MISMATCH"],
+        ["conversationId", this.context.conversationId || null, "FLOW_CONVERSATION_MISMATCH"],
       ];
       for (const [field, actual, code] of checks) {
-        const shouldCheck = field === "projectId"
+        const shouldCheck = field === "projectId" || field === "conversationId"
           ? Object.prototype.hasOwnProperty.call(expected, field)
           : expected[field] != null;
         if (shouldCheck && expected[field] !== actual) {
