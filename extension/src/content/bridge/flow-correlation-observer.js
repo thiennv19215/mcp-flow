@@ -502,6 +502,14 @@
       (row) => decodeStructuredNodes(videoInputNodes(row))?.fingerprint || null
     );
   };
+  const videoRowModelRatioLocal = (row) => {
+    // Mirror of the codec's positional decode (see flow-v2-correlation-codec):
+    // the model key is the string at [2], [1] or [4], the ratio enum follows.
+    if (typeof row?.[2] === "string") return { model: row[2], ratio: row[3] };
+    if (typeof row?.[1] === "string") return { model: row[1], ratio: row[2] };
+    if (typeof row?.[4] === "string") return { model: row[4], ratio: row[5] };
+    return null;
+  };
   const plainInputSummaryLocal = (payload) => {
     const rows = payload?.[0];
     if (!Array.isArray(rows) || !rows.length) return null;
@@ -519,15 +527,27 @@
       )
         return null;
       const normalized = normalizePrompt(nodes.map((node) => node[0]).join(""));
+      const decoded = videoRowModelRatioLocal(row);
       return {
         fingerprint: promptFingerprint(normalized),
         anchorFingerprint: promptFingerprint(normalized.slice(0, 512)),
         normalizedLength: normalized.length,
+        model: decoded && decoded.model ? decoded.model : null,
+        ratio: decoded && Number.isInteger(decoded.ratio) && decoded.ratio >= 1 ? decoded.ratio : null,
       };
     });
-    return values.every((value) => value && value.fingerprint === values[0].fingerprint)
-      ? values[0]
-      : null;
+    if (!values.every((value) => value && value.fingerprint === values[0].fingerprint)) return null;
+    const summary = {
+      fingerprint: values[0].fingerprint,
+      anchorFingerprint: values[0].anchorFingerprint,
+      normalizedLength: values[0].normalizedLength,
+    };
+    // VID-03 (mirror of the codec summary): carry the wire model key and
+    // ratio enum only when every row decodes the same value; otherwise the
+    // key stays absent, which matchers treat as "don't care".
+    if (values.every((value) => value.model !== null && value.model === values[0].model)) summary.model = values[0].model;
+    if (values.every((value) => value.ratio !== null && value.ratio === values[0].ratio)) summary.ratio = values[0].ratio;
+    return summary;
   };
   const plainInputSummary = codec?.plainInputSummary || plainInputSummaryLocal;
   const plainInputFingerprint = (payload) => plainInputSummary(payload)?.fingerprint || null;

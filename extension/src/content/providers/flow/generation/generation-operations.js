@@ -564,6 +564,17 @@
 
         const errorsBeforeSubmit = new Set(editor.currentFlowSubmitErrors());
         const projectId = (root.ProviderRegistry || root.FlowDriverRegistry).describeUrl(location.href)?.projectId;
+        // VID-03: a caller that already knows the wire model key / ratio
+        // enum supplies them on the payload (top level or the params bag,
+        // the same convention as maxCredits) and they are forwarded as
+        // correlation expectations. The submit path itself only knows UI
+        // labels (payload.model) and aspect strings ("16:9"); no
+        // label-to-wire-key or aspect-to-enum mapping exists in this repo,
+        // so those are deliberately NOT converted into expectations —
+        // absent expectations keep attribution exactly as before.
+        const expectedVideoModelKey = payload.expectedVideoModelKey ?? payload.params?.expectedVideoModelKey;
+        const expectedVideoRatioEnum = payload.expectedVideoRatioEnum ?? payload.params?.expectedVideoRatioEnum;
+        const expectedImageModelKey = payload.expectedImageModelKey ?? payload.params?.expectedImageModelKey;
         const correlationAttemptId = await runFlowStage("arming the request observer", () => tiles.armNativeFlowCorrelation({
           projectId,
           mediaType: payload.type === "image" ? "image" : "video",
@@ -574,6 +585,9 @@
           expectedCharacterIds: payload.type === "image" ? validCharacterUuids : [],
           expectedVoiceCount: payload.voice ? 1 : 0,
           unverifiedMediaCount: unverifiedUploadRefCount,
+          ...(expectedVideoModelKey !== undefined ? { expectedVideoModelKey } : {}),
+          ...(expectedVideoRatioEnum !== undefined ? { expectedVideoRatioEnum } : {}),
+          ...(expectedImageModelKey !== undefined ? { expectedImageModelKey } : {}),
         }));
         if (!correlationAttemptId || !tiles.nativeFlowCorrelationMap().has(correlationAttemptId)) {
           throw this.error(
