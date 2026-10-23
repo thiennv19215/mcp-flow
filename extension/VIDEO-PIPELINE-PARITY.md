@@ -1,0 +1,80 @@
+# Video pipeline parity notes
+
+Comparison of the reference extension's Google Flow **video creation**
+pipeline against this repo's, and what was aligned. Reference build:
+TobyFlow 1.3.103 (readable extraction, kept outside this repo).
+
+## Reference video pipeline (stages)
+
+1. **Gen form (GenTab)** — provider/model selects; video input type
+   **Ingredients** or **Frames**; per-model duration tier + resolution from a
+   data-driven model registry (`ModelRegistry`/`ProviderConfigManager`);
+   multi-prompt drafts; per-prompt reference modes (`all` / `sequential` /
+   `mention` / `none`); per-prompt frame slots (`frameFileIds`: first/last
+   frame, from uploads or the Flow library); character (ingredients only),
+   voice (ingredients only), style; chain-from-previous (text-to-video or
+   Frames only).
+2. **Upload (FileUploader / ImmediateUploader)** — local files go to a local
+   store first; the content driver uploads to Flow when the job runs, opens
+   the component picker (switching Frames→Ingredients first if the "+"
+   trigger is hidden), clicks "Tải nội dung nghe nhìn lên" behind a
+   slate-bridge file-picker trap, then confirms by tile-ID diff with a
+   persistent-ID read from the tile container attributes.
+3. **Prompt assembly** — `@mention` components resolve to attached media;
+   references attach via the tile context menu ("Add to prompt") with a
+   global menu lock and retries.
+4. **Settings apply (FlowV2GenerationSettings → content driver)** — media
+   type, aspect ratio, model, duration, resolution, output count, then the
+   Ingredients/Frames mode with trigger-ID (`-trigger-VIDEO_FRAMES` /
+   `-trigger-VIDEO_REFERENCES`) and icon fallbacks.
+5. **Submit + tracking (FlowV2Editor / correlation observer / tile
+   resolver)** — prompt inserted and verified, submit clicked, the Flow
+   request correlated to new tiles, results followed to completion.
+6. **Post** — downloads with a chosen video download resolution and
+   watermark modes; chain/continue and edit flows reuse the saved media
+   identity.
+
+## This repo's equivalents
+
+| Stage | Here |
+| --- | --- |
+| Gen form | `src/ui/sidebar.*` Gen tab + `flow-model-capabilities.json` registry |
+| Upload | `FlowUploadClient` (sidebar) → `flow.media.upload` → `FlowUploader.uploadStagedMedia`, tile confirmation in `waitForNativeMediaTile` |
+| Prompt assembly | `generation-operations.js` + `FlowReferenceActions.attach`, per-prompt ref modes, `FlowNativeFramePicker` for frame slots |
+| Settings apply | `FlowVideoActions.prepare` (`video-settings.js`) over `FlowSettings` |
+| Submit + tracking | `FlowEditor` submit + correlation observer + `FlowTiles` |
+| Post | queue downloads, `flow.video.chain` / continue / edit operations |
+
+Both frame references (Start/End) and ingredient references (≤3 media:
+image, video, character, voice, style) are supported for Veo 3.1 (all tiers)
+and Omni Flash; Frames and Ingredients stay mutually exclusive per job,
+matching Flow itself.
+
+## Aligned in this change
+
+- **Tile identity for upload confirmation** — `mediaId()` now reads the
+  persistent media ID from the tile container's
+  `data-persistent-media-id`/`data-media-id` (then descendant wrappers)
+  before src-derived IDs, mirroring the reference driver's
+  `_getPersistentMediaId2` precedence; `collectAssets` falls back to the
+  `persistentMediaId` it already resolves. Fixes uploads that reached the
+  Flow library but could never be confirmed (blob:/UUID-less preview srcs).
+- **Veo 3.1 tiers** — Lite/Fast/Quality added to the local capability
+  registry (canonical `flow-model-capabilities.json` at the repo root, which
+  the build syncs into `extension/`), the sidebar model selects, and
+  capability validation: tiers previously skipped registry validation in
+  the content script (`hasUnverifiedVeoTier`) and were unselectable in the
+  panel. Tiers keep the Veo contract: fixed 8s, 16:9/9:16, ≤3 references,
+  Frames supported.
+- **Omni label matching** — `getModelAliases` accepts both "Omni Flash" and
+  "Omni 1.1 Flash" picker labels in both directions.
+
+## Deliberately not ported
+
+- The reference's **Flow API V2 driver** and its model/selector configs are
+  delivered from the vendor's server with device-key authentication; they
+  are not present in the readable build and this repo's plan already
+  excludes depending on them. Generation here stays on the DOM/native path
+  with the local capability registry.
+- Server-side account/telemetry, remote control, and watermark removal are
+  out of scope for the video creation pipeline.
