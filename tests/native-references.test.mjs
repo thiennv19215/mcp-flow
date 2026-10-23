@@ -1442,6 +1442,11 @@ test('classifyFlowError identifies quota, unusual activity, policy, and rate lim
   assert.equal(rateLimit.code, 'FLOW_RATE_LIMIT');
   assert.equal(rateLimit.retryable, true);
 
+  const genericPublicError = classify('Flow returned PUBLIC_ERROR_SERVICE_UNAVAILABLE');
+  assert.equal(genericPublicError.category, 'provider_error');
+  assert.equal(genericPublicError.code, 'PUBLIC_ERROR_SERVICE_UNAVAILABLE');
+  assert.equal(genericPublicError.retryable, false);
+
   assert.equal(classify('A normal unknown error occurred'), null);
 });
 

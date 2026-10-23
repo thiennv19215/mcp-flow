@@ -146,9 +146,30 @@
     const variantMatch = wanted.match(/^x([1-4])$/);
     const variantNum = variantMatch ? variantMatch[1] : null;
 
+    const suffix = wanted === "video" ? "VIDEO" : wanted === "image" ? "IMAGE" : wanted === "frames" ? "VIDEO_FRAMES" : wanted === "ingredients" ? "VIDEO_REFERENCES" : null;
+    const iconName = wanted === "video" ? "videocam" : wanted === "image" ? "image" : wanted === "frames" ? "movie_edit" : wanted === "ingredients" ? "interests" : null;
+
     const findIn = rootEl => {
       const candidates = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.options", rootEl, { checkVisible: false, latestFirst: true }) : null) ||
-        [...rootEl.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"]')];
+        [...rootEl.querySelectorAll('[role="radio"],mat-radio-button,[role="tab"],button[id*="-trigger-"],button[data-state]')];
+
+      if (suffix) {
+        const byId = candidates.find(el => root.visible?.(el) && !isNavControl(el) && (
+          String(el.id || "").includes(`-trigger-${suffix}`) ||
+          String(el.getAttribute?.("aria-controls") || "").includes(suffix)
+        ));
+        if (byId) return byId;
+      }
+
+      if (iconName) {
+        const byIcon = candidates.find(el => {
+          if (!root.visible?.(el) || isNavControl(el)) return false;
+          const icon = (root.flowFindIcon ? root.flowFindIcon(el) : el.querySelector?.("mat-icon,.mat-icon,.google-symbols"))?.textContent?.trim()?.toLowerCase();
+          return icon === iconName;
+        });
+        if (byIcon) return byIcon;
+      }
+
       return candidates.find(el => {
         if (!root.visible?.(el) || isNavControl(el)) return false;
         const label = foldLabel(root.accessibleName?.(el));
@@ -487,10 +508,21 @@
       }
       if (kind === "ratio") {
         const ratio = root.normalizeAspectRatio?.(wanted) || wanted;
+        const ratioSuffixMap = {
+          "9:16": "PORTRAIT",
+          "16:9": "LANDSCAPE",
+          "1:1": "SQUARE",
+          "4:3": "LANDSCAPE_4_3",
+          "3:4": "PORTRAIT_3_4"
+        };
+        const wantedSuffix = ratioSuffixMap[ratio] || ratioSuffixMap[wanted];
+        if (wantedSuffix && (String(element.id || "").includes(`-trigger-${wantedSuffix}`) || String(element.getAttribute?.("aria-controls") || "").includes(wantedSuffix))) {
+          return true;
+        }
         return candidates.some(value => value === foldLabel(ratio) || value.includes(foldLabel(ratio)));
       }
       return candidates.some(value => normalizeCompact(value) === normalizeCompact(wanted) ||
-        (kind === "resolution" && normalizeCompact(value) === `${normalizeCompact(wanted)}p`));
+        (kind === "resolution" && (normalizeCompact(value) === `${normalizeCompact(wanted)}p` || normalizeCompact(value) === normalizeCompact(wanted))));
     };
     const find = () => {
       // Multiple overlays may be open (for example, an unrelated Add menu and
@@ -507,6 +539,7 @@
     await openFlowSettings(options);
     let target = find();
     if (target && isDisabled(target)) {
+      if (options.allowAbsent === true) return { selected: false, modelFixed: true };
       throw root.flowError(`FLOW_VIDEO_${codePrefix}_UNAVAILABLE`, `Flow's requested video ${kind} (${wanted}) is disabled. Nothing was submitted.`, true, false);
     }
     if (!target && options.allowAbsent === true) return { selected: false, modelFixed: true };
@@ -516,14 +549,17 @@
         await waitPreparation(options, 100, `finding requested video ${kind}`);
         target = find();
         if (target && isDisabled(target)) {
+          if (options.allowAbsent === true) return { selected: false, modelFixed: true };
           throw root.flowError(`FLOW_VIDEO_${codePrefix}_UNAVAILABLE`, `Flow's requested video ${kind} (${wanted}) is disabled. Nothing was submitted.`, true, false);
         }
       }
     }
     if (!target) {
+      if (options.allowAbsent === true) return { selected: false, modelFixed: true };
       throw root.flowError(`FLOW_VIDEO_${codePrefix}_UNAVAILABLE`, `Flow does not expose the requested video ${kind} (${wanted}). Nothing was submitted.`, true, false);
     }
-    if (!nativeRadioSelected(target)) target.click();
+    if (nativeRadioSelected(target)) return { selected: true };
+    target.click();
     const verifyDeadline = Math.min(Date.now() + 2500, Number.isFinite(options.deadline) ? options.deadline : Infinity);
     let selected = false;
     while (Date.now() < verifyDeadline) {

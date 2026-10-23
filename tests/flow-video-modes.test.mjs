@@ -557,3 +557,102 @@ test('submit_only queue jobs do not auto-retry safe errors or repeat after dispa
     assert.equal(runs, 1);
   }
 });
+
+test('selectAndConfirmMode gracefully skips missing control when optional: true', async () => {
+  const context = vm.createContext({
+    Date, Map, Promise, Set, Object, Math, String, Number, Boolean, Array, Error, console,
+    document: { querySelectorAll: () => [], querySelector: () => null },
+    visible: () => false,
+    accessibleName: () => '',
+    normalizeFlowUiText: v => String(v || '').toLowerCase().trim(),
+    flowError: (code, message) => Object.assign(new Error(message), { code }),
+  });
+  vm.runInContext(settingsSource, context);
+  // Pure text-to-video mode with optional: true should not throw when Ingredients control is absent
+  await assert.doesNotReject(async () => {
+    await context.FlowSettings.selectAndConfirmMode('Ingredients', false, { optional: true });
+  });
+});
+
+test('selectAndConfirmMode throws FLOW_FRAMES_MODE_UNAVAILABLE when frames control is absent and required', async () => {
+  const context = vm.createContext({
+    Date, Map, Promise, Set, Object, Math, String, Number, Boolean, Array, Error, console,
+    document: { querySelectorAll: () => [], querySelector: () => null },
+    visible: () => false,
+    accessibleName: () => '',
+    normalizeFlowUiText: v => String(v || '').toLowerCase().trim(),
+    flowError: (code, message) => Object.assign(new Error(message), { code }),
+  });
+  vm.runInContext(settingsSource, context);
+  await assert.rejects(
+    async () => {
+      await context.FlowSettings.selectAndConfirmMode('Frames', true, { optional: false });
+    },
+    error => error.code === 'FLOW_FRAMES_MODE_UNAVAILABLE'
+  );
+});
+
+test('exactModeControl resolves Radix trigger suffix for VIDEO_FRAMES and VIDEO_REFERENCES', () => {
+  const framesBtn = {
+    id: 'radix-vue-trigger-VIDEO_FRAMES',
+    visible: true,
+    classList: [],
+    getAttribute: () => null,
+    querySelector: () => null,
+  };
+  const refsBtn = {
+    id: 'radix-vue-trigger-VIDEO_REFERENCES',
+    visible: true,
+    classList: [],
+    getAttribute: () => null,
+    querySelector: () => null,
+  };
+  const context = vm.createContext({
+    Date, Map, Promise, Set, Object, Math, String, Number, Boolean, Array, Error, console,
+    document: {
+      querySelectorAll: (sel) => [framesBtn, refsBtn],
+      querySelector: () => null,
+    },
+    visible: (el) => el.visible !== false,
+    accessibleName: () => '',
+    normalizeFlowUiText: v => String(v || '').toLowerCase().trim(),
+    flowError: (code, message) => Object.assign(new Error(message), { code }),
+  });
+  vm.runInContext(settingsSource, context);
+  assert.equal(context.FlowSettings.exactModeControl('Frames'), framesBtn);
+  assert.equal(context.FlowSettings.exactModeControl('Ingredients'), refsBtn);
+});
+
+test('chooseVideoOption allows absent option when allowAbsent: true is provided', async () => {
+  const makeOption = (label, selected = false) => ({
+    label, visible: true, checked: selected, classList: [],
+    closest: () => null,
+    getAttribute(name) { return name === 'aria-checked' ? String(this.checked) : null; },
+    querySelector: () => null,
+    click() { this.checked = true; },
+  });
+  const settingsOptions = [makeOption('Image'), makeOption('Video'), makeOption('x1')];
+  const settings = {
+    visible: true,
+    querySelector(selector) { return selector.includes('[role="radio"]') ? settingsOptions[0] : null; },
+    querySelectorAll() { return settingsOptions; },
+  };
+  const context = vm.createContext({
+    Date, Map, Promise, Set, Object, Math, String, Number, Boolean, Array, Error, console,
+    document: { querySelectorAll: () => [settings], querySelector: () => null },
+    visible: () => true,
+    accessibleName: (el) => el.label || '',
+    normalizeAspectRatio: v => v,
+    normalizeFlowUiText: v => String(v || '').toLowerCase().trim(),
+    flowError: (code, message) => Object.assign(new Error(message), { code }),
+  });
+  vm.runInContext(settingsSource, context);
+  // When model does not provide duration or resolution tabs, allowAbsent: true avoids throwing
+  await assert.doesNotReject(async () => {
+    await context.FlowSettings.chooseVideoOption('duration', '8s', { allowAbsent: true });
+  });
+  await assert.doesNotReject(async () => {
+    await context.FlowSettings.chooseVideoOption('resolution', '1080p', { allowAbsent: true });
+  });
+});
+

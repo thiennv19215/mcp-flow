@@ -563,6 +563,14 @@
     "warning_icon": { "selectors": ["mat-icon", ".mat-icon", ".google-symbols", "svg"], "icons": ["warning", "error", "report_problem"] },
     "signed_out_indicator": { "selectors": ["main button", "main a[href]", "[role='main'] button", "[role='main'] a[href]"], "textRegex": "(?:sign in|log in|đăng nhập|tiếp tục đăng nhập)" },
     "video_upload_confirm": { "selectors": ["button", "[role='button']"], "textRegex": "(?:upload|continue|confirm|agree|tải lên|tiếp tục|xác nhận|đồng ý|chấp nhận)" },
-    "flow_scroll_container": { "selectors": ["[class*='scroll']", "main", ".flow-scroll-container", "flow-app"] }
+    "flow_scroll_container": { "selectors": ["[class*='scroll']", "main", ".flow-scroll-container", "flow-app"] },
+    "mode_tab_video": { "selectors": ["button[id*='-trigger-VIDEO']", "[role='tab']", "button"], "icons": ["videocam"], "textRegex": "(?:video)" },
+    "mode_tab_image": { "selectors": ["button[id*='-trigger-IMAGE']", "[role='tab']", "button"], "icons": ["image"], "textRegex": "(?:image|ảnh|hình ảnh)" },
+    "video_mode_frames": { "selectors": ["button[id*='-trigger-VIDEO_FRAMES']", "[role='tab']", "[role='radio']", "button"], "icons": ["movie_edit"], "text_match": ["Frames", "Khung hình", "Khung"] },
+    "video_mode_ingredients": { "selectors": ["button[id*='-trigger-VIDEO_REFERENCES']", "[role='tab']", "[role='radio']", "button"], "icons": ["interests"], "text_match": ["Ingredients", "Thành phần", "Nguyên liệu"] },
+    "video_duration_tab": { "selectors": ["button[id*='-trigger-']", "[role='tab']", "[role='radio']", "button"], "text_match": ["4s", "5s", "6s", "8s", "10s"] },
+    "video_resolution_tab": { "selectors": ["button[id*='-trigger-']", "[role='tab']", "[role='radio']", "button"], "text_match": ["720p", "1080p"] },
+    "ratio_button": { "selectors": ["button[id*='-trigger-']", "[role='radio']", "[role='tab']", "button"] },
+    "quantity_button": { "selectors": ["button[id*='-trigger-']", "[role='radio']", "[role='tab']", "button"] }
   }
 }

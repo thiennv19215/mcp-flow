@@ -617,8 +617,11 @@
   }
 
   function currentFlowSubmitErrors() {
-    const errorWords = /(?:error|failed|could not|couldn't|unable|insufficient|not enough|quota|credit limit|daily limit|try again|unusual activity|suspicious activity|safety guidelines|policy violation|blocked|something went wrong|lỗi|không thể|thất bại|không đủ|hết hạn mức|hạn mức|hạn ngạch|thử lại|hoạt động bất thường|nguyên tắc an toàn|chính sách|đã bị chặn|đã xảy ra lỗi|đã xảy ra sự cố|sự cố|vui lòng thử lại|không an toàn|từ chối|vi phạm|không thành công|bị từ chối)/i;
+    const errorWords = /(?:\bPUBLIC_ERROR_[A-Z0-9_]+\b|error|failed|could not|couldn't|unable|insufficient|not enough|quota|credit limit|daily limit|try again|unusual activity|suspicious activity|safety guidelines|policy violation|blocked|something went wrong|lỗi|không thể|thất bại|không đủ|hết hạn mức|hạn mức|hạn ngạch|thử lại|hoạt động bất thường|nguyên tắc an toàn|chính sách|đã bị chặn|đã xảy ra lỗi|đã xảy ra sự cố|sự cố|vui lòng thử lại|không an toàn|từ chối|vi phạm|không thành công|bị từ chối)/i;
     const selectors = [
+      '[data-sonner-toast]',
+      '[data-sonner-toaster] [data-toast]',
+      '[data-title]',
       '[role="alert"]',
       '[role="status"]',
       '[aria-live="assertive"]',

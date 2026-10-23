@@ -119,7 +119,7 @@ extension/src/
 Sau khi sửa code trong `extension/`:
 
 ```bash
-# 1. Chạy toàn bộ 251 bài kiểm thử tự động để đảm bảo không làm gãy tính năng cũ
+# 1. Chạy toàn bộ 255 bài kiểm thử tự động để đảm bảo không làm gãy tính năng cũ
 npm test
 
 # 2. Đóng gói lại extension vào dist/extension/ để cài hoặc nạp vào Chrome
@@ -129,3 +129,17 @@ npm run build
 npm run dev:extension
 ```
 Sau khi build xong, vào `chrome://extensions`, bấm nút **Tải lại (Reload)** ở tiện ích **Flow MCP Native Automation** để áp dụng thay đổi.
+
+---
+
+## 6. Kiến Trúc Pipeline Sinh Video & Xử Lý Lỗi DOM (Video Pipeline & Error Handling)
+
+### 6.1 Cơ chế chọn Mode & Model Video (`video-settings.js` & `settings.js`)
+* **Không ép buộc mode "Ingredients":** Khi người dùng tạo video thuần bằng prompt văn bản (Text-to-Video), hệ thống đánh dấu `{ optional: true }`. Nếu trang Flow không hiển thị radio button "Ingredients", hệ thống tiếp tục gửi lệnh bình thường thay vì chặn lại bằng lỗi `FLOW_VIDEO_MODE_UNAVAILABLE`.
+* **Khớp điều khiển Radix UI:** Hệ thống hỗ trợ nhận diện các trigger button Radix UI hiện đại qua ID suffix (ví dụ `button[id*="-trigger-VIDEO_FRAMES"]`, `button[id*="-trigger-VIDEO_REFERENCES"]`, `button[id*="-trigger-PORTRAIT"]`) và Material symbols (`movie_edit`, `interests`, `videocam`).
+* **Cho phép thông số tự động/cố định (`allowAbsent: true`):** Đối với các model video như Veo 2 hoặc Omni vốn cố định độ dài (ví dụ 5s/8s) hoặc độ phân giải mà không cung cấp tab tùy chọn, hệ thống tự động bỏ qua kiểm tra bắt buộc thay vì báo lỗi `FLOW_VIDEO_DURATION_UNAVAILABLE` hoặc `FLOW_VIDEO_RESOLUTION_UNAVAILABLE`.
+
+### 6.2 Bắt lỗi Toast Sonner & Phân loại lỗi (`flow-editor.js`, `tiles.js`, `dom-utils.js`)
+* **Bắt Sonner Toasts:** Google Flow sử dụng thư viện toast thông báo Sonner. Hệ thống quét qua các selector `[data-sonner-toast]`, `[data-sonner-toaster] [data-toast]`, `[data-title]` để bắt thông báo lỗi tức thì ngay khi nhấn nút Submit.
+* **Phân loại mã lỗi API `PUBLIC_ERROR_*`:** `classifyFlowError()` tự động nhận diện regex `\bPUBLIC_ERROR_[A-Z0-9_]+\b` (ví dụ `PUBLIC_ERROR_USER_QUOTA_REACHED`, `PUBLIC_ERROR_UNUSUAL_ACTIVITY`, `PUBLIC_ERROR_SERVICE_UNAVAILABLE`) để phân loại chính xác lỗi hệ thống và dừng lại an toàn mà không retry gây tốn quota.
+

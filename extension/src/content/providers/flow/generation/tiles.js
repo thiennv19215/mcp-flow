@@ -855,7 +855,7 @@
     let previous = "";
     while (Date.now() < deadline) {
       const text = document.querySelector("main")?.innerText || document.body?.innerText || "";
-      const alerts = [...(document.querySelector("main") || document.body || document).querySelectorAll?.('[role="alert"],mat-error,[aria-live="assertive"],[data-error-code],[data-error]') || []]
+      const alerts = [...(document.body || document).querySelectorAll?.('[role="alert"],mat-error,[aria-live="assertive"],[data-error-code],[data-error],[data-sonner-toast],[data-sonner-toaster] [data-toast]') || []]
         .filter(el => root.visible?.(el));
       const alertFailure = alerts.map(el => {
         const message = String(el.innerText || el.textContent || el.getAttribute?.("aria-label") || "").replace(/\s+/g, " ").trim();

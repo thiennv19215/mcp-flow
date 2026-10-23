@@ -36,14 +36,22 @@
     const rawWanted = foldLabel(name);
     const aliases = (MODE_ALIASES[rawWanted] || [rawWanted]).map(foldLabel);
     const configured = typeof root.flowQueryAll === "function" ? root.flowQueryAll("settings.optionCandidates", document, { checkVisible: false }) : [];
-    const candidates = [...new Set([...configured, ...deepQueryAll(document, '[role="radio"],mat-radio-button,[role="tab"],[role="option"],button,[role="button"]')])];
+    const candidates = [...new Set([...configured, ...deepQueryAll(document, '[role="radio"],mat-radio-button,[role="tab"],[role="option"],button[id*="-trigger-"],button,[role="button"]')])];
     const visibleCandidates = [...new Set(candidates)].filter(element => root.visible?.(element) && !isNavControl(element));
     const suffix = rawWanted === "frames" ? "VIDEO_FRAMES" : rawWanted === "ingredients" ? "VIDEO_REFERENCES" : "";
     if (suffix) {
-      const byId = visibleCandidates.find(element => String(element.id || "").endsWith(`-trigger-${suffix}`));
+      const byId = visibleCandidates.find(element => String(element.id || "").includes(`-trigger-${suffix}`));
       if (byId) return byId;
       const byPanel = visibleCandidates.find(element => String(element.getAttribute?.("aria-controls") || "").includes(suffix));
       if (byPanel) return byPanel;
+    }
+    const iconName = rawWanted === "frames" ? "movie_edit" : rawWanted === "ingredients" ? "interests" : "";
+    if (iconName) {
+      const byIcon = visibleCandidates.find(element => {
+        const icon = (root.flowFindIcon ? root.flowFindIcon(element) : element.querySelector?.("mat-icon,.mat-icon,.google-symbols"))?.textContent?.trim()?.toLowerCase();
+        return icon === iconName;
+      });
+      if (byIcon) return byIcon;
     }
     return visibleCandidates.find(element => {
       const cName = foldLabel(String(root.accessibleName?.(element) || "").replace(/^(?:accessibility_new|dashboard|face)\s*/i, ""));
@@ -66,18 +74,28 @@
     const unavailableError = message => root.flowError(unavailableCode, message, true, false);
     let control = exactModeControl(name);
     if (isDisabledModeControl(control)) {
+      if (options.optional === true) {
+        console.warn(`[FlowVideoSettings] ${name} mode control is disabled; continuing with current Flow settings.`);
+        return;
+      }
       throw unavailableError(`Flow's exact ${name} mode control is visible but disabled. Nothing was submitted.`);
     }
     if (!control) {
+      if (options.optional === true) {
+        console.warn(`[FlowVideoSettings] Flow does not display an explicit ${name} control for this model; continuing with current Flow settings.`);
+        return;
+      }
       throw unavailableError(`Flow does not offer the exact ${name} mode for the selected model. Nothing was submitted.`);
     }
-    if (!modeControlSelected(control)) control.click();
+    if (modeControlSelected(control)) return;
+    control.click();
     const deadline = Math.min(Date.now() + 5000, Number.isFinite(options.deadline) ? options.deadline : Infinity);
     let confirmed = false;
     while (Date.now() < deadline) {
       checkPreparation(options, `confirming Flow ${name} mode`);
       control = exactModeControl(name);
       if (isDisabledModeControl(control)) {
+        if (options.optional === true) return;
         throw unavailableError(`Flow's exact ${name} mode control became disabled before selection could be confirmed. Nothing was submitted.`);
       }
       if (modeControlSelected(control)) { confirmed = true; break; }
@@ -87,7 +105,12 @@
     if (!confirmed) {
       control = exactModeControl(name);
       if (isDisabledModeControl(control)) {
+        if (options.optional === true) return;
         throw unavailableError(`Flow's exact ${name} mode control is disabled. Nothing was submitted.`);
+      }
+      if (options.optional === true) {
+        console.warn(`[FlowVideoSettings] Flow did not confirm ${name} mode selection; proceeding without blocking.`);
+        return;
       }
       const code = framesMode ? "FLOW_FRAMES_MODE_UNCONFIRMED" : "FLOW_VIDEO_MODE_UNCONFIRMED";
       throw root.flowError(code, `Flow did not confirm that ${name} mode is selected. Nothing was submitted.`, true, false);
@@ -117,7 +140,6 @@
     try {
     const type = payload.type || "video";
     const requestedModel = payload.model || payload.video_settings?.model;
-    const modeName = framesMode ? "Frames" : "Ingredients";
     const aspectRatio = payload.aspectRatio ?? payload.aspect_ratio ?? payload.video_settings?.aspectRatio ?? payload.video_settings?.aspect_ratio;
     const duration = payload.duration ?? payload.video_settings?.duration;
     const resolution = payload.resolution ?? payload.video_settings?.resolution;
@@ -132,7 +154,7 @@
     emitImagePreparationProgress(options, "selecting Video mode");
     await ensureSettingsSurface();
     await chooseRadio("Video", options);
-    if (aspectRatio) await chooseVideoOption("ratio", aspectRatio, options);
+    if (aspectRatio) await chooseVideoOption("ratio", aspectRatio, { ...options, allowAbsent: true });
 
     if (requestedModel) {
       emitImagePreparationProgress(options, "selecting requested model");
@@ -146,24 +168,29 @@
       }
       await ensureSettingsSurface();
       await chooseRadio("Video", options);
-      if (aspectRatio) await chooseVideoOption("ratio", aspectRatio, options);
+      if (aspectRatio) await chooseVideoOption("ratio", aspectRatio, { ...options, allowAbsent: true });
     }
 
     if (duration != null) {
       emitImagePreparationProgress(options, "selecting video duration");
-      const modelFixedDuration = Number.isFinite(Number(modelCapabilities?.fixedDuration)) && Number(duration) === Number(modelCapabilities.fixedDuration);
-      await chooseVideoOption("duration", duration, { ...options, allowAbsent: modelFixedDuration });
+      await chooseVideoOption("duration", duration, { ...options, allowAbsent: true });
     }
     if (resolution != null) {
       emitImagePreparationProgress(options, "selecting video resolution");
-      await chooseVideoOption("resolution", resolution, options);
+      await chooseVideoOption("resolution", resolution, { ...options, allowAbsent: true });
     }
     emitImagePreparationProgress(options, "selecting output count");
     await chooseNativeVariantCount(variants, options);
 
-    emitImagePreparationProgress(options, `selecting ${modeName} input mode`);
-    await ensureSettingsSurface();
-    await selectAndConfirmMode(modeName, Boolean(framesMode), options);
+    if (framesMode) {
+      emitImagePreparationProgress(options, "selecting Frames input mode");
+      await ensureSettingsSurface();
+      await selectAndConfirmMode("Frames", true, options);
+    } else if (payload.video_settings?.mode === "ingredients" || (Array.isArray(payload.attachments) && payload.attachments.length > 0)) {
+      emitImagePreparationProgress(options, "checking Ingredients input mode");
+      await ensureSettingsSurface();
+      await selectAndConfirmMode("Ingredients", false, { ...options, optional: true });
+    }
     emitImagePreparationProgress(options, "reading generation credit quote");
     const settingsCredits = await (root.FlowEditor?.waitForGenerationCreditQuote?.(Math.min(2000, Number.isFinite(options.deadline) ? Math.max(1, options.deadline - Date.now()) : 2000), options) || root.waitForGenerationCreditQuote?.(2000));
     finishVideoPreparationDiagnostics("completed", { result: { creditQuote: Number.isFinite(settingsCredits) ? settingsCredits : "unknown", framesMode, model: requestedModel || null, aspectRatio: aspectRatio || null, duration: duration ?? null, resolution: resolution || null, variants } });
@@ -183,5 +210,5 @@
     prepare: (payload, variants, framesMode, options) => prepareNativeVideoSettings(payload, variants, framesMode, options),
   });
   root.FlowVideoActions = FlowVideoActions;
-  root.FlowSettings = Object.freeze({ ...root.FlowSettings, prepareNativeVideoSettings, selectAndConfirmMode });
+  root.FlowSettings = Object.freeze({ ...root.FlowSettings, prepareNativeVideoSettings, selectAndConfirmMode, exactModeControl, modeControlSelected });
 })();

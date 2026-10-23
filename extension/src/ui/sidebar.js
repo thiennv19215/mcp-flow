@@ -1514,16 +1514,18 @@
       return;
     }
     const visibleVideoModel = document.querySelector("#videoModel")?.value || "";
-    const submitVideoModel = document.querySelector("#selectModelVideo")?.value || "";
-    if (visibleVideoModel && submitVideoModel && visibleVideoModel !== submitVideoModel) {
-      setFeedback("Mô hình video hiển thị chưa đồng bộ với lựa chọn gửi lên Flow. Hãy chọn lại mô hình rồi thử lại.", false);
-      return;
+    if (visibleVideoModel) {
+      const selectModelEl = document.querySelector("#selectModelVideo");
+      if (selectModelEl && selectModelEl.value !== visibleVideoModel) {
+        selectModelEl.value = visibleVideoModel;
+      }
     }
     const visibleVideoMode = String(document.querySelector("#videoInputType")?.value || "").toLowerCase();
-    const submitVideoMode = String(document.querySelector("#selectModeVideo")?.value || "ingredients").toLowerCase();
-    if (visibleVideoMode && visibleVideoMode !== submitVideoMode) {
-      setFeedback("Chế độ Video/Frames hiển thị chưa đồng bộ với lựa chọn gửi lên Flow. Hãy chọn lại chế độ rồi thử lại.", false);
-      return;
+    if (visibleVideoMode) {
+      const selectModeEl = document.querySelector("#selectModeVideo");
+      if (selectModeEl && selectModeEl.value !== visibleVideoMode) {
+        selectModeEl.value = visibleVideoMode;
+      }
     }
     const aspect_ratio = document.querySelector("#selectRatioVideo").value;
     const model = document.querySelector("#selectModelVideo")?.value || "veo 3.1";

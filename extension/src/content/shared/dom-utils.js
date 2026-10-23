@@ -186,6 +186,17 @@ function classifyFlowError(rawText) {
     };
   }
 
+  // 7. General Flow Provider error codes (e.g. from Sonner toast or alert text)
+  const publicErrorMatch = text.match(/\b(PUBLIC_ERROR_[A-Z0-9_]+)\b/);
+  if (publicErrorMatch) {
+    return {
+      category: "provider_error",
+      code: publicErrorMatch[1],
+      message: `Flow reported: ${text}`,
+      retryable: false,
+    };
+  }
+
   return null;
 }
 

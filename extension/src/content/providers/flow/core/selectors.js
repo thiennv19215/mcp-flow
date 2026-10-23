@@ -157,7 +157,9 @@
         selectors: [
           "[role='radio']",
           "mat-radio-button",
-          "[role='tab']"
+          "[role='tab']",
+          "button[id*='-trigger-']",
+          "button[data-state]"
         ]
       },
       optionCandidates: {
@@ -566,7 +568,15 @@
       warning_icon: { selectors: ["mat-icon", ".mat-icon", ".google-symbols", "svg"], icons: ["warning", "error", "report_problem"] },
       signed_out_indicator: { selectors: ["main button", "main a[href]", "[role='main'] button", "[role='main'] a[href]"], textRegex: /(?:sign in|log in|đăng nhập|tiếp tục đăng nhập)/i },
       video_upload_confirm: { selectors: ["button", "[role='button']"], textRegex: /(?:upload|continue|confirm|agree|tải lên|tiếp tục|xác nhận|đồng ý|chấp nhận)/i },
-      flow_scroll_container: { selectors: ["[class*='scroll']", "main", ".flow-scroll-container", "flow-app"] }
+      flow_scroll_container: { selectors: ["[class*='scroll']", "main", ".flow-scroll-container", "flow-app"] },
+      mode_tab_video: { selectors: ["button[id*='-trigger-VIDEO']", "[role='tab']", "button"], icons: ["videocam"], textRegex: /(?:video)/i },
+      mode_tab_image: { selectors: ["button[id*='-trigger-IMAGE']", "[role='tab']", "button"], icons: ["image"], textRegex: /(?:image|ảnh|hình ảnh)/i },
+      video_mode_frames: { selectors: ["button[id*='-trigger-VIDEO_FRAMES']", "[role='tab']", "[role='radio']", "button"], icons: ["movie_edit"], textMatch: ["Frames", "Khung hình", "Khung"] },
+      video_mode_ingredients: { selectors: ["button[id*='-trigger-VIDEO_REFERENCES']", "[role='tab']", "[role='radio']", "button"], icons: ["interests"], textMatch: ["Ingredients", "Thành phần", "Nguyên liệu"] },
+      video_duration_tab: { selectors: ["button[id*='-trigger-']", "[role='tab']", "[role='radio']", "button"], textMatch: ["4s", "5s", "6s", "8s", "10s"] },
+      video_resolution_tab: { selectors: ["button[id*='-trigger-']", "[role='tab']", "[role='radio']", "button"], textMatch: ["720p", "1080p"] },
+      ratio_button: { selectors: ["button[id*='-trigger-']", "[role='radio']", "[role='tab']", "button"] },
+      quantity_button: { selectors: ["button[id*='-trigger-']", "[role='radio']", "[role='tab']", "button"] }
     }
   };
 
@@ -608,6 +618,14 @@
     signed_out_indicator: "toby.signed_out_indicator",
     video_upload_confirm: "toby.video_upload_confirm",
     flow_scroll_container: "toby.flow_scroll_container",
+    mode_tab_video: "toby.mode_tab_video",
+    mode_tab_image: "toby.mode_tab_image",
+    video_mode_frames: "toby.video_mode_frames",
+    video_mode_ingredients: "toby.video_mode_ingredients",
+    video_duration_tab: "toby.video_duration_tab",
+    video_resolution_tab: "toby.video_resolution_tab",
+    ratio_button: "toby.ratio_button",
+    quantity_button: "toby.quantity_button",
   });
   function recordSelectorFailure(path, details = {}) {
     const record = {
