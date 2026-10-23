@@ -4,6 +4,7 @@ import { inspectExtensionBuild } from "./flow-build-info.js";
 import { decideDevExtensionReload } from "./dev-extension-reload.js";
 import { flowDocumentMatchesLocale, flowHomeUrl, flowLocaleFromUrl, flowProjectUrl, normalizeFlowLocale } from "./flow-locale.js";
 import { FlowJobQueue } from "./flow-job-queue.js";
+import { resolveProviderForOperation } from "./provider-router.js";
 import { FlowBatchDrafts, materializeDraftJobs } from "./flow-batch-drafts.js";
 import { FlowMediaCatalog } from "./flow-media-catalog.js";
 import { revalidateJobReferences } from "./flow-ref-preflight.js";
@@ -982,6 +983,13 @@ function broadcastFlowQueue(snapshot, reason) {
 
 async function runExtensionFlowJob(job, hooks) {
   const operation = job.operation || job.data?.operation;
+  // Provider dispatch (GPT-08): resolve the operation's provider
+  // descriptor up front. Unknown prefixes throw the same typed
+  // unsupported-operation error the allowlist check below has always
+  // thrown, so this only routes — the per-provider runner branches
+  // (GPT-10) hang off the descriptor, and Flow jobs flow through the
+  // unchanged path below.
+  resolveProviderForOperation(operation);
   const payload = structuredClone(job.payload || job.data?.payload || {});
   const queuedOperations = new Set([
     ...extensionQueueJobOperations,
