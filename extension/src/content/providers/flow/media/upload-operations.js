@@ -84,6 +84,12 @@
         // staged file's original name. The receipt keeps name = assetName
         // (the original) and gains the content-derived uploadName.
         const callerKey = payload.callerKey ?? payload.uploadKey ?? undefined;
+        // IMG-09b: forward the caller's per-upload request id so a cancel
+        // by id (FlowUploader.cancelUpload) reaches the in-page upload.
+        // Without it the id stopped at the client layer: the uploader
+        // never registered a canceller, and an already-dispatched
+        // confirmation loop could not be aborted from the sidebar.
+        const requestId = payload.requestId ?? payload.uploadRequestId ?? undefined;
         // IMG-05b: the 75 s deadline above remains the budget for every
         // upload phase (navigation, baseline, menu, picker dispatch).
         // Only the post-dispatch tile confirmation may extend past it
@@ -92,7 +98,7 @@
         // command's own timeout, which the uploader derives from the
         // command itself. confirmExtendable opts this call into that
         // extension; all other upload callers keep the absolute deadline.
-        const receipt = await components.uploadStagedFlowMedia(file, kind, command, { deadline, signal: command.signal, callerKey, confirmExtendable: true });
+        const receipt = await components.uploadStagedFlowMedia(file, kind, command, { deadline, signal: command.signal, callerKey, requestId, confirmExtendable: true });
         // Upload can leave Flow's asset picker or upload menu mounted while
         // the media tile finishes rendering. Close and verify it before the
         // caller starts image/video generation or another DOM operation.
