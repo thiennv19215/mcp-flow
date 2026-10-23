@@ -49,6 +49,41 @@
     return false;
   }
 
+  // DL-04: logo variants ride alongside the legacy single mask. Each entry
+  // is validated on its own — its mask must pass the same structural alpha
+  // gate — and normalized (baseWidth/baseHeight collapse to the short side)
+  // before forwarding; an invalid entry is dropped without affecting the
+  // others or the legacy fields.
+  const MAX_VARIANTS = 8;
+  function forwardVariant(entry) {
+    if (!entry || typeof entry !== "object") return undefined;
+    if (!maskHasAlpha(entry.alpha_png_b64)) return undefined;
+    const variant = { alpha_png_b64: entry.alpha_png_b64 };
+    const id = typeof entry.id === "string" ? entry.id.trim()
+      : (typeof entry.name === "string" ? entry.name.trim() : "");
+    if (id) variant.id = id.slice(0, 64);
+    let baseShortSide = Number(entry.baseShortSide);
+    if (!Number.isFinite(baseShortSide) || baseShortSide <= 0) {
+      const baseWidth = Number(entry.baseWidth);
+      const baseHeight = Number(entry.baseHeight);
+      baseShortSide = baseWidth > 0 && baseHeight > 0 ? Math.min(baseWidth, baseHeight) : NaN;
+    }
+    if (Number.isFinite(baseShortSide) && baseShortSide > 0) variant.baseShortSide = baseShortSide;
+    const priority = Number(entry.priority);
+    if (Number.isFinite(priority)) variant.priority = priority;
+    return variant;
+  }
+  function forwardVariants(value) {
+    if (!Array.isArray(value)) return undefined;
+    const variants = [];
+    for (const entry of value) {
+      const variant = forwardVariant(entry);
+      if (variant) variants.push(variant);
+      if (variants.length >= MAX_VARIANTS) break;
+    }
+    return variants.length ? variants : undefined;
+  }
+
   async function load() {
     try {
       const stored = await chrome.storage.local.get(["flowWatermark", "watermark"]);
@@ -58,6 +93,7 @@
         image: config.image !== false,
         video: config.video !== false,
         alpha_png_b64: maskHasAlpha(config.alpha_png_b64) ? config.alpha_png_b64 : undefined,
+        variants: forwardVariants(config.variants),
         nccThreshold: config.nccThreshold,
         minNccAfter: config.minNccAfter,
       });
