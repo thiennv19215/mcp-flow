@@ -4,6 +4,7 @@ import { inspectExtensionBuild } from "./flow-build-info.js";
 import { decideDevExtensionReload } from "./dev-extension-reload.js";
 import { flowDocumentMatchesLocale, flowHomeUrl, flowLocaleFromUrl, flowProjectUrl, normalizeFlowLocale } from "./flow-locale.js";
 import { FlowJobQueue } from "./flow-job-queue.js";
+import { FlowBatchDrafts, materializeDraftJobs } from "./flow-batch-drafts.js";
 import { FlowBridgeClient, readBridgeConfig, postHttpMessage } from "./flow-bridge-client.js";
 import { planFlowAgentBatch, planFlowBatch, planFlowContinue, planFlowEdit } from "./flow-workflows.js";
 import {
@@ -1218,6 +1219,7 @@ const flowJobQueue = new FlowJobQueue(runExtensionFlowJob, {
     }
   },
 });
+const flowBatchDrafts = new FlowBatchDrafts();
 flowJobQueue.subscribe((snapshot, reason) => {
   broadcastFlowQueue(snapshot, reason);
   // Failures during queue preflight happen before the download runner can mark
@@ -1441,6 +1443,58 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
     })().then(respond).catch(error => respond({
       ok: false,
       error: { code: error?.code || "FLOW_QUEUE_FAILED", message: String(error?.message || error) },
+    }));
+    return true;
+  }
+  if (typeof message?.type === "string" && message.type.startsWith("flow-batch:")) {
+    if (_sender?.id !== chrome.runtime.id || _sender?.tab) {
+      respond({ ok: false, error: { code: "FLOW_BATCH_FORBIDDEN", message: "Batch drafts are available only from the extension UI." } });
+      return;
+    }
+    void (async () => {
+      await flowBatchDrafts.ready;
+      switch (message.type) {
+        case "flow-batch:list":
+          return { ok: true, drafts: await flowBatchDrafts.list() };
+        case "flow-batch:save": {
+          const draft = await flowBatchDrafts.save({ id: message.id, label: message.label, jobs: message.jobs });
+          return { ok: true, draft, drafts: await flowBatchDrafts.list() };
+        }
+        case "flow-batch:remove": {
+          const removed = await flowBatchDrafts.remove(String(message.id || ""));
+          return { ok: true, removed, drafts: await flowBatchDrafts.list() };
+        }
+        case "flow-batch:run": {
+          const draft = await flowBatchDrafts.get(String(message.id || ""));
+          if (!draft) throw Object.assign(new Error(`No batch draft with id ${message.id}.`), { code: "FLOW_BATCH_DRAFT_NOT_FOUND" });
+          const target = await captureFlowTargetMetadata();
+          const jobs = materializeDraftJobs(draft).map(job => ({
+            ...job,
+            metadata: { source: "extension", ...target, ...(job.metadata || {}) },
+          }));
+          let snapshot;
+          let runBatchId = null;
+          if (jobs.length === 1) {
+            const added = await flowJobQueue.add(jobs[0]);
+            runBatchId = added?.batch?.batchId || null;
+            snapshot = await flowJobQueue.snapshot();
+          } else {
+            const added = await flowJobQueue.addBatch(jobs, { batchLabel: draft.label });
+            runBatchId = added[0]?.batch?.batchId || null;
+            snapshot = await flowJobQueue.snapshot();
+          }
+          const updated = await flowBatchDrafts.recordRun(draft.id, runBatchId);
+          snapshot = message.autoStart === false || snapshot.isPaused || snapshot.waitingForUser > 0
+            ? snapshot
+            : await flowJobQueue.resume();
+          return { ok: true, draft: updated, drafts: await flowBatchDrafts.list(), ...flowQueueSnapshot(snapshot) };
+        }
+        default:
+          throw Object.assign(new Error(`Unsupported batch draft action: ${message.type}`), { code: "FLOW_BATCH_ACTION_UNSUPPORTED" });
+      }
+    })().then(respond).catch(error => respond({
+      ok: false,
+      error: { code: error?.code || "FLOW_BATCH_FAILED", message: String(error?.message || error) },
     }));
     return true;
   }

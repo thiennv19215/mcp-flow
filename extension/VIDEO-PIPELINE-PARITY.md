@@ -126,10 +126,13 @@ visual ports without engines behind them. Verified by handler audit of
 - Photos tab albums are an empty state: no album organization of results.
 
 **Queue / job submission**
-- No saved batch drafts: the reference persists named batches per project
-  that can be created now, run later, re-run, and resumed per item
-  (GenBatchQueueStore + scheduler run-all/run-one). Here the queue itself
-  is the only persistence; batches are one-shot groups of jobs.
+- Saved batch drafts: IMPLEMENTED (2026-10-24, commit after this audit) —
+  the panel composer can save a batch as a persistent draft and run/re-run
+  it from the drafts list, with fresh job IDs and rewritten chain edges per
+  run (`src/background/flow-batch-drafts.js`). Still missing versus the
+  reference: per-item resume inside a partially-run batch (here a re-run
+  starts the whole batch; failed items inside a run use the queue's own
+  retry), and draft organization per project.
 - No saved multi-task lists (named prompt sets with run-all) in the
   panel; the Tasks tab is the live queue view.
 - No remote submission channel (the reference accepts jobs via

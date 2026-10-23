@@ -16,6 +16,10 @@
     retry: "flow-queue:retry",
     retryBatch: "flow-queue:retry-batch",
     download: "flow-queue:download",
+    draftList: "flow-batch:list",
+    draftSave: "flow-batch:save",
+    draftRun: "flow-batch:run",
+    draftRemove: "flow-batch:remove",
   });
 
   const RETRYABLE_OPERATIONS = new Set([
@@ -64,6 +68,8 @@
       autoDownloadLabel: "Tự động tải kết quả về máy",
       editLabel: "Sửa", continueLabel: "Nối tiếp", agentLabel: "Agent", scenes: "cảnh",
       retryBatch: "Thử lại {n} tác vụ lỗi an toàn",
+      saveDraft: "Lưu nháp", draftsTitle: "Batch nháp", draftEmpty: "Chưa có batch nháp nào.",
+      draftMeta: "{n} tác vụ · đã chạy {runs} lần", runDraft: "Chạy", deleteDraft: "Xóa",
     },
     en: {
       aria: "Flow task queue", title: "Flow queue", loading: "Loading…",
@@ -100,6 +106,8 @@
       autoDownloadLabel: "Automatically download results",
       editLabel: "Edit", continueLabel: "Continue", agentLabel: "Agent", scenes: "scenes",
       retryBatch: "Retry {n} safe failed tasks",
+      saveDraft: "Save draft", draftsTitle: "Batch drafts", draftEmpty: "No batch drafts yet.",
+      draftMeta: "{n} tasks · ran {runs} time(s)", runDraft: "Run", deleteDraft: "Delete",
     },
   });
 
@@ -222,6 +230,7 @@
     }
 
     async refresh() {
+      void this._loadDrafts();
       return this._send(MESSAGE.get);
     }
 
@@ -353,6 +362,10 @@
       }
       const submit = makeElement("button", "", text.submit);
       submit.type = "submit";
+      const saveDraft = makeElement("button", "", text.saveDraft);
+      saveDraft.type = "submit";
+      saveDraft.name = "intent";
+      saveDraft.value = "draft";
       const autoDownloadLabel = makeElement("label", "flow-queue-panel__manual");
       const autoDownloadCheckbox = makeElement("input");
       autoDownloadCheckbox.type = "checkbox";
@@ -369,18 +382,21 @@
       batchCheckbox.type = "checkbox";
       batchCheckbox.name = "batch_mode";
       batchLabel.append(batchCheckbox, makeElement("span", "", text.batchLabel));
-      form.append(input, type, this.assetInput, ratio, refsInput, refMode, refCountWrap, firstFramesInput, lastFramesInput, submit, autoDownloadLabel, manualLabel, batchLabel);
+      form.append(input, type, this.assetInput, ratio, refsInput, refMode, refCountWrap, firstFramesInput, lastFramesInput, submit, saveDraft, autoDownloadLabel, manualLabel, batchLabel);
 
       this.error = makeElement("div", "flow-queue-panel__error");
       this.error.setAttribute("role", "alert");
       this.error.hidden = true;
       this.itemsElement = makeElement("div", "flow-queue-panel__items");
       this.itemsElement.setAttribute("aria-live", "polite");
+      const draftsHeading = makeElement("div", "flow-queue-panel__title", text.draftsTitle);
+      this.draftsElement = makeElement("div", "flow-queue-panel__items");
 
-      panel.append(heading, toolbar, this.attentionBanner, form, this.error, this.itemsElement);
+      panel.append(heading, toolbar, this.attentionBanner, form, this.error, this.itemsElement, draftsHeading, this.draftsElement);
       this.container.replaceChildren(panel);
       this.panel = panel;
       this._syncFields();
+      void this._loadDrafts();
     }
 
     _button(label, action) {
@@ -698,14 +714,58 @@
       const autoDownload = form.elements.namedItem("auto_download")?.checked !== false;
       const downloadAwareMakePayload = makePayload;
       makePayload = (...args) => ({ ...downloadAwareMakePayload(...args), autoDownload });
+      const jobs = prompts.map((itemPrompt, index) => ({ operation, payload: makePayload(itemPrompt, index), label: makeLabel(itemPrompt) }));
+      if (event.submitter?.value === "draft") {
+        const response = await this._send(MESSAGE.draftSave, { label: this._text("batchName"), jobs });
+        if (response?.ok !== false && !response?.error && input) input.value = "";
+        await this._loadDrafts();
+        return;
+      }
       if (batchMode && prompts.length > 1) {
-        const jobs = prompts.map((itemPrompt, index) => ({ operation, payload: makePayload(itemPrompt, index), label: makeLabel(itemPrompt) }));
         const response = await this._send(MESSAGE.addBatch, { jobs, batchLabel: this._text("batchName") });
         if (response?.ok !== false && !response?.error && input) input.value = "";
         return;
       }
-      const response = await this.add({ operation, payload: makePayload(prompts[0], 0), label: makeLabel(prompts[0]) });
+      const response = await this.add(jobs[0]);
       if (response?.ok !== false && !response?.error && input) input.value = "";
+    }
+
+    async _loadDrafts() {
+      if (!this.draftsElement || !this.runtime?.sendMessage) return;
+      try {
+        const response = await this.runtime.sendMessage({ type: MESSAGE.draftList });
+        if (response?.ok === false || response?.error) return;
+        this.drafts = Array.isArray(response?.drafts) ? response.drafts : [];
+        this._renderDrafts();
+      } catch { /* drafts are an enhancement; the queue itself must keep working */ }
+    }
+
+    _renderDrafts() {
+      if (!this.draftsElement) return;
+      const drafts = Array.isArray(this.drafts) ? this.drafts : [];
+      this.draftsElement.replaceChildren();
+      if (!drafts.length) {
+        this.draftsElement.append(makeElement("div", "flow-queue-panel__empty", this._text("draftEmpty")));
+        return;
+      }
+      const fragment = document.createDocumentFragment();
+      for (const draft of drafts) {
+        const item = makeElement("article", "flow-queue-panel__item");
+        const head = makeElement("div", "flow-queue-panel__item-head");
+        head.append(makeElement("span", "flow-queue-panel__label", draft.label || this._text("batchName")));
+        item.append(head);
+        item.append(makeElement("div", "flow-queue-panel__detail",
+          this._text("draftMeta", { n: Array.isArray(draft.jobs) ? draft.jobs.length : 0, runs: draft.runCount || 0 })));
+        const actions = makeElement("div", "flow-queue-panel__item-actions");
+        const run = this._button(this._text("runDraft"), "draft-run");
+        run.dataset.draftId = String(draft.id);
+        const remove = this._button(this._text("deleteDraft"), "draft-remove");
+        remove.dataset.draftId = String(draft.id);
+        actions.append(run, remove);
+        item.append(actions);
+        fragment.append(item);
+      }
+      this.draftsElement.append(fragment);
     }
 
     _handleChange(event) {
@@ -753,6 +813,16 @@
         return this._send(MESSAGE.retry, { id: taskIdentity(task, index), taskId: taskIdentity(task, index) });
       }
       if (action === "retry-batch") return this._send(MESSAGE.retryBatch, { batchId: button.dataset.batchId });
+      if (action === "draft-run") {
+        const response = await this._send(MESSAGE.draftRun, { id: button.dataset.draftId });
+        await this._loadDrafts();
+        return response;
+      }
+      if (action === "draft-remove") {
+        const response = await this._send(MESSAGE.draftRemove, { id: button.dataset.draftId });
+        await this._loadDrafts();
+        return response;
+      }
     }
 
     _setBusy(value) {
