@@ -2196,6 +2196,37 @@
     });
   }
 
+  // DL-01: the "No watermark" toggle (+ per-kind image/video flags)
+  // persists the flowWatermark storage config the watermark bridge
+  // reads. Stored fields the sidebar does not own (a supplied mask,
+  // thresholds) are preserved on every write; the config is read back
+  // here on load so the toggles reflect it.
+  function initWatermarkSettings() {
+    const pill = document.querySelector("#genTabWatermarkPill");
+    if (!pill) return;
+    const imageToggle = document.querySelector("#genTabWatermarkImage");
+    const videoToggle = document.querySelector("#genTabWatermarkVideo");
+    readUiStorage("flowWatermark", {}).then(stored => {
+      const config = stored && typeof stored === "object" ? stored : {};
+      pill.checked = config.enabled === true;
+      if (imageToggle) imageToggle.checked = config.image !== false;
+      if (videoToggle) videoToggle.checked = config.video !== false;
+    }).catch(() => {});
+    const persist = async () => {
+      const stored = await readUiStorage("flowWatermark", {});
+      const base = stored && typeof stored === "object" ? stored : {};
+      await writeUiStorage("flowWatermark", {
+        ...base,
+        enabled: pill.checked === true,
+        image: imageToggle ? imageToggle.checked === true : base.image !== false,
+        video: videoToggle ? videoToggle.checked === true : base.video !== false,
+      });
+    };
+    pill.addEventListener("change", () => { void persist(); });
+    imageToggle?.addEventListener("change", () => { void persist(); });
+    videoToggle?.addEventListener("change", () => { void persist(); });
+  }
+
   // 2. Header and Settings Menu
   function initSettingsAndHeader() {
     const dropdown = document.querySelector("#settingsDropdown");
@@ -2851,6 +2882,7 @@
     initScreenCapture();
     initSubtabs();
     initGenerationControls();
+    initWatermarkSettings();
     initStyleDropdown();
     initCharacterAndVoiceModals();
     await loadFlowModelCapabilities();

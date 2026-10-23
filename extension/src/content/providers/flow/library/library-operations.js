@@ -73,7 +73,7 @@
       if (name === "flow.asset.download") {
         const prefix = String(payload.name || "").toLowerCase();
         if (!prefix && !payload.id) throw this.error("FLOW_INVALID_ARGUMENT", "Asset name or media id is required.");
-        const downloadOptions = { signal: command.signal, timeoutMs: command.timeoutMs };
+        const downloadOptions = { signal: command.signal, timeoutMs: command.timeoutMs, watermarkMode: payload.watermarkMode ?? payload.watermark_mode };
         if (payload.id) return menu.triggerFlowDownload(String(payload.name || ""), payload.quality, String(payload.id), downloadOptions);
         const assets = await menu.scanNativeAssets({ signal: command.signal });
         const candidates = assets.filter(a => a.name.toLowerCase().startsWith(prefix));

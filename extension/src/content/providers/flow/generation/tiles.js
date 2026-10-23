@@ -52,6 +52,21 @@
     });
   }
 
+  // VID-03: correlation expectations are optional at every layer. They are
+  // normalised here with exactly the rules the observer applies when storing
+  // the attempt (model key charset, ratio enum clamped to 1..16) and are
+  // included in the arm detail only when valid, so an arm that carries no
+  // expectation produces the historical detail byte-for-byte.
+  function correlationModelKey(value) {
+    return typeof value === "string" && /^[a-zA-Z0-9_-]{1,128}$/.test(value) ? value : undefined;
+  }
+
+  function correlationRatioEnum(value) {
+    return value != null && Number.isInteger(Number(value))
+      ? Math.max(1, Math.min(16, Number(value)))
+      : undefined;
+  }
+
   async function armNativeFlowCorrelation({
     projectId,
     mediaType,
@@ -62,8 +77,19 @@
     expectedCharacterIds = [],
     expectedVoiceCount = 0,
     unverifiedMediaCount = 0,
+    expectedVideoModelKey,
+    expectedVideoRatioEnum,
+    expectedImageModelKey,
   }) {
     if (!projectId || !["image", "video"].includes(mediaType)) return null;
+    const videoModelKey = correlationModelKey(expectedVideoModelKey);
+    const videoRatioEnum = correlationRatioEnum(expectedVideoRatioEnum);
+    const imageModelKey = correlationModelKey(expectedImageModelKey);
+    const expectationDetail = {
+      ...(videoModelKey !== undefined ? { expectedVideoModelKey: videoModelKey } : {}),
+      ...(videoRatioEnum !== undefined ? { expectedVideoRatioEnum: videoRatioEnum } : {}),
+      ...(imageModelKey !== undefined ? { expectedImageModelKey: imageModelKey } : {}),
+    };
     const attemptId = crypto.randomUUID();
     const nonce = crypto.randomUUID();
     const entry = { attemptId, nonce, projectId, mediaType, receipts: [], listener: null, armed: false, armedAt: Date.now(), requestSeen: false, useTilesFallback: false };
@@ -112,13 +138,14 @@
         expectedGlobalCharacter: false,
         strictDispatch: true,
         ttlMs: 15 * 60_000,
+        ...expectationDetail,
       },
     }));
     if (!(await armed)) {
       root.__flowNativeCorrelationArmDiagnostics = {
         requestedAt: new Date(entry.armedAt).toISOString(),
         result: "not_armed",
-        expected: { projectId, mediaType, promptFingerprint: flowPromptFingerprint(prompt) },
+        expected: { projectId, mediaType, promptFingerprint: flowPromptFingerprint(prompt), ...expectationDetail },
         receipt: entry.receipts.find(receipt => receipt?.stage === "armed") || null,
         timeoutMs: 500,
       };
@@ -133,7 +160,7 @@
     root.__flowNativeCorrelationArmDiagnostics = {
       requestedAt: new Date(entry.armedAt).toISOString(),
       result: "armed",
-      expected: { projectId, mediaType, promptFingerprint: flowPromptFingerprint(prompt) },
+      expected: { projectId, mediaType, promptFingerprint: flowPromptFingerprint(prompt), ...expectationDetail },
       receipt: entry.receipts.find(receipt => receipt?.stage === "armed") || null,
       timeoutMs: 500,
     };
@@ -599,15 +626,115 @@
     };
   }
 
-  async function findFlowTileByMediaId(mediaId, options = {}) {
-    const wanted = String(mediaId || "").trim();
-    if (!wanted || wanted.startsWith("title:")) return null;
-    const sameId = value => {
-      const current = String(value || "").trim();
-      return /^[0-9a-f-]{36}$/i.test(current) && /^[0-9a-f-]{36}$/i.test(wanted)
-        ? current.toLowerCase() === wanted.toLowerCase()
-        : current === wanted;
+  // DL-09: tile identity is an ALIAS SET, not a single string. The forms
+  // below are exactly the ones the generation side already accepts for a
+  // tile (see mediaId() in dom-utils.js): the primary mediaId() value,
+  // the persistent/media id attributes on the tile or a descendant, the
+  // media element's own id attributes, and the identities derivable from
+  // the media src (a canonical UUID, or an `asb:` identity — kept in both
+  // its prefixed and bare forms, since callers carry either). Two values
+  // match when they are the same UUID (case-insensitive) or the same asb
+  // identity in either form, otherwise only on exact equality.
+  function tileIdentityValuesMatch(left, right) {
+    const a = String(left || "").trim();
+    const b = String(right || "").trim();
+    if (!a || !b) return false;
+    if (/^[0-9a-f-]{36}$/i.test(a) && /^[0-9a-f-]{36}$/i.test(b)) return a.toLowerCase() === b.toLowerCase();
+    const aAsb = /^asb:(.+)$/i.exec(a)?.[1];
+    const bAsb = /^asb:(.+)$/i.exec(b)?.[1];
+    if (aAsb || bAsb) return (aAsb || a) === (bAsb || b);
+    return a === b;
+  }
+
+  function tileIdentityAliases(tile) {
+    const aliases = [];
+    const add = value => {
+      const text = typeof value === "string" ? value.trim() : "";
+      if (text && !aliases.includes(text)) aliases.push(text);
     };
+    if (!tile) return aliases;
+    try { add(root.mediaId?.(tile)); } catch (_) {}
+    const identityAttributes = ["data-persistent-media-id", "data-media-id", "data-media-uuid", "data-uuid"];
+    for (const attribute of identityAttributes) {
+      try { add(tile.getAttribute?.(attribute)); } catch (_) {}
+    }
+    try {
+      const descendants = tile.querySelectorAll?.("[data-persistent-media-id],[data-media-id],[data-media-uuid],[data-uuid]") || [];
+      for (const node of descendants) {
+        for (const attribute of identityAttributes) {
+          try { add(node.getAttribute?.(attribute)); } catch (_) {}
+        }
+      }
+    } catch (_) {}
+    try {
+      const mediaNodes = tile.querySelectorAll?.("img,video") || [];
+      for (const node of mediaNodes) {
+        for (const attribute of identityAttributes) {
+          try { add(node.getAttribute?.(attribute)); } catch (_) {}
+        }
+        const src = String(node.currentSrc || node.src || node.getAttribute?.("src") || "");
+        if (!src) continue;
+        add(src.match(/[0-9a-f]{8}-[0-9a-f-]{27}/i)?.[0]);
+        try {
+          const url = new URL(src, location.href);
+          if (url.pathname.startsWith("/asb/")) {
+            const rest = url.pathname.slice("/asb/".length).replace(/=(?:s\d+(?:-[a-z]+)*|mm,\d+,\d+)$/i, "");
+            if (rest) { add(`asb:${rest}`); add(rest); }
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
+    return aliases;
+  }
+
+  function tileMatchesMediaIdentity(tile, wantedValues) {
+    const wanted = (Array.isArray(wantedValues) ? wantedValues : [wantedValues])
+      .map(value => String(value || "").trim()).filter(Boolean);
+    if (!wanted.length) return false;
+    const aliases = tileIdentityAliases(tile);
+    return aliases.some(alias => wanted.some(value => tileIdentityValuesMatch(alias, value)));
+  }
+
+  // DL-09 failure cooldown (reference behavior D4): a sweep that fails
+  // to mount its target records the failure per target identity; a
+  // repeat sweep for the SAME target inside
+  // FLOW_TILE_SWEEP_FAILURE_COOLDOWN_MS (60s, the reference window)
+  // fails fast with FLOW_TILE_SWEEP_COOLDOWN instead of scrolling the
+  // grid again. At most one real sweep per target per window: attempts
+  // inside the window do not extend it, a success clears the record,
+  // and other targets are unaffected. Callers opt in via
+  // options.failureCooldownMs (the download sweep entry point below
+  // always does); the historical findFlowTileByMediaId callers keep
+  // their un-cooled behavior unless they pass it.
+  const FLOW_TILE_SWEEP_FAILURE_COOLDOWN_MS = 60_000;
+  const flowTileSweepFailures = globalThis.__flowTileSweepFailures instanceof Map
+    ? globalThis.__flowTileSweepFailures
+    : (globalThis.__flowTileSweepFailures = new Map());
+
+  async function findFlowTileByMediaId(mediaId, options = {}) {
+    const wantedValues = [mediaId, ...(Array.isArray(options.aliases) ? options.aliases : []),
+      ...(Array.isArray(options.identityAliases) ? options.identityAliases : [])]
+      .map(value => String(value || "").trim())
+      .filter(value => value && !value.startsWith("title:"));
+    if (!wantedValues.length) return null;
+    const cooldownMs = Number.isFinite(Number(options.failureCooldownMs)) && Number(options.failureCooldownMs) > 0
+      ? Number(options.failureCooldownMs)
+      : (Number.isFinite(Number(options.cooldownMs)) && Number(options.cooldownMs) > 0 ? Number(options.cooldownMs) : 0);
+    const cooldownKey = cooldownMs
+      ? wantedValues.map(value => value.toLowerCase()).sort().join("|")
+      : null;
+    if (cooldownKey) {
+      const failedAt = flowTileSweepFailures.get(cooldownKey);
+      if (Number.isFinite(failedAt)) {
+        if (Date.now() - failedAt < cooldownMs) {
+          throw root.flowError("FLOW_TILE_SWEEP_COOLDOWN",
+            `The Flow tile sweep for this media failed less than ${Math.round(cooldownMs / 1000)}s ago; refusing to sweep the grid again until the cooldown expires. No tile was clicked.`,
+            true, false);
+        }
+        flowTileSweepFailures.delete(cooldownKey);
+      }
+    }
+    const recordSweepFailure = () => { if (cooldownKey) flowTileSweepFailures.set(cooldownKey, Date.now()); };
     const deadline = Number.isFinite(options.deadline) ? options.deadline : Date.now() + 15_000;
     const maxSteps = Math.max(1, Math.min(100, Number(options.maxSteps) || 60));
     const scroller = flowMediaGridScrollContainer();
@@ -618,13 +745,21 @@
         if (options.signal?.aborted) throw root.flowError("FLOW_OPERATION_TIMEOUT", "Timed out while locating the exact Flow media tile; no reference was selected.", false, false);
         const tiles = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", document, { checkVisible: false }) : null) ||
           [...document.querySelectorAll("flow-grid-tile-container")];
-        const matches = tiles.filter(tile => sameId(root.mediaId?.(tile)));
+        const matches = tiles.filter(tile => tileMatchesMediaIdentity(tile, wantedValues));
         if (matches.length === 1) {
           found = matches[0];
+          if (cooldownKey) flowTileSweepFailures.delete(cooldownKey);
           found.scrollIntoView?.({ behavior: "instant", block: "center" });
+          // On-mounted (D4): fire the moment the target mounts, with
+          // ownership already verified by the alias-set match above and
+          // BEFORE any scroll restore (a found tile is never restored
+          // away), so the caller can act on the mounted tile at once.
+          const onMounted = typeof options.onMounted === "function" ? options.onMounted
+            : (typeof options.onTileMounted === "function" ? options.onTileMounted : null);
+          if (onMounted) await onMounted(found);
           return found;
         }
-        if (matches.length > 1) return null;
+        if (matches.length > 1) { recordSweepFailure(); return null; }
         if (!scroller) break;
         const top = scroller.scrollTop;
         const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
@@ -635,10 +770,23 @@
         if (root.FlowUiDeadline?.boundedWait) await root.FlowUiDeadline.boundedWait(pause, deadline, "scanning Flow media for the requested image", false, options.signal);
         else await root.wait?.(pause);
       }
+      recordSweepFailure();
       return null;
     } finally {
       if (!found && scroller) scroller.scrollTop = originalTop;
     }
+  }
+
+  // DL-09 reusable sweep entry point for the download path: the
+  // generation tile-loading sweep above, with the failure cooldown
+  // always armed and the caller's on-mounted callback forwarded.
+  async function sweepFlowTileByMediaId(mediaId, options = {}) {
+    return findFlowTileByMediaId(mediaId, {
+      ...options,
+      failureCooldownMs: Number.isFinite(Number(options.failureCooldownMs)) && Number(options.failureCooldownMs) > 0
+        ? Number(options.failureCooldownMs)
+        : FLOW_TILE_SWEEP_FAILURE_COOLDOWN_MS,
+    });
   }
 
   async function countFlowTitleAcrossGrid(title) {
@@ -933,6 +1081,11 @@
     hasRenderedMedia,
     findFlowTile,
     findFlowTileByMediaId,
+    sweepFlowTileByMediaId,
+    tileIdentityAliases,
+    tileMatchesMediaIdentity,
+    tileIdentityValuesMatch,
+    FLOW_TILE_SWEEP_FAILURE_COOLDOWN_MS,
     countFlowTitleAcrossGrid,
     retryIdentity,
     retryNativeErrorTile,
@@ -958,6 +1111,9 @@
   root.hasRenderedMedia = hasRenderedMedia;
   root.findFlowTile = findFlowTile;
   root.findFlowTileByMediaId = findFlowTileByMediaId;
+  root.sweepFlowTileByMediaId = sweepFlowTileByMediaId;
+  root.tileIdentityAliases = tileIdentityAliases;
+  root.tileMatchesMediaIdentity = tileMatchesMediaIdentity;
   root.countFlowTitleAcrossGrid = countFlowTitleAcrossGrid;
   root.waitForProgressResult = waitForProgressResult;
   root.waitForNativeEditorCompletion = waitForNativeEditorCompletion;

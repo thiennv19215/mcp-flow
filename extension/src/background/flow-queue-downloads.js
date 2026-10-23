@@ -2,6 +2,16 @@
 // Dedicated module for managing Flow media downloads, filename overrides,
 // Chrome downloads event listening, and download completion tracking for queue jobs.
 
+import {
+  buildFlowDownloadPlan,
+  normalizePlanFolderPath,
+  normalizePlannedDownloadPath,
+  serializeFilenameTicket,
+  restoreFilenameTicket,
+  FlowDownloadFilenameRecords,
+  FLOW_FILENAME_TICKETS_STORAGE_KEY,
+} from "./flow-download-plan.js";
+
 const isFlowMediaHost = hostname => {
   const host = String(hostname || "").toLowerCase();
   return host === "flow.google.com" || host.endsWith(".flow.google.com") ||
@@ -69,13 +79,126 @@ export function queueDownloadExtension(downloadItem) {
   return byMime.get(mime) || nameExtension?.toLowerCase() || "";
 }
 
-export function armQueueFilenameOverride({ jobId, flowMediaId, fileStem, flowTabId, flowProjectId, mediaKind, title }) {
+// DL-06 (D13): armed tickets persist to chrome.storage.session on every
+// arm/disarm/assignment, so a service-worker restart mid-download no
+// longer loses the intended filename; initQueueDownloadListeners
+// restores them (expired or malformed entries are dropped by
+// restoreFilenameTicket). Session scope is deliberate: an armed rename
+// is meaningful only for downloads of the current browser session.
+// The write chain mirrors FlowMediaCatalog's discipline: snapshot
+// synchronously, chain onto a rejection-guarded promise, so one failed
+// write can neither wedge nor reorder later writes. All storage access
+// is guarded — without chrome.storage the tickets simply stay
+// memory-only, exactly the pre-DL-06 behavior.
+let queueTicketPersistChain = Promise.resolve();
+
+export function persistQueueFilenameOverrides() {
+  const storage = globalThis.chrome?.storage?.session;
+  if (!storage?.set) return Promise.resolve();
+  const snapshot = {
+    version: 1,
+    updatedAt: Date.now(),
+    tickets: pendingQueueFilenameOverrides.map(serializeFilenameTicket).filter(Boolean),
+  };
+  queueTicketPersistChain = queueTicketPersistChain
+    .catch(() => {})
+    .then(() => storage.set({ [FLOW_FILENAME_TICKETS_STORAGE_KEY]: snapshot }))
+    .catch(() => {});
+  return queueTicketPersistChain;
+}
+
+let queueTicketRestorePromise = null;
+
+// Restore persisted tickets into the live array. Memoized per worker
+// lifetime: the restore runs once, when the background initializes;
+// repeat calls return the same promise (and the same restored count).
+export function restoreQueueFilenameOverrides() {
+  if (!queueTicketRestorePromise) queueTicketRestorePromise = (async () => {
+    const storage = globalThis.chrome?.storage?.session;
+    if (!storage?.get) return 0;
+    try {
+      const stored = await storage.get(FLOW_FILENAME_TICKETS_STORAGE_KEY);
+      const state = stored?.[FLOW_FILENAME_TICKETS_STORAGE_KEY];
+      if (!state || state.version !== 1 || !Array.isArray(state.tickets)) return 0;
+      const now = Date.now();
+      let restored = 0;
+      for (const raw of state.tickets) {
+        const ticket = restoreFilenameTicket(raw, now);
+        if (!ticket) continue;
+        const duplicate = pendingQueueFilenameOverrides.some(candidate =>
+          candidate.jobId === ticket.jobId && candidate.flowMediaId === ticket.flowMediaId && candidate.armedAt === ticket.armedAt);
+        if (duplicate) continue;
+        pendingQueueFilenameOverrides.push(ticket);
+        restored += 1;
+      }
+      return restored;
+    } catch {
+      return 0;
+    }
+  })();
+  return queueTicketRestorePromise;
+}
+
+// DL-06 (D22): the durable per-project media id -> planned filename
+// records. Lazily built singleton; null when chrome.storage.local is
+// unavailable, in which case downloads simply derive names as before.
+let filenameRecordsStore;
+function getFilenameRecords() {
+  if (filenameRecordsStore !== undefined) return filenameRecordsStore;
+  try {
+    const storage = globalThis.chrome?.storage?.local;
+    if (!storage?.get || !storage?.set) {
+      filenameRecordsStore = null;
+      return null;
+    }
+    filenameRecordsStore = new FlowDownloadFilenameRecords({ storage });
+  } catch {
+    filenameRecordsStore = null;
+  }
+  return filenameRecordsStore;
+}
+
+// The relative path a ticket will suggest for its download: an exact
+// planned filename (D22 record reuse) wins; otherwise the armed
+// folder, when any, prefixes the assigned filename.
+export function ticketSuggestedFilename(ticket) {
+  if (!ticket) return "";
+  if (ticket.plannedFilename) return ticket.plannedFilename;
+  if (!ticket.assignedFilename) return "";
+  return ticket.folder ? `${ticket.folder}/${ticket.assignedFilename}` : ticket.assignedFilename;
+}
+
+// Record a ticket's assigned name in the D22 store. Advisory only —
+// failures are swallowed so the name store can never fail a download.
+// Only names this extension actually imposed are recorded (an
+// unassigned ticket has no planned name worth remembering).
+function noteTicketFilenameAssigned(ticket) {
+  if (!ticket?.flowProjectId || !ticket?.flowMediaId || !ticket?.assignedFilename) return;
+  const records = getFilenameRecords();
+  if (!records) return;
+  const filename = ticketSuggestedFilename(ticket);
+  if (!filename) return;
+  void records.record({
+    projectId: ticket.flowProjectId,
+    mediaId: ticket.flowMediaId,
+    folder: ticket.folder || "",
+    filename,
+  }).catch(() => {});
+}
+
+export function armQueueFilenameOverride({ jobId, flowMediaId, fileStem, flowTabId, flowProjectId, mediaKind, title, folder = "", plannedFilename = "" }) {
   const stem = safeQueueFilenameStem(fileStem);
   if (!stem || !String(jobId || "").trim() || !Number.isInteger(flowTabId) || !flowMediaId) return null;
+  const cleanPlannedFilename = plannedFilename ? normalizePlannedDownloadPath(plannedFilename) : "";
+  if (plannedFilename && !cleanPlannedFilename) return null;
   const ticket = {
     jobId: String(jobId || ""),
     flowMediaId: String(flowMediaId),
     fileStem: stem,
+    folder: cleanPlannedFilename
+      ? (cleanPlannedFilename.includes("/") ? cleanPlannedFilename.slice(0, cleanPlannedFilename.lastIndexOf("/")) : "")
+      : (folder ? normalizePlanFolderPath(folder, "") : ""),
+    plannedFilename: cleanPlannedFilename || null,
     flowTabId,
     flowProjectId: String(flowProjectId || ""),
     mediaKind: String(mediaKind || "").toLowerCase() === "scene" ? "video" : String(mediaKind || "").toLowerCase(),
@@ -89,12 +212,16 @@ export function armQueueFilenameOverride({ jobId, flowMediaId, fileStem, flowTab
     assignedFilename: null,
   };
   pendingQueueFilenameOverrides.push(ticket);
+  void persistQueueFilenameOverrides();
   return ticket;
 }
 
 export function disarmQueueFilenameOverride(ticket) {
   const index = pendingQueueFilenameOverrides.indexOf(ticket);
-  if (index >= 0) pendingQueueFilenameOverrides.splice(index, 1);
+  if (index >= 0) {
+    pendingQueueFilenameOverrides.splice(index, 1);
+    void persistQueueFilenameOverrides();
+  }
 }
 
 export function queueDownloadProjectId(downloadItem) {
@@ -170,19 +297,30 @@ export function claimQueueDownloadTicket(downloadItem) {
   const ticket = candidates[0];
   const extension = queueDownloadExtension(downloadItem) || (ticket.mediaKind === "video" ? ".mp4" : ".jpg");
   ticket.downloadId = downloadItem.id;
-  ticket.assignedFilename = `${ticket.fileStem}${extension}`;
+  // A ticket carrying an exact planned filename (D22 record reuse)
+  // keeps it as its assigned name; the suggestion is that path verbatim.
+  ticket.assignedFilename = ticket.plannedFilename || `${ticket.fileStem}${extension}`;
+  void persistQueueFilenameOverrides();
+  noteTicketFilenameAssigned(ticket);
   return ticket;
 }
 
 export function initQueueDownloadListeners() {
+  // DL-06: bring back any tickets persisted before a worker restart.
+  void restoreQueueFilenameOverrides();
   chrome.downloads?.onCreated?.addListener(downloadItem => {
     claimQueueDownloadTicket(downloadItem);
   });
   chrome.downloads?.onDeterminingFilename?.addListener((downloadItem, suggest) => {
     const now = Date.now();
+    let swept = false;
     for (let i = pendingQueueFilenameOverrides.length - 1; i >= 0; i--) {
-      if (pendingQueueFilenameOverrides[i].expiresAt < now) pendingQueueFilenameOverrides.splice(i, 1);
+      if (pendingQueueFilenameOverrides[i].expiresAt < now) {
+        pendingQueueFilenameOverrides.splice(i, 1);
+        swept = true;
+      }
     }
+    if (swept) void persistQueueFilenameOverrides();
     if (downloadItem?.byExtensionId && downloadItem.byExtensionId !== chrome.runtime.id) return;
     if (!Number.isInteger(downloadItem?.id)) return;
     const sourceUrl = `${downloadItem.url || ""} ${downloadItem.finalUrl || ""} ${downloadItem.referrer || ""}`;
@@ -203,13 +341,141 @@ export function initQueueDownloadListeners() {
     if (!extension) return;
     if (!ticket.downloadId) {
       ticket.downloadId = downloadItem.id;
-      ticket.assignedFilename = `${ticket.fileStem}${extension}`;
+      ticket.assignedFilename = ticket.plannedFilename || `${ticket.fileStem}${extension}`;
+      noteTicketFilenameAssigned(ticket);
     } else if (ticket.downloadId !== downloadItem.id) {
       return;
     }
+    const suggestedFilename = ticketSuggestedFilename(ticket);
+    if (!suggestedFilename) return;
     disarmQueueFilenameOverride(ticket);
-    suggest({ filename: ticket.assignedFilename, conflictAction: "uniquify" });
+    suggest({ filename: suggestedFilename, conflictAction: "uniquify" });
   });
+}
+
+// DL-05: interrupted-download classification + in-place resume (study
+// D16/D17). Chrome reports an interruption reason on the download item;
+// only transient network/transport-class reasons may resume, and only
+// when Chrome itself says the download can resume. Identity/provenance,
+// auth/policy and integrity reasons never resume; unknown reasons fail
+// closed as fatal. (The reference reads its retry budget from server
+// execution config — blocked, DL-B5 — so ours is a small local constant,
+// mirrored in src/native-downloads.ts.)
+export const FLOW_DOWNLOAD_RESUME_BUDGET = 3;
+
+const TRANSIENT_DOWNLOAD_INTERRUPTIONS = new Set([
+  "NETWORK_FAILED", "NETWORK_TIMEOUT", "NETWORK_DISCONNECTED", "NETWORK_SERVER_DOWN",
+  "SERVER_FAILED", "SERVER_UNREACHABLE", "SERVER_NO_RANGE", "SERVER_CONTENT_LENGTH_MISMATCH",
+  "FILE_TRANSIENT_ERROR", "CRASH",
+]);
+
+export function classifyDownloadInterruption(error, canResume) {
+  const reason = String(error || "").trim().toUpperCase() || "UNKNOWN";
+  const transient = TRANSIENT_DOWNLOAD_INTERRUPTIONS.has(reason);
+  return {
+    category: transient ? "transient" : "fatal",
+    reason,
+    resumable: transient && canResume === true,
+  };
+}
+
+// DL-07: explicit HTML-response rejection (study D15, gap G7). Flow
+// sometimes serves an HTML error/placeholder page instead of media;
+// without an explicit check the wait either sat until timeout or, in
+// edge paths, treated the .html payload as the download result. The
+// detector is mime OR filename — mirroring the gap text ("mime or
+// .html filename") and D15's two alternative signals. That OR is
+// deliberately stricter than queueDownloadExtension above: there a
+// real media mime rescues an .html name for EXTENSION purposes, but
+// for HTML rejection a .html/.htm filename alone is enough, even when
+// the item also carries a media mime (pinned in the DL-07 tests).
+export function detectFlowDownloadHtmlResponse(downloadItem) {
+  if (!downloadItem || typeof downloadItem !== "object") return null;
+  const mime = String(downloadItem.mime || "").split(";")[0].trim().toLowerCase();
+  const filename = flowDownloadBasename(downloadItem.filename);
+  if (mime === "text/html") return { via: "mime", mime, filename };
+  if (/\.html?$/i.test(filename)) return { via: "filename", mime, filename };
+  return null;
+}
+
+// Removal goes through chrome.downloads.removeFile — the removal
+// surface Chrome exposes for a completed download's file — guarded
+// like the other optional chrome calls in this module: when it is
+// missing or refuses, removal reports false and the HTML error below
+// still stands (a failed removal must never mask the real failure).
+async function removeQueueDownloadFile(downloadItem) {
+  if (!Number.isInteger(downloadItem?.id) || typeof chrome.downloads?.removeFile !== "function") return false;
+  try { await chrome.downloads.removeFile(downloadItem.id); return true; } catch { return false; }
+}
+
+// Fail fast when a sighted item is an HTML response. Ordering, per
+// DL-07: this check runs on a completed or interrupted sighting
+// BEFORE the item can be returned as media and BEFORE the DL-05
+// resume classifier — an interrupted HTML-ish item is not a media
+// download at all, so resuming it would only re-fetch the same HTML
+// page; and a completed HTML item must never reach the return paths.
+// Callers invoke it only for items already attributed to this wait
+// (ticket-claimed, ticket-matched, title-matched, or identity-
+// re-verified), so removal never touches an unrelated user download.
+// In-progress sightings are left alone: their mime/filename are not
+// yet final, and the next poll re-checks them once they settle.
+async function assertQueueDownloadNotHtml(downloadItem, title) {
+  if (!downloadItem || (downloadItem.state !== "complete" && downloadItem.state !== "interrupted")) return;
+  const signal = detectFlowDownloadHtmlResponse(downloadItem);
+  if (!signal) return;
+  const fileRemoved = await removeQueueDownloadFile(downloadItem);
+  throw Object.assign(new Error(`Chrome download for "${title}" arrived as an HTML page instead of media (detected via ${signal.via === "mime" ? `mime "${signal.mime}"` : `filename "${signal.filename}"`}); the HTML payload is not the generated media${fileRemoved ? " and its file was removed" : ""}. The media remains in Flow.`), {
+    code: "FLOW_DOWNLOAD_HTML_RESPONSE", retryable: false, outcomeUnknown: false, outcome_unknown: false,
+    downloadHtmlResponse: {
+      downloadId: downloadItem.id,
+      via: signal.via,
+      mime: signal.mime || null,
+      filename: signal.filename || null,
+      fileRemoved,
+    },
+  });
+}
+
+function queueDownloadFailure(title, item, classification, resumeAttempts) {
+  return Object.assign(new Error(`Chrome download failed for "${title}": ${item?.error || "unknown error"}. The media remains in Flow.`), {
+    code: "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
+    downloadInterruption: {
+      reason: classification.reason,
+      category: classification.category,
+      canResume: item?.canResume === true,
+      resumable: classification.resumable,
+      resumeAttempts,
+      resumeBudget: FLOW_DOWNLOAD_RESUME_BUDGET,
+    },
+  });
+}
+
+// Resume one interrupted download in place, or throw the standard
+// FLOW_DOWNLOAD_FAILED carrying the last error. The caller has already
+// matched the item to its ticket on this poll, and its loop re-runs the
+// same matching after the resume — ticket identity is re-verified before
+// the download can complete. A resume re-arms nothing watermark-related:
+// DL-03 contexts are single-use and belong to the original attempt, and
+// the recorded watermark outcome stays the original trigger's.
+async function resumeInterruptedQueueDownload(resumeState, item, title) {
+  const classification = classifyDownloadInterruption(item?.error, item?.canResume);
+  if (!classification.resumable || resumeState.attempts >= FLOW_DOWNLOAD_RESUME_BUDGET ||
+      !Number.isInteger(item?.id) || typeof chrome.downloads?.resume !== "function") {
+    throw queueDownloadFailure(title, item, classification, resumeState.attempts);
+  }
+  resumeState.attempts += 1;
+  let resumeRefused = false;
+  try { await chrome.downloads.resume(item.id); } catch { resumeRefused = true; }
+  if (!resumeRefused) return;
+  // Chrome refused the resume call itself. Believe that only when the
+  // item is still interrupted — a lagging snapshot can show the
+  // pre-resume state for an item that is already moving again.
+  let current = null;
+  try { [current] = await chrome.downloads.search({ id: item.id }); } catch {}
+  if (current?.state === "interrupted") {
+    throw queueDownloadFailure(title, current, classifyDownloadInterruption(current.error, current.canResume), resumeState.attempts);
+  }
+  if (!current) throw queueDownloadFailure(title, item, classification, resumeState.attempts);
 }
 
 export async function throwIfQueueDownloadAborted(signal, title, downloadId = null) {
@@ -229,13 +495,14 @@ export async function waitForQueueFlowDownload(beforeIds, title, timeoutMs = 12 
   const deadline = Date.now() + timeoutMs;
   const titleKey = flowDownloadTitleKey(title);
   let lastNew = [];
+  const resumeState = { attempts: 0 };
   while (Date.now() < deadline) {
     await throwIfQueueDownloadAborted(signal, title, filenameTicket?.downloadId);
     if (Number.isInteger(filenameTicket?.downloadId)) {
       const [claimed] = await chrome.downloads.search({ id: filenameTicket.downloadId });
-      if (claimed?.state === "interrupted") throw Object.assign(new Error(`Chrome download failed for "${title}": ${claimed.error || "unknown error"}. The media remains in Flow.`), {
-        code: "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
-      });
+      // DL-07: HTML check first — before resume (DL-05) and before return.
+      await assertQueueDownloadNotHtml(claimed, title);
+      if (claimed?.state === "interrupted") await resumeInterruptedQueueDownload(resumeState, claimed, title);
       if (claimed?.state === "complete" && claimed.filename) return {
         id: claimed.id,
         filename: claimed.filename,
@@ -280,9 +547,9 @@ export async function waitForQueueFlowDownload(beforeIds, title, timeoutMs = 12 
         });
       }
       const candidate = matching[0];
-      if (candidate?.state === "interrupted") throw Object.assign(new Error(`Chrome download failed for "${title}": ${candidate.error || "unknown error"}. The media remains in Flow.`), {
-        code: "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
-      });
+      // DL-07: HTML check first — before resume (DL-05) and before return.
+      await assertQueueDownloadNotHtml(candidate, title);
+      if (candidate?.state === "interrupted") await resumeInterruptedQueueDownload(resumeState, candidate, title);
       if (candidate?.state === "complete" && candidate.filename) {
         if (!filenameTicket.downloadId) filenameTicket.downloadId = candidate.id;
         return { id: candidate.id, filename: candidate.filename, matchedByQueueTicket: true, ...(matchedByTriggeredFilename ? { matchedBy: "triggered_flow_filename" } : {}) };
@@ -302,18 +569,17 @@ export async function waitForQueueFlowDownload(beforeIds, title, timeoutMs = 12 
     }
     if (Number.isInteger(filenameTicket?.downloadId)) {
       const exact = newItems.find(item => item.id === filenameTicket.downloadId);
-      if (exact?.state === "interrupted") throw Object.assign(new Error(`Chrome download failed for "${title}": ${exact.error || "unknown error"}. The media remains in Flow.`), {
-        code: "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
-      });
+      await assertQueueDownloadNotHtml(exact, title);
+      if (exact?.state === "interrupted") await resumeInterruptedQueueDownload(resumeState, exact, title);
       if (exact?.state === "complete" && exact.filename) return { id: exact.id, filename: exact.filename };
       await new Promise(resolve => setTimeout(resolve, 750));
       continue;
     }
     const candidates = flowItems.length === 1 && matching.length === 1 ? matching : [];
+    // DL-07: HTML check first — before resume (DL-05) and before return.
+    for (const candidate of candidates) await assertQueueDownloadNotHtml(candidate, title);
     const interrupted = candidates.find(item => item.state === "interrupted");
-    if (interrupted) throw Object.assign(new Error(`Chrome download failed for "${title}": ${interrupted.error || "unknown error"}. The media remains in Flow.`), {
-      code: "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
-    });
+    if (interrupted) await resumeInterruptedQueueDownload(resumeState, interrupted, title);
     const complete = candidates.find(item => item.state === "complete" && item.filename);
     if (complete) return { id: complete.id, filename: complete.filename };
     await new Promise(resolve => setTimeout(resolve, 250));
@@ -325,7 +591,7 @@ export async function waitForQueueFlowDownload(beforeIds, title, timeoutMs = 12 
   });
 }
 
-export async function findExistingQueueFlowDownload(flowMediaId, flowTabId, flowProjectId) {
+export async function findExistingQueueFlowDownload(flowMediaId, flowTabId, flowProjectId, title = "Flow media") {
   if (!chrome.downloads?.search || !flowMediaId || !Number.isInteger(flowTabId)) return null;
   const ticket = {
     flowMediaId: String(flowMediaId),
@@ -334,14 +600,23 @@ export async function findExistingQueueFlowDownload(flowMediaId, flowTabId, flow
   };
   const items = await chrome.downloads.search({ query: [String(flowMediaId)], orderBy: ["-startTime"], limit: 100 });
   const matching = items.filter(item => queueDownloadMatchesTicket(item, ticket));
-  return matching.find(item => item.state === "complete") ||
+  const candidate = matching.find(item => item.state === "complete") ||
     matching.find(item => item.state === "in_progress") ||
     matching.find(item => item.state === "interrupted") || null;
+  // DL-07: the completed candidate this lookup would hand back as an
+  // already-downloaded result is HTML-checked first — downloadQueueMedia
+  // returns a completed existing item without any further wait, so this
+  // is the last point where an HTML payload can be stopped. (An
+  // in-progress/interrupted candidate is checked again by
+  // waitForExistingQueueFlowDownload when the caller waits on it.)
+  if (candidate?.state === "complete") await assertQueueDownloadNotHtml(candidate, title);
+  return candidate;
 }
 
 export async function waitForExistingQueueFlowDownload(downloadId, flowMediaId, flowTabId, flowProjectId, title, timeoutMs = 3 * 60_000, signal = null) {
   const ticket = { flowMediaId: String(flowMediaId), flowTabId, flowProjectId: String(flowProjectId || "") };
   const deadline = Date.now() + timeoutMs;
+  const resumeState = { attempts: 0 };
   while (Date.now() < deadline) {
     await throwIfQueueDownloadAborted(signal, title, downloadId);
     const items = await chrome.downloads.search({ id: downloadId });
@@ -352,9 +627,13 @@ export async function waitForExistingQueueFlowDownload(downloadId, flowMediaId, 
     if (!queueDownloadMatchesTicket(item, ticket)) throw Object.assign(new Error(`Chrome download identity changed while resuming "${title}"; refusing to attach an unrelated file. The generated media remains in Flow.`), {
       code: "FLOW_DOWNLOAD_IDENTITY_MISMATCH", outcomeUnknown: false, outcome_unknown: false,
     });
-    if (item.state === "interrupted") throw Object.assign(new Error(`Chrome download failed for "${title}": ${item.error || "unknown error"}. The media remains in Flow.`), {
-      code: "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
-    });
+    // Identity was verified for this sighting above; after a resume the
+    // loop re-verifies it before the item can complete (DL-05).
+    // DL-07: the HTML check runs after that identity verification (so
+    // removal only ever targets this wait's own download) and before
+    // the DL-05 resume below — HTML wins over resume.
+    await assertQueueDownloadNotHtml(item, title);
+    if (item.state === "interrupted") await resumeInterruptedQueueDownload(resumeState, item, title);
     if (item.state === "complete" && item.filename) return { id: item.id, filename: item.filename, matchedByQueueTicket: true };
     await new Promise(resolve => setTimeout(resolve, 250));
   }
@@ -363,10 +642,208 @@ export async function waitForExistingQueueFlowDownload(downloadId, flowMediaId, 
   });
 }
 
-export async function downloadQueueMedia(media, outputDir, fileStem, quality, invoke, hooks, sceneNumbers = [], jobId = "", flowTabId, flowProjectId = "", generationState = null) {
+// DL-03: map the download op's watermark fields (DL-01: mode / armed /
+// cleaned, plus the per-download attribution status / outcomeReason when
+// the interceptor reported one) into the job-result status shape. The
+// status describes the SAVED file: "cleaned" when cleaning changed the
+// bytes, "original" when the saved bytes are the untouched original
+// (by mode, by config, or because no watermark was found), "failed" when
+// a cleaning attempt ran and failed, and "unknown" when an armed clean
+// produced no attributable outcome — never an invented success.
+// DL-02 (W11): video watermark cleaning NEVER runs in this service
+// worker. The frame pipeline lives in a page context
+// (content/bridge/video-watermark-cleaner.js); the background's job is
+// only to route the request there and record the outcome the page
+// reports (queueWatermarkResult below). Callers treat the delegation
+// as a routing signal, not as a failure of the media.
+export const FLOW_VIDEO_WATERMARK_MAX_INPUT_BYTES = 300 * 1024 * 1024;
+
+export function queueVideoWatermarkRoute({ kind, mode } = {}) {
+  const normalizedKind = String(kind || "").toLowerCase() === "scene" ? "video" : String(kind || "").toLowerCase();
+  const normalizedMode = typeof mode === "string" && mode ? mode : "original";
+  if (normalizedMode !== "clean") {
+    return { route: "none", context: "page", serviceWorker: false, delegated: false, kind: normalizedKind || null, mode: normalizedMode, reason: "clean_not_requested" };
+  }
+  if (normalizedKind === "video") {
+    return { route: "video-frame-pipeline", context: "page", serviceWorker: false, delegated: true, kind: "video", mode: "clean", reason: "video_cleaning_page_context_only", maxInputBytes: FLOW_VIDEO_WATERMARK_MAX_INPUT_BYTES };
+  }
+  return { route: "media-interceptor", context: "page", serviceWorker: false, delegated: true, kind: normalizedKind || null, mode: "clean", reason: "image_cleaning_page_context_only" };
+}
+
+// DL-02: the video fields that may ride an op watermark outcome into
+// the recorded job result — the page cleaner's output bookkeeping
+// (frames, re-detections, untouched audio packets, source duration).
+// Only finite numbers (and the warning string) are recorded; anything
+// else the page sent is dropped rather than persisted verbatim.
+const QUEUE_VIDEO_WATERMARK_FIELDS = ["framesProcessed", "framesCleaned", "framesWithoutWatermark", "verificationFailures", "redetections", "redetectionRatio", "audioPacketsCopied", "durationMs", "sampleCount"];
+
+// DL-12: download phase visibility. The short phase vocabulary the
+// content side records (media-menu's honest sequence, built from the
+// interceptor's attributed TOBY_FLOW_WATERMARK_PHASE signals) and the
+// progress.phase each short phase maps onto in the queue op's EXISTING
+// progress stream. download.state never leaves its existing vocabulary
+// ("downloading" until the withQueueDownloads terminal states) — the
+// phase distinction rides progress.phase + download.phase instead.
+export const QUEUE_DOWNLOAD_PHASES = ["fetching", "cleaning", "original", "saving", "cleaning_failed"];
+export const QUEUE_DOWNLOAD_PHASE_PROGRESS = {
+  fetching: "download_fetching",
+  cleaning: "download_cleaning",
+  original: "download_original",
+  saving: "download_saving",
+  cleaning_failed: "download_cleaning_failed",
+};
+const QUEUE_DOWNLOAD_PHASE_RANK = { fetching: 0, cleaning: 1, original: 1, cleaning_failed: 2, saving: 3 };
+
+// Sanitize an op-supplied phase list against the recorded outcome.
+// Attribution first: an entry carrying a DIFFERENT operationId than
+// the watermark outcome's is dropped — a concurrent download's phases
+// never move this job. Honesty second, mirroring the DL-03 outcome
+// vocabulary: an original outcome never carries a cleaning (or
+// cleaning-failed) phase, a cleaned outcome always carries cleaning
+// before saving, and a failed outcome ends on cleaning_failed with
+// no saving claim after it.
+function sanitizeDownloadPhases(rawPhases, status, operationId) {
+  const phases = [];
+  for (const entry of Array.isArray(rawPhases) ? rawPhases : []) {
+    const name = typeof entry === "string" ? entry : (entry && typeof entry === "object" ? entry.phase : null);
+    if (!name || !QUEUE_DOWNLOAD_PHASES.includes(name)) continue;
+    const entryOperationId = entry && typeof entry === "object" && typeof entry.operationId === "string" && entry.operationId
+      ? entry.operationId : null;
+    if (entryOperationId && operationId && entryOperationId !== operationId) continue;
+    if (!phases.includes(name)) phases.push(name);
+  }
+  phases.sort((a, b) => QUEUE_DOWNLOAD_PHASE_RANK[a] - QUEUE_DOWNLOAD_PHASE_RANK[b]);
+  if (status === "original") {
+    const filtered = phases.filter(phase => phase !== "cleaning" && phase !== "cleaning_failed");
+    if (!filtered.includes("original")) {
+      const savingAt = filtered.indexOf("saving");
+      if (savingAt >= 0) filtered.splice(savingAt, 0, "original");
+      else filtered.push("original");
+    }
+    return filtered;
+  }
+  if (status === "cleaned") {
+    const filtered = phases.filter(phase => phase !== "original" && phase !== "cleaning_failed");
+    if (!filtered.includes("cleaning")) {
+      const savingAt = filtered.indexOf("saving");
+      if (savingAt >= 0) filtered.splice(savingAt, 0, "cleaning");
+      else filtered.push("cleaning");
+    }
+    return filtered;
+  }
+  if (status === "failed") {
+    const filtered = phases.filter(phase => phase !== "original" && phase !== "saving" && phase !== "cleaning_failed");
+    filtered.push("cleaning_failed");
+    return filtered;
+  }
+  return phases;
+}
+
+// The ordered short phases for one download's op watermark: the
+// op-supplied list (sanitized above) when present, otherwise the
+// honest sequence derived from the recorded outcome alone (legacy op
+// results without a phases list): cleaned → fetching/cleaning/saving,
+// original → fetching/original/saving, failed →
+// fetching/cleaning/cleaning_failed, unknown → fetching only (the
+// click happened; no terminal phase is invented).
+export function queueDownloadPhases(opWatermark) {
+  if (!opWatermark || typeof opWatermark !== "object") return [];
+  const status = queueWatermarkResult(opWatermark)?.status || null;
+  if (Array.isArray(opWatermark.phases)) {
+    return sanitizeDownloadPhases(opWatermark.phases, status, opWatermark.operationId);
+  }
+  if (status === "cleaned") return ["fetching", "cleaning", "saving"];
+  if (status === "original") return ["fetching", "original", "saving"];
+  if (status === "failed") return ["fetching", "cleaning", "cleaning_failed"];
+  if (status === "unknown") return ["fetching"];
+  return [];
+}
+
+export function queueWatermarkResult(opWatermark) {
+  if (!opWatermark || typeof opWatermark !== "object") return undefined;
+  const mode = typeof opWatermark.mode === "string" ? opWatermark.mode : "original";
+  const armed = opWatermark.armed === true;
+  const cleaned = opWatermark.cleaned === true ? true : opWatermark.cleaned === false ? false : null;
+  let status = typeof opWatermark.status === "string" && opWatermark.status ? opWatermark.status : null;
+  if (!status) {
+    if (cleaned === true) status = "cleaned";
+    else if (armed && mode === "clean") status = cleaned === false ? "original" : "unknown";
+    else status = "original";
+  }
+  const outcomeReason = typeof opWatermark.outcomeReason === "string" && opWatermark.outcomeReason ? opWatermark.outcomeReason : null;
+  const armReason = typeof opWatermark.reason === "string" && opWatermark.reason ? opWatermark.reason : null;
+  const reason = status === "cleaned" ? outcomeReason : (outcomeReason || armReason);
+  const recorded = {
+    mode,
+    armed,
+    cleaned,
+    status,
+    ...(reason ? { reason } : {}),
+    ...(typeof opWatermark.operationId === "string" && opWatermark.operationId ? { operationId: opWatermark.operationId } : {}),
+  };
+  // DL-02: kind + video bookkeeping are recorded only when the op
+  // outcome actually carried them — the DL-01/DL-03 image shape above
+  // is byte-identical for image downloads.
+  if (typeof opWatermark.kind === "string" && opWatermark.kind) recorded.kind = opWatermark.kind;
+  if (opWatermark.video && typeof opWatermark.video === "object") {
+    const video = {};
+    for (const field of QUEUE_VIDEO_WATERMARK_FIELDS) {
+      if (Number.isFinite(opWatermark.video[field])) video[field] = opWatermark.video[field];
+    }
+    if (typeof opWatermark.video.warning === "string" && opWatermark.video.warning) video.warning = opWatermark.video.warning;
+    if (Object.keys(video).length) recorded.video = video;
+  }
+  // DL-12: the phase sequence is recorded only when the op actually
+  // supplied one (sanitized against this outcome) — op results without
+  // a phases list keep the exact pre-DL-12 recorded shape.
+  if (Array.isArray(opWatermark.phases)) {
+    const phases = sanitizeDownloadPhases(opWatermark.phases, status, opWatermark.operationId);
+    if (phases.length) recorded.phases = phases;
+  }
+  return recorded;
+}
+
+// DL-06: extract the optional filename-plan settings (template, root
+// folder, per-task subfolder) from a job's payload/params/metadata.
+// Returns null when nothing plan-shaped is configured — downloads then
+// derive stems and folders exactly as they did before DL-06.
+export function queueDownloadPlanOptions({ payload = {}, params = {}, metadata = {} } = {}) {
+  const pick = (...values) => values.find(value => typeof value === "string" && value.trim())?.trim();
+  const template = pick(params.filename_template, payload.filename_template, metadata.filename_template,
+    params.download_filename_template, payload.download_filename_template, metadata.download_filename_template);
+  const rootFolder = pick(params.download_root_folder, params.download_folder,
+    payload.download_root_folder, payload.download_folder, metadata.download_root_folder, metadata.download_folder);
+  const subfolder = pick(params.download_subfolder, params.task_folder,
+    payload.download_subfolder, payload.task_folder, metadata.download_subfolder, metadata.task_folder);
+  const projectName = pick(params.project_name, payload.project_name, metadata.project_name);
+  if (!template && !rootFolder && !subfolder) return null;
+  const resolution = pick(params.download_resolution, payload.download_resolution, metadata.download_resolution);
+  return {
+    ...(template ? { template } : {}),
+    ...(rootFolder ? { rootFolder } : {}),
+    ...(subfolder ? { subfolder } : {}),
+    ...(projectName ? { projectName } : {}),
+    ...(resolution ? { resolution } : {}),
+  };
+}
+
+export async function downloadQueueMedia(media, outputDir, fileStem, quality, invoke, hooks, sceneNumbers = [], jobId = "", flowTabId, flowProjectId = "", generationState = null, watermarkMode = undefined, planOptions = null) {
   if (!chrome.downloads?.search) throw Object.assign(new Error("Chrome download tracking is unavailable; the generated media remains in Flow."), {
     code: "FLOW_DOWNLOAD_TRACKING_UNAVAILABLE", outcomeUnknown: false, outcome_unknown: false,
   });
+  // DL-06 (D12): one plan per batch — a single shared timestamp, the
+  // template applied per item, and the planned root/task folder. The
+  // plan only supplies stems + folder; the existing stem derivation
+  // stays the fallback whenever no plan is configured.
+  const downloadPlan = planOptions
+    ? buildFlowDownloadPlan(media.map(item => ({
+      project: planOptions.projectName || flowProjectId,
+      prompt: String(item?.title || item?.name || ""),
+      kind: String(item?.kind || item?.type || ""),
+      resolution: planOptions.resolution,
+    })), planOptions)
+    : null;
+  const filenameRecords = getFilenameRecords();
   const browserDownloads = [];
   try {
     for (const [index, item] of media.entries()) {
@@ -379,10 +856,30 @@ export async function downloadQueueMedia(media, outputDir, fileStem, quality, in
         code: "FLOW_DOWNLOAD_MEDIA_ID_DUPLICATE", outcomeUnknown: false, outcome_unknown: false,
       });
       const sceneNumber = Number(sceneNumbers[index]);
-      const outputStem = Number.isSafeInteger(sceneNumber) && sceneNumber > 0
+      let outputStem = Number.isSafeInteger(sceneNumber) && sceneNumber > 0
         ? `scene-${String(sceneNumber).padStart(2, "0")}`
         : media.length > 1 ? `${fileStem}-v${index + 1}` : fileStem;
-      const existing = await findExistingQueueFlowDownload(flowMediaId, flowTabId, flowProjectId);
+      // DL-06: the batch plan (when configured) supplies this item's
+      // stem + folder; a D22 record for this exact media then overrides
+      // both with the name the media was first downloaded under, so a
+      // re-download lands under the identical folder+filename.
+      let ticketFolder = "";
+      let plannedFilename = "";
+      if (downloadPlan) {
+        const planItem = downloadPlan.items[index];
+        if (planItem) {
+          outputStem = planItem.fileStem;
+          ticketFolder = planItem.folder;
+        }
+      }
+      if (filenameRecords && flowProjectId) {
+        const record = await filenameRecords.lookup(flowProjectId, flowMediaId).catch(() => null);
+        if (record?.filename) {
+          plannedFilename = record.filename;
+          ticketFolder = record.folder || ticketFolder;
+        }
+      }
+      const existing = await findExistingQueueFlowDownload(flowMediaId, flowTabId, flowProjectId, title);
       if (existing) {
         const resumed = existing.state === "in_progress"
           ? await waitForExistingQueueFlowDownload(existing.id, flowMediaId, flowTabId, flowProjectId, title, quality === "upscaled" ? 12 * 60_000 : 3 * 60_000, hooks.signal)
@@ -417,6 +914,7 @@ export async function downloadQueueMedia(media, outputDir, fileStem, quality, in
         });
         filenameTicket = armQueueFilenameOverride({
           jobId, flowMediaId, fileStem: outputStem, flowTabId, flowProjectId, mediaKind: itemKind, title,
+          folder: ticketFolder, plannedFilename,
         });
         if (!filenameTicket) throw Object.assign(new Error(`Could not safely arm the requested filename for task ${jobId || "(unknown)"} and Flow media ${flowMediaId}; no download was started.`), {
           code: "FLOW_DOWNLOAD_FILENAME_ARM_FAILED", outcomeUnknown: false, outcome_unknown: false,
@@ -424,7 +922,7 @@ export async function downloadQueueMedia(media, outputDir, fileStem, quality, in
         let triggered;
         try {
           filenameTicket.triggerStartedAt = Date.now();
-          triggered = await invoke("flow.asset.download", { id: item.id, name: title, quality });
+          triggered = await invoke("flow.asset.download", { id: item.id, name: title, quality, ...(watermarkMode ? { watermarkMode } : {}) });
           filenameTicket.triggerConfirmedAt = Date.now();
         } catch (cause) {
           throw Object.assign(new Error(`Flow generated "${title}", but did not start its download: ${String(cause?.message || cause)}. The media remains in Flow.`), {
@@ -434,6 +932,36 @@ export async function downloadQueueMedia(media, outputDir, fileStem, quality, in
         if (!triggered?.downloadTriggered) throw Object.assign(new Error(`Flow generated "${title}", but did not confirm that its download started. The media remains in Flow.`), {
           code: "FLOW_DOWNLOAD_TRIGGER_FAILED", outcomeUnknown: false, outcome_unknown: false,
         });
+        // DL-12: forward this download's phases onto the job's existing
+        // progress stream, in order, before the browser-save wait (the
+        // wait IS the saving stage). Phases come only from THIS item's
+        // op result — queueDownloadPhases drops any entry attributed
+        // to a different operationId — and download.state stays
+        // "downloading": the distinction rides progress.phase and
+        // download.phase, never a renamed state.
+        const downloadPhases = triggered?.watermark ? queueDownloadPhases(triggered.watermark) : [];
+        const downloadPhaseMessages = {
+          fetching: `Fetching ${mediaLabel} ${index + 1}/${media.length} from Flow…`,
+          cleaning: `Cleaning the watermark from ${mediaLabel} ${index + 1}/${media.length}…`,
+          original: `No watermark cleaning for ${mediaLabel} ${index + 1}/${media.length}; saving the original…`,
+          saving: `Saving ${mediaLabel} ${index + 1}/${media.length}…`,
+          cleaning_failed: `Watermark cleaning failed for ${mediaLabel} ${index + 1}/${media.length}; the download continues with the original file…`,
+        };
+        const downloadPhaseFractions = { fetching: 0, cleaning: 0.34, original: 0.34, cleaning_failed: 0.67, saving: 0.67 };
+        for (const phase of downloadPhases) {
+          await hooks.progress({
+            phase: QUEUE_DOWNLOAD_PHASE_PROGRESS[phase],
+            message: downloadPhaseMessages[phase],
+            percent: 90 + Math.floor((index + (downloadPhaseFractions[phase] || 0)) * 9 / Math.max(1, media.length)),
+            generation: generationState,
+            download: {
+              state: "downloading", completed: index, total: media.length,
+              current: { id: flowMediaId, title },
+              phase,
+              ...(triggered?.watermark ? { watermarkStatus: queueWatermarkResult(triggered.watermark)?.status || null } : {}),
+            },
+          });
+        }
         let download;
         try {
           download = await waitForQueueFlowDownload(beforeIds, title, quality === "upscaled" ? 12 * 60_000 : 3 * 60_000, filenameTicket, hooks.signal);
@@ -450,6 +978,11 @@ export async function downloadQueueMedia(media, outputDir, fileStem, quality, in
         });
         if (!filenameTicket.downloadId) filenameTicket.downloadId = download.id;
         const filenameOverrideApplied = Boolean(filenameTicket.assignedFilename && filenameTicket.downloadId === download.id);
+        // DL-12: the recorded watermark is exactly queueWatermarkResult
+        // — it carries phases only when the op supplied them; the
+        // outcome-derived phases above are a progress-stream
+        // presentation, not an added recorded fact.
+        const recordedWatermark = triggered?.watermark ? queueWatermarkResult(triggered.watermark) : undefined;
         browserDownloads.push({
           ...download,
           downloadId: download.id,
@@ -458,6 +991,7 @@ export async function downloadQueueMedia(media, outputDir, fileStem, quality, in
           title,
           filenameOverrideApplied,
           fileStem: outputStem,
+          ...(recordedWatermark ? { watermark: recordedWatermark } : {}),
         });
       } finally {
         if (filenameTicket) disarmQueueFilenameOverride(filenameTicket);
@@ -524,7 +1058,7 @@ export async function withQueueDownloads(job, payload, operationResult, invoke, 
     const sceneNumbers = Array.isArray(operationResult?.sceneNumbers) && operationResult.sceneNumbers.length === media.length
       ? operationResult.sceneNumbers
       : [];
-    const browserDownloads = await downloadQueueMedia(media, outputDir || "", fileStem, params.download_quality || payload.download_quality || "original", invoke, hooks, sceneNumbers, job.id, job.metadata?.flowTabId, job.metadata?.flowProjectId, generationState);
+    const browserDownloads = await downloadQueueMedia(media, outputDir || "", fileStem, params.download_quality || payload.download_quality || "original", invoke, hooks, sceneNumbers, job.id, job.metadata?.flowTabId, job.metadata?.flowProjectId, generationState, params.watermark_mode || payload.watermark_mode || params.watermarkMode || payload.watermarkMode || undefined, queueDownloadPlanOptions({ payload, params, metadata: job.metadata || {} }));
     await hooks.progress({
       phase: "download_complete",
       message: `Flow generated and downloaded ${media.length} result${media.length === 1 ? "" : "s"}.`,
@@ -638,6 +1172,8 @@ export async function downloadGeneratedQueueJob(job, payload, invoke, hooks, flo
       job.metadata?.flowTabId,
       job.metadata?.flowProjectId,
       generation,
+      params.watermark_mode || sourceJob.payload?.watermark_mode || params.watermarkMode || sourceJob.payload?.watermarkMode || undefined,
+      queueDownloadPlanOptions({ payload: sourceJob.payload || {}, params, metadata: sourceJob.metadata || {} }),
     );
     await setSourceDownload("completed", media.length, `Downloaded ${media.length} existing Flow result${media.length === 1 ? "" : "s"}.`);
     return { completed: true, downloadOnly: true, sourceJobId: sourceJob.id, browserDownloads };

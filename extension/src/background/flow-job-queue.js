@@ -1,4 +1,5 @@
 import { validateFlowJobPayloads, preflightError } from "./flow-queue-preflight.js";
+import { validateChatGptJobPayloads, isChatGptOperation } from "./chatgpt-queue-preflight.js";
 
 const STORAGE_KEY = "flowMcpJobQueueV1";
 const AUTO_RETRY_MAX = 2;
@@ -56,6 +57,16 @@ const mayHaveDispatched = value => value?.outcomeUnknown === true || value?.outc
   value?.requestDispatched === true || value?.request_dispatched === true ||
   value?.possiblyDispatched === true || value?.possibly_dispatched === true ||
   value?.mayHaveSubmitted === true;
+// VID-01: normalize a partial generation outcome's failed-output list.
+// Only the tile title and the classified failure code are kept, so a
+// persisted job record never carries raw page text or unbounded data.
+const normalizeFailedOutputs = value => {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 20).map(item => ({
+    title: String(item?.title || item?.name || "").trim().slice(0, 300),
+    code: String(item?.code || item?.errorCode || "FLOW_GENERATION_FAILED").trim() || "FLOW_GENERATION_FAILED",
+  }));
+};
 
 /**
  * A persistent, sequential queue for Flow work in the MV3 service worker.
@@ -63,13 +74,15 @@ const mayHaveDispatched = value => value?.outcomeUnknown === true || value?.outc
  * normal add; callers that intentionally pause the queue can resume it later.
  */
 export class FlowJobQueue {
-  constructor(runner, { storageKey = STORAGE_KEY, storage = globalThis.chrome?.storage?.local, minDelayMs = 5_000, maxDelayMs = 10_000, loadCapabilityRegistry = null, refPreflight = null } = {}) {
+  constructor(runner, { storageKey = STORAGE_KEY, storage = globalThis.chrome?.storage?.local, minDelayMs = 5_000, maxDelayMs = 10_000, loadCapabilityRegistry = null, loadChatGptCapabilityRegistry = null, refPreflight = null } = {}) {
     if (typeof runner !== "function") throw new TypeError("FlowJobQueue requires a runner(job, hooks).");
     if (!storage?.get || !storage?.set) throw new TypeError("FlowJobQueue requires chrome.storage.local or a compatible storage adapter.");
     this.runner = runner;
     this.loadCapabilityRegistry = typeof loadCapabilityRegistry === "function" ? loadCapabilityRegistry : null;
+    this.loadChatGptCapabilityRegistry = typeof loadChatGptCapabilityRegistry === "function" ? loadChatGptCapabilityRegistry : null;
     this.refPreflight = typeof refPreflight === "function" ? refPreflight : null;
     this.capabilityRegistryPromise = null;
+    this.chatGptCapabilityRegistryPromise = null;
     this.storage = storage;
     this.storageKey = storageKey;
     this.minDelayMs = Math.max(0, Number(minDelayMs) || 0);
@@ -108,6 +121,15 @@ export class FlowJobQueue {
         job.errorCode = undefined;
         job.diagnostics = undefined;
         job.finishedAt = undefined;
+        // VID-01: a partial result checkpoint also restores the partial
+        // markers, so the failure half of the outcome survives the restart
+        // even though the rebuilt runner result is assembled from the
+        // checkpoint's successful media alone. The checkpoint media list
+        // itself only ever contains outputs that were observed ready.
+        if (Array.isArray(generationCheckpoint.failedOutputs) && generationCheckpoint.failedOutputs.length > 0) {
+          job.partial = true;
+          job.failedOutputs = clone(generationCheckpoint.failedOutputs);
+        }
         job.progress = {
           ...(job.progress && typeof job.progress === "object" ? job.progress : {}),
           phase: "recovering_generation_result",
@@ -234,15 +256,30 @@ export class FlowJobQueue {
   // registry loader is configured or the registry cannot be read; the
   // content-side capability check at run time remains the backstop.
   async #preflight(jobs) {
-    if (!this.loadCapabilityRegistry) return;
-    if (!this.capabilityRegistryPromise) {
-      this.capabilityRegistryPromise = Promise.resolve()
-        .then(() => this.loadCapabilityRegistry())
-        .catch(() => null);
+    const problems = [];
+    if (this.loadCapabilityRegistry) {
+      if (!this.capabilityRegistryPromise) {
+        this.capabilityRegistryPromise = Promise.resolve()
+          .then(() => this.loadCapabilityRegistry())
+          .catch(() => null);
+      }
+      const registry = await this.capabilityRegistryPromise;
+      if (registry) problems.push(...validateFlowJobPayloads(jobs, registry));
     }
-    const registry = await this.capabilityRegistryPromise;
-    if (!registry) return;
-    const problems = validateFlowJobPayloads(jobs, registry);
+    // GPT-09: preflight dispatch by operation prefix — chatgpt.* jobs are
+    // admitted by the ChatGPT validator against the ChatGPT capability
+    // registry, alongside the Flow validator above. The ChatGPT registry
+    // is only loaded when the submission actually carries a chatgpt job,
+    // and an unreadable registry skips the check exactly like Flow's.
+    if (this.loadChatGptCapabilityRegistry && jobs.some(job => isChatGptOperation(job?.operation))) {
+      if (!this.chatGptCapabilityRegistryPromise) {
+        this.chatGptCapabilityRegistryPromise = Promise.resolve()
+          .then(() => this.loadChatGptCapabilityRegistry())
+          .catch(() => null);
+      }
+      const chatGptRegistry = await this.chatGptCapabilityRegistryPromise;
+      if (chatGptRegistry) problems.push(...validateChatGptJobPayloads(jobs, chatGptRegistry));
+    }
     if (problems.length > 0) throw preflightError(problems);
   }
 
@@ -378,6 +415,19 @@ export class FlowJobQueue {
     const before = Array.isArray(checkpoint?.before)
       ? checkpoint.before.filter(value => typeof value === "string").slice(-2000)
       : [];
+    // VID-02: persist the dispatch stamp the content side took at submit
+    // acknowledgement, so observe can anchor its render deadline at
+    // dispatch. The FIRST valid stamp wins and is never re-stamped: later
+    // checkpoints for the same observation (e.g. the runner's own, which
+    // carries no stamp) must neither move nor erase it, or a resumed
+    // observe would silently regain render budget after a worker restart.
+    // A checkpoint with no valid stamp stays unstamped (legacy) — observe
+    // then falls back to a fresh window from observe entry, as before.
+    const existingDispatchedAt = Number(job.metadata?.generationObservation?.dispatchedAt);
+    const incomingDispatchedAt = Number(checkpoint?.dispatchedAt);
+    const dispatchedAt = Number.isFinite(existingDispatchedAt) && existingDispatchedAt > 0
+      ? existingDispatchedAt
+      : (Number.isFinite(incomingDispatchedAt) && incomingDispatchedAt > 0 ? incomingDispatchedAt : null);
     job.metadata = {
       ...(job.metadata || {}),
       generationObservation: {
@@ -386,6 +436,7 @@ export class FlowJobQueue {
         kind: checkpoint?.kind === "video" ? "video" : "image",
         expectedCount: Math.max(1, Math.min(20, Number(checkpoint?.expectedCount) || 1)),
         timeoutMs: Math.max(1000, Math.min(15 * 60_000, Number(checkpoint?.timeoutMs) || 5 * 60_000)),
+        ...(dispatchedAt ? { dispatchedAt } : {}),
         ...(typeof checkpoint?.credits === "number" && Number.isFinite(checkpoint.credits) ? { credits: checkpoint.credits } : {}),
         submitOnly: checkpoint?.submitOnly === true,
         recordedAt: Date.now(),
@@ -396,7 +447,7 @@ export class FlowJobQueue {
     return clone(job);
   }
 
-  async checkpointGenerationResult(id, media) {
+  async checkpointGenerationResult(id, media, extras = null) {
     await this.ready;
     const job = this.jobs.find(item => item.id === String(id));
     if (!job || job.status !== "running") return null;
@@ -414,9 +465,20 @@ export class FlowJobQueue {
     const quoteFields = job.metadata?.generationQuoteFields && typeof job.metadata.generationQuoteFields === "object"
       ? clone(job.metadata.generationQuoteFields)
       : {};
+    // VID-01: when the observe outcome was partial, the failed outputs are
+    // checkpointed alongside the successful media so a worker restart
+    // recovers the partial state too. The media list only ever contains
+    // outputs that were observed ready — the checkpoint never claims a
+    // failed output as a success.
+    const failedOutputs = normalizeFailedOutputs(extras?.failedOutputs);
     job.metadata = {
       ...(job.metadata || {}),
-      generationResultCheckpoint: { media: normalizedMedia, quoteFields, recordedAt: Date.now() },
+      generationResultCheckpoint: {
+        media: normalizedMedia,
+        quoteFields,
+        ...(failedOutputs.length ? { failedOutputs } : {}),
+        recordedAt: Date.now(),
+      },
     };
     delete job.metadata.generationObservation;
     const previousProgress = job.progress && typeof job.progress === "object" ? job.progress : {};
@@ -936,6 +998,27 @@ export class FlowJobQueue {
             job.status = "completed";
             job.result = clone(result);
             job.outcomeUnknown = false;
+            // VID-01: a generation that ended with some outputs ready and
+            // some terminally failed completes as a PARTIAL success. The
+            // ready media stays in the result (the runner's download step
+            // already consumed exactly that list), and the failure is
+            // recorded on the job instead of failing the whole job.
+            // failedOutputs normally rides the runner result; after a
+            // worker-restart recovery the rebuilt result no longer
+            // carries it, so the markers restored from the result
+            // checkpoint (#restore) are used instead.
+            const resultFailedOutputs = normalizeFailedOutputs(result?.result?.failedOutputs ?? result?.failedOutputs);
+            const failedOutputs = resultFailedOutputs.length
+              ? resultFailedOutputs
+              : (job.partial === true ? normalizeFailedOutputs(job.failedOutputs) : []);
+            if (failedOutputs.length) {
+              job.partial = true;
+              job.failedOutputs = failedOutputs;
+              job.result = { ...job.result, partial: true, failedOutputs: clone(failedOutputs) };
+              if (job.progress && typeof job.progress === "object") {
+                job.progress = { ...job.progress, partial: true };
+              }
+            }
           }
         } catch (thrown) {
           const error = asError(thrown);

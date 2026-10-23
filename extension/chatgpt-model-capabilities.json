@@ -1,0 +1,49 @@
+{
+  "capabilities": {
+    "supportsAutoDownload": true,
+    "supportsQuantity": false,
+    "supportsRatio": true,
+    "supportsRefImage": true,
+    "supportsVideo": false
+  },
+  "defaults": {
+    "defaultRatio": "1:1",
+    "maxRefImages": 5,
+    "ratioSemantics": {
+      "16:9": "widescreen",
+      "1:1": "square",
+      "3:4": "portrait",
+      "4:3": "landscape",
+      "9:16": "story"
+    },
+    "supportedRatios": [
+      "16:9",
+      "9:16",
+      "1:1",
+      "4:3",
+      "3:4"
+    ]
+  },
+  "models": [
+    {
+      "aspectRatios": [
+        "16:9",
+        "9:16",
+        "1:1",
+        "4:3",
+        "3:4"
+      ],
+      "match": [
+        "gpt-image-1",
+        "gpt-4o",
+        "chatgpt-4o",
+        "chatgpt"
+      ],
+      "maxRefImages": 5,
+      "types": [
+        "image"
+      ]
+    }
+  ],
+  "version": 1
+}
