@@ -9,19 +9,32 @@ import { PORT, TOKEN_FILE } from "./server.js";
 // need no translation: owner and clients are on the same filesystem.
 export class RemoteCore implements Core {
   readonly baseUrl: string;
+  readonly requestTimeoutMs: number;
 
-  constructor(baseUrl?: string) {
+  constructor(baseUrl?: string, requestTimeoutMs = 30_000) {
     this.baseUrl = (baseUrl ?? `http://127.0.0.1:${PORT}`).replace(/\/$/, "");
+    this.requestTimeoutMs = requestTimeoutMs;
   }
 
   private async request(method: string, args?: unknown): Promise<unknown> {
     const headers: Record<string, string> = { "content-type": "application/json" };
     try { headers["x-flow-token"] = readFileSync(TOKEN_FILE, "utf8").trim(); } catch { /* the owner writes the token file before clients connect */ }
-    const res = await fetch(`${this.baseUrl}/api/${method}`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(args ?? {}),
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${this.baseUrl}/api/${method}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(args ?? {}),
+        // An owner that accepts the connection but never answers must not
+        // hang this client MCP process forever.
+        signal: AbortSignal.timeout(this.requestTimeoutMs),
+      });
+    } catch (err) {
+      if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
+        throw new Error(`The flow-mcp backend did not answer "${method}" within ${Math.round(this.requestTimeoutMs / 1000)}s — the owner process may be hung. Restart it, then retry.`);
+      }
+      throw err;
+    }
     const data = (await res.json().catch(() => ({}))) as { error?: string };
     if (!res.ok) throw new Error(data.error ?? `flow-mcp backend answered ${res.status}`);
     return data;

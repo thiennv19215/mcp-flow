@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, renameSync, statSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, extname, join } from "node:path";
 
@@ -63,6 +63,11 @@ export function extractZip(zip: string, dest: string): string[] {
   try {
     execFileSync("tar", ["-xf", zip, "-C", dest], { stdio: "ignore" });
   } catch {
+    // tar may have written a partial tree before failing; start the unzip
+    // fallback from a clean directory so half-extracted files from the
+    // failed attempt are not mixed into the result.
+    rmSync(dest, { recursive: true, force: true });
+    mkdirSync(dest, { recursive: true });
     execFileSync("unzip", ["-o", "-q", zip, "-d", dest], { stdio: "ignore" });
   }
   const files: string[] = [];
@@ -70,8 +75,12 @@ export function extractZip(zip: string, dest: string): string[] {
     for (const f of readdirSync(dir)) {
       if (f.startsWith(".") || f === "__MACOSX") continue;
       const p = join(dir, f);
-      if (statSync(p).isDirectory()) walk(p);
-      else files.push(p);
+      // lstat, not stat: a symlink entry in the archive must not be followed
+      // (its target could be anywhere on disk) nor handed back as a "take".
+      const info = lstatSync(p);
+      if (info.isSymbolicLink()) continue;
+      if (info.isDirectory()) walk(p);
+      else if (info.isFile()) files.push(p);
     }
   };
   walk(dest);

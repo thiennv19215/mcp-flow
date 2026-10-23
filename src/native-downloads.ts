@@ -16,6 +16,41 @@ export async function nativeDownloadIds(): Promise<Set<number>> {
   return new Set((await extensionDownloads()).map(item => item.id));
 }
 
+// Provenance rules mirroring the extension queue's own download matching
+// (flow-queue-downloads.js isFlowMediaHost/flowUrl): a download only counts
+// as Flow output when its URL chain points at Flow or Google media hosts.
+export function isFlowMediaHost(hostname: string): boolean {
+  const host = String(hostname || "").toLowerCase();
+  return host === "flow.google.com" || host.endsWith(".flow.google.com") ||
+    host === "labs.google" || host.endsWith(".labs.google") ||
+    host === "storage.googleapis.com" || host.endsWith(".storage.googleapis.com") ||
+    host === "googleusercontent.com" || host.endsWith(".googleusercontent.com") ||
+    host === "googleapis.com" || host.endsWith(".googleapis.com") ||
+    host === "usercontent.goog" || host.endsWith(".usercontent.goog");
+}
+
+export function isFlowUrl(value?: string): boolean {
+  try {
+    const raw = String(value || "");
+    if (!raw) return false;
+    if (raw.startsWith("blob:")) return raw.includes("flow.google.com") || raw.includes("labs.google");
+    return isFlowMediaHost(new URL(raw).hostname);
+  } catch { return false; }
+}
+
+export function hasFlowDownloadProvenance(item: { url?: string; finalUrl?: string; referrer?: string }): boolean {
+  return isFlowUrl(item.url) || isFlowUrl(item.finalUrl) || isFlowUrl(item.referrer);
+}
+
+/** Pick the completed Flow download out of a poll of Chrome downloads. The
+ * user's own unrelated download finishing in the same window must never be
+ * materialized as the scene's output file. */
+export function selectCompletedFlowDownload(items: NativeDownload[], before: ReadonlySet<number>): NativeDownload | undefined {
+  return items.find(item => !before.has(item.id) && hasFlowDownloadProvenance(item) &&
+    item.state === "complete" && item.filename && (item.totalBytes > 0 || item.bytesReceived > 0) &&
+    (!existsSync(item.filename) || statSync(item.filename).size > 0));
+}
+
 /** Wait for a Chrome download initiated by the content script. */
 export async function waitForNativeDownload(
   before: ReadonlySet<number>,
@@ -25,8 +60,8 @@ export async function waitForNativeDownload(
   const deadline = Date.now() + timeoutMs;
   let lastProgress = "";
   while (Date.now() < deadline) {
-    const items = (await extensionDownloads()).filter(item => !before.has(item.id));
-    const complete = items.find(item => item.state === "complete" && item.filename && (item.totalBytes > 0 || item.bytesReceived > 0) && (!existsSync(item.filename) || statSync(item.filename).size > 0));
+    const items = (await extensionDownloads()).filter(item => !before.has(item.id) && hasFlowDownloadProvenance(item));
+    const complete = selectCompletedFlowDownload(items, before);
     if (complete) return complete;
 
     const failed = items.find(item => item.state === "interrupted");

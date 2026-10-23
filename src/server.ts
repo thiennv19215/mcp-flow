@@ -46,19 +46,74 @@ function readBody(req: IncomingMessage, limit: number): Promise<Buffer> {
 
 const inside = (file: string, dir: string) => resolve(file).startsWith(resolve(dir) + sep);
 
+export interface ByteRange { start: number; end: number }
+
+/**
+ * Parse a single-range `Range: bytes=...` header against a file size.
+ * Returns null when the header is absent or not a plain byte range (serve
+ * the whole file), "unsatisfiable" when no byte of the file matches (answer
+ * 416), and otherwise the clamped inclusive range. Suffix ranges
+ * (`bytes=-N`) mean the LAST N bytes — the old inline math read them as the
+ * first N+1, and a start past EOF produced a negative content-length whose
+ * writeHead threw after the headers were already sent.
+ */
+export function parseRangeHeader(header: string | undefined, size: number): ByteRange | "unsatisfiable" | null {
+  if (!header) return null;
+  const match = header.match(/^bytes=(\d*)-(\d*)$/);
+  if (!match) return null;
+  const [, first, last] = match;
+  if (first === "" && last === "") return null;
+  if (size <= 0) return "unsatisfiable";
+  if (first === "") {
+    const suffix = Number(last);
+    if (!Number.isSafeInteger(suffix) || suffix <= 0) return "unsatisfiable";
+    return { start: Math.max(0, size - suffix), end: size - 1 };
+  }
+  const start = Number(first);
+  if (!Number.isSafeInteger(start) || start >= size) return "unsatisfiable";
+  const end = last === "" ? size - 1 : Math.min(Number(last), size - 1);
+  if (end < start) return "unsatisfiable";
+  return { start, end };
+}
+
+function pipeFile(res: ServerResponse, stream: ReturnType<typeof createReadStream>) {
+  // A file deleted or replaced between statSync and the read must not take
+  // the whole MCP process down with an unhandled stream "error" event.
+  stream.on("error", () => res.destroy());
+  stream.pipe(res);
+}
+
 function sendMedia(req: IncomingMessage, res: ServerResponse, file: string, allowedRoots = [OUTPUT_ROOT, UPLOAD_DIR]) {
   if (!allowedRoots.some((root) => inside(file, root)) || !existsSync(file)) return json(res, 404, { error: "Not found." });
   const { size } = statSync(file);
   const type = MIME[extname(file).toLowerCase()] ?? "application/octet-stream";
-  const range = req.headers.range?.match(/bytes=(\d*)-(\d*)/);
+  const range = parseRangeHeader(req.headers.range, size);
+  if (range === "unsatisfiable") {
+    res.writeHead(416, { "content-type": type, "accept-ranges": "bytes", "content-range": `bytes */${size}`, "content-length": 0 });
+    return res.end();
+  }
   if (range) {
-    const start = range[1] ? Number(range[1]) : 0;
-    const end = range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
-    res.writeHead(206, { "content-type": type, "accept-ranges": "bytes", "content-range": `bytes ${start}-${end}/${size}`, "content-length": end - start + 1 });
-    return createReadStream(file, { start, end }).pipe(res);
+    res.writeHead(206, { "content-type": type, "accept-ranges": "bytes", "content-range": `bytes ${range.start}-${range.end}/${size}`, "content-length": range.end - range.start + 1 });
+    return pipeFile(res, createReadStream(file, range));
   }
   res.writeHead(200, { "content-type": type, "accept-ranges": "bytes", "content-length": size });
-  createReadStream(file).pipe(res);
+  pipeFile(res, createReadStream(file));
+}
+
+/**
+ * Resolve the per-machine API token. An env var or token file that exists
+ * but is blank (interrupted write, disk error, manual cleanup) must never
+ * resolve to "": every route compares the presented token against this one,
+ * and "" === "" would let any local request in. A generated token is
+ * persisted by startServer's existing TOKEN_FILE write once this process
+ * owns the port, so sibling processes read the same value.
+ */
+export function resolveServerToken(envToken: string | undefined, fileToken: string | undefined): string {
+  const fromEnv = envToken?.trim();
+  if (fromEnv) return fromEnv;
+  const fromFile = fileToken?.trim();
+  if (fromFile) return fromFile;
+  return randomBytes(24).toString("hex");
 }
 
 export type ServerRole = "owner" | "client" | "none";
@@ -74,7 +129,7 @@ export async function startServer(core: Core): Promise<ServerRole> {
   }
   mkdirSync(HOME_DIR, { recursive: true });
   mkdirSync(UPLOAD_DIR, { recursive: true });
-  const token = process.env.FLOW_MCP_TOKEN?.trim() || (existsSync(TOKEN_FILE) ? readFileSync(TOKEN_FILE, "utf8").trim() : randomBytes(24).toString("hex"));
+  const token = resolveServerToken(process.env.FLOW_MCP_TOKEN, existsSync(TOKEN_FILE) ? readFileSync(TOKEN_FILE, "utf8") : undefined);
   const allowedHosts = new Set(
     (process.env.FLOW_MCP_ALLOWED_HOSTS ?? `127.0.0.1:${PORT},localhost:${PORT}`)
       .split(",").map((host) => host.trim().toLowerCase()).filter(Boolean),
@@ -164,6 +219,10 @@ export async function startServer(core: Core): Promise<ServerRole> {
       json(res, 404, { error: "Not found." });
     } catch (err) {
       const message = err instanceof z.ZodError ? err.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") : err instanceof Error ? err.message : String(err);
+      // A failure after the response has started (e.g. mid media stream)
+      // cannot be answered with a second writeHead: that throws
+      // ERR_HTTP_HEADERS_SENT outside the handler and kills the process.
+      if (res.headersSent) { res.destroy(); return; }
       json(res, 400, { error: message });
     }
   });

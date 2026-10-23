@@ -32,13 +32,20 @@ async function probe(file: string): Promise<ClipInfo> {
   const { stdout } = await run(FFPROBE, ["-v", "error", "-show_entries", "stream=codec_type,width,height:format=duration", "-of", "json", file]).catch(() => {
     throw new Error(`"${basename(file)}" isn't a playable video - it may be an unfinished download or a ZIP of several clips. Remove it, or pick other clips.`);
   });
-  const data = JSON.parse(stdout) as { streams: { codec_type: string; width?: number; height?: number }[]; format: { duration: string } };
+  const data = JSON.parse(stdout) as { streams: { codec_type: string; width?: number; height?: number }[]; format?: { duration?: string } };
   const video = data.streams.find((s) => s.codec_type === "video");
   if (!video?.width || !video.height) throw new Error(`${file} has no video stream.`);
+  // ffprobe reports no duration (or "N/A") for some files; a NaN here would
+  // leak into the ffmpeg atrim/tpad filter arguments and fail there with an
+  // unreadable filter error instead of naming the bad clip.
+  const duration = Number(data.format?.duration);
+  if (!Number.isFinite(duration) || duration <= 0) {
+    throw new Error(`"${basename(file)}" has no readable duration — ffprobe could not measure it. The file may be corrupt or an unfinished download; remove it, or pick other clips.`);
+  }
   return {
     width: video.width,
     height: video.height,
-    duration: Number(data.format.duration),
+    duration,
     hasAudio: data.streams.some((s) => s.codec_type === "audio"),
   };
 }

@@ -14,4 +14,11 @@ export const uploadDirForContext = (): string => UPLOAD_DIR;
 
 export const castDirForContext = (): string => CAST_DIR;
 
-export const projectDir = (project = ""): string => resolve(OUTPUT_ROOT, project.replace(/[^\w.-]+/g, "_"));
+export const projectDir = (project = ""): string => {
+  const name = project.replace(/[^\w.-]+/g, "_");
+  // The sanitizer keeps dots, so a bare "." or ".." would survive as a path
+  // segment and resolve to OUTPUT_ROOT itself or its PARENT — every project
+  // write (generate/download/assemble) would land outside the films root.
+  // Map those two segments to a safe in-root folder name.
+  return resolve(OUTPUT_ROOT, name === "." || name === ".." ? "_" : name);
+};
