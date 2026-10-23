@@ -66,14 +66,10 @@ const GENERATED_MEDIA_DOWNLOAD_OPERATION = "flow.queue.download-generated";
 const queueDownloadEnqueues = new Map();
 let socket = null;
 let httpSession = null;
-let bridgeTransport = "disconnected";
-let opening = false;
-let reconnectTimer;
-let reconnectAttempt = 0;
-let heartbeat;
 let selectedTabId;
 let lastError = "";
 let progressReceiptSequence = 0;
+let uiDispatchSequence = 0;
 let lastProgressDiagnostic = null;
 const activeInteractiveRequests = new Map();
 const activeInteractiveCounts = new Map();
@@ -563,32 +559,46 @@ async function execute(_ws, method, args = [], { queueOwner = false, connectorOw
         }
         const defaultFlowTarget = await captureFlowTargetMetadata();
         const batchId = crypto.randomUUID();
-        const added = [];
-        for (const [index, source] of plannedJobs.entries()) {
+        // Build every job input before enqueueing anything. Ids are minted
+        // up front (same rule the queue applies: caller id wins) so workflow
+        // dependency metadata can point at the previous job's id before the
+        // batch is admitted.
+        const jobIds = plannedJobs.map(source => source.id || crypto.randomUUID());
+        const jobInputs = plannedJobs.map((source, index) => {
           const operation = String(source.operation || source.data?.operation || "flow.generation.submit");
           if (!extensionQueueJobOperations.has(operation)) throw Object.assign(new Error(`Unsupported queued Flow operation: ${operation}`), {
             code: "FLOW_QUEUE_OPERATION_UNSUPPORTED", retryable: false, outcome_unknown: false,
           });
           const jobPayload = source.payload ?? source.data?.payload;
           const workflow = jobPayload?.workflow || jobPayload?.params?.workflow || source.workflow || {};
-          const previous = added[index - 1];
+          const previousId = index > 0 ? jobIds[index - 1] : undefined;
           const metadata = {
             source: 'mcp',
             ...(source.metadata ?? source.data?.metadata ?? {}),
             ...(source.metadata?.flowTabId === undefined && source.data?.metadata?.flowTabId === undefined ? defaultFlowTarget : {}),
             batchId,
             ...(workflow && Object.keys(workflow).length ? { workflow } : {}),
-            ...(previous && workflow.dependency ? { dependsOnId: previous.id, dependencyType: workflow.dependency.type } : {}),
+            ...(previousId && workflow.dependency ? { dependsOnId: previousId, dependencyType: workflow.dependency.type } : {}),
             ...(typeof jobPayload?.output_dir === "string" ? { output_dir: jobPayload.output_dir } : {}),
             ...(typeof jobPayload?.file_stem === "string" ? { file_stem: jobPayload.file_stem } : {}),
             ...(typeof jobPayload?.params?.output_dir === "string" ? { output_dir: jobPayload.params.output_dir } : {}),
             ...(typeof jobPayload?.params?.file_stem === "string" ? { file_stem: jobPayload.params.file_stem } : {}),
           };
-          added.push(await flowJobQueue.add({
-            id: source.id, operation, payload: jobPayload,
+          return {
+            id: jobIds[index], operation, payload: jobPayload,
             label: source.label || source.name, metadata,
-          }));
-        }
+          };
+        });
+        // Admit the submission atomically: a multi-job batch goes through
+        // addBatch, which validates ids and preflights every job before any
+        // of them enters the queue. Enqueueing one-by-one here would leave
+        // earlier jobs queued (and spending credits) when a later job fails,
+        // even though the caller is told the whole submission failed.
+        const added = jobInputs.length === 0
+          ? []
+          : jobInputs.length === 1
+            ? [await flowJobQueue.add(jobInputs[0])]
+            : await flowJobQueue.addBatch(jobInputs, { batchId });
         // Match the extension UI: adding work must not implicitly clear a
         // queue pause caused by an unresolved Flow page blocker or a manual
         // submit. Only an explicit Resume command may continue that queue.
@@ -1303,13 +1313,7 @@ chrome.runtime.onStartup.addListener(() => { chrome.alarms.create("flow-mcp-conn
 chrome.alarms.onAlarm.addListener(() => { void connect(); void checkDevExtensionReload(); });
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local" || !changes.bridge) return;
-  clearTimeout(reconnectTimer); reconnectTimer = undefined;
-  stopHttpSession();
-  bridgeTransport = "disconnected";
-  const previousSocket = socket;
-  socket = null;
-  clearInterval(heartbeat);
-  if (previousSocket) previousSocket.close(1000, "Bridge URL changed");
+  bridgeClient.disconnect("Bridge URL changed");
   void connect();
 });
 chrome.runtime.onMessage.addListener((message, _sender, respond) => {
@@ -1603,13 +1607,25 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
     return;
   }
   if (message?.type === "flow-mcp:dispatch") {
+    // Dispatch runs an operation directly against the Flow tab, bypassing
+    // the queue (no preflight, no pause state, no retry budget). Like the
+    // flow-batch:* handlers, it is restricted to this extension's own UI
+    // pages; a content script in a tab must never reach it.
+    if (_sender?.id !== chrome.runtime.id || _sender?.tab) {
+      respond({ ok: false, error: { code: "FLOW_DISPATCH_FORBIDDEN", message: "Flow dispatch is available only from the extension UI." } });
+      return true;
+    }
     void (async () => {
       const { operation, payload } = message;
       const command = {
         op: "flowOperation",
         name: operation,
         payload: payload || {},
-        id: "ui-" + Date.now(),
+        // The sequence suffix keeps ids unique for dispatches minted in the
+        // same millisecond; begin/end interactive-request tracking keys off
+        // this id, so a collision would leak the count and stick the
+        // activity overlay on.
+        id: `ui-${Date.now()}-${++uiDispatchSequence}`,
       };
       const result = await execute(null, "flow.dom.execute", [command]);
       respond({ ok: true, value: result });
@@ -1629,13 +1645,7 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
       const activeFlowTab = flowTabs.find(tab => activeTabs.some(active => active.id === tab.id));
       if (activeFlowTab) await adoptFlowTab(activeFlowTab, true);
       else await chooseTab();
-      clearTimeout(reconnectTimer); reconnectTimer = undefined;
-      stopHttpSession();
-      bridgeTransport = "disconnected";
-      const previousSocket = socket;
-      socket = null;
-      clearInterval(heartbeat);
-      if (previousSocket) previousSocket.close(1000, "User reconnect");
+      bridgeClient.disconnect("User reconnect");
       await connect();
       respond({ ok: true });
     })().catch(error => respond({ ok: false, error: String(error?.message || error) }));

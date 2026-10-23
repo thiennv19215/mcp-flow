@@ -88,7 +88,7 @@ export class FlowBatchDrafts {
     // awaits, and unordered storage writes could persist a stale state
     // over a fresher one.
     const snapshot = { version: 1, updatedAt: Date.now(), drafts: clone(this.drafts) };
-    this.writeChain = this.writeChain.then(() => this.storage.set({ [this.storageKey]: snapshot }));
+    this.writeChain = this.writeChain.catch(() => {}).then(() => this.storage.set({ [this.storageKey]: snapshot }));
     return this.writeChain;
   }
 

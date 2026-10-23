@@ -551,6 +551,9 @@ export class FlowJobQueue {
     await this.#persist();
     this.#emit("started");
     this.drainPromise = this.#drain();
+    // The drain is fire-and-forget from here; keep a rejection from ever
+    // surfacing as unhandled (awaiters can still observe it via drainPromise).
+    this.drainPromise.catch(error => console.error("[FlowJobQueue] drain failed", error));
     return this.#snapshot();
   }
 
@@ -1046,7 +1049,15 @@ export class FlowJobQueue {
       this.running = false;
       this.stopRequested = false;
       this.stopped = !this.paused;
-      await this.#persist();
+      try {
+        await this.#persist();
+      } catch (error) {
+        // A failed final persist must not strand the queue: the drained
+        // notification and a requested restart still have to run, or jobs
+        // that arrived during the drain would sit pending until some
+        // unrelated trigger starts the queue again.
+        console.error("[FlowJobQueue] final persist after drain failed", error);
+      }
       this.#emit(this.paused ? "paused" : "drained");
       if (restartRequested && !this.paused && this.jobs.some(job => job.status === "pending")) {
         void this.start().catch(error => console.error("[FlowJobQueue] requested restart failed", error));
