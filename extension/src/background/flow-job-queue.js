@@ -397,6 +397,19 @@ export class FlowJobQueue {
     const before = Array.isArray(checkpoint?.before)
       ? checkpoint.before.filter(value => typeof value === "string").slice(-2000)
       : [];
+    // VID-02: persist the dispatch stamp the content side took at submit
+    // acknowledgement, so observe can anchor its render deadline at
+    // dispatch. The FIRST valid stamp wins and is never re-stamped: later
+    // checkpoints for the same observation (e.g. the runner's own, which
+    // carries no stamp) must neither move nor erase it, or a resumed
+    // observe would silently regain render budget after a worker restart.
+    // A checkpoint with no valid stamp stays unstamped (legacy) — observe
+    // then falls back to a fresh window from observe entry, as before.
+    const existingDispatchedAt = Number(job.metadata?.generationObservation?.dispatchedAt);
+    const incomingDispatchedAt = Number(checkpoint?.dispatchedAt);
+    const dispatchedAt = Number.isFinite(existingDispatchedAt) && existingDispatchedAt > 0
+      ? existingDispatchedAt
+      : (Number.isFinite(incomingDispatchedAt) && incomingDispatchedAt > 0 ? incomingDispatchedAt : null);
     job.metadata = {
       ...(job.metadata || {}),
       generationObservation: {
@@ -405,6 +418,7 @@ export class FlowJobQueue {
         kind: checkpoint?.kind === "video" ? "video" : "image",
         expectedCount: Math.max(1, Math.min(20, Number(checkpoint?.expectedCount) || 1)),
         timeoutMs: Math.max(1000, Math.min(15 * 60_000, Number(checkpoint?.timeoutMs) || 5 * 60_000)),
+        ...(dispatchedAt ? { dispatchedAt } : {}),
         ...(typeof checkpoint?.credits === "number" && Number.isFinite(checkpoint.credits) ? { credits: checkpoint.credits } : {}),
         submitOnly: checkpoint?.submitOnly === true,
         recordedAt: Date.now(),

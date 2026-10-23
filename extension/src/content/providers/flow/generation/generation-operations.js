@@ -61,12 +61,18 @@
           matchKind: typeof rawReceipt.matchKind === "string" ? rawReceipt.matchKind : null,
         };
         if (prepared.submitOnly === true) tiles.releaseSubmitOnlyCorrelation?.(attemptId, true);
+        // VID-02: this confirm is the submit acknowledgement for a manual
+        // dispatch — stamp the dispatch moment for the observation
+        // checkpoint exactly like the automatic submit path, so a resumed
+        // observe anchors its render deadline here.
+        const dispatchedAt = Date.now();
         await tiles.emitFlowProgress(command, "Flow accepted the manual generation request; saved a recovery checkpoint.", {
           generationObservation: {
             before: Array.isArray(prepared.before) ? prepared.before : [],
             kind: prepared.type === "image" ? "image" : "video",
             expectedCount: Math.max(1, Math.min(4, Number(prepared.expectedCount) || 1)),
             correlationAttemptId: attemptId,
+            dispatchedAt,
             credits: Number.isFinite(prepared.credits) ? prepared.credits : null,
             timeoutMs: prepared.type === "image" ? 300_000 : 600_000,
             submitOnly: prepared.submitOnly === true,
@@ -79,6 +85,7 @@
           expectedCount: Math.max(1, Math.min(4, Number(prepared.expectedCount) || 1)),
           credits: Number.isFinite(prepared.credits) ? prepared.credits : null,
           correlationAttemptId: attemptId,
+          dispatchedAt,
           requestDispatched: true,
           manualSubmit: true,
           correlationReceipt: receipt,
@@ -688,6 +695,11 @@
           }
         }
 
+        // VID-02: stamp the dispatch moment once, at submit acknowledgement.
+        // The observation checkpoint persists this stamp so a resumed
+        // observe computes its render deadline from here instead of
+        // restarting the clock after a service-worker restart.
+        const dispatchedAt = Date.now();
         const dispatchReceipt = payload.submitOnly === true
           ? tiles.releaseSubmitOnlyCorrelation?.(correlationAttemptId, acknowledged) || null
           : null;
@@ -697,6 +709,7 @@
             kind: payload.type === "image" ? "image" : "video",
             expectedCount: variants,
             correlationAttemptId,
+            dispatchedAt,
             credits: Number.isFinite(credits) ? credits : null,
             timeoutMs: payload.type === "video" ? 600_000 : 300_000,
             submitOnly: payload.submitOnly === true || payload.submit_only === true,
@@ -709,6 +722,7 @@
           expectedCount: variants,
           credits: Number.isFinite(credits) ? credits : null,
           correlationAttemptId,
+          dispatchedAt,
           activation: activation.strategy || "dom-click",
           requestDispatched: acknowledged,
           serverAcceptanceObserved: false,
@@ -720,7 +734,18 @@
         const before = Array.isArray(payload.before) ? payload.before : [];
         const kind = payload.kind === "image" ? "image" : payload.kind === "video" ? "video" : undefined;
         const expected = Math.max(1, Math.min(20, Number(payload.expectedCount || payload.variants || 1)));
-        const deadline = Date.now() + Math.max(1000, Math.min(15 * 60000, Number(payload.timeoutMs || 12 * 60000)));
+        const timeoutMs = Math.max(1000, Math.min(15 * 60000, Number(payload.timeoutMs || 12 * 60000)));
+        // VID-02: anchor the render deadline at dispatch when the caller
+        // carries the submit-acknowledgement stamp (persisted in the
+        // observation checkpoint): a service-worker restart resumes with the
+        // remaining budget instead of a fresh full window, and a window that
+        // already expired while the worker was down times out immediately
+        // via the loop exit below. Legacy payloads without a valid stamp
+        // keep the historical behavior — a fresh window from observe entry.
+        const dispatchedAt = Number(payload.dispatchedAt);
+        const deadline = Number.isFinite(dispatchedAt) && dispatchedAt > 0
+          ? dispatchedAt + timeoutMs
+          : Date.now() + timeoutMs;
         const correlationAttemptId = String(payload.correlationAttemptId || "");
         const correlationEntry = correlationAttemptId ? tiles.nativeFlowCorrelationMap().get(correlationAttemptId) : null;
         if (!correlationEntry) {
