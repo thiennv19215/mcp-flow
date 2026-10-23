@@ -124,17 +124,6 @@ function classifyFlowError(rawText) {
   const foldedText = normalizeFlowUiText(text);
   const searchableText = `${text}\n${foldedText}`;
 
-  // Flow can render a missing-prompt validation response as a gallery tile.
-  // Catch it before generation observation mistakes that tile for downloadable media.
-  if (/missing text or image prompt/i.test(searchableText)) {
-    return {
-      category: "prompt_validation",
-      code: "FLOW_PROMPT_MISSING",
-      message: `Flow rejected this generation because it did not receive a text or image prompt: ${text}. Check the task prompt and attached reference image before retrying.`,
-      retryable: false,
-    };
-  }
-
   // 1. Quota / Credits
   if (/(?:PUBLIC_ERROR_USER_QUOTA_REACHED|quota_exceeded|per_model_daily|tier_restricted|credit limit|insufficient credits|not enough credits|out of credits|daily generation limit|khong du (?:credit|tin dung|diem tin dung)|het (?:han muc|tin dung|luot tao)|vuot(?: qua)? han muc(?: tao)?|gioi han tao hang ngay)/i.test(searchableText)) {
     return {

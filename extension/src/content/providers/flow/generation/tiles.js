@@ -387,7 +387,7 @@
     if (retryBtn) return retryBtn;
 
     const tileText = (tile.innerText || tile.textContent || "").toLowerCase();
-    if (/(?:missing text or image prompt|failed to generate|generation failed|could not generate|something went wrong|try again|không thể tạo|không tạo được|thất bại|đã xảy ra lỗi|thử lại|bị từ chối|lỗi tạo|không thành công|vi phạm|nội dung không an toàn|chính sách an toàn|bị chặn)/i.test(tileText)) {
+    if (/(?:failed to generate|generation failed|could not generate|something went wrong|try again|không thể tạo|không tạo được|thất bại|đã xảy ra lỗi|thử lại|bị từ chối|lỗi tạo|không thành công|vi phạm|nội dung không an toàn|chính sách an toàn|bị chặn)/i.test(tileText)) {
       return tile;
     }
 
