@@ -1029,14 +1029,23 @@ function queueDownloadProjectId(downloadItem) {
   const sourceUrl = `${downloadItem?.url || ""} ${downloadItem?.finalUrl || ""} ${downloadItem?.referrer || ""}`;
   return sourceUrl.match(/\/project\/([0-9a-f-]{36})(?:[/?#\s]|$)/i)?.[1]?.toLowerCase() || "";
 }
-function queueDownloadMatchesTicket(downloadItem, ticket, allowTabTimeMatch = false) {
+function queueDownloadMatchesTicket(downloadItem, ticket, allowTabTimeMatch = false, allowProjectTimeMatch = false) {
   if (!downloadItem || !ticket) return false;
   const sourceUrl = `${downloadItem.url || ""} ${downloadItem.finalUrl || ""} ${downloadItem.referrer || ""}`.toLowerCase();
   const mediaIdMatch = sourceUrl.includes(ticket.flowMediaId.toLowerCase());
   const sameTab = downloadItem.tabId === ticket.flowTabId;
-  if (!sameTab && !(mediaIdMatch && downloadItem.tabId === -1)) return false;
   const projectId = queueDownloadProjectId(downloadItem);
   if (projectId && ticket.flowProjectId && projectId !== ticket.flowProjectId.toLowerCase()) return false;
+  // Chrome sometimes records a download initiated by Flow's own media pipeline
+  // with tabId=-1 and an opaque CDN URL that omits the media UUID. In that case
+  // the Flow project referrer plus the unique, post-trigger time window is the
+  // available identity. Callers still reject multiple matches before attaching
+  // any file to a queue task.
+  if (!sameTab && !(mediaIdMatch && downloadItem.tabId === -1)) {
+    if (!allowProjectTimeMatch || downloadItem.tabId !== -1 || !ticket.flowProjectId || projectId !== ticket.flowProjectId.toLowerCase()) return false;
+    const startedAt = Date.parse(downloadItem.startTime || "");
+    return Number.isFinite(startedAt) && startedAt >= ticket.baselineAt - 1_000;
+  }
   if (mediaIdMatch) return true;
   if (!allowTabTimeMatch || !sameTab) return false;
   const startedAt = Date.parse(downloadItem.startTime || "");
@@ -1079,7 +1088,7 @@ async function waitForQueueFlowDownload(beforeIds, title, timeoutMs = 12 * 60_00
     const items = await chrome.downloads.search({ orderBy: ["-startTime"], limit: 100 });
     const newItems = items.filter(item => !beforeIds.has(item.id));
     if (filenameTicket) {
-      const matching = newItems.filter(item => item.id === filenameTicket.downloadId || queueDownloadMatchesTicket(item, filenameTicket, true));
+      const matching = newItems.filter(item => item.id === filenameTicket.downloadId || queueDownloadMatchesTicket(item, filenameTicket, true, true));
       lastNew = matching;
       if (matching.length > 1) {
         throw Object.assign(new Error(`Chrome reported multiple new downloads from the Flow queue tab for "${title}"; refusing to attach an ambiguous file to this job. The media remains in Flow.`), {
