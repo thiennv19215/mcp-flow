@@ -215,6 +215,107 @@
           return !root.validStagedLocalImage?.(item, /(?:ref[1-3]|attach[1-3])/);
         }))) throw this.error("NATIVE_CAPABILITY_UNSUPPORTED", "Native generation accepts project asset names or staged local image attachments only; nothing was submitted.", true, false);
         const referenceAttachments = framesMode ? [] : attachments;
+        // IMG-04: pre-generation reference revalidation (the content-side
+        // run of the flow-ref-preflight contract; the background module of
+        // the same name is the canonical implementation the queue hook
+        // uses). References were resolved when this job was created, but a
+        // queued job can run much later — a referenced library tile may
+        // have been deleted, or an uploaded asset may have vanished.
+        // Revalidate BEFORE any settings/prompt work: the IMG-03 catalog is
+        // consulted first, then a targeted existence check for the specific
+        // asset; an uploaded ref whose staged bytes are still retained is
+        // re-uploaded and the expectedId the attach stages below use is
+        // rewritten. A missing library ref fails here with the distinct
+        // preflight code instead of surfacing as a mid-submit attach
+        // error. Existence here only proves presence (by id or by name);
+        // the attach stages still verify identity exactly as before.
+        const refChecks = [];
+        const addRefCheck = (assetName, expectedId, kind, applyId) => {
+          const name = typeof assetName === "string" ? assetName.replace(/^asset:/i, "").trim() : "";
+          if (!name) return;
+          refChecks.push({ assetName: name, expectedId: typeof expectedId === "string" && expectedId ? expectedId : undefined, kind, applyId: applyId || null });
+        };
+        for (const item of referenceAttachments) {
+          if (typeof item === "string") addRefCheck(item, undefined, undefined, null);
+          else if (item && typeof item === "object" && typeof item.assetName === "string") {
+            addRefCheck(item.assetName, item.expectedId, item.kind, newId => { item.expectedId = newId; });
+          }
+          // Staged local attachments (transferId) carry their own bytes
+          // into this submit and are uploaded by uploadAndResolve; skip.
+        }
+        if (firstFrame) addRefCheck(firstFrame.assetName, firstFrame.expectedId, firstFrame.kind, newId => {
+          firstFrame.expectedId = newId;
+          if (payload.firstFrame && typeof payload.firstFrame === "object") payload.firstFrame.expectedId = newId;
+        });
+        if (lastFrame) addRefCheck(lastFrame.assetName, lastFrame.expectedId, lastFrame.kind, newId => {
+          lastFrame.expectedId = newId;
+          if (payload.lastFrame && typeof payload.lastFrame === "object") payload.lastFrame.expectedId = newId;
+        });
+        if (refChecks.length) {
+          const catalogProjectId = (() => {
+            try { return root.location?.pathname?.match(/\/project\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/|$)/i)?.[1]?.toLowerCase() || null; } catch { return null; }
+          })();
+          const lookupRefCatalog = async ref => {
+            if (!catalogProjectId) return null;
+            try {
+              const sendMessage = root.chrome?.runtime?.sendMessage;
+              if (typeof sendMessage !== "function") return null;
+              const response = await sendMessage.call(root.chrome.runtime, {
+                type: "flow-media-catalog:lookup",
+                query: { projectId: catalogProjectId, ...(ref.expectedId ? { mediaId: ref.expectedId } : {}), name: ref.assetName },
+              });
+              return response?.ok ? response.entry || null : null;
+            } catch { return null; }
+          };
+          const refAssetExists = (ref, entry) => {
+            // Absence must be provable: when the asset scan is unavailable
+            // or fails, the ref cannot be declared missing — the attach
+            // stages below remain the authority, exactly as before this
+            // pass existed (same degrade discipline as the catalog lookup).
+            if (typeof menu.collectAssets !== "function") return true;
+            let assets;
+            try { assets = menu.collectAssets({ includeIncomplete: true }); } catch { return true; }
+            const ids = new Set([ref.expectedId, entry?.mediaId, entry?.uuid].filter(value => typeof value === "string" && value));
+            return assets.some(asset => (ids.size > 0 && (ids.has(asset?.id) || ids.has(asset?.persistentMediaId))) ||
+              String(asset?.name || "").trim() === ref.assetName);
+          };
+          const retainedRefFile = entry => {
+            const wanted = [entry?.originalName, entry?.uploadName].filter(value => typeof value === "string" && value);
+            if (!wanted.length || !root.stagedNativeFiles) return null;
+            const matches = [...root.stagedNativeFiles.values()].filter(file => file && wanted.includes(file.name));
+            // A name shared by several staged files cannot prove which
+            // bytes belong to this asset — treat it as not retained.
+            return matches.length === 1 ? matches[0] : null;
+          };
+          await runFlowStage("revalidating queued references", async ({ signal }) => {
+            const missing = [];
+            for (const ref of refChecks) {
+              const entry = await lookupRefCatalog(ref);
+              if (refAssetExists(ref, entry)) continue;
+              let restoredId = null;
+              if (entry?.uploadName) {
+                const file = retainedRefFile(entry);
+                if (file) {
+                  const receipt = await components.uploadStagedFlowMedia(file, ref.kind === "video" ? "video" : "image", command, { deadline: flowDeadline, signal });
+                  if (typeof receipt?.id === "string" && receipt.id) restoredId = receipt.id;
+                }
+              }
+              if (restoredId) {
+                ref.applyId?.(restoredId);
+                continue;
+              }
+              missing.push(ref.assetName);
+            }
+            if (missing.length) {
+              throw this.error(
+                "FLOW_QUEUE_PREFLIGHT_REFERENCE_MISSING",
+                `Flow reference${missing.length === 1 ? "" : "s"} missing before generation: ${missing.join(", ")}. The referenced asset is no longer in the Flow project library, and no retained upload bytes are available to restore it. Re-attach the reference or remove it from the job; nothing was submitted.`,
+                false,
+                false,
+              );
+            }
+          });
+        }
         const expectedMediaReferenceIds = [];
         const expectedCharacterIds = [];
         const expectedVideoReferenceIds = [];
@@ -429,8 +530,14 @@
         requireFlowTime("preparing the Flow submit request", expectedVideoReferenceIds.length + expectedMediaReferenceIds.length + expectedCharacterIds.length > 0);
 
         let credits;
-        if (payload.type !== "image") {
-          const maxCredits = payload.maxCredits ?? payload.max_credits ?? payload.params?.maxCredits ?? payload.params?.max_credits;
+        const maxCredits = payload.maxCredits ?? payload.max_credits ?? payload.params?.maxCredits ?? payload.params?.max_credits;
+        // The credit-quote gate guards every generation type, not just
+        // video: whenever a maxCredits cap is set, the composer's quote must
+        // be read and enforced before submit, failing closed when no quote
+        // can be read. Video jobs also read the quote without a cap because
+        // the submit result reports the charged credits; uncapped image jobs
+        // keep the historical behavior and skip the read entirely.
+        if (payload.type !== "image" || maxCredits !== undefined) {
           try {
             const renderedCredits = await runFlowStage("reading Flow's credit quote", ({ signal }) => editor.waitForGenerationCreditQuote(Number.isFinite(settingsCredits) ? 1000 : 2000, { deadline: flowDeadline, signal }));
             credits = Number.isFinite(renderedCredits)
@@ -442,7 +549,7 @@
             credits = Number.isFinite(settingsCredits) ? settingsCredits : undefined;
           }
           if (maxCredits !== undefined && !Number.isFinite(credits)) {
-            throw this.error("FLOW_CREDIT_QUOTE_UNAVAILABLE", "Flow did not show a verifiable credit quote. Because maxCredits is set, no video request was submitted.", false, false);
+            throw this.error("FLOW_CREDIT_QUOTE_UNAVAILABLE", `Flow did not show a verifiable credit quote. Because maxCredits is set, no ${payload.type === "image" ? "image" : "video"} request was submitted.`, false, false);
           }
           if (maxCredits !== undefined && credits > Number(maxCredits)) {
             throw this.error("FLOW_MAX_CREDITS_EXCEEDED", `Flow quotes ${credits} credits, above max_credits=${maxCredits}. Nothing was submitted.`, false, false);

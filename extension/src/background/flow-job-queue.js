@@ -63,11 +63,12 @@ const mayHaveDispatched = value => value?.outcomeUnknown === true || value?.outc
  * normal add; callers that intentionally pause the queue can resume it later.
  */
 export class FlowJobQueue {
-  constructor(runner, { storageKey = STORAGE_KEY, storage = globalThis.chrome?.storage?.local, minDelayMs = 5_000, maxDelayMs = 10_000, loadCapabilityRegistry = null } = {}) {
+  constructor(runner, { storageKey = STORAGE_KEY, storage = globalThis.chrome?.storage?.local, minDelayMs = 5_000, maxDelayMs = 10_000, loadCapabilityRegistry = null, refPreflight = null } = {}) {
     if (typeof runner !== "function") throw new TypeError("FlowJobQueue requires a runner(job, hooks).");
     if (!storage?.get || !storage?.set) throw new TypeError("FlowJobQueue requires chrome.storage.local or a compatible storage adapter.");
     this.runner = runner;
     this.loadCapabilityRegistry = typeof loadCapabilityRegistry === "function" ? loadCapabilityRegistry : null;
+    this.refPreflight = typeof refPreflight === "function" ? refPreflight : null;
     this.capabilityRegistryPromise = null;
     this.storage = storage;
     this.storageKey = storageKey;
@@ -888,6 +889,21 @@ export class FlowJobQueue {
         let outcomeBlocked = false;
         let autoRetryQueued = false;
         try {
+          if (this.refPreflight && job.operation === "flow.generation.submit") {
+            // IMG-04: revalidate the job's references at job start, before
+            // the runner spends any Flow work. A missing library ref throws
+            // the distinct preflight error and lands in the failure path
+            // below (not retryable — a user-action problem); a re-uploaded
+            // ref returns a payload with the rewritten expectedId, which is
+            // adopted and persisted so the runner and any later resume use
+            // the new asset id.
+            const outcome = await this.refPreflight(clone(job));
+            const updatedJob = outcome?.job && typeof outcome.job === "object" ? outcome.job : outcome;
+            if (updatedJob?.payload && typeof updatedJob.payload === "object") {
+              job.payload = clone(updatedJob.payload);
+              await this.#persist();
+            }
+          }
           const result = await this.runner(clone(job), hooks);
           if (result?.waitingForUser === true) {
             waitingForUser = true;

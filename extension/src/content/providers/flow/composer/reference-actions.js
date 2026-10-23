@@ -33,6 +33,22 @@
     const callerBudget = Number.isFinite(callerTimeout) && callerTimeout > 0 ? Math.max(250, callerTimeout - reserveMs) : fallbackMs;
     return Date.now() + Math.min(fallbackMs, callerBudget);
   };
+  // IMG-03: the background media catalog resolves identities that uploads
+  // registered at upload time. It is consulted BEFORE the observer-event
+  // wait (and long before any DOM grid scan): a hit answers from storage
+  // even after the asset's tile has been detached from the page. Every
+  // failure mode — no background, no entry, a rejected message — degrades
+  // to null so the caller falls back to the existing resolution paths.
+  async function lookupFlowMediaCatalog(query) {
+    try {
+      const sendMessage = root.chrome?.runtime?.sendMessage;
+      if (typeof sendMessage !== "function") return null;
+      const response = await sendMessage.call(root.chrome.runtime, { type: "flow-media-catalog:lookup", query });
+      return response?.ok ? response.entry || null : null;
+    } catch {
+      return null;
+    }
+  }
   async function resolveNativeMediaUuid(id, expectedType = "image") {
     const value = String(id || "");
     const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -41,6 +57,10 @@
     if (!asb || !["image", "video"].includes(expectedType)) return undefined;
     const projectId = location.pathname.match(/\/project\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/|$)/i)?.[1]?.toLowerCase();
     if (!projectId) return undefined;
+    const catalogEntry = await lookupFlowMediaCatalog({ projectId, mediaId: value });
+    if (catalogEntry?.uuid && uuidPattern.test(String(catalogEntry.uuid))) {
+      return String(catalogEntry.uuid).toLowerCase();
+    }
     const identitiesEvent = "TOBY_FLOW_MEDIA_IDENTITIES";
     const identitiesV2Event = "TOBY_FLOW_V2_MEDIA_IDENTITIES";
     const readEvent = "TOBY_FLOW_MEDIA_IDENTITIES_READ";
@@ -2079,6 +2099,23 @@
             const attachedCharacterId = explicitCharacterUuid(chip.element, chip.owner);
             if (attachedCharacterId && attachedCharacterId.toLowerCase() !== selectedId.toLowerCase()) {
               throw flowError("FLOW_CHARACTER_ID_MISMATCH", `Flow attached a different character entity than the exact option selected for "${ref.name}". No generation was submitted.`, false, false);
+            }
+          }
+          if (kind === "image") {
+            // Mirror the tile path's chip proof: when the new chip exposes a
+            // media UUID, it must be the selected option's canonical id. A
+            // picker race (stale state, recycled grid node) can land a chip
+            // for a different asset; confirming by count alone would attach
+            // the wrong reference. A chip exposing no UUID at all keeps the
+            // count-based confirmation.
+            const observedUuids = chipMediaUuids(chip);
+            if (uuidPattern.test(String(selectedId || "")) && observedUuids.some(id => id !== String(selectedId).toLowerCase())) {
+              const scan = chipAttachEvidence(before, currentChips, added, "picker_chip_uuid_mismatch");
+              updateReferenceActionDiagnostics({ step: "picker reference chip uuid mismatch", chipAttachScan: scan });
+              const error = flowError("FLOW_ASSET_ID_MISMATCH", `Flow attached an image chip whose exposed UUID does not match the exact option selected for "${ref.name}". No generation was submitted.`, false, true);
+              error.diagnostics = { chipAttachScan: scan };
+              console.error("[FlowReferenceAction] picker image chip UUID mismatch", JSON.stringify(scan));
+              throw error;
             }
           }
           const result = { name: ref.name, kind: chip.kind, source: chip.source, id: selectedId, confirmed: true };

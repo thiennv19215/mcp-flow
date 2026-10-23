@@ -371,8 +371,10 @@ test('fix 3: a same-name tile without any size evidence is not reused when the s
 test('fix 3: a same-name tile with the exact same size keeps the reuse fast-path', async () => {
   const { uploader, name, mediaId } = sizedTileHarness({ tileSize: 1000 });
   const result = await uploader.upload({ name, size: 1000 }, 'image', {});
+  // IMG-03: the receipt surfaces the canonical media UUID (here the tile id
+  // already is one) as mediaUuid alongside the unchanged legacy fields.
   assert.deepEqual(JSON.parse(JSON.stringify(result)), {
-    uploaded: true, name, kind: 'image', id: mediaId, reused: true,
+    uploaded: true, name, kind: 'image', id: mediaId, reused: true, mediaUuid: mediaId,
   });
 });
 
