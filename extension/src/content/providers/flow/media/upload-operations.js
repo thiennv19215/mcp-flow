@@ -79,7 +79,12 @@
         const kind = payload.kind === "video" ? "video" : "image";
         if (!file || file.name !== assetName) throw this.error("FLOW_TRANSFER_UNKNOWN", "The staged media file is missing or its name does not match.", true);
         const deadline = root.FlowUiDeadline?.makeDeadline(command, 75_000, 15_000) || Date.now() + 60_000;
-        const receipt = await components.uploadStagedFlowMedia(file, kind, command, { deadline, signal: command.signal });
+        // IMG-01: a caller may pin the upload identity to its own reference
+        // key; without one the uploader derives the identity key from the
+        // staged file's original name. The receipt keeps name = assetName
+        // (the original) and gains the content-derived uploadName.
+        const callerKey = payload.callerKey ?? payload.uploadKey ?? undefined;
+        const receipt = await components.uploadStagedFlowMedia(file, kind, command, { deadline, signal: command.signal, callerKey });
         // Upload can leave Flow's asset picker or upload menu mounted while
         // the media tile finishes rendering. Close and verify it before the
         // caller starts image/video generation or another DOM operation.

@@ -430,6 +430,73 @@
     throw error;
   }
 
+  // Deterministic content-derived upload identity (IMG-01). A staged file is
+  // dispatched under a synthetic name derived from a digest over (a fixed
+  // salt, the caller key, the MIME type, and the SHA-256 of the file bytes),
+  // formatted as a UUID-shaped token with the original extension. Flow names
+  // the new tile after the dispatched file, so every tile match, reuse check
+  // and confirmation that keys off this name is content-exact by
+  // construction: the same file + caller key always derives the same name,
+  // and different bytes can never derive the same name — name+size collisions
+  // between genuinely different files stop mattering. Files whose bytes
+  // cannot be read (legacy plain-object callers) get no identity and keep
+  // the historical name-based behavior untouched.
+  const FLOW_UPLOAD_IDENTITY_SALT = "flow-mcp:upload-identity:v1";
+  const flowUploadIdentityCache = new WeakMap();
+
+  async function flowUploadSha256Hex(data) {
+    const subtle = root.crypto?.subtle;
+    if (!subtle?.digest) return null;
+    let buffer = data;
+    if (typeof data === "string") {
+      if (typeof root.TextEncoder !== "function") return null;
+      buffer = new root.TextEncoder().encode(data);
+    }
+    const digest = await subtle.digest("SHA-256", buffer);
+    return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
+  }
+
+  function flowUploadIdentityExtension(file) {
+    const fromName = String(file?.name || "").match(/\.(png|jpe?g|webp|gif|heic|heif|avif|mp4|m4v|mov|webm|avi|mkv|3gp)$/i);
+    if (fromName) return `.${fromName[1].toLowerCase()}`;
+    const byMime = {
+      "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif",
+      "video/mp4": ".mp4", "video/webm": ".webm", "video/quicktime": ".mov",
+    };
+    return byMime[String(file?.type || "").toLowerCase()] || "";
+  }
+
+  async function computeFlowUploadIdentity(file, callerKey) {
+    try {
+      if (!file || typeof file !== "object" || typeof file.arrayBuffer !== "function") return null;
+      if (typeof root.File !== "function" || !root.crypto?.subtle?.digest) return null;
+      const bytesHash = await flowUploadSha256Hex(await file.arrayBuffer());
+      if (!bytesHash) return null;
+      const key = String(callerKey || file.name || "");
+      const digest = await flowUploadSha256Hex([FLOW_UPLOAD_IDENTITY_SALT, key, String(file.type || ""), bytesHash].join("\n"));
+      if (!digest) return null;
+      const uploadName = `${digest.slice(0, 8)}-${digest.slice(8, 12)}-${digest.slice(12, 16)}-${digest.slice(16, 20)}-${digest.slice(20, 32)}${flowUploadIdentityExtension(file)}`;
+      return { uploadName, bytesHash, digest };
+    } catch {
+      return null;
+    }
+  }
+
+  // Hashed at most once per (staged file, caller key); the cache lives on
+  // the file object itself, so every upload path that fetches the staged
+  // file from stagedNativeFiles shares the one computation.
+  function flowUploadIdentity(file, callerKey) {
+    if (!file || typeof file !== "object") return Promise.resolve(null);
+    let byKey = flowUploadIdentityCache.get(file);
+    if (!byKey) {
+      byKey = new Map();
+      flowUploadIdentityCache.set(file, byKey);
+    }
+    const cacheKey = String(callerKey || "");
+    if (!byKey.has(cacheKey)) byKey.set(cacheKey, computeFlowUploadIdentity(file, callerKey));
+    return byKey.get(cacheKey);
+  }
+
   async function waitForNativeMediaTile(assetName, command, kind, options = {}) {
     const fn = root.flowError || ((c, m, r, o) => Object.assign(new Error(m), { code: c, retryable: r, outcome_unknown: o }));
     const deadline = Math.min(options.deadline || Infinity, Date.now() + (kind === "video" ? 60_000 : 90_000));
@@ -588,13 +655,23 @@
     const checkTime = (operation, outcomeUnknown = false) => root.FlowUiDeadline?.requireTime(deadline, operation, outcomeUnknown, options.signal);
     checkTime("starting the Flow media upload");
 
+    // IMG-01: derive the content-exact upload identity before any tile
+    // matching or dispatch. When an identity exists, matching keys off the
+    // synthetic upload name (never the user-facing original name) and the
+    // file is dispatched under that name so Flow's tile carries it; receipts
+    // keep the original name for callers and add uploadName/originalName.
+    const identity = await flowUploadIdentity(file, options.callerKey);
+    const matchName = identity ? identity.uploadName : file.name;
+    const identityFields = identity ? { uploadName: identity.uploadName, originalName: file.name } : {};
+    const dispatchFile = identity ? new root.File([file], identity.uploadName, { type: file.type || "" }) : file;
+
     const scroller = root.FlowTiles?.flowMediaGridScrollContainer?.() || root.flowMediaGridScrollContainer?.() || null;
     if (scroller && scroller.scrollTop > 5) {
       scroller.scrollTop = 0;
       await root.FlowUiDeadline?.boundedWait(150, deadline, "scrolling to the Flow composer", false, options.signal);
     }
 
-    const existingTiles = [...document.querySelectorAll("flow-grid-tile-container")].filter(item => matchesFlowTile(item, file.name));
+    const existingTiles = [...document.querySelectorAll("flow-grid-tile-container")].filter(item => matchesFlowTile(item, matchName));
     // A matching name alone does not prove a tile is the staged file: camera
     // exports and repeated downloads routinely collide on names like
     // IMG_1234.png, and reusing the wrong tile silently generates from the
@@ -603,16 +680,20 @@
     // the same byte size; a proven mismatch — or no comparable evidence at
     // all — means "upload instead" (a duplicate tile is recoverable, a
     // wrong reference is not). Callers whose file carries no size keep the
-    // legacy name-only behavior.
+    // legacy name-only behavior. With a content identity (IMG-01) the
+    // matched name is the synthetic upload name, which only this exact file
+    // can produce, so a matched tile is content-proven: its size verdict is
+    // "match" by construction and the size evidence below is subsumed.
     const stagedSize = Number.isSafeInteger(file?.size) && file.size >= 0 ? file.size : null;
     const namedTileDetails = existingTiles.map(tile => {
       const id = typeof root.mediaId === "function" ? root.mediaId(tile) : "";
       const actualKind = flowUploadTileKind(tile);
       const ready = root.FlowTiles?.isTileMediaReady?.(tile) ?? !root.isTileBusy?.(tile);
       const tileSize = flowUploadTileFileSize(tile);
-      const sizeVerdict = stagedSize === null ? "legacy"
-        : tileSize === null ? "unverifiable"
-          : tileSize === stagedSize ? "match" : "mismatch";
+      const sizeVerdict = identity ? "match"
+        : stagedSize === null ? "legacy"
+          : tileSize === null ? "unverifiable"
+            : tileSize === stagedSize ? "match" : "mismatch";
       return { tile, id: id && !String(id).startsWith("title:") ? String(id) : null, actualKind, ready, tileSize, sizeVerdict,
         reuseEligible: sizeVerdict === "legacy" || sizeVerdict === "match",
         error: Boolean(tile.querySelector("flow-error-tile")) };
@@ -630,11 +711,11 @@
       const chosen = reusableTiles.find(item => item.actualKind && item.ready) || reusableTiles[0];
       if (chosen.actualKind && chosen.ready) {
         root.emitFlowProgress?.(command, `Reusing existing Flow ${kind} media ID ${chosen.id} for "${file.name}"; skipped upload.`);
-        return { uploaded: true, name: file.name, kind, id: chosen.id, reused: true };
+        return { uploaded: true, name: file.name, kind, id: chosen.id, ...identityFields, reused: true };
       }
-      const confirmed = await waitForNativeMediaTile(file.name, command, kind, { deadline, signal: options.signal, expectedId: chosen.id });
+      const confirmed = await waitForNativeMediaTile(matchName, command, kind, { deadline, signal: options.signal, expectedId: chosen.id });
       root.emitFlowProgress?.(command, `Reusing existing Flow ${kind} media ID ${confirmed.id} for "${file.name}" after readiness confirmation; skipped upload.`);
-      return { ...confirmed, uploaded: true, name: file.name, kind, reused: true };
+      return { ...confirmed, uploaded: true, name: file.name, kind, ...identityFields, reused: true };
     }
     // The name-only branches below confirm by title alone, so they may run
     // only when every same-name tile is reuse-eligible. If any tile was
@@ -648,8 +729,8 @@
         }
         const actualKind = assertReusableFlowUploadKind(eligibleTiles[0], file.name, kind);
         if (actualKind && !flowUploadKindMatches(kind, actualKind)) throw fn("FLOW_UPLOAD_KIND_MISMATCH", `Flow already has a ${actualKind} tile named "${file.name}", not the requested ${kind}. No upload was started.`, false, false);
-        const confirmed = await waitForNativeMediaTile(file.name, command, kind, { deadline, signal: options.signal });
-        return { uploaded: true, name: file.name, kind, id: confirmed.id, reused: true };
+        const confirmed = await waitForNativeMediaTile(matchName, command, kind, { deadline, signal: options.signal });
+        return { uploaded: true, name: file.name, kind, id: confirmed.id, ...identityFields, reused: true };
       }
       if (eligibleTiles.length > 1) {
         const knownKinds = eligibleTiles.map(flowUploadTileKind).filter(Boolean);
@@ -825,7 +906,7 @@
         throw error;
       } else {
         try {
-          const pickerReceipt = await root.FlowNativeFileTransfer.selectFileThroughPicker(file, async () => {
+          const pickerReceipt = await root.FlowNativeFileTransfer.selectFileThroughPicker(dispatchFile, async () => {
             checkTime("opening Flow's file picker");
             if (!uploadItem?.isConnected || !isVisible(uploadItem)) {
               await switchUploadCategoryTab(menuRoots());
@@ -837,21 +918,21 @@
           selectionDiagnostics.filePickerSelectionConfirmed = pickerReceipt?.selected === true;
           selectionDiagnostics.pickerMethod = safeFlowPickerMethod(pickerReceipt?.method);
           selectionDiagnostics.pickerType = safeFlowPickerType(pickerReceipt?.type);
-          root.emitFlowProgress?.(command, `Flow's scoped Upload picker confirmed ${file.name} via ${pickerReceipt.method || "Flow file input"}`);
+          root.emitFlowProgress?.(command, `Flow's scoped Upload picker confirmed ${dispatchFile.name} via ${pickerReceipt.method || "Flow file input"}`);
         } catch (error) {
           if (error?.outcome_unknown || error?.code === "FLOW_UPLOAD_PICKER_OUTCOME_UNKNOWN") throw error;
           if (error?.code === "FLOW_OPERATION_TIMEOUT") throw error;
           console.warn(`[Flow MCP upload] File-picker trap failed before selection (${String(error?.message || error)}); falling back to drag-and-drop for ${kind} "${file.name}".`);
           selectionDiagnostics.dropAttempted = true;
-          const dropReceipt = await root.FlowNativeFileTransfer.dropFileToFlow(file);
+          const dropReceipt = await root.FlowNativeFileTransfer.dropFileToFlow(dispatchFile);
           selectionDiagnostics.dropReceiptConfirmed = dropReceipt?.dropped === true || dropReceipt?.accepted === true;
         }
       }
     }
     checkTime("confirming the Flow media upload", true);
     if (kind === "video") Object.assign(selectionDiagnostics, await confirmFlowVideoUploadIfPrompted(deadline, options.signal, selectionDiagnostics));
-    const confirmed = await waitForNativeMediaTile(file.name, command, kind, { deadline, signal: options.signal, baselineIds, requireNewOwner: true, selectionDiagnostics });
-    return { ...confirmed, uploaded: true, name: file.name, kind };
+    const confirmed = await waitForNativeMediaTile(matchName, command, kind, { deadline, signal: options.signal, baselineIds, requireNewOwner: true, selectionDiagnostics });
+    return { ...confirmed, uploaded: true, name: file.name, kind, ...identityFields };
   }
 
   /**
@@ -860,6 +941,9 @@
   class FlowUploader {
     static upload(file, kind, command, options) {
       return uploadStagedMedia(file, kind, command, options);
+    }
+    static uploadIdentity(file, callerKey) {
+      return flowUploadIdentity(file, callerKey);
     }
     static findAddMediaButton() {
       return findAddMediaButton();
