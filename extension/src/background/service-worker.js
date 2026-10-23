@@ -1068,15 +1068,14 @@ function queueDownloadMatchesTriggeredFlowItem(downloadItem, ticket, title) {
   if (projectId && ticket.flowProjectId && projectId !== ticket.flowProjectId.toLowerCase()) return false;
   const sameFlowTab = downloadItem.tabId === ticket.flowTabId;
   const flowReferrer = queueDownloadIsFlowPageUrl(downloadItem.referrer) || queueDownloadIsFlowPageUrl(downloadItem.url) || queueDownloadIsFlowPageUrl(downloadItem.finalUrl);
-  // Some Flow downloads are surfaced by Chrome under a different tab (or
-  // tabId=-1), even though the filename and timing identify the result. Require
-  // a Flow referrer or matching project for those records; a pinned Flow tab is
-  // itself sufficient provenance.
-  if (!sameFlowTab && !(flowReferrer || (ticket.flowProjectId && projectId === ticket.flowProjectId.toLowerCase()))) return false;
+  const sameProject = Boolean(ticket.flowProjectId && projectId === ticket.flowProjectId.toLowerCase());
   const parsedStartedAt = Date.parse(downloadItem.startTime || "");
   const startedAt = Number.isFinite(parsedStartedAt) ? parsedStartedAt : Date.now();
   const lowerBound = Number(ticket.triggerStartedAt) || Number(ticket.baselineAt);
-  const upperBound = (Number(ticket.triggerConfirmedAt) || Date.now()) + 30_000;
+  // Flow may create the Chrome download well after its menu action returns.
+  // Keep the ticket alive for the full browser-download window instead of
+  // rejecting a valid item after a short post-click grace period.
+  const upperBound = Math.max(Number(ticket.expiresAt) || 0, (Number(ticket.triggerConfirmedAt) || Date.now()) + 5 * 60_000);
   if (!Number.isFinite(startedAt) || startedAt < lowerBound - 1_500 || startedAt > upperBound) return false;
   const extension = queueDownloadExtension(downloadItem);
   const compatibleExtension = ticket.mediaKind === "video"
@@ -1085,11 +1084,33 @@ function queueDownloadMatchesTriggeredFlowItem(downloadItem, ticket, title) {
   if (!compatibleExtension) return false;
   const titleKey = flowDownloadTitleKey(title);
   const filenameKey = flowDownloadTitleKey(downloadItem.filename);
-  // Prefer a title match when available. The pinned tab is already validated as
-  // a Flow project, and the active ticket plus trigger window and media type
-  // identify a same-tab download even when Flow rewrites the browser filename.
-  return Boolean((titleKey && filenameKey.startsWith(titleKey)) || sameFlowTab);
+  const titleMatches = Boolean(titleKey && filenameKey.startsWith(titleKey));
+  const hasFlowProvenance = sameFlowTab || flowReferrer || sameProject;
+  // Chrome frequently reports Flow's own download with tabId=-1 and an opaque
+  // CDN URL, losing both the originating tab and project in DownloadItem. In
+  // that case, the unique armed ticket, exact title prefix, expected media type,
+  // and time window identify the download. Reject title-less records unless
+  // Chrome preserved direct Flow tab/project provenance.
+  return titleMatches || hasFlowProvenance;
 }
+function claimQueueDownloadTicket(downloadItem) {
+  if (!Number.isInteger(downloadItem?.id)) return null;
+  const candidates = pendingQueueFilenameOverrides.filter(ticket => !ticket.downloadId &&
+    queueDownloadMatchesTriggeredFlowItem(downloadItem, ticket, ticket.title));
+  if (candidates.length !== 1) return null;
+  const ticket = candidates[0];
+  const extension = queueDownloadExtension(downloadItem);
+  if (!extension) return null;
+  ticket.downloadId = downloadItem.id;
+  ticket.assignedFilename = `${ticket.fileStem}${extension}`;
+  return ticket;
+}
+chrome.downloads?.onCreated?.addListener(downloadItem => {
+  // onCreated gives us the Chrome ID even when onDeterminingFilename is not
+  // fired for Flow's blob/CDN download path. The same ticket is also claimed
+  // from onDeterminingFilename when that event arrives first.
+  claimQueueDownloadTicket(downloadItem);
+});
 chrome.downloads?.onDeterminingFilename?.addListener((downloadItem, suggest) => {
   const now = Date.now();
   for (let i = pendingQueueFilenameOverrides.length - 1; i >= 0; i--) {
@@ -1112,14 +1133,18 @@ chrome.downloads?.onDeterminingFilename?.addListener((downloadItem, suggest) => 
   if (exactCandidates.length > 1) return;
   const candidates = exactCandidates.length === 1
     ? exactCandidates
-    : pendingQueueFilenameOverrides.filter(ticket => !ticket.downloadId &&
+    : pendingQueueFilenameOverrides.filter(ticket => (!ticket.downloadId || ticket.downloadId === downloadItem.id) &&
       queueDownloadMatchesTriggeredFlowItem(downloadItem, ticket, ticket.title));
   if (candidates.length !== 1) return;
   const ticket = candidates[0];
   const extension = queueDownloadExtension(downloadItem);
   if (!extension) return;
-  ticket.downloadId = downloadItem.id;
-  ticket.assignedFilename = `${ticket.fileStem}${extension}`;
+  if (!ticket.downloadId) {
+    ticket.downloadId = downloadItem.id;
+    ticket.assignedFilename = `${ticket.fileStem}${extension}`;
+  } else if (ticket.downloadId !== downloadItem.id) {
+    return;
+  }
   disarmQueueFilenameOverride(ticket);
   suggest({ filename: ticket.assignedFilename, conflictAction: "uniquify" });
 });
