@@ -186,7 +186,7 @@ textarea:disabled {
   scrollbar-gutter: stable;
 }
 .flow-mcp-sidebar .tab-pane { min-width: 0; gap: 8px; }
-.flow-mcp-sidebar .tab-pane.active { flex: 1 0 auto; }
+.flow-mcp-sidebar .tab-pane.active { flex: 1 1 0%; min-height: 0; }
 .flow-mcp-sidebar .pane-heading {
   display: flex;
   align-items: center;
