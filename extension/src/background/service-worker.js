@@ -1003,7 +1003,7 @@ function queueDownloadExtension(downloadItem) {
   if (/\.html?$/i.test(nameExtension || "") && !byMime.has(mime)) return "";
   return byMime.get(mime) || nameExtension?.toLowerCase() || "";
 }
-function armQueueFilenameOverride({ jobId, flowMediaId, fileStem, flowTabId, flowProjectId, mediaKind }) {
+function armQueueFilenameOverride({ jobId, flowMediaId, fileStem, flowTabId, flowProjectId, mediaKind, title }) {
   const stem = safeQueueFilenameStem(fileStem);
   if (!stem || !String(jobId || "").trim() || !Number.isInteger(flowTabId) || !flowMediaId) return null;
   const ticket = {
@@ -1012,7 +1012,8 @@ function armQueueFilenameOverride({ jobId, flowMediaId, fileStem, flowTabId, flo
     fileStem: stem,
     flowTabId,
     flowProjectId: String(flowProjectId || ""),
-    mediaKind: String(mediaKind || "").toLowerCase(),
+    mediaKind: String(mediaKind || "").toLowerCase() === "scene" ? "video" : String(mediaKind || "").toLowerCase(),
+    title: String(title || "").trim(),
     armedAt: Date.now(),
     baselineAt: Date.now(),
     triggerStartedAt: null,
@@ -1065,7 +1066,8 @@ function queueDownloadMatchesTriggeredFlowItem(downloadItem, ticket, title) {
   // a Flow referrer or matching project for those records; a pinned Flow tab is
   // itself sufficient provenance.
   if (!sameFlowTab && !(flowReferrer || (ticket.flowProjectId && projectId === ticket.flowProjectId.toLowerCase()))) return false;
-  const startedAt = Date.parse(downloadItem.startTime || "");
+  const parsedStartedAt = Date.parse(downloadItem.startTime || "");
+  const startedAt = Number.isFinite(parsedStartedAt) ? parsedStartedAt : Date.now();
   const lowerBound = Number(ticket.triggerStartedAt) || Number(ticket.baselineAt);
   const upperBound = (Number(ticket.triggerConfirmedAt) || Date.now()) + 30_000;
   if (!Number.isFinite(startedAt) || startedAt < lowerBound - 1_500 || startedAt > upperBound) return false;
@@ -1090,12 +1092,19 @@ chrome.downloads?.onDeterminingFilename?.addListener((downloadItem, suggest) => 
   const mediaIdCandidates = pendingQueueFilenameOverrides.filter(ticket =>
     sourceUrl.toLowerCase().includes(ticket.flowMediaId.toLowerCase())
   );
-  // The generation observer has already correlated this media UUID to the API
-  // request. Titles can be placeholders or differ from the downloaded filename,
-  // so use the UUID, pinned tab, and project as the download identity.
-  const candidates = mediaIdCandidates.length
+  // Prefer the exact media UUID when the CDN URL exposes it. Flow often omits
+  // that UUID from browser download metadata, so fall back to the armed per-job
+  // title plus media type, trigger time, and Flow tab/project provenance. This
+  // captures Chrome's download ID at creation time instead of trying to infer it
+  // later from a global downloads list.
+  const exactCandidates = mediaIdCandidates.length
     ? mediaIdCandidates.filter(ticket => queueDownloadMatchesTicket(downloadItem, ticket))
     : [];
+  if (exactCandidates.length > 1) return;
+  const candidates = exactCandidates.length === 1
+    ? exactCandidates
+    : pendingQueueFilenameOverrides.filter(ticket => !ticket.downloadId && ticket.title &&
+      queueDownloadMatchesTriggeredFlowItem(downloadItem, ticket, ticket.title));
   if (candidates.length !== 1) return;
   const ticket = candidates[0];
   const extension = queueDownloadExtension(downloadItem);
@@ -1113,6 +1122,18 @@ async function waitForQueueFlowDownload(beforeIds, title, timeoutMs = 12 * 60_00
   const titleKey = flowDownloadTitleKey(title);
   let lastNew = [];
   while (Date.now() < deadline) {
+    if (Number.isInteger(filenameTicket?.downloadId)) {
+      const [claimed] = await chrome.downloads.search({ id: filenameTicket.downloadId });
+      if (claimed?.state === "interrupted") throw Object.assign(new Error(`Chrome download failed for "${title}": ${claimed.error || "unknown error"}. The media remains in Flow.`), {
+        code: "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
+      });
+      if (claimed?.state === "complete" && claimed.filename) return {
+        id: claimed.id,
+        filename: claimed.filename,
+        matchedByQueueTicket: true,
+        matchedBy: "download_id",
+      };
+    }
     const items = await chrome.downloads.search({ orderBy: ["-startTime"], limit: 100 });
     const newItems = items.filter(item => !beforeIds.has(item.id));
     if (filenameTicket) {
@@ -1272,7 +1293,7 @@ async function downloadQueueMedia(media, outputDir, fileStem, quality, invoke, h
           download: { state: "downloading", completed: index, total: media.length, current: { id: flowMediaId, title } },
         });
         filenameTicket = armQueueFilenameOverride({
-          jobId, flowMediaId, fileStem: outputStem, flowTabId, flowProjectId, mediaKind: itemKind,
+          jobId, flowMediaId, fileStem: outputStem, flowTabId, flowProjectId, mediaKind: itemKind, title,
         });
         if (!filenameTicket) throw Object.assign(new Error(`Could not safely arm the requested filename for task ${jobId || "(unknown)"} and Flow media ${flowMediaId}; no download was started.`), {
           code: "FLOW_DOWNLOAD_FILENAME_ARM_FAILED", outcomeUnknown: false, outcome_unknown: false,
