@@ -1,15 +1,139 @@
 (function (root) {
   "use strict";
 
-  function armWatermarkDownload(meta = {}) {
+  // DL-01: the interceptor reports each cleaning attempt on this window
+  // event. Keep the latest one so a download can record whether cleaning
+  // actually ran; DL-03 replaces this with per-download attribution.
+  let lastWatermarkResult = null;
+  try {
+    root.addEventListener?.("TOBY_FLOW_WATERMARK_RESULT", event => {
+      const detail = event?.detail;
+      if (!detail || typeof detail !== "object") return;
+      lastWatermarkResult = {
+        at: Date.now(),
+        ok: detail.ok === true,
+        changed: detail.changed === true,
+        kind: typeof detail.kind === "string" ? detail.kind : undefined,
+      };
+    });
+  } catch (_) {}
+
+  // Structural gate for a locally supplied mask: the value must be base64
+  // (optionally a data: URL) decoding to a PNG whose IHDR carries an alpha
+  // channel (color type 4/6) or that declares a tRNS chunk before IDAT.
+  // Anything else can never drive the remover, so it must not arm
+  // cleaning. (The same gate lives in bridge/watermark-config.js, which
+  // forwards the config to the MAIN world.)
+  const WATERMARK_MASK_MAX_B64_CHARS = 2_800_000;
+  function watermarkMaskHasAlpha(value) {
+    if (typeof value !== "string") return false;
+    let raw = value.trim();
+    const dataUrl = /^data:image\/png;base64,([\s\S]+)$/i.exec(raw);
+    if (dataUrl) raw = dataUrl[1].trim();
+    if (!raw || raw.length > WATERMARK_MASK_MAX_B64_CHARS || raw.length % 4 === 1 || !/^[A-Za-z0-9+/]+={0,2}$/.test(raw)) return false;
+    let binary;
+    try { binary = atob(raw); } catch (_) { return false; }
+    if (binary.length < 33) return false;
+    const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+    for (let index = 0; index < signature.length; index++) {
+      if (binary.charCodeAt(index) !== signature[index]) return false;
+    }
+    let offset = 8;
+    let sawIhdr = false;
+    for (let chunk = 0; chunk < 64 && offset + 12 <= binary.length; chunk++) {
+      const length = binary.charCodeAt(offset) * 0x1000000 +
+        (binary.charCodeAt(offset + 1) << 16) + (binary.charCodeAt(offset + 2) << 8) + binary.charCodeAt(offset + 3);
+      const type = binary.slice(offset + 4, offset + 8);
+      if (type === "IHDR") {
+        if (length < 10) return false;
+        sawIhdr = true;
+        const colorType = binary.charCodeAt(offset + 17);
+        if (colorType === 4 || colorType === 6) return true;
+      } else if (type === "tRNS") {
+        return sawIhdr;
+      } else if (type === "IDAT") {
+        break;
+      }
+      if (length < 0 || offset + 12 + length > binary.length) break;
+      offset += 12 + length;
+    }
+    return false;
+  }
+
+  function normalizeWatermarkMode(value) {
+    const mode = String(value || "").trim().toLowerCase();
+    return mode === "clean" || mode === "original" || mode === "inherit" ? mode : "inherit";
+  }
+
+  async function loadWatermarkConfig() {
+    try {
+      if (typeof chrome === "undefined" || !chrome.storage?.local?.get) return {};
+      const stored = await chrome.storage.local.get(["flowWatermark", "watermark"]);
+      const config = stored?.flowWatermark || stored?.watermark;
+      return config && typeof config === "object" ? config : {};
+    } catch (_) { return {}; }
+  }
+
+  // Resolve the per-download watermark mode from the job's requested mode
+  // plus the persisted flowWatermark config. Explicit modes act as
+  // one-shot tickets: "original" always posts a suppressing arm (the
+  // interceptor honors it for this download regardless of the global
+  // setting) and "clean" arms whenever a valid mask is configured.
+  // "inherit" follows the config: master toggle off or the per-kind flag
+  // off → no arm at all, and an enabled config without a valid alpha-PNG
+  // mask never arms cleaning either.
+  async function resolveWatermarkArm(meta = {}) {
+    const requested = normalizeWatermarkMode(meta.mode);
+    const kindKey = meta.kind === "image" ? "image" : "video";
+    const config = await loadWatermarkConfig();
+    const maskValid = watermarkMaskHasAlpha(config.alpha_png_b64);
+    if (requested === "original") return { post: true, mode: "original", reason: "explicit_original" };
+    if (requested === "clean") {
+      return maskValid
+        ? { post: true, mode: "clean", reason: "explicit_clean" }
+        : { post: false, mode: "clean", reason: "mask_missing_or_invalid" };
+    }
+    if (config.enabled !== true) return { post: false, mode: "original", reason: "disabled" };
+    if (config[kindKey] === false) return { post: false, mode: "original", reason: "kind_disabled" };
+    if (!maskValid) return { post: false, mode: "original", reason: "mask_missing_or_invalid" };
+    return { post: true, mode: "clean", reason: "inherit_clean" };
+  }
+
+  // Whether cleaning ran for an armed download, from the interceptor's
+  // result events observed since the arm: true/false when an event for
+  // this download's kind arrived, null when none was observed (the op
+  // returns right after the click; DL-03 attributes outcomes precisely).
+  function watermarkCleanedOutcome(outcome) {
+    if (!outcome?.armed) return false;
+    if (outcome.mode !== "clean") return false;
+    const event = lastWatermarkResult;
+    if (!event || outcome.armedAt == null || event.at < outcome.armedAt) return null;
+    if (event.kind && outcome.kind && event.kind !== outcome.kind) return null;
+    return event.ok && event.changed;
+  }
+
+  async function armWatermarkDownload(meta = {}) {
+    const resolution = await resolveWatermarkArm(meta);
+    const outcome = { mode: resolution.mode, armed: false, reason: resolution.reason, kind: meta.kind, armedAt: null };
+    if (!resolution.post) return outcome;
     try {
       window.postMessage({
         source: "flow-mcp-watermark-v1",
         action: "arm",
         requestId: `watermark-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        options: { ...meta, timeoutMs: Math.min(120_000, Math.max(5_000, Number(meta.timeoutMs) || 45_000)) },
+        options: {
+          title: meta.title,
+          kind: meta.kind,
+          quality: meta.quality,
+          mode: resolution.mode,
+          enabled: resolution.mode === "clean",
+          timeoutMs: Math.min(120_000, Math.max(5_000, Number(meta.timeoutMs) || 45_000)),
+        },
       }, location.origin);
+      outcome.armed = true;
+      outcome.armedAt = Date.now();
     } catch (_) {}
+    return outcome;
   }
 
   function flowTileOptionsButton(tile) {
@@ -179,6 +303,7 @@
     return (async () => {
       const deadline = Date.now() + Math.max(5000, Math.min(90_000, Number(operationOptions.timeoutMs) || 45_000));
       let downloadMayHaveStarted = false;
+      let watermarkOutcome = null;
       const checkActive = operation => {
         if (operationOptions.signal?.aborted) {
           throw root.flowError("FLOW_OPERATION_CANCELLED", `The Flow queue stopped while ${operation}.${downloadMayHaveStarted ? " The download may already have started; check the browser downloads before retrying." : " No download was started."}`, false, downloadMayHaveStarted);
@@ -234,7 +359,7 @@
         const download = root.flowButton?.("Download scene") || root.flowButton?.("Tải xuống cảnh") || root.flowButton?.("Tải cảnh");
         if (!download) throw root.flowError("FLOW_SCENE_DOWNLOAD_MISSING", "Scene view opened but Download scene is unavailable.", true);
         checkActive("starting the Flow scene download");
-        armWatermarkDownload({ title, kind: "video", quality });
+        watermarkOutcome = await armWatermarkDownload({ title, kind: "video", quality, mode: operationOptions.watermarkMode });
         download.click();
         downloadMayHaveStarted = true;
       } else {
@@ -279,18 +404,29 @@
               throw root.flowError("FLOW_DOWNLOAD_QUALITY_MISSING", `Flow's download menu for "${title}" has no ${quality} option. Available: ${available}.`, true);
             }
             checkActive("starting the Flow media download");
-            armWatermarkDownload({ title, kind, quality });
+            watermarkOutcome = await armWatermarkDownload({ title, kind, quality, mode: operationOptions.watermarkMode });
             choice.click();
             downloadMayHaveStarted = true;
           } else {
             checkActive("starting the Flow media download");
-            armWatermarkDownload({ title, kind, quality });
+            watermarkOutcome = await armWatermarkDownload({ title, kind, quality, mode: operationOptions.watermarkMode });
             download.click();
             downloadMayHaveStarted = true;
           }
         } else throw root.flowError("FLOW_TILE_MENU_MISSING", `Could not open options for "${title}".`, true);
       }
-      return { title, kind: scene ? "scene" : tile.querySelector("flow-video-tile") ? "video" : "image", downloadTriggered: true, trustedGesture: false };
+      return {
+        title,
+        kind: scene ? "scene" : tile.querySelector("flow-video-tile") ? "video" : "image",
+        downloadTriggered: true,
+        trustedGesture: false,
+        watermark: {
+          mode: watermarkOutcome?.mode || "original",
+          armed: watermarkOutcome?.armed === true,
+          cleaned: watermarkCleanedOutcome(watermarkOutcome),
+          ...(watermarkOutcome?.reason ? { reason: watermarkOutcome.reason } : {}),
+        },
+      };
     })();
   }
 
@@ -935,6 +1071,8 @@
 
   const FlowMediaMenu = Object.freeze({
     triggerFlowDownload,
+    resolveWatermarkArm,
+    watermarkMaskHasAlpha,
     scanNativeAssets,
     scanGalleryTiles,
     scanNativeProjects,

@@ -363,7 +363,7 @@ export async function waitForExistingQueueFlowDownload(downloadId, flowMediaId, 
   });
 }
 
-export async function downloadQueueMedia(media, outputDir, fileStem, quality, invoke, hooks, sceneNumbers = [], jobId = "", flowTabId, flowProjectId = "", generationState = null) {
+export async function downloadQueueMedia(media, outputDir, fileStem, quality, invoke, hooks, sceneNumbers = [], jobId = "", flowTabId, flowProjectId = "", generationState = null, watermarkMode = undefined) {
   if (!chrome.downloads?.search) throw Object.assign(new Error("Chrome download tracking is unavailable; the generated media remains in Flow."), {
     code: "FLOW_DOWNLOAD_TRACKING_UNAVAILABLE", outcomeUnknown: false, outcome_unknown: false,
   });
@@ -424,7 +424,7 @@ export async function downloadQueueMedia(media, outputDir, fileStem, quality, in
         let triggered;
         try {
           filenameTicket.triggerStartedAt = Date.now();
-          triggered = await invoke("flow.asset.download", { id: item.id, name: title, quality });
+          triggered = await invoke("flow.asset.download", { id: item.id, name: title, quality, ...(watermarkMode ? { watermarkMode } : {}) });
           filenameTicket.triggerConfirmedAt = Date.now();
         } catch (cause) {
           throw Object.assign(new Error(`Flow generated "${title}", but did not start its download: ${String(cause?.message || cause)}. The media remains in Flow.`), {
@@ -458,6 +458,7 @@ export async function downloadQueueMedia(media, outputDir, fileStem, quality, in
           title,
           filenameOverrideApplied,
           fileStem: outputStem,
+          ...(triggered?.watermark ? { watermark: triggered.watermark } : {}),
         });
       } finally {
         if (filenameTicket) disarmQueueFilenameOverride(filenameTicket);
@@ -524,7 +525,7 @@ export async function withQueueDownloads(job, payload, operationResult, invoke, 
     const sceneNumbers = Array.isArray(operationResult?.sceneNumbers) && operationResult.sceneNumbers.length === media.length
       ? operationResult.sceneNumbers
       : [];
-    const browserDownloads = await downloadQueueMedia(media, outputDir || "", fileStem, params.download_quality || payload.download_quality || "original", invoke, hooks, sceneNumbers, job.id, job.metadata?.flowTabId, job.metadata?.flowProjectId, generationState);
+    const browserDownloads = await downloadQueueMedia(media, outputDir || "", fileStem, params.download_quality || payload.download_quality || "original", invoke, hooks, sceneNumbers, job.id, job.metadata?.flowTabId, job.metadata?.flowProjectId, generationState, params.watermark_mode || payload.watermark_mode || params.watermarkMode || payload.watermarkMode || undefined);
     await hooks.progress({
       phase: "download_complete",
       message: `Flow generated and downloaded ${media.length} result${media.length === 1 ? "" : "s"}.`,
@@ -638,6 +639,7 @@ export async function downloadGeneratedQueueJob(job, payload, invoke, hooks, flo
       job.metadata?.flowTabId,
       job.metadata?.flowProjectId,
       generation,
+      params.watermark_mode || sourceJob.payload?.watermark_mode || params.watermarkMode || sourceJob.payload?.watermarkMode || undefined,
     );
     await setSourceDownload("completed", media.length, `Downloaded ${media.length} existing Flow result${media.length === 1 ? "" : "s"}.`);
     return { completed: true, downloadOnly: true, sourceJobId: sourceJob.id, browserDownloads };
