@@ -549,6 +549,292 @@
     };
   }
 
+  // DL-09 — download-path tile robustness (study D3/D4/D5/D6, gap G9).
+  // The download op now:
+  //  (1) checks the page's current project against the media's project
+  //      BEFORE any sweep or click (FLOW_PROJECT_MISMATCH);
+  //  (2) locates a media-id target by REUSING the generation side's
+  //      tile-loading sweep (FlowTiles.sweepFlowTileByMediaId) with an
+  //      on-mounted callback and the sweep's failure cooldown
+  //      (DOWNLOAD_TILE_SWEEP_COOLDOWN_MS = 60_000, the reference
+  //      window: at most one real sweep per target per window, a repeat
+  //      inside the window fails fast with FLOW_TILE_SWEEP_COOLDOWN);
+  //  (3) verifies the tile against the identity ALIAS SET the
+  //      generation side already accepts (media id / persistent id /
+  //      UUID / asb forms) — a tile mounting with a different identity
+  //      is never clicked;
+  //  (4) recovers or withholds broken (load-error) tiles: recovery is
+  //      attempted through the generation side's retry machinery plus
+  //      an in-place refresh, and if the tile is still broken the op
+  //      fails with FLOW_DOWNLOAD_BROKEN_TILE and NO download click
+  //      (and no DL-08 fallback) happens.
+  const DOWNLOAD_TILE_SWEEP_COOLDOWN_MS = 60_000;
+  const DOWNLOAD_TILE_RECOVERY_TIMEOUT_MS = 2_000;
+
+  function downloadExpectedProjectId(operationOptions = {}) {
+    const value = [operationOptions.projectId, operationOptions.expectedProjectId,
+      operationOptions.mediaProjectId, operationOptions.project_id, operationOptions.expected_project_id]
+      .find(candidate => typeof candidate === "string" && candidate.trim());
+    return value ? value.trim() : null;
+  }
+
+  function currentDownloadProjectId() {
+    try {
+      const described = (root.ProviderRegistry || root.FlowDriverRegistry)?.describeUrl?.(location.href);
+      if (described?.projectId) return String(described.projectId);
+    } catch (_) {}
+    const match = /\/project\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i
+      .exec(String(location.href || location.pathname || ""));
+    return match ? match[1] : null;
+  }
+
+  function assertDownloadProject(operationOptions = {}) {
+    const expected = downloadExpectedProjectId(operationOptions);
+    if (!expected) return;
+    const current = currentDownloadProjectId();
+    if (!current || current.toLowerCase() !== expected.toLowerCase()) {
+      throw root.flowError("FLOW_PROJECT_MISMATCH",
+        `The Flow page is in project "${current || "unknown"}", but the requested media belongs to project "${expected}"; no download was started.`,
+        false, false);
+    }
+  }
+
+  function assertTileProject(tile) {
+    let tileProject = null;
+    try { tileProject = tile?.getAttribute?.("data-project-id") || tile?.getAttribute?.("data-project") || null; } catch (_) {}
+    if (!tileProject) return;
+    const current = currentDownloadProjectId();
+    if (current && String(current).toLowerCase() !== String(tileProject).toLowerCase()) {
+      throw root.flowError("FLOW_PROJECT_MISMATCH",
+        `The tile for this download belongs to project "${tileProject}", but the Flow page is in project "${current}"; no download was started.`,
+        false, false);
+    }
+  }
+
+  function downloadIdentityValuesMatch(left, right) {
+    const fromTiles = root.FlowTiles?.tileIdentityValuesMatch;
+    if (typeof fromTiles === "function") return fromTiles(left, right);
+    const a = String(left || "").trim();
+    const b = String(right || "").trim();
+    if (!a || !b) return false;
+    if (/^[0-9a-f-]{36}$/i.test(a) && /^[0-9a-f-]{36}$/i.test(b)) return a.toLowerCase() === b.toLowerCase();
+    const aAsb = /^asb:(.+)$/i.exec(a)?.[1];
+    const bAsb = /^asb:(.+)$/i.exec(b)?.[1];
+    if (aAsb || bAsb) return (aAsb || a) === (bAsb || b);
+    return a === b;
+  }
+
+  // The tile's identity alias set. The generation side's extractor
+  // (FlowTiles.tileIdentityAliases, tiles.js) is authoritative when it
+  // is loaded — in the shipped content script it always is (manifest
+  // order) — and the local mirror below only covers harnesses that load
+  // media-menu alone; both collect the same alias forms.
+  function downloadTileIdentityAliases(tile) {
+    const fromTiles = root.FlowTiles?.tileIdentityAliases;
+    if (typeof fromTiles === "function") {
+      try { return fromTiles(tile); } catch (_) {}
+    }
+    const aliases = [];
+    const add = value => {
+      const text = typeof value === "string" ? value.trim() : "";
+      if (text && !aliases.includes(text)) aliases.push(text);
+    };
+    if (!tile) return aliases;
+    try { add(root.mediaId?.(tile)); } catch (_) {}
+    const identityAttributes = ["data-persistent-media-id", "data-media-id", "data-media-uuid", "data-uuid"];
+    for (const attribute of identityAttributes) {
+      try { add(tile.getAttribute?.(attribute)); } catch (_) {}
+    }
+    try {
+      const descendants = tile.querySelectorAll?.("[data-persistent-media-id],[data-media-id],[data-media-uuid],[data-uuid]") || [];
+      for (const node of descendants) {
+        for (const attribute of identityAttributes) {
+          try { add(node.getAttribute?.(attribute)); } catch (_) {}
+        }
+      }
+    } catch (_) {}
+    try {
+      const mediaNodes = tile.querySelectorAll?.("img,video") || [];
+      for (const node of mediaNodes) {
+        for (const attribute of identityAttributes) {
+          try { add(node.getAttribute?.(attribute)); } catch (_) {}
+        }
+        const src = String(node.currentSrc || node.src || node.getAttribute?.("src") || "");
+        if (!src) continue;
+        add(src.match(/[0-9a-f]{8}-[0-9a-f-]{27}/i)?.[0]);
+        try {
+          const url = new URL(src, location.href);
+          if (url.pathname.startsWith("/asb/")) {
+            const rest = url.pathname.slice("/asb/".length).replace(/=(?:s\d+(?:-[a-z]+)*|mm,\d+,\d+)$/i, "");
+            if (rest) { add(`asb:${rest}`); add(rest); }
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
+    return aliases;
+  }
+
+  function downloadRequestedAliases(operationOptions = {}) {
+    const values = [];
+    for (const key of ["mediaAliases", "identityAliases", "aliases", "mediaAlias", "identityAlias"]) {
+      const raw = operationOptions[key];
+      if (Array.isArray(raw)) values.push(...raw);
+      else if (typeof raw === "string" && raw.trim()) values.push(raw);
+    }
+    return values;
+  }
+
+  function downloadTileMatchesIdentity(tile, mediaHandle, extraAliases = []) {
+    const requested = [mediaHandle, ...extraAliases]
+      .map(value => String(value || "").trim())
+      .filter(value => value && !value.startsWith("title:"));
+    if (!requested.length) return true;
+    const aliases = downloadTileIdentityAliases(tile);
+    if (!aliases.length) return false;
+    return aliases.some(alias => requested.some(value => downloadIdentityValuesMatch(alias, value)));
+  }
+
+  // Locate the target tile through the generation side's sweep. The
+  // sweep fires onMounted the moment a tile whose alias set contains
+  // the requested identity mounts; identity is re-verified at that
+  // moment here, and the caller's own onTileMounted hook runs after
+  // the verification (its errors are ignored — it is an observer, the
+  // verification above is the gate). Without the generation module
+  // (isolated test harnesses only) the fallback is a mounted-tiles-only
+  // alias match — it never scrolls on its own.
+  async function locateDownloadTile(mediaHandle, { title, operationOptions = {}, deadline } = {}) {
+    const requestedAliases = downloadRequestedAliases(operationOptions);
+    const sweep = root.FlowTiles?.sweepFlowTileByMediaId || root.sweepFlowTileByMediaId ||
+      root.FlowTiles?.findFlowTileByMediaId || root.findFlowTileByMediaId;
+    if (typeof sweep === "function") {
+      const owner = typeof root.FlowTiles?.sweepFlowTileByMediaId === "function" ? root.FlowTiles
+        : (typeof root.sweepFlowTileByMediaId === "function" ? root : root.FlowTiles);
+      return sweep.call(owner, mediaHandle, {
+        aliases: requestedAliases,
+        deadline,
+        signal: operationOptions.signal,
+        failureCooldownMs: DOWNLOAD_TILE_SWEEP_COOLDOWN_MS,
+        onMounted: async mounted => {
+          if (!downloadTileMatchesIdentity(mounted, mediaHandle, requestedAliases)) {
+            throw root.flowError("FLOW_ASSET_CHANGED",
+              `A tile mounted while locating "${title}", but its identity does not match "${mediaHandle}"; it was not clicked.`,
+              false, false);
+          }
+          const external = operationOptions.onTileMounted || operationOptions.onMounted;
+          if (typeof external === "function") {
+            try { await external(mounted); } catch (_) {}
+          }
+        },
+      });
+    }
+    const candidates = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", document, { checkVisible: false }) : null) ||
+      [...document.querySelectorAll("flow-grid-tile-container")];
+    return candidates.find(candidate => downloadTileMatchesIdentity(candidate, mediaHandle, requestedAliases)) || null;
+  }
+
+  function findDownloadRetryControl(tile) {
+    const buttons = [...(tile?.querySelectorAll?.('button,[role="button"]') || [])];
+    return buttons.find(el => {
+      let label = "";
+      try { label = flowMenuLabel(el); } catch (_) {}
+      const accessible = (root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim();
+      const icon = (root.flowFindIcon ? root.flowFindIcon(el) : el.querySelector?.("mat-icon, .mat-icon, .google-symbols"))?.textContent?.trim() || "";
+      return /^(?:retry|try again|thử lại)(?:\s+.*)?$/i.test(label || accessible) ||
+        /^(?:refresh|replay|retry)$/i.test(icon);
+    }) || null;
+  }
+
+  // A tile is broken for download purposes when Flow shows its load
+  // error surface (error tile or a retry/refresh control), when its
+  // image element finished loading with no pixels, or when its video
+  // element is in a network/codec error state. A merely still-loading
+  // tile (incomplete image, no error surface) is NOT broken — the
+  // existing waitForFlowTileMedia wait handles that case.
+  function downloadTileLoadError(tile) {
+    if (!tile) return null;
+    const errorTile = (typeof root.flowQuery === "function" ? root.flowQuery("tiles.error", tile, { checkVisible: false }) : null) ||
+      tile.querySelector?.("flow-error-tile");
+    const retryControl = findDownloadRetryControl(tile);
+    if (errorTile || retryControl) {
+      const reason = (errorTile?.innerText || errorTile?.textContent || "").replace(/\s+/g, " ").trim();
+      return { kind: "error-tile", reason, retryControl };
+    }
+    let media = [];
+    try {
+      media = [
+        ...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.mediaElements", tile, { checkVisible: false }) : null) || tile.querySelectorAll("video,img,canvas,[role='img'],flow-video-tile,flow-image-tile")),
+      ];
+    } catch (_) { media = []; }
+    // Only flag the tile when NO media element on it is healthy: a
+    // video tile whose poster image failed but whose video element is
+    // fine (and vice versa) can still download normally.
+    let brokenCandidate = null;
+    for (const element of media) {
+      const tag = String(element?.tagName || "").toLowerCase();
+      const isImage = (typeof HTMLImageElement !== "undefined" && element instanceof HTMLImageElement) || tag === "img";
+      const isVideo = (typeof HTMLVideoElement !== "undefined" && element instanceof HTMLVideoElement) || tag === "video";
+      if (isImage) {
+        const src = element.currentSrc || element.getAttribute?.("src") || "";
+        if (src && element.complete === true && element.naturalWidth > 0) return null;
+        if (!brokenCandidate && src && element.complete === true && element.naturalWidth === 0) {
+          brokenCandidate = { kind: "broken-image", reason: "image failed to load", media: element };
+        }
+      } else if (isVideo) {
+        const src = element.currentSrc || element.getAttribute?.("src") || "";
+        if (src && !element.error && element.networkState !== 3) return null;
+        if (!brokenCandidate && (element.error || element.networkState === 3)) {
+          brokenCandidate = { kind: "broken-video", reason: "video failed to load", media: element };
+        }
+      }
+    }
+    return brokenCandidate;
+  }
+
+  async function recoverDownloadTile(tile, { title, kind, mediaHandle, helpers, operationOptions = {}, deadline }) {
+    const broken = downloadTileLoadError(tile);
+    if (!broken) return tile;
+    // Recovery attempt 1: the generation side's error-tile retry
+    // machinery (the same helper upload/generation recovery uses).
+    let accepted = false;
+    const retry = root.FlowTiles?.retryNativeErrorTile || root.retryNativeErrorTile;
+    if (typeof retry === "function") {
+      try {
+        const result = await retry(
+          { id: mediaHandle || (() => { try { return root.mediaId?.(tile); } catch (_) { return undefined; } })(), title, kind, element: tile },
+          { attempted: new Set(), deadline, timeoutMs: DOWNLOAD_TILE_RECOVERY_TIMEOUT_MS, signal: operationOptions.signal });
+        accepted = Boolean(result?.accepted ?? result);
+      } catch (_) { accepted = false; }
+    }
+    // Recovery attempt 2: an in-place refresh — activate the tile's own
+    // retry/refresh control, or reload a broken media element's src so
+    // the browser fetches the preview again.
+    if (!accepted) {
+      const control = broken.retryControl || findDownloadRetryControl(tile);
+      if (control && typeof control.click === "function") {
+        try { control.click(); } catch (_) {}
+        await helpers.wait(200, "recovering the broken Flow tile");
+      } else if (broken.media) {
+        const src = broken.media.currentSrc || broken.media.getAttribute?.("src") || broken.media.src || "";
+        if (src) {
+          try { broken.media.src = ""; broken.media.src = src; } catch (_) {}
+          await helpers.wait(200, "recovering the broken Flow tile");
+        }
+      }
+    }
+    let current = tile?.isConnected ? tile : null;
+    if (!current && mediaHandle) {
+      const candidates = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", document, { checkVisible: false }) : null) ||
+        [...document.querySelectorAll("flow-grid-tile-container")];
+      current = candidates.find(candidate => downloadTileMatchesIdentity(candidate, mediaHandle, downloadRequestedAliases(operationOptions))) || null;
+    }
+    if (!current || downloadTileLoadError(current)) {
+      throw root.flowError("FLOW_DOWNLOAD_BROKEN_TILE",
+        `The tile for "${title}" failed to load${broken.reason ? `: ${broken.reason}` : ""}; recovery was attempted but the tile is still broken, so no download was started rather than risk saving a placeholder or the wrong asset.`,
+        true, false);
+    }
+    return current;
+  }
+
   function triggerFlowDownload(title, quality = "original", mediaHandle, operationOptions = {}) {
     return (async () => {
       const deadline = Date.now() + Math.max(5000, Math.min(90_000, Number(operationOptions.timeoutMs) || 45_000));
@@ -569,6 +855,9 @@
       };
       const helpers = { checkActive, wait };
       checkActive("preparing the Flow download");
+      // DL-09: the project check is FIRST — before tab activation, any
+      // sweep, or any click (study D3).
+      assertDownloadProject(operationOptions);
       if (document.visibilityState === "hidden") {
         const activated = await chrome.runtime.sendMessage({ type: "flow-mcp:ensure-active-tab" });
         if (!activated?.ok) throw root.flowError("FLOW_TAB_ACTIVATION_FAILED", activated?.error || "Flow tab could not be activated for its download menu.", true);
@@ -576,17 +865,13 @@
       }
       let tile;
       if (mediaHandle) {
-        const scroller = root.FlowTiles?.flowMediaGridScrollContainer?.() || root.flowMediaGridScrollContainer?.();
-        if (scroller) scroller.scrollTop = 0;
-        for (let step = 0; step < 180 && !tile; step++) {
-          checkActive("locating the selected Flow media");
-          tile = [...document.querySelectorAll("flow-grid-tile-container")].find(candidate => root.mediaId?.(candidate) === mediaHandle);
-          if (tile || !scroller) break;
-          const top = scroller.scrollTop, max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-          if (top >= max - 2) break;
-          scroller.scrollTop = Math.min(max, top + Math.max(200, scroller.clientHeight * 0.78));
-          await wait(300, "locating the selected Flow media");
-        }
+        // DL-09: locate through the generation side's tile-loading
+        // sweep (with on-mounted callback + failure cooldown), which
+        // mounts a target scrolled out of the virtualized grid and
+        // only ever returns a tile whose identity alias set contains
+        // the requested media id.
+        checkActive("locating the selected Flow media");
+        tile = await locateDownloadTile(mediaHandle, { title, operationOptions, deadline });
         if (!tile) throw root.flowError("FLOW_ASSET_NOT_FOUND", `Could not find media id "${mediaHandle}" in the project library; refusing to substitute another tile named "${title}".`, true);
       }
       if (!tile) tile = await root.findFlowTile?.(title);
@@ -600,15 +885,25 @@
         const mediaElement = tile.querySelector("img,video");
         watermarkUrl = mediaElement?.currentSrc || mediaElement?.src || mediaElement?.getAttribute?.("src") || undefined;
       } catch (_) {}
-      if (!scene) await waitForFlowTileMedia(tile, title, 20_000, helpers);
-      if (!tile.isConnected || mediaHandle && root.mediaId?.(tile) !== mediaHandle) {
+      assertTileProject(tile);
+      if (!scene) {
+        // DL-09: a broken (load-error) tile is recovered first; if it
+        // cannot recover, recoverDownloadTile throws and no download
+        // click (or DL-08 fallback) ever happens.
+        tile = await recoverDownloadTile(tile, { title, kind, mediaHandle, helpers, operationOptions, deadline });
+        await waitForFlowTileMedia(tile, title, 20_000, helpers);
+      }
+      if (!tile.isConnected || (mediaHandle && !downloadTileMatchesIdentity(tile, mediaHandle, downloadRequestedAliases(operationOptions)))) {
         tile = mediaHandle
-          ? ((typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", document, { checkVisible: false }) : null) ||
-            [...document.querySelectorAll("flow-grid-tile-container")]).find(candidate => root.mediaId?.(candidate) === mediaHandle)
+          ? await locateDownloadTile(mediaHandle, { title, operationOptions, deadline })
           : await root.findFlowTile?.(title);
         if (!tile) throw root.flowError("FLOW_ASSET_CHANGED", `The selected Flow tile for "${title}" changed before its menu opened.`, true);
         tile.scrollIntoView({ behavior: "instant", block: "center" });
-        if (!scene) await waitForFlowTileMedia(tile, title, 20_000, helpers);
+        assertTileProject(tile);
+        if (!scene) {
+          tile = await recoverDownloadTile(tile, { title, kind, mediaHandle, helpers, operationOptions, deadline });
+          await waitForFlowTileMedia(tile, title, 20_000, helpers);
+        }
       }
       // DL-08: a pre-click menu failure gets one direct-bytes fallback
       // attempt (see directBytesDownloadFallback); anything else rethrows.
@@ -1346,6 +1641,12 @@
 
   const FlowMediaMenu = Object.freeze({
     triggerFlowDownload,
+    downloadTileIdentityAliases,
+    downloadTileMatchesIdentity,
+    downloadTileLoadError,
+    currentDownloadProjectId,
+    DOWNLOAD_TILE_SWEEP_COOLDOWN_MS,
+    DOWNLOAD_TILE_RECOVERY_TIMEOUT_MS,
     resolveWatermarkArm,
     watermarkMaskHasAlpha,
     sniffMediaBytes,
