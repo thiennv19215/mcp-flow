@@ -57,7 +57,12 @@ test('submit-only cleanup does not release an attempt without authoritative disp
 test('only the successful submit-only return path releases correlation and dispatch is not acceptance', () => {
   const successBranch = operationsSource.slice(operationsSource.indexOf('const dispatchReceipt = payload.submitOnly'));
   assert.match(successBranch, /payload\.submitOnly === true[\s\S]*?releaseSubmitOnlyCorrelation\?\.\(correlationAttemptId, acknowledged\)/);
-  assert.match(successBranch, /requestDispatched: acknowledged,[\s\S]*?serverAcceptanceObserved: false/);
+  // VID-06: the returned flag is the receipt-derived value computed at
+  // acknowledgement, not the old hardcoded false (that literal WAS the
+  // gap); the release itself still claims no acceptance — request_seen
+  // alone keeps the computed flag false, as the VID-06 tests pin.
+  assert.match(successBranch, /requestDispatched: acknowledged,[\s\S]*?serverAcceptanceObserved,/);
+  assert.doesNotMatch(successBranch, /serverAcceptanceObserved: false/);
   const unknownBranch = operationsSource.slice(operationsSource.indexOf('if \(!acknowledged\)'), operationsSource.indexOf('const dispatchReceipt = payload.submitOnly'));
   assert.match(unknownBranch, /FLOW_SUBMIT_UNCONFIRMED/);
   assert.doesNotMatch(unknownBranch, /releaseSubmitOnlyCorrelation/);
