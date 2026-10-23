@@ -7,8 +7,7 @@ import { join } from 'node:path';
 import vm from 'node:vm';
 import { EventEmitter } from 'node:events';
 import { extensionSetWebSocket } from '../dist/extension.js';
-import { runGeneration, normalizeFlowCharacters } from '../dist/flow.js';
-import { getCachedProjectMedia, cacheProjectMedia } from '../dist/flow-transfer.js';
+import { normalizeFlowCharacters } from '../dist/flow.js';
 import { materializeNativeDownload } from '../dist/native-downloads.js';
 import { readFlowDownloadChunk } from '../extension/src/background/flow-download-relay.js';
 import { flowComponentsSource } from './helpers/flow-components-source.mjs';
@@ -1307,42 +1306,7 @@ test('file picker reports success only after the bridge confirms the selected fi
   assert.equal(result.trustedGesture, false);
 });
 
-test('dynamic selector sync keeps regex-valued extension selectors executable', () => {
-  const selectorsSource = readFileSync(new URL('../extension/src/content/providers/flow/core/selectors.js', import.meta.url), 'utf8');
-  const remoteSelectors = JSON.parse(readFileSync(new URL('../flow-selectors.json', import.meta.url), 'utf8'));
-  const context = vm.createContext({ chrome: { storage: {
-    local: { get: (_key, callback) => callback({ flow_remote_selectors: remoteSelectors }) },
-    onChanged: { addListener: () => {} },
-  } } });
-  vm.runInContext(selectorsSource, context);
-  const excludedAria = context.FlowSelectors.submitButton.excludedComposerAria;
-  assert.equal(typeof excludedAria.test, 'function');
-  assert.equal(excludedAria.test('add media'), true);
-});
 
-test('generation transports character:<name> as a named reference, not a local file', async () => {
-  class Connector extends EventEmitter {
-    readyState = 1;
-    sent = [];
-    send(raw) {
-      const command = JSON.parse(raw);
-      this.sent.push(command);
-      const operation = command.args[0];
-      const result = operation.name === 'flow.context'
-        ? { ok: true, value: { driverKey: 'flow_v2', origin: 'https://flow.google.com', projectId: 'test-project', routePrefix: '', isProjectEditor: true, tabId: 101 } }
-        : { ok: false, error: { message: 'Stopped at submit boundary for test', outcome_unknown: false } };
-      queueMicrotask(() => this.emit('message', JSON.stringify({ type: 'result', id: command.id, result })));
-    }
-  }
-  const connector = new Connector();
-  extensionSetWebSocket(connector);
-  connector.emit('message', JSON.stringify({ type: 'event', method: 'extension.initialized', params: [{ protocol: 2, version: '0.2.13', capabilities: ['context', 'generation.submit', 'generation.observe', 'asset.download', 'references.attach'].map(name => `flow.native.${name}`) }] }));
-  try {
-    await assert.rejects(runGeneration({ params: { type: 'image', prompt: 'Test character', reference_images: ['character:MCP Test Mug'], max_credits: 0 } }), /Stopped at submit boundary/);
-    assert.deepEqual(connector.sent.map(command => command.args[0].name), ['flow.context', 'flow.generation.submit']);
-    assert.deepEqual(connector.sent[1].args[0].payload.attachments, [{ assetName: 'character:MCP Test Mug' }]);
-  } finally { connector.emit('close', 1000, Buffer.from('test complete')); }
-});
 
 test('remote browser downloads are relayed in ordered, checksum-verified chunks', async () => {
   const bytes = Buffer.alloc(300_000, 37);
@@ -1450,18 +1414,6 @@ test('classifyFlowError identifies quota, unusual activity, policy, and rate lim
   assert.equal(classify('A normal unknown error occurred'), null);
 });
 
-test('getCachedProjectMedia reuses previously uploaded asset by sha256', () => {
-  const filePath = new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1');
-  const projectId = 'proj-123';
-  assert.equal(getCachedProjectMedia(projectId, filePath), undefined);
-
-  cacheProjectMedia(projectId, filePath, { name: 'fm-cached-asset', kind: 'image' });
-  const hit = getCachedProjectMedia(projectId, filePath);
-  assert.deepEqual(hit, { name: 'fm-cached-asset', kind: 'image' });
-
-  // Different project should not hit
-  assert.equal(getCachedProjectMedia('other-proj', filePath), undefined);
-});
 
 test('getEditorUserText extracts plain prompt text while completely excluding inline chips', () => {
   const domUtilsSource = readFileSync(new URL('../extension/src/content/shared/dom-utils.js', import.meta.url), 'utf8');

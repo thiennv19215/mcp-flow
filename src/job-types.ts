@@ -1,5 +1,16 @@
-import type { FlowErrorCategory } from "./flow-error-policy.js";
 import type { SafeFlowOperationDiagnostics, SafeUnknownSubmitDiagnostics } from "./flow-request-diagnostics.js";
+
+export type FlowErrorCategory =
+  | "quota"
+  | "rate_limit"
+  | "session"
+  | "captcha"
+  | "policy"
+  | "download"
+  | "generation"
+  | "extension"
+  | "unsupported"
+  | "unknown";
 
 export type JobStatus = "queued" | "running" | "waiting_for_user" | "submitted" | "done" | "failed" | "cancelled";
 export type FrameAssetInput = string | { asset: string; id: string };

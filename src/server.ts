@@ -13,7 +13,6 @@ import {
 } from "./extension.js";
 import { runWithDeviceContext } from "./request-context.js";
 import { outputRootForContext, uploadDirForContext } from "./paths.js";
-import { getFlowSelectors } from "./selectors.js";
 const authenticateDevice = (bearer: string) => (bearer ? { user_id: "local", device_id: "local", label: "Local Device" } : undefined);
 
 export const PORT = Number(process.env.FLOW_MCP_PORT ?? 18899);
@@ -154,9 +153,6 @@ export async function startServer(
         const body = JSON.parse(raw.toString() || "{}");
         await runWithDeviceContext({ userId: device.user_id, deviceId: device.device_id }, () => handleRemoteMcp(device, req, res, body));
         return;
-      }
-      if (req.method === "GET" && url.pathname === "/api/flow-selectors") {
-        return json(res, 200, getFlowSelectors());
       }
       if (req.method === "POST" && url.pathname === "/api/extension/remote-session") {
         const origin = req.headers.origin;

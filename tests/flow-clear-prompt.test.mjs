@@ -86,9 +86,30 @@ test('project mismatch fails before editing', async () => {
 });
 
 test('queue busy guard prevents the local API from issuing a prompt clear', async () => {
-  const core = new LocalCore(`clear-prompt-busy-${randomUUID()}`);
-  core.queue.list = () => [{ status: 'queued' }];
-  await assert.rejects(core.clear_prompt({ expected_prompt: 'known test prompt' }), /generation is running/i);
+  // The busy signal now comes from the extension queue snapshot (the
+  // backend's own queue is gone), so fake the extension connection.
+  const { EventEmitter } = await import('node:events');
+  const { extensionSetWebSocket } = await import('../dist/extension.js');
+  class Connector extends EventEmitter {
+    readyState = 1;
+    send(raw) {
+      const command = JSON.parse(raw);
+      const operation = command.args[0];
+      const result = operation.name === 'flow.queue.get'
+        ? { ok: true, value: { jobs: [{ id: 'busy-1', status: 'running', operation: 'flow.generation.submit' }], isRunning: true } }
+        : { ok: false, error: { message: 'unexpected operation' } };
+      queueMicrotask(() => this.emit('message', JSON.stringify({ type: 'result', id: command.id, result })));
+    }
+  }
+  const connector = new Connector();
+  extensionSetWebSocket(connector);
+  connector.emit('message', JSON.stringify({ type: 'event', method: 'extension.initialized', params: [{ protocol: 2, version: '0.2.45', capabilities: ['flow.native.queue.get'] }] }));
+  try {
+    const core = new LocalCore(`clear-prompt-busy-${randomUUID()}`);
+    await assert.rejects(core.clear_prompt({ expected_prompt: 'known test prompt' }), /generation is running/i);
+  } finally {
+    connector.emit('close', 1000, Buffer.from('test complete'));
+  }
 });
 
 test('MCP registers flow_clear_prompt and forwards the required exact prompt', async () => {

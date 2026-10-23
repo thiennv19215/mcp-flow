@@ -12,8 +12,7 @@ Hệ thống hiện tại tách thành **cấu hình selector, query engine và 
 
 ```
 [Tầng 1: Registry Cấu Hình]
-         flow-selectors.json (Local config & Hot-reload)
-                   ↕ (Sync qua src/selectors.ts & WebSocket / storage)
+         FlowSelectors — defaults nhúng trong selectors.js (nguồn selector duy nhất)
 [Tầng 2: Query Engine]
          extension/src/content/providers/flow/core/selectors.js (Content Script Layer)
          ├── flowGetConfig(path)
@@ -34,7 +33,7 @@ Hệ thống hiện tại tách thành **cấu hình selector, query engine và 
 
 > [!CAUTION]
 > **1. Ưu tiên selector cấu hình cho điểm nhận diện DOM cần thay đổi theo Flow**:
-> Dùng `flowQuery`/`flowQueryAll` với key trong `flow-selectors.json` cho vùng DOM dùng lại hoặc selector có khả năng đổi theo giao diện. Nếu cần key mới, khai báo giá trị mặc định trong `extension/src/content/providers/flow/core/selectors.js` và cấu hình trong `flow-selectors.json`. Với thao tác đặc thù hoặc semantic matching, module nghiệp vụ có thể dùng selector cục bộ có giải thích và xác minh rõ ràng; không đưa quy trình nghiệp vụ vào file selector.
+> Dùng `flowQuery`/`flowQueryAll` với key trong `FlowSelectors` (`extension/src/content/providers/flow/core/selectors.js`) cho vùng DOM dùng lại hoặc selector có khả năng đổi theo giao diện. Nếu cần key mới, khai báo ngay trong object `FlowSelectors` đó. Với thao tác đặc thù hoặc semantic matching, module nghiệp vụ có thể dùng selector cục bộ có giải thích và xác minh rõ ràng; không đưa quy trình nghiệp vụ vào file selector.
 
 > [!IMPORTANT]
 > **2. Fallback phải an toàn và kiểm chứng được**:
@@ -52,9 +51,9 @@ Hệ thống hiện tại tách thành **cấu hình selector, query engine và 
 
 ---
 
-## 3. Bản Đồ Phân Nhóm Trong `flow-selectors.json`
+## 3. Bản Đồ Phân Nhóm Selector
 
-File [`flow-selectors.json`](./flow-selectors.json) được tổ chức thành 10 nhóm chính:
+Object `FlowSelectors` trong `extension/src/content/providers/flow/core/selectors.js` được tổ chức thành 10 nhóm chính:
 
 | Nhóm (Category) | Mô Tả & Các Thành Phần Quản Lý | Ví Dụ Key |
 | :--- | :--- | :--- |
@@ -175,8 +174,8 @@ Khi Google Flow cập nhật UI khiến extension không tìm thấy nút hoặc
 1. **Bước 1: Inspect DOM trên trình duyệt**
    - Mở DevTools trên Flow, kiểm tra thẻ DOM mới (class, role, tag, aria-label).
 2. **Bước 2: Cập nhật cấu hình hoặc module sở hữu thao tác**
-   - Mở file [`flow-selectors.json`](./flow-selectors.json) và cập nhật selector cho key hiện có nếu cấu hình đủ biểu đạt thay đổi.
-   - Nếu cần key mới, khai báo default trong `extension/src/content/providers/flow/core/selectors.js` rồi thêm cấu hình trong `flow-selectors.json`.
+   - Cập nhật selector cho key hiện có trong `FlowSelectors` ở `extension/src/content/providers/flow/core/selectors.js` nếu giá trị mặc định đủ biểu đạt thay đổi.
+   - Nếu cần key mới, khai báo ngay trong cùng object `FlowSelectors` đó.
    - Nếu đổi luồng thao tác, điều kiện an toàn hoặc xác minh kết quả, cập nhật module nghiệp vụ sở hữu hành động (ví dụ `extension/src/content/providers/flow/composer/reference-actions.js` cho picker reference, `extension/src/content/providers/flow/media/uploader.js` cho upload UI, `extension/src/content/providers/flow/composer/prompt-operations.js` cho clear prompt). Selector JSON không thay thế code khi hành vi thay đổi.
    ```json
    {

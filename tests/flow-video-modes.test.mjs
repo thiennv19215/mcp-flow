@@ -4,9 +4,8 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { LocalCore } from '../dist/core.js';
-import { JobQueue } from '../dist/queue.js';
 import { shapes } from '../dist/schemas.js';
+import { planFlowAgentBatch, planFlowContinue, planFlowEdit } from '../extension/src/background/flow-workflows.js';
 
 const workflowSource = readFileSync(new URL('../extension/src/content/providers/flow/workflows/workflow-operations.js', import.meta.url), 'utf8');
 const agentSource = readFileSync(new URL('../extension/src/content/providers/flow/agent/flow-agent.js', import.meta.url), 'utf8');
@@ -525,38 +524,22 @@ test('edit, continue, and Agent schemas expose optional submit_only', () => {
   assert.equal(z.object(shapes.agent).parse({ project: 'test', scenes: ['scene'], submit_only: true }).submit_only, true);
 });
 
-test('submit_only edit, continue, and Agent jobs force retries to zero', async () => {
-  for (const mode of ['agent', 'edit', 'continue']) {
-    const core = new LocalCore(`submit-safety-${randomUUID()}`);
-    let captured;
-    core.queue.add = params => {
-      captured = params;
-      return { id: 'test-job', status: 'queued', params, files: [], attempts: 0 };
-    };
-    const project = `SubmitSafety-${mode}-${randomUUID()}`;
-    if (mode === 'agent') await core.agent({ project, scenes: ['one scene'], submit_only: true });
-    if (mode === 'edit') await core.edit({ project, asset: 'source clip', prompt: 'edit prompt', acknowledge_cost: true, submit_only: true });
-    if (mode === 'continue') await core.continue_shot({ project, from_asset: 'source clip', prompt: 'continue prompt', acknowledge_cost: true, force: true, submit_only: true });
-    assert.equal(captured?.submit_only, true, `${mode} must retain submit_only in the queued job`);
-    assert.equal(captured?.retries, 0, `${mode} must never auto-retry a submit_only request`);
-  }
+test('submit_only edit, continue, and Agent jobs force retries to zero', () => {
+  // The extension planners own this rule now: submit_only work must carry
+  // retries: 0 into the queue (see flow-queue-retry-budget tests for the
+  // queue honoring that budget).
+  const edit = planFlowEdit({ project: 'SubmitSafety', asset: 'source clip', prompt: 'edit prompt', submit_only: true });
+  assert.equal(edit.job.payload.params.submit_only, true);
+  assert.equal(edit.job.payload.params.retries, 0);
+  const cont = planFlowContinue({ project: 'SubmitSafety', from_asset: 'source clip', prompt: 'continue prompt', submit_only: true, force: true });
+  assert.equal(cont.job.payload.params.submit_only, true);
+  assert.equal(cont.job.payload.params.retries, 0);
+  const agent = planFlowAgentBatch({ project: 'SubmitSafety', scenes: ['one scene'], submit_only: true });
+  assert.equal(agent.job.payload.params.submit_only, true);
+  assert.equal(agent.job.payload.params.retries, 0);
+  assert.equal(planFlowEdit({ project: 'SubmitSafety', asset: 'source clip', prompt: 'edit prompt' }).job.payload.params.retries, undefined);
 });
 
-test('submit_only queue jobs do not auto-retry safe errors or repeat after dispatch', async () => {
-  for (const afterDispatch of [false, true]) {
-    let runs = 0;
-    const queue = new JobQueue(async job => {
-      runs++;
-      if (afterDispatch) job.requestDispatched = true;
-      throw Object.assign(new Error('Agent finished without creating'), { retryable: true, outcome_unknown: afterDispatch });
-    }, `submit-retry-${randomUUID()}`);
-    queue.persist = () => {};
-    queue.add({ prompt: 'test', type: 'image', max_credits: 0, submit_only: true, retries: 0, output_dir: 'test', file_stem: 'scene-01' });
-    for (let wait = 0; wait < 50 && ['queued', 'running'].includes(queue.list()[0]?.status); wait++) await new Promise(resolve => setTimeout(resolve, 5));
-    assert.equal(queue.list()[0]?.status, 'failed');
-    assert.equal(runs, 1);
-  }
-});
 
 test('selectAndConfirmMode gracefully skips missing control when optional: true', async () => {
   const context = vm.createContext({

@@ -48,9 +48,9 @@ Image creation and video creation share the submit/observe lifecycle but do not 
 
 ### Selector updates and release versions
 
-`flow-selectors.json` is the backend-managed selector configuration. `src/selectors.ts` watches its containing directory (including atomic editor saves), reloads the file, and broadcasts updates to connected extensions. The extension persists the received configuration in `chrome.storage.local`; `extension/src/content/providers/flow/core/selectors.js` merges it with local defaults. Existing selector keys can therefore be adjusted without rebuilding the extension. A new selector key needs a code default in `extension/src/content/providers/flow/core/selectors.js`, and a behavior change needs an extension code update/reload.
+Selectors live in exactly one place: the `FlowSelectors` defaults embedded in `extension/src/content/providers/flow/core/selectors.js`. (A backend-managed `flow-selectors.json` sync channel existed until 2026-10-24 and was removed as a duplicate source of truth; the extension is the source of truth for everything Flow-facing.) Adjusting a selector therefore means editing that file and reloading/rebuilding the extension.
 
-When shipping code changes, update both release identifiers: `package.json` for the package and `extension/manifest.json` for Chrome. The values are intentionally read from those files rather than duplicated here. Selector-only backend configuration changes do not require a package or extension version bump.
+When shipping code changes, update both release identifiers: `package.json` for the package and `extension/manifest.json` for Chrome. The values are intentionally read from those files rather than duplicated here.
 
 ## Extension queue
 

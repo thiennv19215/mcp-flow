@@ -6,26 +6,6 @@ import type { Job } from "./job-types.js";
 import { streamFileChunks, type FileChunk } from "./native-file-transfer.js";
 import { nativeOperation, requireCapabilities } from "./flow.js";
 
-const projectUploadedMediaCache = new Map<string, { name: string; kind: "image" | "video" }>();
-
-export function getCachedProjectMedia(projectId: string, filePath: string): { name: string; kind: "image" | "video" } | undefined {
-  try {
-    const fileBuf = readFileSync(filePath);
-    const hash = createHash("sha256").update(fileBuf).digest("hex");
-    return projectUploadedMediaCache.get(`${projectId}:${hash}`);
-  } catch {
-    return undefined;
-  }
-}
-
-export function cacheProjectMedia(projectId: string, filePath: string, media: { name: string; kind: "image" | "video" }): void {
-  try {
-    const fileBuf = readFileSync(filePath);
-    const hash = createHash("sha256").update(fileBuf).digest("hex");
-    projectUploadedMediaCache.set(`${projectId}:${hash}`, media);
-  } catch {}
-}
-
 export function uploadMimeType(name: string): string {
   const extension = extname(name).toLowerCase();
   const types: Record<string, string> = {

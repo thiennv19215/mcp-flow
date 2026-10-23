@@ -477,7 +477,6 @@ const bridgeClient = new FlowBridgeClient({
       else reject(res?.result?.error || new Error("Command failed"));
     });
   }),
-  onEvent: applyBackendEvent,
   getSelectedTabId: () => selectedTabId,
   getCapabilities: () => [...nativeFlowOperations].map(name => `flow.native.${name.slice(5)}`),
 });
@@ -1240,15 +1239,6 @@ flowJobQueue.subscribe((snapshot, reason) => {
 void flowJobQueue.ready.then(() => flowJobQueue.resumeRecovered()).catch(error => {
   console.error("[FlowQueue] Could not resume a checkpointed job after worker restart:", error?.message || error);
 });
-function applyBackendEvent(message) {
-  if (message?.type === "event" && message.method === "flow.selectors.sync") {
-    const payload = message.params?.[0];
-    if (payload && typeof payload === "object") {
-      console.log("[Flow MCP] Dynamic selectors sync received from the local MCP host");
-      chrome.storage.local.set({ flow_remote_selectors: payload });
-    }
-  }
-}
 function dispatchCommand(command, sendResult) {
   const commandId = command.id ?? command.request_id ?? command.requestId;
   if (commandId === undefined || commandId === null) throw new Error("Command is missing request id");

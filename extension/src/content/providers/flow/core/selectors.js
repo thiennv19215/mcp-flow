@@ -584,8 +584,8 @@
   let selectorFailureSequence = 0;
   // Toby's content driver uses flat selector keys while the native extension
   // keeps related keys grouped. Resolve both forms so an updated Toby profile
-  // can be copied into flow-selectors.json without forcing every DOM module to
-  // know which config layout supplied it.
+  // can be adopted without forcing every DOM module to know which config
+  // layout supplied it.
   const TOBY_SELECTOR_ALIASES = Object.freeze({
     slate_editor: "toby.slate_editor",
     editor: "toby.editor",
@@ -942,50 +942,6 @@
     return null;
   }
 
-  /**
-   * Hợp nhất cấu hình selectors từ Remote Backend vào FlowSelectors cục bộ.
-   */
-  function flowMergeSelectors(remote) {
-    if (!remote || typeof remote !== "object") return;
-    function deepMerge(target, source) {
-      for (const key of Object.keys(source)) {
-        const val = source[key];
-        if (val == null) continue;
-        if (typeof val === "string" && (key.endsWith("Regex") || key.endsWith("Pattern") || key.endsWith("Aria") || target[key] instanceof RegExp)) {
-          try {
-            target[key] = new RegExp(val, "i");
-          } catch (_) {
-            target[key] = val;
-          }
-        } else if (Array.isArray(val)) {
-          target[key] = [...val];
-        } else if (typeof val === "object" && typeof target[key] === "object" && !Array.isArray(target[key])) {
-          deepMerge(target[key], val);
-        } else {
-          target[key] = val;
-        }
-      }
-    }
-    deepMerge(FlowSelectors, remote);
-    console.log("[FlowSelectors] 🔄 Merged dynamic remote selectors from backend successfully.");
-  }
-
-  // Tự động lắng nghe và đồng bộ từ Backend thông qua chrome.storage.local
-  if (typeof chrome !== "undefined" && chrome.storage?.local) {
-    try {
-      chrome.storage.local.get("flow_remote_selectors", (res) => {
-        if (res?.flow_remote_selectors) {
-          flowMergeSelectors(res.flow_remote_selectors);
-        }
-      });
-      chrome.storage.onChanged.addListener((changes, area) => {
-        if (area === "local" && changes.flow_remote_selectors?.newValue) {
-          flowMergeSelectors(changes.flow_remote_selectors.newValue);
-        }
-      });
-    } catch (_) {}
-  }
-
   // Gắn lên global root (window hoặc globalThis)
   root.FlowSelectors = FlowSelectors;
   root.flowGetConfig = flowGetConfig;
@@ -997,7 +953,6 @@
   root.flowFindSemantic = flowFindSemantic;
   root.flowFindIcon = flowFindIcon;
   root.flowWaitFor = flowWaitFor;
-  root.flowMergeSelectors = flowMergeSelectors;
   root.flowSelectorDiagnosticCursor = () => selectorFailureSequence;
   root.flowGetSelectorDiagnostics = getSelectorFailureDiagnostics;
 })(typeof globalThis !== "undefined" ? globalThis : self);

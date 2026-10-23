@@ -1,5 +1,4 @@
-const defaultAdd = (params: any) => ({ id: 'mock-job', status: 'queued', params, files: [], attempts: 0 });
-import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { assemble } from "./assemble.js";
 import { clearFlowPrompt, createFlowProject, downloadAsset, renameAsset, trashAsset, getCorrelationObserverHealth, getFlowState, listAssets, listCharacters, listFlowProjects, listFlowVoiceOptions, openFlowProject, rememberCharacter, uploadFlowMediaToProject } from "./flow.js";
@@ -74,24 +73,6 @@ export interface Core {
 }
 
 // Flow's own voices: still offered when giving a character a voice, but narration no longer goes through Flow.
-export const VOICES = [
-  { name: "Achernar", description: "female, soft, high pitch" },
-  { name: "Achird", description: "male, friendly, mid pitch" },
-  { name: "Algenib", description: "male, gravelly, low pitch" },
-  { name: "Algieba", description: "male, easy-going, mid-low pitch" },
-  { name: "Alnilam", description: "male, firm, mid-low pitch" },
-  { name: "Aoede", description: "female, breezy, mid pitch" },
-  { name: "Autonoe", description: "female, bright, mid pitch" },
-  { name: "Callirrhoe", description: "female, easy-going, mid pitch" },
-  { name: "Charon", description: "male, informative, lower pitch" },
-  { name: "Despina", description: "female, smooth, mid pitch" },
-  { name: "Enceladus", description: "male, breathy, lower pitch" },
-  { name: "Erinome", description: "female, clear, mid pitch" },
-  { name: "Fenrir", description: "male, excitable, younger pitch" },
-  { name: "Gacrux", description: "female, mature, mid pitch" },
-  { name: "Iapetus", description: "male, clear, mid-low pitch" },
-];
-
 const BUSY = "A generation is running in the Flow tab. Wait for it to finish (flow_wait), then retry.";
 
 type ExtensionQueueJob = {
@@ -154,9 +135,6 @@ function extensionJobAsLegacy(job: ExtensionQueueJob): Job {
 }
 
 async function queueIsActive(core?: any): Promise<boolean> {
-  if (core?.queue?.busy || (Array.isArray(core?.queue?.list?.()) && core.queue.list().some((j: any) => ["pending", "running", "queued", "waiting_for_user"].includes(j?.status)))) {
-    return true;
-  }
   const snapshot = await extensionQueueSnapshot();
   return snapshot.isRunning === true || snapshot.jobs.some(job => ["pending", "running", "waiting_for_user"].includes(job.status));
 }
@@ -228,7 +206,6 @@ const castOutputDir = () => castDirForContext();
 export class LocalCore implements Core {
   private detailedState: ReturnType<typeof getFlowState> | undefined;
   private mediaUploadActive = false;
-  public queue: any = { list: () => [], add: defaultAdd, get busy() { return false; }, get: (_id: string) => undefined };
   constructor(_scopeId = "local") {}
 
   async status({ detailed }: Args<"status">) {
@@ -275,8 +252,6 @@ export class LocalCore implements Core {
     if (noPrev >= 0) throw new Error("Scene 1 has no previous scene to reference.");
     const unknown = scenes.find((s) => s.technique && !techniqueById(s.technique));
     if (unknown) throw new Error(`Unknown technique "${unknown.technique}". Call flow_techniques for valid ids.`);
-    const { validateFlowSceneCapabilities } = await import("./flow-capabilities.js");
-    for (const [index, scene] of scenes.entries()) validateFlowSceneCapabilities(scene, index);
     const videoReferenceScene = scenes.findIndex(scene => scene.video_reference);
     if (videoReferenceScene >= 0) {
       throw Object.assign(new Error(`Scene ${videoReferenceScene + 1}: Toby-style video-reference editing requires Flow's dynamic video_edit_submit RPC configuration, which is not available in the native extension yet. Nothing was submitted.`), {
@@ -287,21 +262,10 @@ export class LocalCore implements Core {
       });
     }
 
-    if (this.queue && this.queue.add !== defaultAdd) {
-      const output_dir = projectDir(project);
-      const jobs = scenes.map((scene, i) => this.queue.add({
-        ...scene,
-        output_dir,
-        file_stem: `scene-${String(i + 1).padStart(2, "0")}`,
-        retries: scene.submit_only ? 0 : undefined,
-      }));
-      return { output_dir, jobs: jobs.map((j: any) => jobView(j)) };
-    }
-
     const output_dir = projectDir(project);
     const knownAssets = await listAssets();
     const outputAssets = existsSync(output_dir) ? readdirSync(output_dir).map(name => ({ name, project: output_dir })) : [];
-    const { flowCapabilityRegistry } = await import("./flow-capabilities.js");
+    const flowCapabilityRegistry = JSON.parse(readFileSync(new URL("../flow-model-capabilities.json", import.meta.url), "utf8"));
     const result = await extensionQueueCall<{ jobs: ExtensionQueueJob[] }>("flow.queue.generate", {
       project, output_dir, scenes, knownAssets, outputAssets,
       techniques: TECHNIQUES.map(({ id, phrase }) => ({ id, phrase })),
@@ -463,13 +427,6 @@ export class LocalCore implements Core {
   async agent({ project, scenes, aspect_ratio, download_quality, submit_only }: Args<"agent">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     const output_dir = projectDir(project);
-    if (this.queue && this.queue.add !== defaultAdd) {
-      const job = this.queue.add({
-        project, output_dir, scenes, aspect_ratio, download_quality, submit_only,
-        retries: submit_only ? 0 : undefined,
-      });
-      return { output_dir, jobs: [jobView(job)] };
-    }
     const result = await extensionQueueCall<any>("flow.queue.agent", {
       project, output_dir, scenes, aspect_ratio, download_quality, submit_only,
       outputAssets: this.localAssets(output_dir).map(name => ({ name, project: output_dir })),
@@ -479,13 +436,6 @@ export class LocalCore implements Core {
   async edit({ project, asset, prompt, download_quality, submit_only }: Args<"edit">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     const output_dir = projectDir(project);
-    if (this.queue && this.queue.add !== defaultAdd) {
-      const job = this.queue.add({
-        project, output_dir, asset, prompt, download_quality, submit_only,
-        retries: submit_only ? 0 : undefined,
-      });
-      return { output_dir, jobs: [jobView(job)] };
-    }
     const result = await extensionQueueCall<any>("flow.queue.edit", {
       project, output_dir, asset, prompt, download_quality, submit_only,
       outputAssets: this.localAssets(output_dir).map(name => ({ name, project: output_dir })),
@@ -496,13 +446,6 @@ export class LocalCore implements Core {
   async continue_shot({ project, from_asset, prompt, attach, aspect_ratio, mode, download_quality, force, submit_only }: Args<"continue_shot">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     const output_dir = projectDir(project);
-    if (this.queue && this.queue.add !== defaultAdd) {
-      const job = this.queue.add({
-        project, output_dir, from_asset, prompt, attach, aspect_ratio, mode, download_quality, force, submit_only,
-        retries: submit_only ? 0 : undefined,
-      });
-      return { output_dir, jobs: [jobView(job)] };
-    }
     const knownAssets = await listAssets();
     const result = await extensionQueueCall<any>("flow.queue.continue", {
       project, output_dir, from_asset, prompt, attach, aspect_ratio, mode, download_quality, force, submit_only,
