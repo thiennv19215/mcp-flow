@@ -497,6 +497,50 @@
     return byKey.get(cacheKey);
   }
 
+  // IMG-02: dispatched-but-unconfirmed upload attempts, keyed by
+  // (project, content-derived upload name). When an upload was dispatched
+  // — Flow accepted the file — but its confirmation was interrupted
+  // (timeout, worker/tab hiccup, an error after dispatch), a retry must
+  // reconcile against the ORIGINAL baseline (the tile set captured before
+  // that dispatch) and confirm the already-present tile instead of
+  // dispatching a duplicate: a fresh baseline would absorb the first
+  // tile, and the retry's confirmation would then latch onto the
+  // duplicate. The map lives next to the upload identity cache because
+  // attempt state is a property of the upload operation, not of the
+  // staged file (stagedNativeFiles is keyed by transfer id and holds
+  // Files). Records exist only for content-identified uploads — the
+  // synthetic upload name is content-exact, so a tile carrying it is
+  // provably this file — and only for this content-script session.
+  // Lifecycle: a record is written at dispatch time, deleted on confirmed
+  // success or when Flow definitively rejected the tile, and dropped when
+  // a reconciliation finds no trace of the tile (the dispatch evidently
+  // never landed, so a real dispatch follows). The map is size-capped
+  // with oldest-first eviction; session lifetime bounds the rest.
+  const FLOW_UPLOAD_ATTEMPT_LIMIT = 50;
+  const flowUploadAttempts = new Map();
+
+  function flowUploadProjectScope() {
+    try {
+      const described = root.ProviderRegistry?.describeUrl?.(root.location?.href || "")
+        || root.FlowDriverRegistry?.describeUrl?.(root.location?.href || "");
+      if (described?.projectId) return `project:${described.projectId}`;
+    } catch {}
+    try { return `url:${String(root.location?.href || "")}`; } catch { return "url:"; }
+  }
+
+  function flowUploadAttemptKey(projectScope, uploadName) {
+    return `${projectScope}\n${uploadName}`;
+  }
+
+  function rememberFlowUploadAttempt(key, attempt) {
+    if (!key) return;
+    flowUploadAttempts.delete(key);
+    flowUploadAttempts.set(key, attempt);
+    while (flowUploadAttempts.size > FLOW_UPLOAD_ATTEMPT_LIMIT) {
+      flowUploadAttempts.delete(flowUploadAttempts.keys().next().value);
+    }
+  }
+
   async function waitForNativeMediaTile(assetName, command, kind, options = {}) {
     const fn = root.flowError || ((c, m, r, o) => Object.assign(new Error(m), { code: c, retryable: r, outcome_unknown: o }));
     const deadline = Math.min(options.deadline || Infinity, Date.now() + (kind === "video" ? 60_000 : 90_000));
@@ -664,11 +708,60 @@
     const matchName = identity ? identity.uploadName : file.name;
     const identityFields = identity ? { uploadName: identity.uploadName, originalName: file.name } : {};
     const dispatchFile = identity ? new root.File([file], identity.uploadName, { type: file.type || "" }) : file;
+    // IMG-02: only content-identified uploads carry an attempt record —
+    // the synthetic upload name is content-exact, so reconciliation can
+    // never latch onto a different file's tile.
+    const attemptKey = identity ? flowUploadAttemptKey(flowUploadProjectScope(), identity.uploadName) : null;
 
     const scroller = root.FlowTiles?.flowMediaGridScrollContainer?.() || root.flowMediaGridScrollContainer?.() || null;
     if (scroller && scroller.scrollTop > 5) {
       scroller.scrollTop = 0;
       await root.FlowUiDeadline?.boundedWait(150, deadline, "scrolling to the Flow composer", false, options.signal);
+    }
+
+    // IMG-02: a previous call in this session may have dispatched this
+    // exact file and lost its confirmation. Reconcile first, against the
+    // ORIGINAL baseline stored with the attempt: the tile that dispatch
+    // created is new against that baseline, so the strict new-owner
+    // confirmation below can latch it — while ambiguity (more than one
+    // new tile with this content-exact name) fails closed exactly like a
+    // fresh confirmation. Reconciliation gets a bounded share of the
+    // remaining deadline so a no-trace outcome still leaves budget for
+    // the real dispatch it falls through to.
+    if (attemptKey) {
+      const priorAttempt = flowUploadAttempts.get(attemptKey);
+      if (priorAttempt) {
+        const reconcileBudgetMs = Math.max(2_000, Math.floor((deadline - Date.now()) / 3));
+        const reconcileDeadline = Math.min(deadline, Date.now() + reconcileBudgetMs);
+        try {
+          const confirmed = await waitForNativeMediaTile(matchName, command, kind, {
+            deadline: reconcileDeadline, signal: options.signal,
+            baselineIds: priorAttempt.baselineIds, requireNewOwner: true,
+            selectionDiagnostics: priorAttempt.selectionDiagnostics,
+          });
+          flowUploadAttempts.delete(attemptKey);
+          root.emitFlowProgress?.(command, `Reconciled the earlier dispatched Flow ${kind} upload "${file.name}" as media ID ${confirmed.id}; no duplicate upload was dispatched.`);
+          return { ...confirmed, uploaded: true, name: file.name, kind, ...identityFields, reconciled: true };
+        } catch (error) {
+          if (error?.code === "FLOW_UPLOAD_REJECTED") {
+            // The dispatched tile is definitively dead. Forget the
+            // attempt so a retry takes the normal path, which surfaces
+            // the same rejection from the tile itself.
+            flowUploadAttempts.delete(attemptKey);
+            throw error;
+          }
+          const noTrace = error?.code === "FLOW_UPLOAD_TIMEOUT"
+            && error.diagnostics?.exactTileObserved !== true
+            && error.diagnostics?.newOwnerIdLatched !== true;
+          if (!noTrace) throw error;
+          // No tile from the earlier dispatch exists in this project:
+          // the dispatch evidently never landed. Forget the attempt and
+          // fall through to the normal reuse/baseline/dispatch flow —
+          // reconciliation must never block a real upload.
+          flowUploadAttempts.delete(attemptKey);
+          root.emitFlowProgress?.(command, `The earlier dispatched upload of "${file.name}" left no tile in this project; uploading it now.`);
+        }
+      }
     }
 
     const existingTiles = [...document.querySelectorAll("flow-grid-tile-container")].filter(item => matchesFlowTile(item, matchName));
@@ -873,6 +966,21 @@
     const selectionDiagnostics = { filePickerSelectionConfirmed: false, pickerMethod: "unknown", pickerType: "unknown", dropAttempted: false, dropReceiptConfirmed: false,
       confirmationDialogSeen: false, confirmationButtonClicked: false, confirmationDialogUnrecognized: false };
 
+    // IMG-02: once the file has been dispatched — or the dispatch outcome
+    // is unknown — record the attempt against the baseline captured above,
+    // so an interrupted confirmation can be reconciled by a later call
+    // instead of re-dispatching. Last write wins: the post-dispatch call
+    // snapshots the final selection diagnostics.
+    const rememberAttempt = () => {
+      if (!attemptKey) return;
+      rememberFlowUploadAttempt(attemptKey, {
+        baselineIds: [...baselineIds],
+        selectionDiagnostics: { ...selectionDiagnostics },
+        dispatchedAt: Date.now(),
+        kind,
+      });
+    };
+
     if (!uploadButton) {
       const controls = uploadControlDiagnostics();
       root.emitFlowProgress?.(command, `Upload trigger unavailable; composer controls: ${JSON.stringify(controls).slice(0, 2200)}`);
@@ -920,8 +1028,8 @@
           selectionDiagnostics.pickerType = safeFlowPickerType(pickerReceipt?.type);
           root.emitFlowProgress?.(command, `Flow's scoped Upload picker confirmed ${dispatchFile.name} via ${pickerReceipt.method || "Flow file input"}`);
         } catch (error) {
-          if (error?.outcome_unknown || error?.code === "FLOW_UPLOAD_PICKER_OUTCOME_UNKNOWN") throw error;
-          if (error?.code === "FLOW_OPERATION_TIMEOUT") throw error;
+          if (error?.outcome_unknown || error?.code === "FLOW_UPLOAD_PICKER_OUTCOME_UNKNOWN") { rememberAttempt(); throw error; }
+          if (error?.code === "FLOW_OPERATION_TIMEOUT") { rememberAttempt(); throw error; }
           console.warn(`[Flow MCP upload] File-picker trap failed before selection (${String(error?.message || error)}); falling back to drag-and-drop for ${kind} "${file.name}".`);
           selectionDiagnostics.dropAttempted = true;
           const dropReceipt = await root.FlowNativeFileTransfer.dropFileToFlow(dispatchFile);
@@ -929,9 +1037,19 @@
         }
       }
     }
+    rememberAttempt();
     checkTime("confirming the Flow media upload", true);
     if (kind === "video") Object.assign(selectionDiagnostics, await confirmFlowVideoUploadIfPrompted(deadline, options.signal, selectionDiagnostics));
-    const confirmed = await waitForNativeMediaTile(matchName, command, kind, { deadline, signal: options.signal, baselineIds, requireNewOwner: true, selectionDiagnostics });
+    let confirmed;
+    try {
+      confirmed = await waitForNativeMediaTile(matchName, command, kind, { deadline, signal: options.signal, baselineIds, requireNewOwner: true, selectionDiagnostics });
+    } catch (error) {
+      // A definitively rejected tile ends the attempt; any other failure
+      // (timeout, interruption) leaves the record for a reconciling retry.
+      if (attemptKey && error?.code === "FLOW_UPLOAD_REJECTED") flowUploadAttempts.delete(attemptKey);
+      throw error;
+    }
+    if (attemptKey) flowUploadAttempts.delete(attemptKey);
     return { ...confirmed, uploaded: true, name: file.name, kind, ...identityFields };
   }
 
