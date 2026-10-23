@@ -344,7 +344,11 @@
       const persistentMediaId = tile.getAttribute("data-persistent-media-id") || tile.getAttribute("data-media-id") ||
         mediaElement?.getAttribute?.("data-media-id") || undefined;
       const rawId = root.mediaId?.(tile);
-      const id = rawId && !rawId.startsWith("title:") ? rawId : undefined;
+      // persistentMediaId was already resolved from the tile's own identity
+      // attributes above; use it when mediaId() could only derive a title
+      // fallback, otherwise the asset is dropped from baseline/confirmation
+      // scans even though Flow exposed a stable ID for it.
+      const id = rawId && !rawId.startsWith("title:") ? rawId : persistentMediaId;
       if ((!kind || !name) && (!includeIncomplete || !id)) return null;
       const busy = Boolean(root.FlowTiles?.isTileBusy?.(tile) ?? root.isTileBusy?.(tile));
       const ready = Boolean(root.FlowTiles?.isTileMediaReady?.(tile) ?? (!busy && root.isTileMediaReady?.(tile)));

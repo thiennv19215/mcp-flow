@@ -46,6 +46,17 @@ function matchesName(value, expected, regex, exact) {
 }
 
 function mediaId(tile) {
+  // Flow V2 tiles carry their persistent media identity on the tile
+  // container itself (data-persistent-media-id / data-media-id) or on a
+  // descendant wrapper, while the <img>/<video> src can be a blob: preview
+  // or a CDN URL with no embedded UUID. Mirror the reference driver: read
+  // the attribute identity first, then fall back to src-derived IDs.
+  const attributeId = tile.getAttribute?.("data-persistent-media-id") || tile.getAttribute?.("data-media-id");
+  if (attributeId) return attributeId;
+  const descendantId = [...tile.querySelectorAll("[data-persistent-media-id],[data-media-id]")]
+    .map(node => node.getAttribute("data-persistent-media-id") || node.getAttribute("data-media-id"))
+    .find(Boolean);
+  if (descendantId) return descendantId;
   const mediaNodes = [...tile.querySelectorAll("img,video")];
   const directId = mediaNodes.map(media => media.getAttribute("data-media-id")).find(Boolean);
   const sources = mediaNodes.map(media => media.currentSrc || media.getAttribute("src") || "").filter(Boolean);
