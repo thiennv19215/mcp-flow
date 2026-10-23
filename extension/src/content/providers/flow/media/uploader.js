@@ -1184,10 +1184,11 @@
         } catch (error) {
           if (error?.outcome_unknown || error?.code === "FLOW_UPLOAD_PICKER_OUTCOME_UNKNOWN") { rememberAttempt(); throw error; }
           if (error?.code === "FLOW_OPERATION_TIMEOUT") { rememberAttempt(); throw error; }
-          console.warn(`[Flow MCP upload] File-picker trap failed before selection (${String(error?.message || error)}); falling back to drag-and-drop for ${kind} "${file.name}".`);
-          selectionDiagnostics.dropAttempted = true;
-          const dropReceipt = await root.FlowNativeFileTransfer.dropFileToFlow(dispatchFile);
-          selectionDiagnostics.dropReceiptConfirmed = dropReceipt?.dropped === true || dropReceipt?.accepted === true;
+          // IMG-08: the picker trap failed before any selection was made,
+          // so nothing was dispatched. Surface the trap error with its
+          // diagnostics instead of falling back to a drag-and-drop dispatch
+          // whose initiation cannot be verified.
+          throw error;
         }
       }
     }
