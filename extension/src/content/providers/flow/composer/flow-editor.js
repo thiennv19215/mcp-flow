@@ -653,7 +653,11 @@
 
   const FLOW_CREDIT_QUOTE_REGEX = /(?:\b(?:generating\s+)?will\s+use\s+([\d,]+(?:\.\d+)?)\s+credits?\b|(?:quá trình tạo\s+)?(?:sẽ\s+dùng|sẽ\s+sử\s+dụng|tiêu\s+tốn)\s+([\d,]+(?:\.\d+)?)\s+(?:tín\s+dụng|điểm\s+tín\s+dụng|credits?))/i;
 
-  function visibleCreditQuoteCandidates() {
+  // Scan the page (document plus open shadow roots) for credit-quote texts.
+  // Each candidate keeps the element it came from so the reader can scope the
+  // quote to the composer region instead of trusting any matching text
+  // anywhere on the page.
+  function collectCreditQuoteCandidates() {
     const roots = [document];
     const visited = new Set(roots);
     const candidates = [];
@@ -677,19 +681,66 @@
         if (!element.matches?.("a,button,[role],p,span,[aria-label],[title],[class*='credit'],[data-testid*='credit']")) continue;
         const text = (element.innerText || element.textContent || root.accessibleName?.(element) || "").replace(/\s+/g, " ").trim();
         if (!text || text.length > 300 || !/(?:credit|tín\s+dụng|will\s+use|sẽ\s+dùng|sẽ\s+sử\s+dụng|tiêu\s+tốn)/i.test(text)) continue;
-        candidates.push(text);
+        candidates.push({ text, element });
       }
     }
-    return [...new Set(candidates)].slice(0, 40);
+    const seen = new Set();
+    return candidates.filter(candidate => {
+      if (seen.has(candidate.text)) return false;
+      seen.add(candidate.text);
+      return true;
+    }).slice(0, 40);
+  }
+
+  function visibleCreditQuoteCandidates() {
+    return collectCreditQuoteCandidates().map(candidate => candidate.text);
+  }
+
+  function creditQuoteScopeRoot() {
+    try { return getFlowComposerContainer(); } catch { return null; }
+  }
+
+  function creditQuoteElementInScope(scope, element) {
+    let node = element;
+    while (node) {
+      if (node === scope) return true;
+      let next = node.parentElement || node.parentNode || null;
+      if (!next && node.host && typeof node.getRootNode === "function" && node.getRootNode() === node) {
+        // Stepping out of a shadow root: continue the climb from its host.
+        next = node.host;
+      }
+      node = next;
+    }
+    return false;
+  }
+
+  function parseCreditQuoteValue(text) {
+    const match = String(text || "").match(FLOW_CREDIT_QUOTE_REGEX);
+    if (!match) return undefined;
+    const value = Number((match[1] || match[2]).replace(/,/g, ""));
+    return Number.isFinite(value) ? value : undefined;
   }
 
   function readGenerationCreditQuote() {
-    const candidates = visibleCreditQuoteCandidates();
-    const usage = candidates.map(text => ({ text, match: text.match(FLOW_CREDIT_QUOTE_REGEX) }))
-      .filter(item => item.match)
-      .sort((a, b) => a.text.length - b.text.length)[0];
-    if (usage) return Number((usage.match[1] || usage.match[2]).replace(/,/g, ""));
-    return undefined;
+    const quotes = collectCreditQuoteCandidates()
+      .map(candidate => ({ ...candidate, value: parseCreditQuoteValue(candidate.text) }))
+      .filter(candidate => candidate.value !== undefined);
+    if (!quotes.length) return undefined;
+    // Prefer the quote rendered inside the composer region holding the
+    // prompt editor and the submit control. A cheaper quote elsewhere on
+    // the page (another mode's label, a stale composer state) must not
+    // under-read the maxCredits gate while Flow charges the real price.
+    const scope = creditQuoteScopeRoot();
+    if (scope) {
+      const scoped = quotes.filter(candidate => creditQuoteElementInScope(scope, candidate.element));
+      if (scoped.length) {
+        scoped.sort((a, b) => a.text.length - b.text.length);
+        return scoped[0].value;
+      }
+    }
+    // Page-wide fallback: unscoped candidates are weak evidence, so take
+    // the maximum — a credit safety cap must never be under-read.
+    return Math.max(...quotes.map(candidate => candidate.value));
   }
 
   function inspectGenerationCreditQuote() {

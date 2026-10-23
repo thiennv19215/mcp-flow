@@ -387,10 +387,32 @@
       });
     if (retryBtn) return retryBtn;
 
-    const tileText = (tile.innerText || tile.textContent || "").toLowerCase();
-    if (/(?:failed to generate|generation failed|could not generate|something went wrong|try again|không thể tạo|không tạo được|thất bại|đã xảy ra lỗi|thử lại|bị từ chối|lỗi tạo|không thành công|vi phạm|nội dung không an toàn|chính sách an toàn|bị chặn)/i.test(tileText)) {
-      return tile;
-    }
+    // Text fallback: only a DISTINCT descendant element may carry the error
+    // text. The tile's whole text includes its title/prompt, so a successful
+    // generation whose prompt mentions e.g. "thất bại" or "vi phạm" would
+    // otherwise be misclassified as failed. The title/prompt node — and any
+    // wrapper around it — is excluded from the haystack; a dedicated in-tile
+    // error banner still matches and is returned.
+    const tileErrorTextPattern = /(?:failed to generate|generation failed|could not generate|something went wrong|try again|không thể tạo|không tạo được|thất bại|đã xảy ra lỗi|thử lại|bị từ chối|lỗi tạo|không thành công|vi phạm|nội dung không an toàn|chính sách an toàn|bị chặn)/i;
+    const normalizeTileText = value => String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const tileTitleText = normalizeTileText(tile.getAttribute?.("aria-label") || tile.getAttribute?.("title") || "");
+    const descendants = [...(tile.querySelectorAll?.("*") || [])];
+    const isTitleElement = element => {
+      if (typeof element.matches === "function" && element.matches("[class*='title'], [class*='prompt'], [class*='caption'], [data-testid*='title']")) return true;
+      return tileTitleText !== "" && normalizeTileText(element.innerText || element.textContent || "") === tileTitleText;
+    };
+    const titleElements = descendants.filter(isTitleElement);
+    const touchesTitle = element => titleElements.some(titleElement =>
+      titleElement === element ||
+      (typeof element.contains === "function" && element.contains(titleElement)) ||
+      (typeof titleElement.contains === "function" && titleElement.contains(element)));
+    const errorCandidates = descendants.filter(element =>
+      !touchesTitle(element) && tileErrorTextPattern.test(normalizeTileText(element.innerText || element.textContent || "")));
+    // Prefer the deepest matching element so its text (not a wrapper's
+    // combined text) becomes the reported failure reason.
+    const errorElement = errorCandidates.find(element =>
+      !errorCandidates.some(other => other !== element && typeof element.contains === "function" && element.contains(other)));
+    if (errorElement) return errorElement;
 
     return null;
   }
@@ -864,7 +886,25 @@
         const explicitFailure = /(?:error|failed|failure|could not|unable to|blocked|loi|that bai|khong the|khong thanh cong|bi chan|tu choi)/i.test(folded);
         return message && (classified || explicitFailure) ? { message, classified } : null;
       }).find(Boolean);
+      // Lines rendered inside media tiles are tile titles/prompts, not page
+      // errors: a successful generation whose prompt mentions e.g. "thất
+      // bại" must not fail this wait, so tile-owned lines are excluded from
+      // the free-text failure scan below.
+      const tileOwnedLines = new Set();
+      const tileContainers = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", document, { checkVisible: false }) : null) ||
+        [...(document.querySelectorAll?.("flow-grid-tile-container") || [])];
+      for (const tileElement of tileContainers || []) {
+        const tileTitle = typeof tileElement.getAttribute === "function"
+          ? (tileElement.getAttribute("aria-label") || tileElement.getAttribute("title") || "").trim()
+          : "";
+        if (tileTitle) tileOwnedLines.add(tileTitle);
+        for (const line of String(tileElement.innerText || tileElement.textContent || "").split("\n")) {
+          const trimmed = line.trim();
+          if (trimmed) tileOwnedLines.add(trimmed);
+        }
+      }
       const failure = alertFailure?.message || text.split("\n").map(line => line.trim()).find(line => {
+        if (!line || tileOwnedLines.has(line)) return false;
         const folded = root.normalizeFlowUiText?.(line) || line.toLowerCase();
         return /(?:failed to generate|generation failed|could not generate|something went wrong|try again|khong the tao|tao that bai|da xay ra loi|thu lai)/i.test(folded);
       });

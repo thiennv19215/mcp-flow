@@ -633,6 +633,12 @@
         }
         let lastMediaScanAt = 0;
         let allMedia = [];
+        // Snapshot the page errors that already exist when observation
+        // starts. A lingering toast from a previous job or an unrelated
+        // alert predates this generation and is not evidence about it;
+        // mirror the submit path (errorsBeforeSubmit) and only react to
+        // errors that appear after this snapshot.
+        const errorsBeforeObserve = new Set(editor.currentFlowSubmitErrors());
 
         try {
           while (Date.now() < deadline) {
@@ -644,14 +650,6 @@
             const quotaAlert = root.checkFlowCreditLimitAlert?.();
             if (quotaAlert) {
               console.warn(`[FlowObserve] Quota alert observed: "${quotaAlert}".`);
-            }
-
-            const currentErrors = editor.currentFlowSubmitErrors();
-            if (currentErrors.length > 0) {
-              const failureText = currentErrors[0];
-              const classified = root.classifyFlowError?.(failureText);
-              if (classified) throw this.error(classified.code, classified.message, classified.retryable, false);
-              throw this.error("FLOW_GENERATION_FAILED", `Flow hiển thị thông báo lỗi: "${failureText}".`, false, false);
             }
 
             const receipt = correlationEntry ? tiles.nativeFlowCorrelationReceipt(correlationAttemptId) : null;
@@ -794,6 +792,18 @@
               tiles.emitFlowProgress(command, "Flow đang cập nhật tiêu đề file...");
               await root.wait?.(1500);
               continue;
+            }
+
+            // Page-level error banners are unscoped evidence: check them
+            // only after this task's correlated receipt and media state
+            // (above), and only when the error is new since observation
+            // began — a pre-existing banner must never fail a generation
+            // that already dispatched or already succeeded.
+            const newPageError = editor.currentFlowSubmitErrors().find(message => !errorsBeforeObserve.has(message));
+            if (newPageError) {
+              const classified = root.classifyFlowError?.(newPageError);
+              if (classified) throw this.error(classified.code, classified.message, classified.retryable, false);
+              throw this.error("FLOW_GENERATION_FAILED", `Flow hiển thị thông báo lỗi: "${newPageError}".`, false, false);
             }
 
             const waitMs = Math.min(apiResultReceipt ? 1_000 : 5_000, Math.max(1, deadline - Date.now()));
