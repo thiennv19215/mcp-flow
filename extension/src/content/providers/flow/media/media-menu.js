@@ -1,20 +1,44 @@
 (function (root) {
   "use strict";
 
-  // DL-01: the interceptor reports each cleaning attempt on this window
-  // event. Keep the latest one so a download can record whether cleaning
-  // actually ran; DL-03 replaces this with per-download attribution.
+  // The interceptor reports each cleaning attempt on this window event.
+  // DL-01 kept only the latest event and a download guessed that an event
+  // seen during the op was its own. DL-03: events carry the operation id
+  // of the per-download interceptor context, so outcomes are attributed
+  // exactly — recorded per operation id below. An event WITHOUT an
+  // operation id (a legacy/explicit-marker clean) may be claimed only by
+  // the one download currently awaiting an outcome, and only when the
+  // kind matches. `lastWatermarkResult` is retained for diagnostics.
   let lastWatermarkResult = null;
+  const watermarkOutcomes = new Map();
+  let pendingWatermarkClaim = null;
+  function recordWatermarkOutcome(detail) {
+    const at = Date.now();
+    const outcome = {
+      at,
+      ok: detail.ok === true,
+      changed: detail.changed === true,
+      kind: typeof detail.kind === "string" ? detail.kind : undefined,
+      status: typeof detail.status === "string" ? detail.status : null,
+      reason: typeof detail.reason === "string" ? detail.reason : null,
+    };
+    lastWatermarkResult = outcome;
+    let operationId = typeof detail.operationId === "string" && detail.operationId ? detail.operationId : null;
+    if (!operationId && pendingWatermarkClaim && at >= pendingWatermarkClaim.armedAt &&
+        (!outcome.kind || !pendingWatermarkClaim.kind || outcome.kind === pendingWatermarkClaim.kind)) {
+      operationId = pendingWatermarkClaim.operationId;
+    }
+    if (!operationId) return;
+    watermarkOutcomes.set(operationId, outcome);
+    for (const [key, value] of watermarkOutcomes) {
+      if (at - value.at > 5 * 60_000 || watermarkOutcomes.size > 20) watermarkOutcomes.delete(key);
+    }
+  }
   try {
     root.addEventListener?.("TOBY_FLOW_WATERMARK_RESULT", event => {
       const detail = event?.detail;
       if (!detail || typeof detail !== "object") return;
-      lastWatermarkResult = {
-        at: Date.now(),
-        ok: detail.ok === true,
-        changed: detail.changed === true,
-        kind: typeof detail.kind === "string" ? detail.kind : undefined,
-      };
+      recordWatermarkOutcome(detail);
     });
   } catch (_) {}
 
@@ -99,23 +123,53 @@
     return { post: true, mode: "clean", reason: "inherit_clean" };
   }
 
-  // Whether cleaning ran for an armed download, from the interceptor's
-  // result events observed since the arm: true/false when an event for
-  // this download's kind arrived, null when none was observed (the op
-  // returns right after the click; DL-03 attributes outcomes precisely).
-  function watermarkCleanedOutcome(outcome) {
-    if (!outcome?.armed) return false;
-    if (outcome.mode !== "clean") return false;
-    const event = lastWatermarkResult;
-    if (!event || outcome.armedAt == null || event.at < outcome.armedAt) return null;
-    if (event.kind && outcome.kind && event.kind !== outcome.kind) return null;
-    return event.ok && event.changed;
+  // Normalize one attributed interceptor outcome into the op-level
+  // watermark fields. Events from DL-03 contexts carry an explicit
+  // status; legacy events only carry ok/changed, from which the status
+  // is derived (an unchanged-but-ok clean means no watermark was found).
+  function watermarkAttributionFromEvent(event) {
+    if (!event) return null;
+    let status = event.status;
+    if (status !== "cleaned" && status !== "original" && status !== "failed") {
+      status = event.ok ? (event.changed ? "cleaned" : "original") : "failed";
+    }
+    return {
+      cleaned: status === "cleaned",
+      status,
+      outcomeReason: status === "original" && !event.reason
+        ? "not_found"
+        : (typeof event.reason === "string" && event.reason ? event.reason : null),
+    };
+  }
+
+  // Resolve the watermark outcome for one armed download. Only an event
+  // attributed to THIS download's operation id counts; a foreign outcome
+  // is never claimed. The click initiates the download synchronously, but
+  // cleaning finishes asynchronously, so a clean image arm waits a
+  // bounded grace for its outcome event; when none arrives the result
+  // stays honestly unknown (cleaned: null, status: "unknown") instead of
+  // DL-01's any-event-during-the-op guess.
+  async function settleWatermarkOutcome(outcome, helpers) {
+    if (!outcome?.armed) return { cleaned: false, status: null, outcomeReason: null };
+    if (outcome.mode !== "clean") return { cleaned: false, status: "original", outcomeReason: null };
+    if (outcome.kind !== "image") return { cleaned: null, status: null, outcomeReason: null };
+    const attributed = () => outcome.operationId ? watermarkOutcomes.get(outcome.operationId) || null : null;
+    let event = attributed();
+    for (let round = 0; !event && round < 50; round++) {
+      try { await helpers.wait(100, "confirming the watermark cleanup outcome"); }
+      catch (_) { break; }
+      event = attributed();
+    }
+    if (pendingWatermarkClaim?.operationId === outcome.operationId) pendingWatermarkClaim = null;
+    if (!event) return { cleaned: null, status: "unknown", outcomeReason: null };
+    return watermarkAttributionFromEvent(event);
   }
 
   async function armWatermarkDownload(meta = {}) {
     const resolution = await resolveWatermarkArm(meta);
-    const outcome = { mode: resolution.mode, armed: false, reason: resolution.reason, kind: meta.kind, armedAt: null };
+    const outcome = { mode: resolution.mode, armed: false, reason: resolution.reason, kind: meta.kind, armedAt: null, operationId: null };
     if (!resolution.post) return outcome;
+    const operationId = `wm-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 10)}`;
     try {
       window.postMessage({
         source: "flow-mcp-watermark-v1",
@@ -127,11 +181,17 @@
           quality: meta.quality,
           mode: resolution.mode,
           enabled: resolution.mode === "clean",
+          operationId,
+          ...(meta.url ? { url: meta.url } : {}),
           timeoutMs: Math.min(120_000, Math.max(5_000, Number(meta.timeoutMs) || 45_000)),
         },
       }, location.origin);
       outcome.armed = true;
       outcome.armedAt = Date.now();
+      outcome.operationId = operationId;
+      if (resolution.mode === "clean") {
+        pendingWatermarkClaim = { operationId, kind: meta.kind, armedAt: outcome.armedAt };
+      }
     } catch (_) {}
     return outcome;
   }
@@ -343,6 +403,13 @@
       if (!tile) throw root.flowError("FLOW_ASSET_NOT_FOUND", `Could not find "${title}" in the project library.`, true);
       const scene = Boolean(typeof root.flowQuery === "function" ? root.flowQuery("tiles.scene", tile, { checkVisible: false }) : tile.querySelector("flow-scene-tile"));
       const kind = (typeof root.flowQuery === "function" ? root.flowQuery("tiles.video", tile, { checkVisible: false }) : tile.querySelector("flow-video-tile")) ? "video" : "image";
+      // DL-03: the tile's media URL lets the arm bind its interceptor
+      // context to exactly this download (canonicalized on both sides).
+      let watermarkUrl;
+      try {
+        const mediaElement = tile.querySelector("img,video");
+        watermarkUrl = mediaElement?.currentSrc || mediaElement?.src || mediaElement?.getAttribute?.("src") || undefined;
+      } catch (_) {}
       if (!scene) await waitForFlowTileMedia(tile, title, 20_000, helpers);
       if (!tile.isConnected || mediaHandle && root.mediaId?.(tile) !== mediaHandle) {
         tile = mediaHandle
@@ -359,7 +426,7 @@
         const download = root.flowButton?.("Download scene") || root.flowButton?.("Tải xuống cảnh") || root.flowButton?.("Tải cảnh");
         if (!download) throw root.flowError("FLOW_SCENE_DOWNLOAD_MISSING", "Scene view opened but Download scene is unavailable.", true);
         checkActive("starting the Flow scene download");
-        watermarkOutcome = await armWatermarkDownload({ title, kind: "video", quality, mode: operationOptions.watermarkMode });
+        watermarkOutcome = await armWatermarkDownload({ title, kind: "video", quality, mode: operationOptions.watermarkMode, url: watermarkUrl });
         download.click();
         downloadMayHaveStarted = true;
       } else {
@@ -404,17 +471,18 @@
               throw root.flowError("FLOW_DOWNLOAD_QUALITY_MISSING", `Flow's download menu for "${title}" has no ${quality} option. Available: ${available}.`, true);
             }
             checkActive("starting the Flow media download");
-            watermarkOutcome = await armWatermarkDownload({ title, kind, quality, mode: operationOptions.watermarkMode });
+            watermarkOutcome = await armWatermarkDownload({ title, kind, quality, mode: operationOptions.watermarkMode, url: watermarkUrl });
             choice.click();
             downloadMayHaveStarted = true;
           } else {
             checkActive("starting the Flow media download");
-            watermarkOutcome = await armWatermarkDownload({ title, kind, quality, mode: operationOptions.watermarkMode });
+            watermarkOutcome = await armWatermarkDownload({ title, kind, quality, mode: operationOptions.watermarkMode, url: watermarkUrl });
             download.click();
             downloadMayHaveStarted = true;
           }
         } else throw root.flowError("FLOW_TILE_MENU_MISSING", `Could not open options for "${title}".`, true);
       }
+      const watermarkAttribution = await settleWatermarkOutcome(watermarkOutcome, helpers);
       return {
         title,
         kind: scene ? "scene" : tile.querySelector("flow-video-tile") ? "video" : "image",
@@ -423,8 +491,11 @@
         watermark: {
           mode: watermarkOutcome?.mode || "original",
           armed: watermarkOutcome?.armed === true,
-          cleaned: watermarkCleanedOutcome(watermarkOutcome),
+          cleaned: watermarkAttribution.cleaned,
           ...(watermarkOutcome?.reason ? { reason: watermarkOutcome.reason } : {}),
+          ...(watermarkOutcome?.operationId ? { operationId: watermarkOutcome.operationId } : {}),
+          ...(watermarkAttribution.status ? { status: watermarkAttribution.status } : {}),
+          ...(watermarkAttribution.outcomeReason ? { outcomeReason: watermarkAttribution.outcomeReason } : {}),
         },
       };
     })();

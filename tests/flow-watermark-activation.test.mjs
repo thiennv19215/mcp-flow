@@ -347,7 +347,9 @@ test('DL-01 (k): queue downloads pass the watermark mode through and record the 
     assert.equal(invocations[0].operation, 'flow.asset.download');
     assert.equal(invocations[0].payload.watermarkMode, 'clean', 'the job mode reaches the download op');
     assert.equal(downloads.length, 1);
-    assert.deepEqual(downloads[0].watermark, { mode: 'clean', armed: true, cleaned: true },
+    // DL-03 extends the recorded outcome with the per-download status
+    // shape on the queue result; the DL-01 fields are preserved verbatim.
+    assert.deepEqual(downloads[0].watermark, { mode: 'clean', armed: true, cleaned: true, status: 'cleaned' },
       'the queue download result records the watermark outcome');
   } finally {
     delete globalThis.chrome;

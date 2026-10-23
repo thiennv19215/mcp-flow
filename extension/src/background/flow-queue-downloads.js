@@ -363,6 +363,38 @@ export async function waitForExistingQueueFlowDownload(downloadId, flowMediaId, 
   });
 }
 
+// DL-03: map the download op's watermark fields (DL-01: mode / armed /
+// cleaned, plus the per-download attribution status / outcomeReason when
+// the interceptor reported one) into the job-result status shape. The
+// status describes the SAVED file: "cleaned" when cleaning changed the
+// bytes, "original" when the saved bytes are the untouched original
+// (by mode, by config, or because no watermark was found), "failed" when
+// a cleaning attempt ran and failed, and "unknown" when an armed clean
+// produced no attributable outcome — never an invented success.
+export function queueWatermarkResult(opWatermark) {
+  if (!opWatermark || typeof opWatermark !== "object") return undefined;
+  const mode = typeof opWatermark.mode === "string" ? opWatermark.mode : "original";
+  const armed = opWatermark.armed === true;
+  const cleaned = opWatermark.cleaned === true ? true : opWatermark.cleaned === false ? false : null;
+  let status = typeof opWatermark.status === "string" && opWatermark.status ? opWatermark.status : null;
+  if (!status) {
+    if (cleaned === true) status = "cleaned";
+    else if (armed && mode === "clean") status = cleaned === false ? "original" : "unknown";
+    else status = "original";
+  }
+  const outcomeReason = typeof opWatermark.outcomeReason === "string" && opWatermark.outcomeReason ? opWatermark.outcomeReason : null;
+  const armReason = typeof opWatermark.reason === "string" && opWatermark.reason ? opWatermark.reason : null;
+  const reason = status === "cleaned" ? outcomeReason : (outcomeReason || armReason);
+  return {
+    mode,
+    armed,
+    cleaned,
+    status,
+    ...(reason ? { reason } : {}),
+    ...(typeof opWatermark.operationId === "string" && opWatermark.operationId ? { operationId: opWatermark.operationId } : {}),
+  };
+}
+
 export async function downloadQueueMedia(media, outputDir, fileStem, quality, invoke, hooks, sceneNumbers = [], jobId = "", flowTabId, flowProjectId = "", generationState = null, watermarkMode = undefined) {
   if (!chrome.downloads?.search) throw Object.assign(new Error("Chrome download tracking is unavailable; the generated media remains in Flow."), {
     code: "FLOW_DOWNLOAD_TRACKING_UNAVAILABLE", outcomeUnknown: false, outcome_unknown: false,
@@ -458,7 +490,7 @@ export async function downloadQueueMedia(media, outputDir, fileStem, quality, in
           title,
           filenameOverrideApplied,
           fileStem: outputStem,
-          ...(triggered?.watermark ? { watermark: triggered.watermark } : {}),
+          ...(triggered?.watermark ? { watermark: queueWatermarkResult(triggered.watermark) } : {}),
         });
       } finally {
         if (filenameTicket) disarmQueueFilenameOverride(filenameTicket);
