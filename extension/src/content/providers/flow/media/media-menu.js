@@ -473,7 +473,9 @@
     const targetUrl = directBytesTargetUrl(rawUrl, quality);
     if (!targetUrl) return null;
     helpers.checkActive("fetching the Flow media bytes directly");
-    const arm = await resolveWatermarkArm({ mode: operationOptions.watermarkMode, kind });
+    // Resolve (never arm) the job's requested mode for honest reporting.
+    const { watermarkMode } = operationOptions;
+    const arm = await resolveWatermarkArm({ mode: watermarkMode, kind });
     let response = null;
     let fetchFailure = null;
     for (const credentials of ["include", "omit"]) {
