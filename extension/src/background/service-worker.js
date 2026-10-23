@@ -1055,9 +1055,16 @@ function queueDownloadMatchesTicket(downloadItem, ticket, allowTabTimeMatch = fa
   return Number.isFinite(startedAt) && startedAt >= ticket.baselineAt - 1_000;
 }
 function queueDownloadMatchesTriggeredFlowItem(downloadItem, ticket, title) {
-  if (!downloadItem || !ticket || downloadItem.tabId !== -1 || downloadItem.byExtensionId && downloadItem.byExtensionId !== chrome.runtime.id) return false;
+  if (!downloadItem || !ticket || !Number.isInteger(downloadItem.tabId) || downloadItem.byExtensionId && downloadItem.byExtensionId !== chrome.runtime.id) return false;
   const projectId = queueDownloadProjectId(downloadItem);
   if (projectId && ticket.flowProjectId && projectId !== ticket.flowProjectId.toLowerCase()) return false;
+  const sameFlowTab = downloadItem.tabId === ticket.flowTabId;
+  const flowReferrer = flowUrl(downloadItem.referrer) || flowUrl(downloadItem.url) || flowUrl(downloadItem.finalUrl);
+  // Some Flow downloads are surfaced by Chrome under a different tab (or
+  // tabId=-1), even though the filename and timing identify the result. Require
+  // a Flow referrer or matching project for those records; a pinned Flow tab is
+  // itself sufficient provenance.
+  if (!sameFlowTab && !(flowReferrer || (ticket.flowProjectId && projectId === ticket.flowProjectId.toLowerCase()))) return false;
   const startedAt = Date.parse(downloadItem.startTime || "");
   const lowerBound = Number(ticket.triggerStartedAt) || Number(ticket.baselineAt);
   const upperBound = (Number(ticket.triggerConfirmedAt) || Date.now()) + 30_000;
