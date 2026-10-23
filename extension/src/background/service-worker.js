@@ -1033,6 +1033,13 @@ function queueDownloadProjectId(downloadItem) {
   const sourceUrl = `${downloadItem?.url || ""} ${downloadItem?.finalUrl || ""} ${downloadItem?.referrer || ""}`;
   return sourceUrl.match(/\/project\/([0-9a-f-]{36})(?:[/?#\s]|$)/i)?.[1]?.toLowerCase() || "";
 }
+function queueDownloadIsFlowPageUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    return url.protocol === "https:" && (url.origin === "https://flow.google.com" ||
+      url.origin === "https://labs.google" && url.pathname.startsWith("/fx/"));
+  } catch { return false; }
+}
 function queueDownloadMatchesTicket(downloadItem, ticket, allowTabTimeMatch = false, allowProjectTimeMatch = false) {
   if (!downloadItem || !ticket) return false;
   const sourceUrl = `${downloadItem.url || ""} ${downloadItem.finalUrl || ""} ${downloadItem.referrer || ""}`.toLowerCase();
@@ -1060,7 +1067,7 @@ function queueDownloadMatchesTriggeredFlowItem(downloadItem, ticket, title) {
   const projectId = queueDownloadProjectId(downloadItem);
   if (projectId && ticket.flowProjectId && projectId !== ticket.flowProjectId.toLowerCase()) return false;
   const sameFlowTab = downloadItem.tabId === ticket.flowTabId;
-  const flowReferrer = flowUrl(downloadItem.referrer) || flowUrl(downloadItem.url) || flowUrl(downloadItem.finalUrl);
+  const flowReferrer = queueDownloadIsFlowPageUrl(downloadItem.referrer) || queueDownloadIsFlowPageUrl(downloadItem.url) || queueDownloadIsFlowPageUrl(downloadItem.finalUrl);
   // Some Flow downloads are surfaced by Chrome under a different tab (or
   // tabId=-1), even though the filename and timing identify the result. Require
   // a Flow referrer or matching project for those records; a pinned Flow tab is
@@ -1078,8 +1085,10 @@ function queueDownloadMatchesTriggeredFlowItem(downloadItem, ticket, title) {
   if (!compatibleExtension) return false;
   const titleKey = flowDownloadTitleKey(title);
   const filenameKey = flowDownloadTitleKey(downloadItem.filename);
-  // Flow's browser filename often appends a timestamp to the asset title.
-  return Boolean(titleKey && filenameKey.startsWith(titleKey));
+  // Prefer a title match when available. The pinned tab is already validated as
+  // a Flow project, and the active ticket plus trigger window and media type
+  // identify a same-tab download even when Flow rewrites the browser filename.
+  return Boolean((titleKey && filenameKey.startsWith(titleKey)) || sameFlowTab);
 }
 chrome.downloads?.onDeterminingFilename?.addListener((downloadItem, suggest) => {
   const now = Date.now();
@@ -1103,7 +1112,7 @@ chrome.downloads?.onDeterminingFilename?.addListener((downloadItem, suggest) => 
   if (exactCandidates.length > 1) return;
   const candidates = exactCandidates.length === 1
     ? exactCandidates
-    : pendingQueueFilenameOverrides.filter(ticket => !ticket.downloadId && ticket.title &&
+    : pendingQueueFilenameOverrides.filter(ticket => !ticket.downloadId &&
       queueDownloadMatchesTriggeredFlowItem(downloadItem, ticket, ticket.title));
   if (candidates.length !== 1) return;
   const ticket = candidates[0];
