@@ -53,6 +53,30 @@
     });
   }
 
+  // Byte size a library tile exposes for its underlying file, when Flow puts
+  // one in the DOM. Only plain byte counts in file-size attributes count as
+  // evidence; anything else (dimensions, labels) is not comparable.
+  function flowUploadTileFileSize(tile) {
+    if (!tile) return null;
+    const readSize = el => {
+      if (!el || typeof el.getAttribute !== "function") return null;
+      for (const attribute of ["data-file-size", "data-filesize", "data-size-bytes", "data-byte-size", "data-content-length"]) {
+        const raw = el.getAttribute(attribute);
+        if (raw === null || raw === undefined) continue;
+        const text = String(raw).trim().replace(/,/g, "");
+        if (!/^\d+(?:\s*(?:b|bytes))?$/i.test(text)) continue;
+        const value = Number(text.replace(/[^0-9]/g, ""));
+        if (Number.isSafeInteger(value) && value > 0) return value;
+      }
+      return null;
+    };
+    const own = readSize(tile);
+    if (own !== null) return own;
+    try {
+      return readSize(tile.querySelector?.("img,video,flow-image-tile,flow-video-tile,flow-scene-tile"));
+    } catch { return null; }
+  }
+
   function flowUploadTileKind(tile) {
     if (!tile) return null;
     if (tile.querySelector("flow-scene-tile")) return "scene";
@@ -571,14 +595,35 @@
     }
 
     const existingTiles = [...document.querySelectorAll("flow-grid-tile-container")].filter(item => matchesFlowTile(item, file.name));
+    // A matching name alone does not prove a tile is the staged file: camera
+    // exports and repeated downloads routinely collide on names like
+    // IMG_1234.png, and reusing the wrong tile silently generates from the
+    // wrong reference. When the staged size is known (production staged
+    // files are real Files), a tile is reuse-eligible only when it exposes
+    // the same byte size; a proven mismatch — or no comparable evidence at
+    // all — means "upload instead" (a duplicate tile is recoverable, a
+    // wrong reference is not). Callers whose file carries no size keep the
+    // legacy name-only behavior.
+    const stagedSize = Number.isSafeInteger(file?.size) && file.size >= 0 ? file.size : null;
     const namedTileDetails = existingTiles.map(tile => {
       const id = typeof root.mediaId === "function" ? root.mediaId(tile) : "";
       const actualKind = flowUploadTileKind(tile);
       const ready = root.FlowTiles?.isTileMediaReady?.(tile) ?? !root.isTileBusy?.(tile);
-      return { tile, id: id && !String(id).startsWith("title:") ? String(id) : null, actualKind, ready,
+      const tileSize = flowUploadTileFileSize(tile);
+      const sizeVerdict = stagedSize === null ? "legacy"
+        : tileSize === null ? "unverifiable"
+          : tileSize === stagedSize ? "match" : "mismatch";
+      return { tile, id: id && !String(id).startsWith("title:") ? String(id) : null, actualKind, ready, tileSize, sizeVerdict,
+        reuseEligible: sizeVerdict === "legacy" || sizeVerdict === "match",
         error: Boolean(tile.querySelector("flow-error-tile")) };
     }).filter(Boolean);
-    const matchingKindTiles = namedTileDetails.filter(item => !item.error && (!item.actualKind || flowUploadKindMatches(kind, item.actualKind)));
+    const eligibleDetails = namedTileDetails.filter(item => item.reuseEligible);
+    const eligibleTiles = eligibleDetails.map(item => item.tile);
+    const excludedTiles = namedTileDetails.length - eligibleDetails.length;
+    if (excludedTiles > 0) {
+      root.emitFlowProgress?.(command, `Ignored ${excludedTiles} same-name Flow tile(s) for "${file.name}" whose size does not match the staged file; uploading instead of reusing.`);
+    }
+    const matchingKindTiles = eligibleDetails.filter(item => !item.error && (!item.actualKind || flowUploadKindMatches(kind, item.actualKind)));
     const reusableTiles = matchingKindTiles.filter(item => item.id);
     if (reusableTiles.length) {
       // Use the first exact-title, matching-kind asset in Flow's current grid order and carry its UUID into the picker selection.
@@ -591,27 +636,34 @@
       root.emitFlowProgress?.(command, `Reusing existing Flow ${kind} media ID ${confirmed.id} for "${file.name}" after readiness confirmation; skipped upload.`);
       return { ...confirmed, uploaded: true, name: file.name, kind, reused: true };
     }
-    if (existingTiles.length === 1) {
-      if (existingTiles[0].querySelector("flow-error-tile")) {
-        throw fn("FLOW_UPLOAD_REJECTED", `Flow already has an error tile for "${file.name}". Inspect it before retrying.`, false, true);
+    // The name-only branches below confirm by title alone, so they may run
+    // only when every same-name tile is reuse-eligible. If any tile was
+    // excluded on size evidence, fall through to a fresh upload instead: the
+    // baseline + requireNewOwner confirmation further down accepts only a
+    // genuinely new tile, never one of the excluded ones.
+    if (eligibleTiles.length && eligibleTiles.length === namedTileDetails.length) {
+      if (eligibleTiles.length === 1) {
+        if (eligibleTiles[0].querySelector("flow-error-tile")) {
+          throw fn("FLOW_UPLOAD_REJECTED", `Flow already has an error tile for "${file.name}". Inspect it before retrying.`, false, true);
+        }
+        const actualKind = assertReusableFlowUploadKind(eligibleTiles[0], file.name, kind);
+        if (actualKind && !flowUploadKindMatches(kind, actualKind)) throw fn("FLOW_UPLOAD_KIND_MISMATCH", `Flow already has a ${actualKind} tile named "${file.name}", not the requested ${kind}. No upload was started.`, false, false);
+        const confirmed = await waitForNativeMediaTile(file.name, command, kind, { deadline, signal: options.signal });
+        return { uploaded: true, name: file.name, kind, id: confirmed.id, reused: true };
       }
-      const actualKind = assertReusableFlowUploadKind(existingTiles[0], file.name, kind);
-      if (actualKind && !flowUploadKindMatches(kind, actualKind)) throw fn("FLOW_UPLOAD_KIND_MISMATCH", `Flow already has a ${actualKind} tile named "${file.name}", not the requested ${kind}. No upload was started.`, false, false);
-      const confirmed = await waitForNativeMediaTile(file.name, command, kind, { deadline, signal: options.signal });
-      return { uploaded: true, name: file.name, kind, id: confirmed.id, reused: true };
-    }
-    if (existingTiles.length > 1) {
-      const knownKinds = existingTiles.map(flowUploadTileKind).filter(Boolean);
-      if (knownKinds.length === existingTiles.length && !knownKinds.some(actualKind => flowUploadKindMatches(kind, actualKind))) {
-        throw fn("FLOW_UPLOAD_KIND_MISMATCH", `Flow has tiles named "${file.name}", but none are ${kind} media. No upload was started.`, false, false);
+      if (eligibleTiles.length > 1) {
+        const knownKinds = eligibleTiles.map(flowUploadTileKind).filter(Boolean);
+        if (knownKinds.length === eligibleTiles.length && !knownKinds.some(actualKind => flowUploadKindMatches(kind, actualKind))) {
+          throw fn("FLOW_UPLOAD_KIND_MISMATCH", `Flow has tiles named "${file.name}", but none are ${kind} media. No upload was started.`, false, false);
+        }
+        if (matchingKindTiles.length) {
+          throw fn("FLOW_UPLOAD_ID_UNAVAILABLE", `Flow already has media tiles named "${file.name}", but none exposes a stable ID that can be selected safely. No duplicate upload was started.`, true, false);
+        }
+        if (eligibleDetails.every(item => item.error)) {
+          throw fn("FLOW_UPLOAD_REJECTED", `All Flow tiles named "${file.name}" are in an error state. No duplicate upload was started.`, false, true);
+        }
+        throw fn("FLOW_UPLOAD_ID_UNAVAILABLE", `Flow has multiple tiles named "${file.name}", but their media IDs or types are not sufficient to choose an existing ${kind} asset safely. No duplicate upload was started.`, true, false);
       }
-      if (matchingKindTiles.length) {
-        throw fn("FLOW_UPLOAD_ID_UNAVAILABLE", `Flow already has media tiles named "${file.name}", but none exposes a stable ID that can be selected safely. No duplicate upload was started.`, true, false);
-      }
-      if (namedTileDetails.every(item => item.error)) {
-        throw fn("FLOW_UPLOAD_REJECTED", `All Flow tiles named "${file.name}" are in an error state. No duplicate upload was started.`, false, true);
-      }
-      throw fn("FLOW_UPLOAD_ID_UNAVAILABLE", `Flow has multiple tiles named "${file.name}", but their media IDs or types are not sufficient to choose an existing ${kind} asset safely. No duplicate upload was started.`, true, false);
     }
 
     let baselineAssets;
