@@ -56,6 +56,16 @@ const mayHaveDispatched = value => value?.outcomeUnknown === true || value?.outc
   value?.requestDispatched === true || value?.request_dispatched === true ||
   value?.possiblyDispatched === true || value?.possibly_dispatched === true ||
   value?.mayHaveSubmitted === true;
+// VID-01: normalize a partial generation outcome's failed-output list.
+// Only the tile title and the classified failure code are kept, so a
+// persisted job record never carries raw page text or unbounded data.
+const normalizeFailedOutputs = value => {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 20).map(item => ({
+    title: String(item?.title || item?.name || "").trim().slice(0, 300),
+    code: String(item?.code || item?.errorCode || "FLOW_GENERATION_FAILED").trim() || "FLOW_GENERATION_FAILED",
+  }));
+};
 
 /**
  * A persistent, sequential queue for Flow work in the MV3 service worker.
@@ -108,6 +118,15 @@ export class FlowJobQueue {
         job.errorCode = undefined;
         job.diagnostics = undefined;
         job.finishedAt = undefined;
+        // VID-01: a partial result checkpoint also restores the partial
+        // markers, so the failure half of the outcome survives the restart
+        // even though the rebuilt runner result is assembled from the
+        // checkpoint's successful media alone. The checkpoint media list
+        // itself only ever contains outputs that were observed ready.
+        if (Array.isArray(generationCheckpoint.failedOutputs) && generationCheckpoint.failedOutputs.length > 0) {
+          job.partial = true;
+          job.failedOutputs = clone(generationCheckpoint.failedOutputs);
+        }
         job.progress = {
           ...(job.progress && typeof job.progress === "object" ? job.progress : {}),
           phase: "recovering_generation_result",
@@ -396,7 +415,7 @@ export class FlowJobQueue {
     return clone(job);
   }
 
-  async checkpointGenerationResult(id, media) {
+  async checkpointGenerationResult(id, media, extras = null) {
     await this.ready;
     const job = this.jobs.find(item => item.id === String(id));
     if (!job || job.status !== "running") return null;
@@ -414,9 +433,20 @@ export class FlowJobQueue {
     const quoteFields = job.metadata?.generationQuoteFields && typeof job.metadata.generationQuoteFields === "object"
       ? clone(job.metadata.generationQuoteFields)
       : {};
+    // VID-01: when the observe outcome was partial, the failed outputs are
+    // checkpointed alongside the successful media so a worker restart
+    // recovers the partial state too. The media list only ever contains
+    // outputs that were observed ready — the checkpoint never claims a
+    // failed output as a success.
+    const failedOutputs = normalizeFailedOutputs(extras?.failedOutputs);
     job.metadata = {
       ...(job.metadata || {}),
-      generationResultCheckpoint: { media: normalizedMedia, quoteFields, recordedAt: Date.now() },
+      generationResultCheckpoint: {
+        media: normalizedMedia,
+        quoteFields,
+        ...(failedOutputs.length ? { failedOutputs } : {}),
+        recordedAt: Date.now(),
+      },
     };
     delete job.metadata.generationObservation;
     const previousProgress = job.progress && typeof job.progress === "object" ? job.progress : {};
@@ -936,6 +966,27 @@ export class FlowJobQueue {
             job.status = "completed";
             job.result = clone(result);
             job.outcomeUnknown = false;
+            // VID-01: a generation that ended with some outputs ready and
+            // some terminally failed completes as a PARTIAL success. The
+            // ready media stays in the result (the runner's download step
+            // already consumed exactly that list), and the failure is
+            // recorded on the job instead of failing the whole job.
+            // failedOutputs normally rides the runner result; after a
+            // worker-restart recovery the rebuilt result no longer
+            // carries it, so the markers restored from the result
+            // checkpoint (#restore) are used instead.
+            const resultFailedOutputs = normalizeFailedOutputs(result?.result?.failedOutputs ?? result?.failedOutputs);
+            const failedOutputs = resultFailedOutputs.length
+              ? resultFailedOutputs
+              : (job.partial === true ? normalizeFailedOutputs(job.failedOutputs) : []);
+            if (failedOutputs.length) {
+              job.partial = true;
+              job.failedOutputs = failedOutputs;
+              job.result = { ...job.result, partial: true, failedOutputs: clone(failedOutputs) };
+              if (job.progress && typeof job.progress === "object") {
+                job.progress = { ...job.progress, partial: true };
+              }
+            }
           }
         } catch (thrown) {
           const error = asError(thrown);
