@@ -617,6 +617,17 @@
       scrollTop: Number(snapshot.scrollTop) || 0,
       visibleSurfaces: (snapshot.visibleSurfaces || []).map(surface => ({ role: surface.role, tag: surface.tag, labelCount: (surface.labels || []).length })),
       categoryTabs: (snapshot.categoryTabs || []).map(tab => ({ selected: tab.selected })),
+      categoryCandidateScan: snapshot.categoryCandidateScan ? {
+        category: snapshot.categoryCandidateScan.category || null,
+        candidateCount: Number(snapshot.categoryCandidateScan.candidateCount) || 0,
+        candidates: (snapshot.categoryCandidateScan.candidates || []).slice(0, 8).map(candidate => ({
+          tag: candidate.tag || null,
+          role: candidate.role || null,
+          label: candidate.label || null,
+          selected: candidate.selected === true,
+          controls: candidate.controls || null,
+        })),
+      } : null,
       chipCount: snapshot.chipCount,
       chips: (snapshot.chips || []).map(chip => ({ kind: chip.kind })),
       chipAttachScan: snapshot.chipAttachScan ? {
@@ -1314,35 +1325,62 @@
   };
   function pickerSurface() {
     const list = picker();
-    return list?.closest?.('[role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane, [class*="dialog"], [class*="picker"], [class*="surface"]') ||
-      document.querySelector?.('[role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane') ||
-      document;
+    // Keep category discovery anchored to the active listbox. Falling back to
+    // document-wide tabs can match unrelated Flow/sidebar controls and report
+    // a false ambiguity.
+    return list?.closest?.('[role="dialog"], mat-dialog-container, flow-dialog, .cdk-overlay-pane, [class*="dialog"]') ||
+      list?.closest?.('[class*="picker"], [class*="surface"]') || list || null;
   }
   function pickerCategoryTabs(name) {
     const norm = normalize(name);
     const synonyms = CATEGORY_SYNONYMS[norm] || [norm];
     const surface = pickerSurface();
+    if (!surface) return [];
     const queriedTabs = typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.categoryTabs", surface) : null;
-    const tabElements = queriedTabs && queriedTabs.length ? queriedTabs : [
-      ...(surface?.querySelectorAll?.('[role="tab"],button,[role="button"],mat-chip,[class*="chip"]') || [])
-    ];
-    return [...new Set([
-      ...tabElements,
-      ...(surface?.querySelectorAll?.('[role="tab"],button,[role="button"]') || []),
-      ...(picker()?.querySelectorAll?.('[role="tab"],button,[role="button"]') || []),
-      ...(document?.querySelectorAll?.('[role="tab"]') || []),
+    const candidates = [...new Set([
+      ...(queriedTabs || []),
+      ...(surface.querySelectorAll?.('[role="tab"],button,[role="button"],mat-chip,[class*="chip"]') || []),
     ])].filter(el => {
       if (!visible(el)) return false;
-      const rawText = accessibleName(el) || el.innerText || el.textContent || "";
-      const label = normalize(rawText).replace(/^(?:accessibility_new|dashboard|face|voice_selection|graphic_eq|record_voice_over|perm_media|video_library|grid_view|folder|collections)\s*/, "");
+      const rawText = accessibleName(el) || el.getAttribute?.("aria-label") || el.getAttribute?.("title") || el.innerText || el.textContent || "";
+      const label = normalize(rawText)
+        .replace(/^(?:accessibility_new|dashboard|face|voice_selection|graphic_eq|record_voice_over|perm_media|video_library|grid_view|folder|collections)\s*/, "")
+        .replace(/\s*\(?\d+\)?\s*$/, "").trim();
       const icon = normalize(el.querySelector?.("mat-icon,.mat-icon,.google-symbols,.material-symbols-outlined")?.textContent);
-      return synonyms.includes(label) || synonyms.some(syn => label.includes(syn)) ||
+      return synonyms.includes(label) || synonyms.some(syn => label.startsWith(`${syn} `)) ||
         norm === "voices" && ["voice_selection", "graphic_eq", "record_voice_over"].includes(icon);
     });
+    // Prefer explicit tabs over their nested button/chip wrappers. Only treat
+    // multiple actual tab controls as ambiguous; wrapper duplicates are one
+    // semantic category, not separate choices.
+    const explicitTabs = candidates.filter(el => el.getAttribute?.("role") === "tab");
+    return explicitTabs.length ? explicitTabs : candidates;
   }
   function findPickerCategoryTab(name) {
     const matches = pickerCategoryTabs(name);
-    if (matches.length > 1) throw flowError("FLOW_REFERENCE_CATEGORY_AMBIGUOUS", `Flow's ${name} picker category is ambiguous; no category was selected.`, false, false);
+    if (matches.length > 1) {
+      const describe = element => ({
+        tag: element?.tagName?.toLowerCase?.() || null,
+        role: element?.getAttribute?.("role") || null,
+        label: String(accessibleName(element) || element?.getAttribute?.("aria-label") || element?.getAttribute?.("title") || element?.innerText || element?.textContent || "").replace(/\s+/g, " ").trim().slice(0, 80),
+        selected: element?.getAttribute?.("aria-selected") === "true",
+        controls: element?.getAttribute?.("aria-controls") || null,
+      });
+      const error = flowError("FLOW_REFERENCE_CATEGORY_AMBIGUOUS", `Flow's ${name} picker category is ambiguous; no category was selected.`, false, false);
+      error.diagnostics = {
+        category: normalize(name),
+        activeSurfaceRole: pickerSurface()?.getAttribute?.("role") || pickerSurface()?.tagName?.toLowerCase?.() || null,
+        candidateCount: matches.length,
+        candidates: matches.slice(0, 8).map(describe),
+      };
+      lastReferenceActionDiagnostics = { ...lastReferenceActionDiagnostics, categoryCandidateScan: error.diagnostics };
+      throw error;
+    }
+    if (matches.length === 1) {
+      lastReferenceActionDiagnostics = { ...lastReferenceActionDiagnostics, categoryCandidateScan: {
+        category: normalize(name), candidateCount: 1, candidates: [{ label: String(accessibleName(matches[0]) || matches[0].innerText || matches[0].textContent || "").replace(/\s+/g, " ").trim().slice(0, 80) }],
+      } };
+    }
     return matches[0] || null;
   }
   async function category(name, deadline, signal) {

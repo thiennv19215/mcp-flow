@@ -230,19 +230,48 @@
         }
         const renameSurfaces = [...document.querySelectorAll('[role="dialog"],mat-dialog-container,.cdk-overlay-pane')].filter(el => root.visible?.(el));
         const dialogInputs = renameSurfaces.flatMap(surface => [...surface.querySelectorAll('input:not([type="file"]),[contenteditable="true"]')]).filter(el => root.visible?.(el));
-        const inputs = [...new Set(dialogInputs.length ? dialogInputs : [...document.querySelectorAll('input:not([type="file"]),[contenteditable="true"]')].filter(el => root.visible?.(el)))];
+        const tileInputs = [...(tile.querySelectorAll?.('input:not([type="file"]),[contenteditable="true"]') || [])].filter(el => root.visible?.(el));
+        const allInputs = [...document.querySelectorAll('input:not([type="file"]),[contenteditable="true"]')].filter(el => root.visible?.(el));
+        const nameMatches = allInputs.filter(el => {
+          const current = String(el.value ?? el.innerText ?? el.textContent ?? "").replace(/\s+/g, " ").trim();
+          const label = String(root.accessibleName?.(el) || el.getAttribute?.("aria-label") || el.getAttribute?.("placeholder") || "").replace(/\s+/g, " ").trim();
+          return normalizeTitle(current) === normalizeTitle(title) || /(?:rename|asset name|file name|đổi tên|tên tệp|tên nội dung)/i.test(label);
+        });
+        const titleValueInputs = allInputs.filter(el => normalizeTitle(el.value ?? el.innerText ?? el.textContent ?? "") === normalizeTitle(title));
+        const explicitNameLabels = allInputs.filter(el => /(?:rename|new name|asset name|file name|đổi tên|tên mới|tên tệp|tên nội dung)/i.test(String(root.accessibleName?.(el) || el.getAttribute?.("aria-label") || el.getAttribute?.("placeholder") || "")));
+        const scopedInputs = titleValueInputs.length ? titleValueInputs
+          : explicitNameLabels.length ? explicitNameLabels
+            : dialogInputs.length === 1 ? dialogInputs
+              : tileInputs.length === 1 ? tileInputs
+                : nameMatches;
+        const inputs = [...new Set(scopedInputs)];
         if (inputs.length !== 1) throw this.error(inputs.length ? "FLOW_RENAME_INPUT_AMBIGUOUS" : "FLOW_RENAME_INPUT_MISSING", "Flow did not expose one unique editable title field; inspect Flow before retrying.", false, true);
         const input = inputs[0];
-        if (input.isContentEditable) input.textContent = newName;
-        else { input.value = newName; input.dispatchEvent(new Event("input", { bubbles: true })); }
-        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-        input.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true }));
+        if (typeof root.setEditable !== "function") throw this.error("FLOW_RENAME_INPUT_UNAVAILABLE", "Flow's framework-aware title editor is unavailable; no rename was committed.", false, true);
+        root.setEditable(input, newName);
+        const enteredTitle = String(input.value ?? input.innerText ?? input.textContent ?? "").replace(/\s+/g, " ").trim();
+        if (normalizeTitle(enteredTitle) !== normalizeTitle(newName) || input.getAttribute?.("aria-invalid") === "true") {
+          throw this.error("FLOW_RENAME_INPUT_UNCONFIRMED", `Flow did not accept the requested title "${newName}" in its rename editor.`, false, false);
+        }
+        const owningSurface = renameSurfaces.find(surface => surface.contains?.(input)) || tile;
+        const commitLabels = /^(?:save|rename|done|ok|lưu|đổi tên|xong|hoàn tất)$/i;
+        const commitControls = [...(owningSurface?.querySelectorAll?.('button,[role="button"]') || [])].filter(button => {
+          if (!root.visible?.(button) || button.disabled || button.getAttribute?.("aria-disabled") === "true") return false;
+          const label = String(root.accessibleName?.(button) || button.getAttribute?.("aria-label") || button.innerText || button.textContent || "").replace(/\s+/g, " ").trim();
+          return commitLabels.test(label) || root.matchesFlowUiRegex?.(label, commitLabels) === true;
+        });
+        if (commitControls.length > 1) throw this.error("FLOW_RENAME_COMMIT_AMBIGUOUS", "Flow exposed more than one possible save action for this asset rename; no save action was clicked.", false, true);
+        if (commitControls.length === 1) commitControls[0].click();
+        else {
+          input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+          input.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true, cancelable: true }));
+        }
         const deadline = Date.now() + Math.min(10_000, Number(command.timeoutMs) || 10_000);
         let renamed = false;
         while (Date.now() < deadline) {
           const current = [...document.querySelectorAll("flow-grid-tile-container")].find(candidate => String(root.mediaId?.(candidate) || "").toLowerCase() === String(tileId).toLowerCase());
-          const currentTitle = String(current?.getAttribute("aria-label") || current?.getAttribute("title") || "").replace(/\s+/g, " ").trim();
-          if (currentTitle === newName) { renamed = true; break; }
+          const currentTitle = String(current?.getAttribute("aria-label") || current?.getAttribute("title") || root.accessibleName?.(current) || current?.innerText || current?.textContent || "").replace(/\s+/g, " ").trim();
+          if (current && String(root.mediaId?.(current) || "").toLowerCase() === String(tileId).toLowerCase() && normalizeTitle(currentTitle) === normalizeTitle(newName)) { renamed = true; break; }
           await root.wait?.(250);
         }
         if (!renamed) throw this.error("FLOW_RENAME_UNCONFIRMED", `Flow did not confirm that "${title}" was renamed to "${newName}". Inspect the library before retrying.`, false, true);

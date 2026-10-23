@@ -15,7 +15,10 @@
     let pickerSelectionOrder = [];
     let pickerFlowLoading = false;
     let pickerFlowScanned = false;
-    let pickerSession = 0;
+    let pickerProjectId = null;
+    let pendingPreviousProjectId = null;
+    let pickerProjectEpoch = 0;
+    const flowAssetCacheByProject = new Map();
     let pickerVisibleLimit = 20;
     let pickerScanLimit = 120;
     let pickerScannedCount = 0;
@@ -165,7 +168,7 @@
             pickerSelectionOrder = pickerSelectionOrder.filter(item => item !== selectedReference);
           } else if (selectedCount() < selectionLimit()) {
             const selectedReference = {
-              source: "flow", id: assetId, name: asset.name,
+              source: "flow", projectId: pickerProjectId, id: assetId, name: asset.name,
               assetName: `asset:${asset.name}`, expectedId: assetId, thumbnailUrl: asset.thumbnailUrl || ""
             };
             pickerFlowSelection.set(assetId, selectedReference);
@@ -178,6 +181,7 @@
       if (flowMessage) {
         flowMessage.hidden = !pickerFlowLoading && list.length > 0;
         if (pickerFlowLoading) flowMessage.textContent = "Đang quét thư viện ảnh Flow...";
+        else if (!pickerProjectId) flowMessage.textContent = "Đang chờ xác định dự án Flow...";
         else if (!list.length) flowMessage.textContent = query ? "Không tìm thấy ảnh khớp." : "Không tìm thấy ảnh sẵn sàng trong thư viện Flow. Hãy mở dự án Flow rồi quét lại.";
       }
     }
@@ -195,14 +199,27 @@
       renderFlowPickerAssets();
     }
 
-    async function loadFlowPickerAssets() {
+    async function loadFlowPickerAssets({ background = false } = {}) {
       if (pickerFlowLoading) return;
-      const session = pickerSession;
+      const projectId = pickerProjectId;
+      if (!projectId) {
+        pickerFlowAssets = [];
+        pickerFlowScanned = false;
+        if (flowMessage) {
+          flowMessage.hidden = false;
+          flowMessage.textContent = "Đang chờ xác định dự án Flow...";
+        }
+        renderFlowPickerAssets();
+        return;
+      }
+      const projectEpoch = pickerProjectEpoch;
       pickerFlowLoading = true;
-      pickerFlowScanned = false;
+      if (!background || pickerFlowAssets.length === 0) pickerFlowScanned = false;
       if (flowMessage) {
         flowMessage.hidden = false;
-        flowMessage.textContent = "Đang quét thư viện ảnh Flow...";
+        flowMessage.textContent = background && pickerFlowAssets.length
+          ? "Đang cập nhật thư viện ảnh Flow..."
+          : "Đang quét thư viện ảnh Flow...";
       }
       const refresh = document.querySelector("#refPickerRefresh");
       if (refresh) refresh.disabled = true;
@@ -210,25 +227,84 @@
       try {
         const result = await dispatchFlowOperation("flow.assets.list", { includeIncomplete: true, maxItems: pickerScanLimit });
         const assets = Array.isArray(result) ? result : (result?.assets || []);
-        if (session !== pickerSession) return;
+        if (projectEpoch !== pickerProjectEpoch || projectId !== pickerProjectId) return;
         pickerScannedCount = assets.length;
         pickerFlowAssets = assets.filter(asset => asset && asset.kind === "image" && typeof asset.name === "string");
+        flowAssetCacheByProject.set(projectId, { assets: pickerFlowAssets, scannedCount: assets.length });
+        while (flowAssetCacheByProject.size > 5) flowAssetCacheByProject.delete(flowAssetCacheByProject.keys().next().value);
         pickerVisibleLimit = 20;
         pickerFlowScanned = true;
         renderFlowPickerAssets();
       } catch (error) {
-        if (session !== pickerSession) return;
-        pickerFlowAssets = [];
-        pickerScannedCount = 0;
+        if (projectEpoch !== pickerProjectEpoch || projectId !== pickerProjectId) return;
+        if (!background || pickerFlowAssets.length === 0) {
+          pickerFlowAssets = [];
+          pickerScannedCount = 0;
+        }
         if (flowMessage) {
           flowMessage.hidden = false;
           flowMessage.textContent = `${error.message || "Không thể tải ảnh Flow."} Mở Flow ở mục All media rồi bấm Quét lại.`;
         }
       } finally {
-        if (session !== pickerSession) return;
+        if (projectEpoch !== pickerProjectEpoch || projectId !== pickerProjectId) return;
         pickerFlowLoading = false;
         if (refresh) refresh.disabled = false;
         renderFlowPickerAssets();
+      }
+    }
+
+    function setProjectContext(projectId) {
+      const nextProjectId = typeof projectId === "string" && projectId.trim() ? projectId.trim() : null;
+      const previousProjectId = pickerProjectId || pendingPreviousProjectId;
+      if (nextProjectId === pickerProjectId && !pendingPreviousProjectId) {
+        if (!nextProjectId && flowMessage) {
+          flowMessage.hidden = false;
+          flowMessage.textContent = "Đang chờ xác định dự án Flow...";
+        }
+        return;
+      }
+
+      if (previousProjectId !== nextProjectId) {
+        for (const type of ["image", "video"]) {
+          const list = referencesFor(type);
+          const kept = list.filter(item => item.source !== "flow" || item.projectId === nextProjectId);
+          if (kept.length !== list.length) {
+            list.splice(0, list.length, ...kept);
+            renderReferenceCards(type);
+          }
+        }
+        let removedFrameSource = false;
+        for (let index = frameSources.length - 1; index >= 0; index--) {
+          const source = frameSources[index];
+          if (source.source === "flow" && source.projectId !== nextProjectId) {
+            frameSources.splice(index, 1);
+            removedFrameSource = true;
+          }
+        }
+        if (removedFrameSource) onFrameSourcesChanged?.([...frameSources]);
+      }
+
+      pickerProjectId = nextProjectId;
+      pendingPreviousProjectId = null;
+      pickerProjectEpoch++;
+      pickerFlowLoading = false;
+      pickerFlowSelection.clear();
+      pickerSelectionOrder = pickerSelectionOrder.filter(entry => entry.source !== "flow");
+      const cachedProjectAssets = nextProjectId ? flowAssetCacheByProject.get(nextProjectId) : null;
+      pickerFlowAssets = Array.isArray(cachedProjectAssets?.assets) ? [...cachedProjectAssets.assets] : [];
+      pickerScannedCount = Number(cachedProjectAssets?.scannedCount) || 0;
+      pickerFlowScanned = Boolean(cachedProjectAssets);
+      const refresh = document.querySelector("#refPickerRefresh");
+      if (refresh) refresh.disabled = false;
+      updatePickerCount();
+
+      // Warm the newly entered project's cache before the user opens the picker.
+      // A missing project ID deliberately clears the gallery instead of showing
+      // assets from the last project while context is loading or unavailable.
+      if (nextProjectId) void loadFlowPickerAssets({ background: true });
+      else if (flowMessage) {
+        flowMessage.hidden = false;
+        flowMessage.textContent = "Đang chờ xác định dự án Flow...";
       }
     }
 
@@ -270,18 +346,17 @@
     }
 
     function open(type, purpose = "references") {
-      pickerSession++;
       pickerType = type === "image" ? "image" : "video";
       pickerPurpose = purpose === "frames" ? "frames" : "references";
-      pickerFlowAssets = [];
+      const cachedProjectAssets = pickerProjectId ? flowAssetCacheByProject.get(pickerProjectId) : null;
+      pickerFlowAssets = Array.isArray(cachedProjectAssets?.assets) ? [...cachedProjectAssets.assets] : [];
       pickerVisibleLimit = 20;
       pickerScanLimit = 120;
-      pickerScannedCount = 0;
+      pickerScannedCount = Number(cachedProjectAssets?.scannedCount) || 0;
       pickerFlowSelection = new Map();
       pickerLocalFiles = [];
       pickerSelectionOrder = [];
-      pickerFlowLoading = false;
-      pickerFlowScanned = false;
+      pickerFlowScanned = Boolean(cachedProjectAssets);
       searchInput.value = "";
       localList.replaceChildren();
       document.querySelector("#refPickerTitle").textContent = pickerPurpose === "frames" ? t("framePickerTitle", "Chọn ảnh nguồn Frames") : t("referencePickerTitle", "Chọn / Tải ảnh lên");
@@ -294,15 +369,14 @@
       document.querySelector("#refPickerConfirm").textContent = pickerPurpose === "frames" ? t("framePickerConfirm", "Thêm nguồn") : t("referencePickerConfirm", "Xác nhận");
       modal.hidden = false;
       document.body.style.overflow = "hidden";
-      // Local upload is the common path and must stay responsive even when a
-      // Flow project contains a very large gallery. Scan Flow only on demand.
+      // Show the cached same-project gallery immediately, or scan it when the
+      // user visits the Flow tab if project-entry warm-up has not finished.
       setPickerTab("upload");
       updatePickerCount();
       document.querySelector("#refPickerClose").focus();
     }
 
     function close({ confirmed = false } = {}) {
-      pickerSession++;
       pickerFlowLoading = false;
       const refresh = document.querySelector("#refPickerRefresh");
       if (refresh) refresh.disabled = false;
@@ -365,6 +439,55 @@
     };
     modal.onclick = event => { if (event.target === modal) close(); };
     document.addEventListener("keydown", event => { if (event.key === "Escape" && !modal.hidden) close(); });
+    async function confirmProjectContext(context) {
+      const expectedProjectId = typeof context?.projectId === "string" && context.projectId.trim()
+        ? context.projectId.trim().toLowerCase()
+        : null;
+      if (!expectedProjectId) {
+        setProjectContext(null);
+        return;
+      }
+      if (expectedProjectId === pickerProjectId) return;
+      // Clear the old project's gallery while the live Flow context is checked.
+      pendingPreviousProjectId = pickerProjectId || pendingPreviousProjectId;
+      pickerProjectId = null;
+      pickerProjectEpoch++;
+      pickerFlowLoading = false;
+      pickerFlowAssets = [];
+      pickerFlowScanned = false;
+      pickerScannedCount = 0;
+      pickerFlowSelection.clear();
+      pickerSelectionOrder = pickerSelectionOrder.filter(entry => entry.source !== "flow");
+      renderFlowPickerAssets();
+      if (flowMessage) {
+        flowMessage.hidden = false;
+        flowMessage.textContent = "Đang xác minh dự án Flow...";
+      }
+      const verificationEpoch = pickerProjectEpoch;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        if (verificationEpoch !== pickerProjectEpoch) return;
+        try {
+          const liveContext = await dispatchFlowOperation("flow.context");
+          const confirmedProjectId = typeof liveContext?.projectId === "string" ? liveContext.projectId.trim().toLowerCase() : "";
+          if (verificationEpoch !== pickerProjectEpoch) return;
+          if (liveContext?.isProjectEditor === true && confirmedProjectId === expectedProjectId) {
+            setProjectContext(confirmedProjectId);
+            return;
+          }
+        } catch {
+          // The route can be announced before Flow's project editor is ready.
+        }
+        if (attempt < 4) await new Promise(resolve => setTimeout(resolve, 350));
+      }
+      if (verificationEpoch === pickerProjectEpoch) setProjectContext(null);
+    }
+
+    chrome.storage?.onChanged?.addListener?.((changes, area) => {
+      if (area !== "session" || !Object.prototype.hasOwnProperty.call(changes, "targetFlowContext")) return;
+      void confirmProjectContext(changes.targetFlowContext?.newValue);
+    });
+    const initialContext = chrome.storage?.session?.get?.("targetFlowContext");
+    if (initialContext?.then) void initialContext.then(stored => confirmProjectContext(stored?.targetFlowContext));
     document.querySelector("#refPickerConfirm").onclick = () => {
       const list = referencesFor(pickerType);
       const pending = [...pickerSelectionOrder].map(entry => entry.source === "local"
@@ -410,6 +533,7 @@
     }
 
     return {
+      setProjectContext,
       getReferences: referencesFor,
       getFrameSources: () => [...frameSources],
       removeFrameSource: source => {

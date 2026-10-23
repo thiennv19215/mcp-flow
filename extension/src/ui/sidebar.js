@@ -676,17 +676,46 @@
     selects.forEach(sel => {
       if (!sel) return;
       const currentVal = sel.value;
+      const currentName = sel.selectedOptions?.[0]?.dataset?.characterName || sel.selectedOptions?.[0]?.textContent?.replace(/^👤\s*/, "").trim() || "";
+      const restoreLegacyName = Boolean(currentVal && !currentVal.startsWith("flow-character:") && !currentVal.startsWith("flow-character-name:") && currentName);
+      let legacySelectionRestored = false;
       sel.innerHTML = `<option value="">${t("sidebar.characterNone")}</option>`;
       currentCharacters.forEach(c => {
         const name = typeof c === "string" ? c : c.name;
         if (!name) return;
         const opt = document.createElement("option");
-        opt.value = name;
+        const uuid = typeof c === "object" && typeof c.uuid === "string" ? c.uuid.trim().toLowerCase() : "";
+        // Preserve the selected Flow character entity, not just its display
+        // name. Names can be duplicated or renamed between list refreshes.
+        opt.value = uuid ? `flow-character:${uuid}` : `flow-character-name:${name}`;
+        opt.dataset.characterName = name;
+        if (uuid) opt.dataset.characterUuid = uuid;
         opt.textContent = `👤 ${name}`;
-        if (opt.value === currentVal) opt.selected = true;
+        const restoreByIdentity = opt.value === currentVal;
+        const restoreByLegacyName = restoreLegacyName && !legacySelectionRestored && name === currentName;
+        if (restoreByIdentity || restoreByLegacyName) {
+          opt.selected = true;
+          if (restoreByLegacyName) legacySelectionRestored = true;
+        }
         sel.appendChild(opt);
       });
     });
+  }
+
+  function selectedFlowCharacter(select) {
+    const option = select?.selectedOptions?.[0];
+    const name = String(option?.dataset?.characterName || "").trim();
+    if (!name || !option?.value) return null;
+    const id = String(option.dataset.characterUuid || "").trim();
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id) ? id.toLowerCase() : "";
+    return {
+      name,
+      attachment: {
+        assetName: `character:${name}`,
+        kind: "character",
+        ...(uuid ? { expectedId: uuid } : {}),
+      },
+    };
   }
 
   // Toby-style views with roving focus for keyboard users.
@@ -1328,16 +1357,15 @@
       setFeedback(t("sidebar.multiPromptRefsMissing"), false);
       return;
     }
-    const character = document.querySelector("#selectCharImage").value;
+    const selectedCharacter = selectedFlowCharacter(document.querySelector("#selectCharImage"));
+    const character = selectedCharacter?.name || "";
 
     const commonAttachments = [];
     const referenceAttachments = [];
     const activeImageReferences = referenceMode === "none" ? []
       : referenceMode === "mention" ? mentionResolution.usedReferences
         : refFilesImage;
-    if (character) {
-      commonAttachments.push({ assetName: `character:${character}` });
-    }
+    if (selectedCharacter) commonAttachments.push(selectedCharacter.attachment);
 
     try {
       if (btn) btn.disabled = true;
@@ -1432,8 +1460,8 @@
       ? document.querySelector("#selectResolutionVideo").value : undefined;
     const count = getVideoQuantity(modelRule, document.querySelector("#selectCountVideo")?.value);
     const mode = document.querySelector("#selectModeVideo").value || "ingredients";
-    const selectedCharacter = document.querySelector("#selectCharVideo").value;
-    const character = mode === "frames" ? "" : selectedCharacter;
+    const selectedCharacter = mode === "frames" ? null : selectedFlowCharacter(document.querySelector("#selectCharVideo"));
+    const character = selectedCharacter?.name || "";
     const chainVideo = document.querySelector("#chainVideoFromPrevious")?.checked === true;
     if (chainVideo && count !== 1) {
       setFeedback(t("sidebar.videoChainNeedsSingleVariant"), false);
@@ -1477,9 +1505,7 @@
 
     const commonAttachments = [];
     const referenceAttachments = [];
-    if (character) {
-      commonAttachments.push({ assetName: `character:${character}` });
-    }
+    if (selectedCharacter) commonAttachments.push(selectedCharacter.attachment);
 
     try {
       if (btn) btn.disabled = true;

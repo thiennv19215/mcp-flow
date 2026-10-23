@@ -910,8 +910,90 @@ function flowResultMedia(value) {
   if (value.result && typeof value.result === "object") return flowResultMedia(value.result);
   return [];
 }
-const flowDownloadTitleKey = value => String(value || "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
-async function waitForQueueFlowDownload(beforeIds, title, timeoutMs = 12 * 60_000) {
+const flowDownloadTitleKey = value => String(value || "")
+  .split(/[\\/]/).pop()
+  .replace(/\.(?:png|jpe?g|webp|gif|mp4|webm|mov|zip)$/i, "")
+  .toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+const pendingQueueFilenameOverrides = [];
+function flowDownloadBasename(value) {
+  return String(value || "").split(/[\\/]/).pop().trim();
+}
+function safeQueueFilenameStem(value) {
+  let stem = flowDownloadBasename(value)
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
+    .replace(/[. ]+$/g, "");
+  if (!stem || stem === "." || stem === "..") return "";
+  if (/^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(stem)) stem = `_${stem}`;
+  return stem;
+}
+function queueDownloadExtension(downloadItem) {
+  const nameExtension = flowDownloadBasename(downloadItem?.filename).match(/\.([a-z0-9]{1,10})$/i)?.[0];
+  if (nameExtension && !/\.html?$/i.test(nameExtension)) return nameExtension.toLowerCase();
+  const mime = String(downloadItem?.mime || "").split(";")[0].trim().toLowerCase();
+  const byMime = new Map([
+    ["image/jpeg", ".jpg"], ["image/png", ".png"], ["image/webp", ".webp"], ["image/gif", ".gif"],
+    ["video/mp4", ".mp4"], ["video/webm", ".webm"], ["video/quicktime", ".mov"],
+  ]);
+  if (/\.html?$/i.test(nameExtension || "") && !byMime.has(mime)) return "";
+  return byMime.get(mime) || nameExtension?.toLowerCase() || "";
+}
+function armQueueFilenameOverride({ jobId, flowMediaId, title, fileStem, flowTabId, flowProjectId }) {
+  const stem = safeQueueFilenameStem(fileStem);
+  if (!stem || !String(jobId || "").trim() || !Number.isInteger(flowTabId) || !flowMediaId) return null;
+  const ticket = {
+    jobId: String(jobId || ""),
+    flowMediaId: String(flowMediaId),
+    title: String(title || ""),
+    titleKey: flowDownloadTitleKey(title),
+    fileStem: stem,
+    flowTabId,
+    flowProjectId: String(flowProjectId || ""),
+    armedAt: Date.now(),
+    expiresAt: Date.now() + 5 * 60_000,
+    downloadId: null,
+    assignedFilename: null,
+  };
+  pendingQueueFilenameOverrides.push(ticket);
+  return ticket;
+}
+function disarmQueueFilenameOverride(ticket) {
+  const index = pendingQueueFilenameOverrides.indexOf(ticket);
+  if (index >= 0) pendingQueueFilenameOverrides.splice(index, 1);
+}
+chrome.downloads?.onDeterminingFilename?.addListener((downloadItem, suggest) => {
+  const now = Date.now();
+  for (let i = pendingQueueFilenameOverrides.length - 1; i >= 0; i--) {
+    if (pendingQueueFilenameOverrides[i].expiresAt < now) pendingQueueFilenameOverrides.splice(i, 1);
+  }
+  if (downloadItem?.byExtensionId && downloadItem.byExtensionId !== chrome.runtime.id) return;
+  if (!Number.isInteger(downloadItem?.id) || !Number.isInteger(downloadItem?.tabId)) return;
+  const sourceUrl = `${downloadItem.url || ""} ${downloadItem.finalUrl || ""} ${downloadItem.referrer || ""}`;
+  const flowOrigin = flowUrl(downloadItem.url) || flowUrl(downloadItem.finalUrl) || flowUrl(downloadItem.referrer);
+  if (!flowOrigin) return;
+  const titleKey = flowDownloadTitleKey(downloadItem.filename);
+  if (!titleKey) return;
+  const mediaIdCandidates = pendingQueueFilenameOverrides.filter(ticket =>
+    sourceUrl.toLowerCase().includes(ticket.flowMediaId.toLowerCase())
+  );
+  // The browser event has no Flow media-id field. Only rename when the URL
+  // context itself proves which queued Flow media caused this download.
+  if (mediaIdCandidates.length !== 1) return;
+  const sourceProjectId = sourceUrl.match(/\/project\/([0-9a-f-]{36})(?:[/?#\s]|$)/i)?.[1]?.toLowerCase();
+  const candidates = pendingQueueFilenameOverrides.filter(ticket => {
+    if (ticket.flowTabId !== downloadItem.tabId || ticket.titleKey !== titleKey) return false;
+    if (sourceProjectId && ticket.flowProjectId && sourceProjectId !== ticket.flowProjectId.toLowerCase()) return false;
+    return ticket === mediaIdCandidates[0];
+  });
+  if (candidates.length !== 1) return;
+  const ticket = candidates[0];
+  const extension = queueDownloadExtension(downloadItem);
+  if (!extension) return;
+  ticket.downloadId = downloadItem.id;
+  ticket.assignedFilename = `${ticket.fileStem}${extension}`;
+  disarmQueueFilenameOverride(ticket);
+  suggest({ filename: ticket.assignedFilename, conflictAction: "uniquify" });
+});
+async function waitForQueueFlowDownload(beforeIds, title, timeoutMs = 12 * 60_000, filenameTicket = null) {
   if (!chrome.downloads?.search) throw Object.assign(new Error("Chrome download tracking is unavailable; the generated media remains in Flow."), {
     code: "FLOW_DOWNLOAD_TRACKING_UNAVAILABLE", outcomeUnknown: false, outcome_unknown: false,
   });
@@ -923,14 +1005,25 @@ async function waitForQueueFlowDownload(beforeIds, title, timeoutMs = 12 * 60_00
     const newItems = items.filter(item => !beforeIds.has(item.id) && (flowUrl(item.referrer) || flowUrl(item.url) || flowUrl(item.finalUrl)));
     lastNew = newItems;
     const matching = titleKey
-      ? newItems.filter(item => flowDownloadTitleKey(item.filename?.split(/[\\/]/).pop()).includes(titleKey))
+      ? newItems.filter(item => flowDownloadTitleKey(item.filename) === titleKey)
       : [];
-    if (matching.length > 1 || (!matching.length && newItems.length > 1)) {
+    if (newItems.length > 1 || matching.length > 1) {
       throw Object.assign(new Error(`Chrome reported multiple possible Flow downloads for "${title}"; refusing to attach an ambiguous file to this queue job. The media remains in Flow.`), {
         code: "FLOW_DOWNLOAD_AMBIGUOUS", outcomeUnknown: false, outcome_unknown: false,
       });
     }
-    const candidates = matching.length === 1 ? matching : newItems.length === 1 ? newItems : [];
+    if (Number.isInteger(filenameTicket?.downloadId)) {
+      const exact = newItems.find(item => item.id === filenameTicket.downloadId);
+      if (exact?.state === "interrupted") throw Object.assign(new Error(`Chrome download failed for "${title}": ${exact.error || "unknown error"}. The media remains in Flow.`), {
+        code: "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
+      });
+      if (exact?.state === "complete" && exact.filename) return { id: exact.id, filename: exact.filename };
+      await new Promise(resolve => setTimeout(resolve, 750));
+      continue;
+    }
+    // A lone new Flow download is not proof that it belongs to this task. Only
+    // accept a unique filename match; otherwise leave the generated result in Flow.
+    const candidates = newItems.length === 1 && matching.length === 1 ? matching : [];
     const interrupted = candidates.find(item => item.state === "interrupted");
     if (interrupted) throw Object.assign(new Error(`Chrome download failed for "${title}": ${interrupted.error || "unknown error"}. The media remains in Flow.`), {
       code: "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
@@ -945,7 +1038,7 @@ async function waitForQueueFlowDownload(beforeIds, title, timeoutMs = 12 * 60_00
     code: "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
   });
 }
-async function downloadQueueMedia(media, outputDir, fileStem, quality, invoke, hooks, sceneNumbers = []) {
+async function downloadQueueMedia(media, outputDir, fileStem, quality, invoke, hooks, sceneNumbers = [], jobId = "", flowTabId, flowProjectId = "") {
   if (!chrome.downloads?.search) throw Object.assign(new Error("Chrome download tracking is unavailable; the generated media remains in Flow."), {
     code: "FLOW_DOWNLOAD_TRACKING_UNAVAILABLE", outcomeUnknown: false, outcome_unknown: false,
   });
@@ -953,40 +1046,63 @@ async function downloadQueueMedia(media, outputDir, fileStem, quality, invoke, h
   try {
     for (const [index, item] of media.entries()) {
       const title = String(item?.title || item?.name || "").trim();
-      if (!title) throw Object.assign(new Error("Flow generated media without a title, so its download could not be matched safely. The media remains in Flow."), {
+      const flowMediaId = String(item?.id || "").trim();
+      if (!title || !flowMediaId || flowMediaId.startsWith("title:")) throw Object.assign(new Error("Flow generated media without a verified task-owned media ID and title, so its download could not be matched safely. The media remains in Flow."), {
         code: "FLOW_DOWNLOAD_ASSET_TITLE_MISSING", outcomeUnknown: false, outcome_unknown: false,
       });
-      const before = await chrome.downloads.search({ orderBy: ["-startTime"], limit: 100 });
-      const beforeIds = new Set(before.map(download => download.id));
-      await hooks.progress({ phase: "download", message: `Downloading ${title} from Flow…`, percent: 90 + Math.floor(index * 9 / Math.max(1, media.length)) });
-      let triggered;
-      try {
-        triggered = await invoke("flow.asset.download", { id: item.id, name: title, quality });
-      } catch (cause) {
-        throw Object.assign(new Error(`Flow generated "${title}", but did not start its download: ${String(cause?.message || cause)}. The media remains in Flow.`), {
-          code: cause?.code || "FLOW_DOWNLOAD_TRIGGER_FAILED", outcomeUnknown: false, outcome_unknown: false,
-        });
-      }
-      if (!triggered?.downloadTriggered) throw Object.assign(new Error(`Flow generated "${title}", but did not confirm that its download started. The media remains in Flow.`), {
-        code: "FLOW_DOWNLOAD_TRIGGER_FAILED", outcomeUnknown: false, outcome_unknown: false,
+      if (media.slice(0, index).some(previous => String(previous?.id || "").toLowerCase() === flowMediaId.toLowerCase())) throw Object.assign(new Error(`Flow returned duplicate task media identity "${flowMediaId}"; refusing to download the same or ambiguous result twice. The media remains in Flow.`), {
+        code: "FLOW_DOWNLOAD_MEDIA_ID_DUPLICATE", outcomeUnknown: false, outcome_unknown: false,
       });
-      let download;
-      try {
-        download = await waitForQueueFlowDownload(beforeIds, title, quality === "upscaled" ? 12 * 60_000 : 3 * 60_000);
-      } catch (cause) {
-        throw Object.assign(new Error(String(cause?.message || cause)), {
-          code: cause?.code || "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
-        });
-      }
       const sceneNumber = Number(sceneNumbers[index]);
       const outputStem = Number.isSafeInteger(sceneNumber) && sceneNumber > 0
         ? `scene-${String(sceneNumber).padStart(2, "0")}`
         : media.length > 1 ? `${fileStem}-v${index + 1}` : fileStem;
-      browserDownloads.push({
-        ...download,
-        title,
-        fileStem: outputStem,
-      });
+      const before = await chrome.downloads.search({ orderBy: ["-startTime"], limit: 100 });
+      const beforeIds = new Set(before.map(download => download.id));
+      let filenameTicket = null;
+      try {
+        await hooks.progress({ phase: "download", message: `Downloading ${title} from Flow…`, percent: 90 + Math.floor(index * 9 / Math.max(1, media.length)) });
+        filenameTicket = armQueueFilenameOverride({
+          jobId, flowMediaId, title, fileStem: outputStem, flowTabId, flowProjectId,
+        });
+        if (!filenameTicket) throw Object.assign(new Error(`Could not safely arm the requested filename for task ${jobId || "(unknown)"} and Flow media ${flowMediaId}; no download was started.`), {
+          code: "FLOW_DOWNLOAD_FILENAME_ARM_FAILED", outcomeUnknown: false, outcome_unknown: false,
+        });
+        let triggered;
+        try {
+          triggered = await invoke("flow.asset.download", { id: item.id, name: title, quality });
+        } catch (cause) {
+          throw Object.assign(new Error(`Flow generated "${title}", but did not start its download: ${String(cause?.message || cause)}. The media remains in Flow.`), {
+            code: cause?.code || "FLOW_DOWNLOAD_TRIGGER_FAILED", outcomeUnknown: false, outcome_unknown: false,
+          });
+        }
+        if (!triggered?.downloadTriggered) throw Object.assign(new Error(`Flow generated "${title}", but did not confirm that its download started. The media remains in Flow.`), {
+          code: "FLOW_DOWNLOAD_TRIGGER_FAILED", outcomeUnknown: false, outcome_unknown: false,
+        });
+        let download;
+        try {
+          download = await waitForQueueFlowDownload(beforeIds, title, quality === "upscaled" ? 12 * 60_000 : 3 * 60_000, filenameTicket);
+        } catch (cause) {
+          throw Object.assign(new Error(String(cause?.message || cause)), {
+            code: cause?.code || "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
+          });
+        }
+        if (filenameTicket.downloadId !== download.id || !filenameTicket.assignedFilename) throw Object.assign(new Error(`Chrome downloaded Flow media "${title}" but its exact task/media filename assignment could not be confirmed; the original browser filename was preserved. The generated media remains in Flow.`), {
+          code: "FLOW_DOWNLOAD_FILENAME_UNCONFIRMED", outcomeUnknown: false, outcome_unknown: false,
+        });
+        browserDownloads.push({
+          ...download,
+          // `id` remains Chrome's download ID for the backend's chunk relay.
+          downloadId: download.id,
+          flowMediaId,
+          taskId: String(jobId || "").trim() || undefined,
+          title,
+          filenameOverrideApplied: true,
+          fileStem: outputStem,
+        });
+      } finally {
+        if (filenameTicket) disarmQueueFilenameOverride(filenameTicket);
+      }
     }
   } catch (error) {
     error.browserDownloads = browserDownloads;
@@ -1004,8 +1120,8 @@ async function withQueueDownloads(job, payload, operationResult, invoke, hooks) 
   if (!media.length) return operationResult;
   // Jobs created directly from the sidebar do not have a native output_dir or
   // file_stem. They still need the same success -> download -> return flow as
-  // MCP jobs, so use a safe metadata stem while Chrome keeps the Flow title as
-  // the visible downloaded filename.
+  // MCP jobs, so use a safe metadata stem for both the browser download and
+  // the later local copy.
   const kind = payload.type === "video" || params.type === "video" ? "video" : "image";
   const fallbackLabel = job.label || payload.prompt || params.prompt || `flow-${kind}`;
   const fallbackStem = String(fallbackLabel)
@@ -1022,7 +1138,7 @@ async function withQueueDownloads(job, payload, operationResult, invoke, hooks) 
     const sceneNumbers = Array.isArray(operationResult?.sceneNumbers) && operationResult.sceneNumbers.length === media.length
       ? operationResult.sceneNumbers
       : [];
-    const browserDownloads = await downloadQueueMedia(media, outputDir || "", fileStem, params.download_quality || payload.download_quality || "original", invoke, hooks, sceneNumbers);
+    const browserDownloads = await downloadQueueMedia(media, outputDir || "", fileStem, params.download_quality || payload.download_quality || "original", invoke, hooks, sceneNumbers, job.id, job.metadata?.flowTabId, job.metadata?.flowProjectId);
     return { ...operationResult, browserDownloads };
   } catch (error) {
     // The media already exists in Flow, but the requested hand-off did not
@@ -1056,6 +1172,7 @@ async function runExtensionFlowJob(job, hooks) {
   if (job.metadata?.flowTabId !== pinnedTabId || !Object.prototype.hasOwnProperty.call(job.metadata || {}, "flowProjectId")) {
     await flowJobQueue.updateMetadata(job.id, { flowTabId: pinnedTabId, flowProjectId: pinnedProjectId });
   }
+  job.metadata = { ...(job.metadata || {}), flowTabId: pinnedTabId, flowProjectId: pinnedProjectId };
   const invokeOnce = (name, body) => execute(null, "flow.dom.execute", [{
       op: "flowOperation",
       name,

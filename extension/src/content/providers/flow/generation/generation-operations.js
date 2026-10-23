@@ -499,6 +499,14 @@
         const deadline = Date.now() + Math.max(1000, Math.min(15 * 60000, Number(payload.timeoutMs || 12 * 60000)));
         const correlationAttemptId = String(payload.correlationAttemptId || "");
         const correlationEntry = correlationAttemptId ? tiles.nativeFlowCorrelationMap().get(correlationAttemptId) : null;
+        if (!correlationEntry) {
+          throw this.error(
+            "FLOW_GENERATION_CORRELATION_UNAVAILABLE",
+            "Flow's task correlation receipt is missing, so the generated media cannot be safely matched to this task. The result was not selected or downloaded; inspect Flow before retrying.",
+            false,
+            true
+          );
+        }
         let priorProgress = "", lastTitleOnlyResult = "";
         let retriesLeft = Math.max(0, Math.min(3, Number(payload.retries ?? 1)));
         const retriedTiles = new Set();
@@ -543,15 +551,6 @@
               throw this.error("FLOW_GENERATION_FAILED", `Flow hiển thị thông báo lỗi: "${failureText}".`, false, false);
             }
 
-            if (correlationEntry && !correlationEntry.requestSeen && Date.now() - correlationEntry.armedAt >= 30000) {
-              correlationEntry.useTilesFallback = true;
-            }
-            if (correlationEntry && Date.now() - observeStartedAt >= 15000 && !correlationEntry.useTilesFallback) {
-              const candidateReceipt = tiles.nativeFlowCorrelationReceipt(correlationAttemptId);
-              const capturedCount = (candidateReceipt?.mediaIds || []).length + (candidateReceipt?.children || []).length;
-              if (capturedCount === 0) correlationEntry.useTilesFallback = true;
-            }
-            const strictCorrelation = correlationEntry && !correlationEntry.useTilesFallback;
             const receipt = correlationEntry ? tiles.nativeFlowCorrelationReceipt(correlationAttemptId) : null;
             if (receipt?.error) {
               const classified = root.classifyFlowError?.(receipt.error);
@@ -566,10 +565,28 @@
               throw this.error("FLOW_GENERATION_FAILED", `Flow báo cáo lỗi: ${errText}`, false, false);
             }
 
-            const correlatedIds = new Set([
+            const receiptMediaIds = [
               ...(receipt?.mediaIds || []),
-              ...(receipt?.children || []).flatMap(c => [c?.mediaId, c?.operationId]),
-            ].filter(id => typeof id === "string").map(id => id.toLowerCase()));
+              ...(receipt?.children || []).map(child => child?.mediaId),
+            ].filter(id => typeof id === "string" && id.trim());
+            if (apiResultReceipt && receiptMediaIds.length === 0) {
+              throw this.error(
+                "FLOW_GENERATION_MEDIA_ID_MISSING",
+                "Flow completed this generation response without exposing a task-owned media ID. The extension did not guess from the gallery or download a file; inspect the Flow result manually.",
+                false,
+                true
+              );
+            }
+
+            const correlatedIds = new Set(receiptMediaIds.map(id => id.toLowerCase()));
+            if (correlatedIds.size > expected) {
+              throw this.error(
+                "FLOW_GENERATION_MEDIA_ID_AMBIGUOUS",
+                `Flow correlated ${correlatedIds.size} media IDs to a task that requested ${expected} output(s). The extension did not choose a subset or download any file.`,
+                false,
+                true
+              );
+            }
 
             // Flow's main-world observer follows the submit and subsequent API
             // poll responses. Use its terminal receipt as the primary signal;
@@ -584,7 +601,7 @@
               !before.includes(item.id || `title:${item.title}`) &&
               !item.title.startsWith("fm-") &&
               (!kind || item.kind === kind || item.failed) &&
-              (!strictCorrelation || item.failed || (item.id && correlatedIds.has(item.id.toLowerCase())))
+              item.id && correlatedIds.has(item.id.toLowerCase())
             );
 
             const failed = fresh.filter(item => item.failed);
@@ -650,9 +667,7 @@
             const isEarly = Date.now() - observeStartedAt < 2000 && !renderObservedInFlight;
 
             if (!isEarly && ready.length >= expected) {
-              const picked = strictCorrelation
-                ? [...correlatedIds].map(id => ready.find(item => item.id?.toLowerCase() === id)).filter(Boolean).slice(0, expected)
-                : ready.slice(0, expected);
+              const picked = [...correlatedIds].map(id => ready.find(item => item.id?.toLowerCase() === id)).filter(Boolean);
               if (picked.length < expected) {
                 await root.wait?.(1000);
                 continue;
