@@ -1470,7 +1470,9 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
           const target = await captureFlowTargetMetadata();
           const jobs = materializeDraftJobs(draft).map(job => ({
             ...job,
-            metadata: { source: "extension", ...target, ...(job.metadata || {}) },
+            // The current tab/project target wins over any target metadata
+            // stored with the draft: a draft runs here and now.
+            metadata: { source: "extension", ...(job.metadata || {}), ...target },
           }));
           let snapshot;
           let runBatchId = null;
@@ -1483,7 +1485,8 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
             runBatchId = added[0]?.batch?.batchId || null;
             snapshot = await flowJobQueue.snapshot();
           }
-          const updated = await flowBatchDrafts.recordRun(draft.id, runBatchId);
+          // Bookkeeping must not misreport a successful enqueue as failed.
+          const updated = await flowBatchDrafts.recordRun(draft.id, runBatchId).catch(() => draft);
           snapshot = message.autoStart === false || snapshot.isPaused || snapshot.waitingForUser > 0
             ? snapshot
             : await flowJobQueue.resume();

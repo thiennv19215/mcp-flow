@@ -64,6 +64,30 @@ test('materializeDraftJobs remints chained ids and rewrites dependency edges wit
   assert.equal(draft.jobs[0].id, 'orig-a', 'the stored draft keeps its original ids');
 });
 
+test('concurrent saves both survive the ordered write chain', async () => {
+  const storage = memoryStorage();
+  const drafts = new FlowBatchDrafts({ storage });
+  const [a, b] = await Promise.all([
+    drafts.save({ label: 'A', jobs: [genJob('a')] }),
+    drafts.save({ label: 'B', jobs: [genJob('b')] }),
+  ]);
+  assert.notEqual(a.id, b.id);
+  assert.equal((await drafts.list()).length, 2);
+  const reopened = new FlowBatchDrafts({ storage });
+  assert.equal((await reopened.list()).length, 2, 'both drafts persisted, neither overwrote the other');
+});
+
+test('a failing storage read degrades to an empty store instead of wedging every operation', async () => {
+  const storage = {
+    async get() { throw new Error('storage unavailable'); },
+    async set() {},
+  };
+  const drafts = new FlowBatchDrafts({ storage });
+  assert.deepEqual(await drafts.list(), []);
+  const saved = await drafts.save({ label: 'Still works', jobs: [genJob('a')] });
+  assert.equal(saved.label, 'Still works');
+});
+
 test('recordRun tracks executions on the draft', async () => {
   const drafts = new FlowBatchDrafts({ storage: memoryStorage() });
   const saved = await drafts.save({ label: 'Runs', jobs: [genJob('a')] });

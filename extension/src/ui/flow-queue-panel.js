@@ -716,7 +716,9 @@
       makePayload = (...args) => ({ ...downloadAwareMakePayload(...args), autoDownload });
       const jobs = prompts.map((itemPrompt, index) => ({ operation, payload: makePayload(itemPrompt, index), label: makeLabel(itemPrompt) }));
       if (event.submitter?.value === "draft") {
-        const response = await this._send(MESSAGE.draftSave, { label: this._text("batchName"), jobs });
+        const firstLabel = jobs[0]?.label || this._text("batchName");
+        const label = jobs.length > 1 ? `${firstLabel} (+${jobs.length - 1})` : firstLabel;
+        const response = await this._send(MESSAGE.draftSave, { label, jobs });
         if (response?.ok !== false && !response?.error && input) input.value = "";
         await this._loadDrafts();
         return;

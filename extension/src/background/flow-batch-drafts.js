@@ -43,16 +43,23 @@ export class FlowBatchDrafts {
     this.storage = storage;
     this.storageKey = storageKey;
     this.drafts = [];
+    this.writeChain = Promise.resolve();
     this.ready = this.#restore();
   }
 
   async #restore() {
-    const stored = await this.storage.get(this.storageKey);
-    const state = stored?.[this.storageKey];
-    if (state && state.version === 1 && Array.isArray(state.drafts)) {
-      this.drafts = state.drafts
-        .filter(draft => draft && typeof draft.id === "string" && Array.isArray(draft.jobs))
-        .map(draft => clone(draft));
+    try {
+      const stored = await this.storage.get(this.storageKey);
+      const state = stored?.[this.storageKey];
+      if (state && state.version === 1 && Array.isArray(state.drafts)) {
+        this.drafts = state.drafts
+          .filter(draft => draft && typeof draft.id === "string" && Array.isArray(draft.jobs))
+          .map(draft => clone(draft));
+      }
+    } catch {
+      // A corrupt or unavailable store must not wedge every draft
+      // operation behind a rejected ready promise; start empty instead.
+      this.drafts = [];
     }
     // Return the array directly: list() awaits this.ready, which is this
     // very promise — calling it here would deadlock the store.
@@ -60,7 +67,13 @@ export class FlowBatchDrafts {
   }
 
   async #persist() {
-    await this.storage.set({ [this.storageKey]: { version: 1, updatedAt: Date.now(), drafts: this.drafts } });
+    // Snapshot synchronously, then chain the write: concurrent
+    // save/remove/recordRun calls mutate the same in-memory array between
+    // awaits, and unordered storage writes could persist a stale state
+    // over a fresher one.
+    const snapshot = { version: 1, updatedAt: Date.now(), drafts: clone(this.drafts) };
+    this.writeChain = this.writeChain.then(() => this.storage.set({ [this.storageKey]: snapshot }));
+    return this.writeChain;
   }
 
   async list() {
