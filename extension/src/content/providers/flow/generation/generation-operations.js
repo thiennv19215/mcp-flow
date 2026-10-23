@@ -700,6 +700,14 @@
         // observe computes its render deadline from here instead of
         // restarting the clock after a service-worker restart.
         const dispatchedAt = Date.now();
+        // VID-06: serverAcceptanceObserved reflects THIS attempt's own
+        // correlation receipts at acknowledgement time — true only when an
+        // accepted/result stage (response_seen/result_seen) was recorded
+        // for the attempt; request_seen alone means the request merely
+        // left the browser. Read it before the submit-only release below
+        // deletes the entry. A missing entry or helper keeps the
+        // historical false, and the flag never affects the submit verdict.
+        const serverAcceptanceObserved = tiles.nativeFlowCorrelationAcceptanceObserved?.(correlationAttemptId) === true;
         const dispatchReceipt = payload.submitOnly === true
           ? tiles.releaseSubmitOnlyCorrelation?.(correlationAttemptId, acknowledged) || null
           : null;
@@ -725,7 +733,7 @@
           dispatchedAt,
           activation: activation.strategy || "dom-click",
           requestDispatched: acknowledged,
-          serverAcceptanceObserved: false,
+          serverAcceptanceObserved,
           ...(dispatchReceipt ? { correlationReceipt: dispatchReceipt } : {}),
         };
       }
