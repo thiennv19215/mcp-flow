@@ -1631,17 +1631,25 @@ async function runExtensionFlowJob(job, hooks) {
   if (isVideo) {
     const rawCredits = submitted?.credits;
     if (typeof rawCredits !== "number" || !Number.isFinite(rawCredits)) {
-      throw Object.assign(new Error("Flow accepted the video request, but did not return a verifiable credit quote. Inspect Flow before retrying."), {
-        code: "FLOW_SUBMIT_RECEIPT_INCOMPLETE", outcomeUnknown: true, outcome_unknown: true, requestDispatched: true, creditQuoteVerified: false,
-      });
+      const maxCredits = payload.maxCredits ?? params.max_credits;
+      if (maxCredits !== undefined && maxCredits !== null) {
+        throw Object.assign(new Error("Flow accepted the video request, but its credit quote could not be verified against max_credits. Inspect Flow before retrying."), {
+          code: "FLOW_SUBMIT_RECEIPT_INCOMPLETE", outcomeUnknown: true, outcome_unknown: true, requestDispatched: true, creditQuoteVerified: false,
+        });
+      }
+      // Some Flow video modes do not render a readable quote. A missing quote
+      // must not turn an already-dispatched generation into a failed queue job
+      // when the caller did not request a maxCredits safety limit.
+      quoteFields = { creditQuoteVerified: false };
+    } else {
+      const maxCredits = payload.maxCredits ?? params.max_credits;
+      if (Number.isFinite(Number(maxCredits)) && rawCredits > Number(maxCredits)) {
+        throw Object.assign(new Error(`Flow dispatched a request quoted at ${rawCredits} credits, above max_credits=${maxCredits}; inspect Flow before retrying.`), {
+          code: "FLOW_MAX_CREDITS_EXCEEDED", outcomeUnknown: true, outcome_unknown: true, requestDispatched: true, credits: rawCredits, creditQuoteVerified: true,
+        });
+      }
+      quoteFields = { credits: rawCredits, creditQuoteVerified: true };
     }
-    const maxCredits = payload.maxCredits ?? params.max_credits;
-    if (Number.isFinite(Number(maxCredits)) && rawCredits > Number(maxCredits)) {
-      throw Object.assign(new Error(`Flow dispatched a request quoted at ${rawCredits} credits, above max_credits=${maxCredits}; inspect Flow before retrying.`), {
-        code: "FLOW_MAX_CREDITS_EXCEEDED", outcomeUnknown: true, outcome_unknown: true, requestDispatched: true, credits: rawCredits, creditQuoteVerified: true,
-      });
-    }
-    quoteFields = { credits: rawCredits, creditQuoteVerified: true };
   }
   if (payload.submitOnly === true || payload.submit_only === true || params.submit_only === true) {
     await hooks.progress({ phase: "submitted", message: "Flow accepted the request; rendering was not awaited.", percent: 100 });

@@ -426,6 +426,7 @@
 
         let credits;
         if (payload.type !== "image") {
+          const maxCredits = payload.maxCredits ?? payload.max_credits ?? payload.params?.maxCredits ?? payload.params?.max_credits;
           try {
             const renderedCredits = await runFlowStage("reading Flow's credit quote", ({ signal }) => editor.waitForGenerationCreditQuote(Number.isFinite(settingsCredits) ? 1000 : 2000, { deadline: flowDeadline, signal }));
             credits = Number.isFinite(renderedCredits)
@@ -436,8 +437,11 @@
           } catch (_) {
             credits = Number.isFinite(settingsCredits) ? settingsCredits : undefined;
           }
-          if (payload.maxCredits !== undefined && Number.isFinite(credits) && credits > Number(payload.maxCredits)) {
-            throw this.error("FLOW_MAX_CREDITS_EXCEEDED", `Flow quotes ${credits} credits, above max_credits=${payload.maxCredits}. Nothing was submitted.`, false, false);
+          if (maxCredits !== undefined && !Number.isFinite(credits)) {
+            throw this.error("FLOW_CREDIT_QUOTE_UNAVAILABLE", "Flow did not show a verifiable credit quote. Because maxCredits is set, no video request was submitted.", false, false);
+          }
+          if (maxCredits !== undefined && credits > Number(maxCredits)) {
+            throw this.error("FLOW_MAX_CREDITS_EXCEEDED", `Flow quotes ${credits} credits, above max_credits=${maxCredits}. Nothing was submitted.`, false, false);
           }
         }
 
