@@ -84,7 +84,15 @@
         // staged file's original name. The receipt keeps name = assetName
         // (the original) and gains the content-derived uploadName.
         const callerKey = payload.callerKey ?? payload.uploadKey ?? undefined;
-        const receipt = await components.uploadStagedFlowMedia(file, kind, command, { deadline, signal: command.signal, callerKey });
+        // IMG-05b: the 75 s deadline above remains the budget for every
+        // upload phase (navigation, baseline, menu, picker dispatch).
+        // Only the post-dispatch tile confirmation may extend past it
+        // while Flow is still processing the latched tile — bounded by
+        // the uploader's hard caps (image 240 s, video 480 s) and by this
+        // command's own timeout, which the uploader derives from the
+        // command itself. confirmExtendable opts this call into that
+        // extension; all other upload callers keep the absolute deadline.
+        const receipt = await components.uploadStagedFlowMedia(file, kind, command, { deadline, signal: command.signal, callerKey, confirmExtendable: true });
         // Upload can leave Flow's asset picker or upload menu mounted while
         // the media tile finishes rendering. Close and verify it before the
         // caller starts image/video generation or another DOM operation.

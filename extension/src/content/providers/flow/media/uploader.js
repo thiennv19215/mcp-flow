@@ -644,7 +644,16 @@
   // still working on our tile. A caller-provided deadline stays an
   // absolute cap — extension is armed only when no explicit deadline is
   // in force — so budgeted callers (IMG-02 reconciliation's bounded
-  // share, the op-deadline upload paths) keep exactly their old waits.
+  // share) keep exactly their old waits.
+  //
+  // IMG-05b: the production flow.media.upload path always passes an op
+  // deadline, so IMG-05's extension never armed there. A caller may now
+  // mark its deadline as an extendable op budget by passing
+  // `extendableTo`: an absolute ceiling the caller has already bounded by
+  // any external (command-level) deadline. The working deadline may then
+  // extend past the caller's deadline while the owner tile processes —
+  // never past extendableTo and never past the hard cap. Callers that do
+  // not pass the hint keep IMG-05's absolute-deadline contract untouched.
   const FLOW_UPLOAD_CONFIRM_BASE_MS = { image: 90_000, video: 60_000 };
   const FLOW_UPLOAD_CONFIRM_HARD_MS = { image: 240_000, video: 480_000 };
   const FLOW_UPLOAD_CONFIRM_EXTENSION_STEP_MS = 15_000;
@@ -654,9 +663,11 @@
     const startedAt = Date.now();
     const callerDeadline = Number.isFinite(options.deadline) && options.deadline > 0 ? options.deadline : null;
     let deadline = Math.min(callerDeadline ?? Infinity, startedAt + (kind === "video" ? FLOW_UPLOAD_CONFIRM_BASE_MS.video : FLOW_UPLOAD_CONFIRM_BASE_MS.image));
-    const extensionCeiling = callerDeadline !== null
-      ? deadline
-      : startedAt + (kind === "video" ? FLOW_UPLOAD_CONFIRM_HARD_MS.video : FLOW_UPLOAD_CONFIRM_HARD_MS.image);
+    const hardCeiling = startedAt + (kind === "video" ? FLOW_UPLOAD_CONFIRM_HARD_MS.video : FLOW_UPLOAD_CONFIRM_HARD_MS.image);
+    const extendableTo = Number.isFinite(options.extendableTo) && options.extendableTo > 0 ? options.extendableTo : null;
+    const extensionCeiling = extendableTo !== null
+      ? Math.max(deadline, Math.min(extendableTo, hardCeiling))
+      : callerDeadline !== null ? deadline : hardCeiling;
     let ownerProcessing = false;
     let nextLibraryScanAt = startedAt + 1_500;
     let libraryScans = 0;
@@ -674,6 +685,9 @@
 
     while (Date.now() < deadline || (ownerProcessing && deadline < extensionCeiling)) {
       if (Date.now() >= deadline) {
+        // IMG-05b: an explicit cancellation wins over the extension — a
+        // caller that aborted must never be kept waiting by extra steps.
+        if (options.signal?.aborted) break;
         deadline = Math.min(extensionCeiling, Date.now() + FLOW_UPLOAD_CONFIRM_EXTENSION_STEP_MS);
         root.emitFlowProgress?.(command, `Flow is still processing the uploaded ${kind} "${assetName}"; extending the confirmation deadline (hard cap ${Math.round((extensionCeiling - startedAt) / 1000)}s).`);
       }
@@ -832,6 +846,7 @@
 
   async function uploadStagedMediaInternal(file, kind, command, options = {}) {
     const fn = root.flowError || ((c, m, r, o) => Object.assign(new Error(m), { code: c, retryable: r, outcome_unknown: o }));
+    const uploadStartedAt = Date.now();
     const deadline = options.deadline || root.FlowUiDeadline?.makeDeadline(command, 75_000, 15_000) || Date.now() + 60_000;
     const checkTime = (operation, outcomeUnknown = false) => root.FlowUiDeadline?.requireTime(deadline, operation, outcomeUnknown, options.signal);
     checkTime("starting the Flow media upload");
@@ -1181,7 +1196,25 @@
     if (kind === "video") Object.assign(selectionDiagnostics, await confirmFlowVideoUploadIfPrompted(deadline, options.signal, selectionDiagnostics));
     let confirmed;
     try {
-      confirmed = await waitForNativeMediaTile(matchName, command, kind, { deadline, signal: options.signal, baselineIds, requireNewOwner: true, selectionDiagnostics });
+      const confirmOptions = { deadline, signal: options.signal, baselineIds, requireNewOwner: true, selectionDiagnostics };
+      if (options.confirmExtendable === true) {
+        // IMG-05b: the op deadline above stays the budget for every phase
+        // up to here (baseline, menu, picker dispatch). Only this
+        // post-dispatch confirmation may extend past it while the new
+        // owner tile processes — up to the IMG-05 hard cap, and never
+        // past the caller's own command timeout when the command carries
+        // one: that external deadline (and the abort signal, honored by
+        // the wait itself) always wins over the extension.
+        const callerTimeoutMs = Number(command?.timeoutMs ?? command?.timeout_ms);
+        const externalDeadline = Number.isFinite(callerTimeoutMs) && callerTimeoutMs > 0
+          ? uploadStartedAt + callerTimeoutMs
+          : Infinity;
+        confirmOptions.extendableTo = Math.min(
+          Date.now() + (kind === "video" ? FLOW_UPLOAD_CONFIRM_HARD_MS.video : FLOW_UPLOAD_CONFIRM_HARD_MS.image),
+          externalDeadline,
+        );
+      }
+      confirmed = await waitForNativeMediaTile(matchName, command, kind, confirmOptions);
     } catch (error) {
       // A definitively rejected tile ends the attempt; any other failure
       // (timeout, interruption) leaves the record for a reconciling retry.
