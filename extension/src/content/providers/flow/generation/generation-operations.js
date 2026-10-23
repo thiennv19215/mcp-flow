@@ -833,21 +833,61 @@
               if (classified?.category === "rate_limit") {
                 throw this.error(classified.code, classified.message, true, false);
               }
+              // VID-01: a terminally failed tile must not discard outputs
+              // that already rendered. The failed set is judged only once
+              // no sibling is still processing — a busy output is not a
+              // failure, and while one remains the loop keeps waiting
+              // (deadline semantics unchanged) so the sibling can still
+              // join the ready set or the failed set. When the set has
+              // settled with at least one ready output, resolve with the
+              // ready media plus a structured failedOutputs list; the
+              // queue records a partial state instead of failing the job.
+              const readySettled = [...correlatedIds]
+                .map(id => fresh.find(item => item.id?.toLowerCase() === id && item.mediaReady && !item.busy && !item.failed))
+                .filter(Boolean);
+              const stillProcessing = fresh.some(item => item.busy && !item.failed);
+              const partialResult = async () => {
+                const media = readySettled.map(({ id, title, kind: mediaKind }) => ({
+                  id,
+                  title,
+                  // Same scene→video normalization as the full-success path.
+                  kind: mediaKind === "scene" ? "video" : mediaKind,
+                }));
+                const failedOutputs = failed.map(item => ({
+                  title: item.title,
+                  code: root.classifyFlowError?.(item.failureReason || "")?.code || "FLOW_GENERATION_FAILED",
+                }));
+                await tiles.emitFlowProgress(command, `Tạo ${kind === "video" ? "video" : "ảnh"} hoàn tất một phần: ${media.length}/${expected} kết quả, ${failedOutputs.length} tile lỗi`, {
+                  generationResult: { media },
+                });
+                return { media, failedOutputs, partial: true };
+              };
               if (classified && !classified.retryable) {
-                throw this.error(classified.code, classified.message, false, false);
+                // A classified non-retryable failure is terminal (never
+                // retried in place). With a ready sibling and nothing
+                // still processing, resolve partially; with no ready
+                // output the classified throw is unchanged.
+                if (!stillProcessing) {
+                  if (readySettled.length >= 1) return await partialResult();
+                  throw this.error(classified.code, classified.message, false, false);
+                }
+              } else {
+                const retryable = failed.find(item => !retriedTiles.has(tiles.retryIdentity?.(item)));
+                if (retryable && retriesLeft > 0 && await tiles.retryNativeErrorTile(retryable, {
+                  attempted: retriedTiles,
+                  deadline,
+                  timeoutMs: Math.min(5000, Math.max(250, deadline - Date.now())),
+                })) {
+                  retriesLeft--;
+                  tiles.emitFlowProgress(command, `Flow thất bại render; đang thử lại (${Math.max(0, Number(payload.retries ?? 1) - retriesLeft)}/${Number(payload.retries ?? 1)})`);
+                  continue;
+                }
+                if (!stillProcessing) {
+                  if (readySettled.length >= 1) return await partialResult();
+                  const details = failed.map(item => `${item.title}${item.failureReason ? `: ${item.failureReason}` : ""}`).join("; ");
+                  throw this.error("FLOW_GENERATION_FAILED", `Flow báo cáo ${failed.length} tile render thất bại: ${details}. Chưa bị trừ tín dụng cho render lỗi này.`, false, false);
+                }
               }
-              const retryable = failed.find(item => !retriedTiles.has(tiles.retryIdentity?.(item)));
-              if (retryable && retriesLeft > 0 && await tiles.retryNativeErrorTile(retryable, {
-                attempted: retriedTiles,
-                deadline,
-                timeoutMs: Math.min(5000, Math.max(250, deadline - Date.now())),
-              })) {
-                retriesLeft--;
-                tiles.emitFlowProgress(command, `Flow thất bại render; đang thử lại (${Math.max(0, Number(payload.retries ?? 1) - retriesLeft)}/${Number(payload.retries ?? 1)})`);
-                continue;
-              }
-              const details = failed.map(item => `${item.title}${item.failureReason ? `: ${item.failureReason}` : ""}`).join("; ");
-              throw this.error("FLOW_GENERATION_FAILED", `Flow báo cáo ${failed.length} tile render thất bại: ${details}. Chưa bị trừ tín dụng cho render lỗi này.`, false, false);
             }
 
             if (Date.now() - observeStartedAt > 5000 && fresh.length === 0 && !renderObservedInFlight) {
