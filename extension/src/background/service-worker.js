@@ -1465,32 +1465,40 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
           return { ok: true, removed, drafts: await flowBatchDrafts.list() };
         }
         case "flow-batch:run": {
-          const draft = await flowBatchDrafts.get(String(message.id || ""));
-          if (!draft) throw Object.assign(new Error(`No batch draft with id ${message.id}.`), { code: "FLOW_BATCH_DRAFT_NOT_FOUND" });
-          const target = await captureFlowTargetMetadata();
-          const jobs = materializeDraftJobs(draft).map(job => ({
-            ...job,
-            // The current tab/project target wins over any target metadata
-            // stored with the draft: a draft runs here and now.
-            metadata: { source: "extension", ...(job.metadata || {}), ...target },
-          }));
-          let snapshot;
-          let runBatchId = null;
-          if (jobs.length === 1) {
-            const added = await flowJobQueue.add(jobs[0]);
-            runBatchId = added?.batch?.batchId || null;
-            snapshot = await flowJobQueue.snapshot();
-          } else {
-            const added = await flowJobQueue.addBatch(jobs, { batchLabel: draft.label });
-            runBatchId = added[0]?.batch?.batchId || null;
-            snapshot = await flowJobQueue.snapshot();
+          const draftId = String(message.id || "");
+          if (!flowBatchDrafts.beginRun(draftId)) {
+            throw Object.assign(new Error("This batch draft is already being queued."), { code: "FLOW_BATCH_DRAFT_RUN_IN_PROGRESS" });
           }
-          // Bookkeeping must not misreport a successful enqueue as failed.
-          const updated = await flowBatchDrafts.recordRun(draft.id, runBatchId).catch(() => draft);
-          snapshot = message.autoStart === false || snapshot.isPaused || snapshot.waitingForUser > 0
-            ? snapshot
-            : await flowJobQueue.resume();
-          return { ok: true, draft: updated, drafts: await flowBatchDrafts.list(), ...flowQueueSnapshot(snapshot) };
+          try {
+            const draft = await flowBatchDrafts.get(draftId);
+            if (!draft) throw Object.assign(new Error(`No batch draft with id ${message.id}.`), { code: "FLOW_BATCH_DRAFT_NOT_FOUND" });
+            const target = await captureFlowTargetMetadata();
+            const jobs = materializeDraftJobs(draft).map(job => ({
+              ...job,
+              // The current tab/project target wins over any target metadata
+              // stored with the draft: a draft runs here and now.
+              metadata: { source: "extension", ...(job.metadata || {}), ...target },
+            }));
+            let snapshot;
+            let runBatchId = null;
+            if (jobs.length === 1) {
+              const added = await flowJobQueue.add(jobs[0]);
+              runBatchId = added?.batch?.batchId || null;
+              snapshot = await flowJobQueue.snapshot();
+            } else {
+              const added = await flowJobQueue.addBatch(jobs, { batchLabel: draft.label });
+              runBatchId = added[0]?.batch?.batchId || null;
+              snapshot = await flowJobQueue.snapshot();
+            }
+            // Bookkeeping must not misreport a successful enqueue as failed.
+            const updated = await flowBatchDrafts.recordRun(draft.id, runBatchId).catch(() => draft);
+            snapshot = message.autoStart === false || snapshot.isPaused || snapshot.waitingForUser > 0
+              ? snapshot
+              : await flowJobQueue.resume();
+            return { ok: true, draft: updated, drafts: await flowBatchDrafts.list(), ...flowQueueSnapshot(snapshot) };
+          } finally {
+            flowBatchDrafts.endRun(draftId);
+          }
         }
         default:
           throw Object.assign(new Error(`Unsupported batch draft action: ${message.type}`), { code: "FLOW_BATCH_ACTION_UNSUPPORTED" });

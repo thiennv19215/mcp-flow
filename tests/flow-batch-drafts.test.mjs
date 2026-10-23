@@ -88,6 +88,15 @@ test('a failing storage read degrades to an empty store instead of wedging every
   assert.equal(saved.label, 'Still works');
 });
 
+test('the per-draft run lock admits one run at a time', async () => {
+  const drafts = new FlowBatchDrafts({ storage: memoryStorage() });
+  assert.equal(drafts.beginRun('d1'), true);
+  assert.equal(drafts.beginRun('d1'), false, 'a second concurrent run of the same draft is rejected');
+  assert.equal(drafts.beginRun('d2'), true, 'other drafts are unaffected');
+  drafts.endRun('d1');
+  assert.equal(drafts.beginRun('d1'), true, 'the lock releases after the run settles');
+});
+
 test('recordRun tracks executions on the draft', async () => {
   const drafts = new FlowBatchDrafts({ storage: memoryStorage() });
   const saved = await drafts.save({ label: 'Runs', jobs: [genJob('a')] });
@@ -129,4 +138,7 @@ test('service worker and panel expose the batch-draft surface', () => {
   assert.match(panelSource, /draft-run/);
   assert.match(panelSource, /draft-remove/);
   assert.match(panelSource, /value === "draft"/, 'composer can save instead of queueing');
+  assert.match(serviceWorkerSource, /beginRun\(draftId\)/, 'draft runs take the per-draft lock');
+  assert.match(serviceWorkerSource, /FLOW_BATCH_DRAFT_RUN_IN_PROGRESS/);
+  assert.match(serviceWorkerSource, /endRun\(draftId\)/, 'the lock is released in a finally block');
 });

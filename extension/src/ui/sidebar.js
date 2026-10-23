@@ -477,6 +477,8 @@
 
     const count = s.flowTabs ?? 0;
     valFlowTabs.textContent = count > 0 ? t("popup.tabsCount", count) : t("popup.tabsNone");
+    const noFlowBanner = document.querySelector("#noFlowBanner");
+    if (noFlowBanner) noFlowBanner.classList.toggle("hidden", count > 0);
     valSelectedTab.textContent = s.selectedTabId ? `Tab #${s.selectedTabId}` : t("popup.tabNone");
 
     if (s.bridge) {
@@ -2070,6 +2072,10 @@
       await chrome.tabs.create({ url: "https://flow.google.com/" });
     }
   };
+
+  // The no-Flow-tab banner reuses the same open/focus behavior.
+  const btnOpenFlowBanner = document.querySelector("#btnOpenFlowBanner");
+  if (btnOpenFlowBanner) btnOpenFlowBanner.onclick = () => document.querySelector("#btnOpenFlow")?.click();
 
   // Clear logs
   document.querySelector("#btnClearLogs").onclick = () => {

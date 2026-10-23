@@ -209,6 +209,12 @@
         </button>
       </nav>
 
+      <!-- Shown only while no Flow tab is open (toggled by renderStatus) -->
+      <div class="no-flow-banner hidden" id="noFlowBanner" role="alert">
+        <span class="no-flow-banner__text" data-i18n="popup.noFlowTabHint">Chưa có tab Flow nào đang mở. Mở Flow để bắt đầu tạo ảnh/video.</span>
+        <button class="btn btn-primary btn-sm" id="btnOpenFlowBanner" type="button" data-i18n="popup.btnOpenFlow">Mở Google Flow</button>
+      </div>
+
       <!-- ============================================== -->
       <!-- TABS CONTENT                                   -->
       <!-- ============================================== -->

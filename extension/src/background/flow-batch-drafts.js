@@ -44,7 +44,23 @@ export class FlowBatchDrafts {
     this.storageKey = storageKey;
     this.drafts = [];
     this.writeChain = Promise.resolve();
+    this.runsInFlight = new Set();
     this.ready = this.#restore();
+  }
+
+  // Per-draft run lock: a run enqueues the draft's jobs exactly once.
+  // Without it, the same draft triggered from two panels at the same
+  // moment would enqueue (and spend credits) twice. The lock is checked
+  // and taken synchronously, so concurrent run requests cannot both pass.
+  beginRun(id) {
+    const key = String(id);
+    if (this.runsInFlight.has(key)) return false;
+    this.runsInFlight.add(key);
+    return true;
+  }
+
+  endRun(id) {
+    this.runsInFlight.delete(String(id));
   }
 
   async #restore() {
