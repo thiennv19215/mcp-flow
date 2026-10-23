@@ -429,8 +429,14 @@
         requireFlowTime("preparing the Flow submit request", expectedVideoReferenceIds.length + expectedMediaReferenceIds.length + expectedCharacterIds.length > 0);
 
         let credits;
-        if (payload.type !== "image") {
-          const maxCredits = payload.maxCredits ?? payload.max_credits ?? payload.params?.maxCredits ?? payload.params?.max_credits;
+        const maxCredits = payload.maxCredits ?? payload.max_credits ?? payload.params?.maxCredits ?? payload.params?.max_credits;
+        // The credit-quote gate guards every generation type, not just
+        // video: whenever a maxCredits cap is set, the composer's quote must
+        // be read and enforced before submit, failing closed when no quote
+        // can be read. Video jobs also read the quote without a cap because
+        // the submit result reports the charged credits; uncapped image jobs
+        // keep the historical behavior and skip the read entirely.
+        if (payload.type !== "image" || maxCredits !== undefined) {
           try {
             const renderedCredits = await runFlowStage("reading Flow's credit quote", ({ signal }) => editor.waitForGenerationCreditQuote(Number.isFinite(settingsCredits) ? 1000 : 2000, { deadline: flowDeadline, signal }));
             credits = Number.isFinite(renderedCredits)
@@ -442,7 +448,7 @@
             credits = Number.isFinite(settingsCredits) ? settingsCredits : undefined;
           }
           if (maxCredits !== undefined && !Number.isFinite(credits)) {
-            throw this.error("FLOW_CREDIT_QUOTE_UNAVAILABLE", "Flow did not show a verifiable credit quote. Because maxCredits is set, no video request was submitted.", false, false);
+            throw this.error("FLOW_CREDIT_QUOTE_UNAVAILABLE", `Flow did not show a verifiable credit quote. Because maxCredits is set, no ${payload.type === "image" ? "image" : "video"} request was submitted.`, false, false);
           }
           if (maxCredits !== undefined && credits > Number(maxCredits)) {
             throw this.error("FLOW_MAX_CREDITS_EXCEEDED", `Flow quotes ${credits} credits, above max_credits=${maxCredits}. Nothing was submitted.`, false, false);
