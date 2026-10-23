@@ -1064,7 +1064,7 @@ async function waitForQueueFlowDownload(beforeIds, title, timeoutMs = 12 * 60_00
     code: "FLOW_DOWNLOAD_FAILED", outcomeUnknown: false, outcome_unknown: false,
   });
 }
-async function downloadQueueMedia(media, outputDir, fileStem, quality, invoke, hooks, sceneNumbers = [], jobId = "", flowTabId, flowProjectId = "") {
+async function downloadQueueMedia(media, outputDir, fileStem, quality, invoke, hooks, sceneNumbers = [], jobId = "", flowTabId, flowProjectId = "", generationState = null) {
   if (!chrome.downloads?.search) throw Object.assign(new Error("Chrome download tracking is unavailable; the generated media remains in Flow."), {
     code: "FLOW_DOWNLOAD_TRACKING_UNAVAILABLE", outcomeUnknown: false, outcome_unknown: false,
   });
@@ -1089,7 +1089,13 @@ async function downloadQueueMedia(media, outputDir, fileStem, quality, invoke, h
       try {
         const itemKind = String(item?.kind || item?.type || "").toLowerCase();
         const mediaLabel = itemKind === "video" || itemKind === "scene" ? "video" : itemKind === "image" ? "image" : "media";
-        await hooks.progress({ phase: "download", message: `Downloading ${mediaLabel} ${index + 1}/${media.length} from Flow…`, percent: 90 + Math.floor(index * 9 / Math.max(1, media.length)) });
+        await hooks.progress({
+          phase: "download",
+          message: `Downloading ${mediaLabel} ${index + 1}/${media.length} from Flow…`,
+          percent: 90 + Math.floor(index * 9 / Math.max(1, media.length)),
+          generation: generationState,
+          download: { state: "downloading", completed: index, total: media.length, current: { id: flowMediaId, title } },
+        });
         filenameTicket = armQueueFilenameOverride({
           jobId, flowMediaId, fileStem: outputStem, flowTabId, flowProjectId,
         });
@@ -1167,16 +1173,51 @@ async function withQueueDownloads(job, payload, operationResult, invoke, hooks) 
   const fileStem = typeof requestedFileStem === "string" && requestedFileStem.trim()
     ? requestedFileStem.trim()
     : (fallbackStem || `flow-${kind}-${String(job.id || crypto.randomUUID()).slice(0, 8)}`);
+  const generationState = {
+    state: "completed",
+    count: media.length,
+    media: media.map(item => ({
+      id: String(item?.id || ""),
+      title: String(item?.title || item?.name || "").trim(),
+      kind: String(item?.kind || item?.type || kind).toLowerCase(),
+    })),
+  };
+  await hooks.progress({
+    phase: "generation_complete",
+    message: `Flow generation completed: ${media.length} result${media.length === 1 ? "" : "s"}. Starting download…`,
+    percent: 89,
+    generation: generationState,
+    download: { state: "queued", completed: 0, total: media.length },
+  });
   try {
     const sceneNumbers = Array.isArray(operationResult?.sceneNumbers) && operationResult.sceneNumbers.length === media.length
       ? operationResult.sceneNumbers
       : [];
-    const browserDownloads = await downloadQueueMedia(media, outputDir || "", fileStem, params.download_quality || payload.download_quality || "original", invoke, hooks, sceneNumbers, job.id, job.metadata?.flowTabId, job.metadata?.flowProjectId);
+    const browserDownloads = await downloadQueueMedia(media, outputDir || "", fileStem, params.download_quality || payload.download_quality || "original", invoke, hooks, sceneNumbers, job.id, job.metadata?.flowTabId, job.metadata?.flowProjectId, generationState);
+    await hooks.progress({
+      phase: "download_complete",
+      message: `Flow generated and downloaded ${media.length} result${media.length === 1 ? "" : "s"}.`,
+      percent: 99,
+      generation: generationState,
+      download: { state: "completed", completed: media.length, total: media.length },
+    });
     return { ...operationResult, browserDownloads };
   } catch (error) {
     // The media already exists in Flow, but the requested hand-off did not
     // complete. Let the queue mark this job failed so the UI cannot claim that
     // generation succeeded while the file is still missing locally.
+    const downloadedCount = Array.isArray(error?.browserDownloads) ? error.browserDownloads.length : 0;
+    try {
+      await hooks.progress({
+        phase: "download_failed",
+        message: `Flow created ${media.length} result${media.length === 1 ? "" : "s"}, but download stopped at ${downloadedCount}/${media.length}.`,
+        percent: 90 + Math.floor(downloadedCount * 9 / Math.max(1, media.length)),
+        generation: generationState,
+        download: { state: "failed", completed: downloadedCount, total: media.length },
+      });
+    } catch (progressError) {
+      console.warn("[FlowQueue] Could not persist generated/download stage details:", progressError?.message || progressError);
+    }
     error.downloadError = String(error?.message || error);
     error.downloadErrorCode = String(error?.code || "FLOW_DOWNLOAD_FAILED");
     error.outcomeUnknown = false;

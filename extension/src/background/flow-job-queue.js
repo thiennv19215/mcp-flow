@@ -292,7 +292,7 @@ export class FlowJobQueue {
       ? clone(progress)
       : { phase: "render", message: String(progress || "") };
     const previous = job.progress && typeof job.progress === "object" ? job.progress : {};
-    if (previous.phase === next.phase && previous.message === next.message && previous.percent === next.percent) return clone(job);
+    if (JSON.stringify(previous) === JSON.stringify(next)) return clone(job);
     job.progress = next;
     await this.#persist();
     this.#emit("job-progress");
@@ -671,7 +671,12 @@ export class FlowJobQueue {
         const hooks = {
           signal: this.controller.signal,
           progress: async progress => {
-            job.progress = clone(progress);
+            const next = clone(progress);
+            const previous = job.progress && typeof job.progress === "object" ? job.progress : {};
+            for (const key of ["generation", "download"]) {
+              if (next[key] === undefined && previous[key] !== undefined) next[key] = previous[key];
+            }
+            job.progress = next;
             await this.#persist();
             this.#emit("job-progress");
           },

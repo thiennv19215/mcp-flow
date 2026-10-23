@@ -54,6 +54,7 @@
       mcp: "AI · MCP", manual: "THỦ CÔNG", moveUp: "Chuyển tác vụ {n} lên", moveDown: "Chuyển tác vụ {n} xuống", retry: "Thử lại", remove: "Xóa",
       pending: "Đang chờ", runningStatus: "Đang chạy", completedStatus: "Hoàn tất", failed: "Thất bại", cancelled: "Đã hủy",
       needsAttention: "Cần xử lý",
+      generationComplete: "Flow đã tạo {count} kết quả", downloadQueued: "Chờ tải {done}/{total}", downloadingCount: "Đang tải {done}/{total}", downloadedCount: "Đã tải {done}/{total}", downloadFailedCount: "Tải lỗi {done}/{total}",
       waitingForUser: "Chờ bạn bấm Tạo", continueManual: "Đã bấm Tạo · tiếp tục", cancelManual: "Bỏ qua", manualSubmitLabel: "Tôi sẽ tự bấm Tạo trên Flow",
       noConnection: "Không thể kết nối với tiện ích Flow.", updateFailed: "Không thể cập nhật hàng đợi Flow.",
       assetRequired: "Nhập tên video cần chỉnh sửa hoặc nối tiếp.", scenesRequired: "Nhập ít nhất một cảnh, mỗi cảnh trên một dòng.",
@@ -86,6 +87,7 @@
       mcp: "AI · MCP", manual: "MANUAL", moveUp: "Move task {n} up", moveDown: "Move task {n} down", retry: "Retry", remove: "Remove",
       pending: "Pending", runningStatus: "Running", completedStatus: "Completed", failed: "Failed", cancelled: "Cancelled",
       needsAttention: "Needs attention",
+      generationComplete: "Flow created {count} result(s)", downloadQueued: "Download queued {done}/{total}", downloadingCount: "Downloading {done}/{total}", downloadedCount: "Downloaded {done}/{total}", downloadFailedCount: "Download failed {done}/{total}",
       waitingForUser: "Waiting for your submit", continueManual: "I clicked Create · continue", cancelManual: "Skip", manualSubmitLabel: "I will click Create in Flow",
       noConnection: "Cannot connect to the Flow extension.", updateFailed: "Could not update the Flow queue.",
       assetRequired: "Enter the video name to edit or continue.", scenesRequired: "Enter at least one scene, one per line.",
@@ -118,6 +120,8 @@
     .flow-queue-panel__label{font-weight:600;overflow-wrap:anywhere}
     .flow-queue-panel__status{white-space:nowrap;color:var(--text-muted,#8b8b92);font-size:11px}
     .flow-queue-panel__detail{margin-top:4px;color:var(--text-muted,#8b8b92);white-space:pre-wrap;overflow-wrap:anywhere}
+    .flow-queue-panel__milestones{margin-top:5px;color:#a3e635;font-size:11px;overflow-wrap:anywhere}
+    .flow-queue-panel__milestones--failed{color:#f87171}
     .flow-queue-panel__progress{height:4px;margin-top:7px;border-radius:4px;background:rgba(255,255,255,.1);overflow:hidden}
     .flow-queue-panel__progress>span{display:block;height:100%;background:var(--primary,#ccff00);transition:width .15s ease}
     .flow-queue-panel__item-actions{justify-content:flex-end;margin-top:7px;flex-wrap:wrap}
@@ -499,6 +503,24 @@
         ? [task?.errorCode, task?.error].filter(Boolean).join(": ")
         : task?.progress?.message ?? task?.progressText ?? task?.message ?? task?.error ?? "";
       if (detail) item.append(makeElement("div", "flow-queue-panel__detail", detail));
+      const generation = task?.progress?.generation;
+      const download = task?.progress?.download;
+      if (generation?.state === "completed") {
+        const count = Math.max(0, Number(generation.count) || 0);
+        const total = Math.max(1, Number(download?.total) || count || 1);
+        const done = Math.max(0, Math.min(total, Number(download?.completed) || 0));
+        const state = String(download?.state || "queued");
+        const downloadKey = state === "completed" ? "downloadedCount"
+          : state === "failed" ? "downloadFailedCount"
+          : state === "downloading" ? "downloadingCount"
+          : "downloadQueued";
+        const milestone = makeElement(
+          "div",
+          `flow-queue-panel__milestones${state === "failed" ? " flow-queue-panel__milestones--failed" : ""}`,
+          `${this._text("generationComplete", { count })} · ${this._text(downloadKey, { done, total })}`,
+        );
+        item.append(milestone);
+      }
       const percent = progressPercent(task);
       if (percent !== null) {
         const bar = makeElement("div", "flow-queue-panel__progress");
