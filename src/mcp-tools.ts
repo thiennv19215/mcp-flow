@@ -3,6 +3,23 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { shapes, type Core } from "./core.js";
 import { PLAYBOOK } from "./playbook.js";
 
+export type Task = { task_id: string; tool: string; started: string; status: "running" | "done" | "failed"; result?: unknown; error?: string };
+
+// Slow-call results are kept so flow_wait/flow_status can answer for them,
+// but a long-lived MCP process must not accumulate every result forever:
+// beyond the cap the oldest entries are evicted (Map order is insertion
+// order). An evicted id is later answered like a restarted process's id —
+// its answer is gone, and flow_wait says so instead of inventing one.
+export const MAX_RETAINED_TASKS = 100;
+export function retainTask(map: Map<string, Task>, task: Task): void {
+  map.set(task.task_id, task);
+  while (map.size > MAX_RETAINED_TASKS) {
+    const oldest = map.keys().next().value as string | undefined;
+    if (oldest === undefined) break;
+    map.delete(oldest);
+  }
+}
+
 export function createFlowMcpServer(core: Core, studio?: string): McpServer {
 const server = new McpServer({ name: "flow-mcp", version: "0.2.0" });
 
@@ -24,7 +41,6 @@ const reply = async (work: Promise<unknown>, extra: object = {}): Promise<ToolRe
 // FLOW_MCP_PATIENCE_MS lowers it for an app with a shorter limit (and lets a test reach the slow path quickly).
 const PATIENCE_MS = Number(process.env.FLOW_MCP_PATIENCE_MS ?? 45_000);
 const WAIT_MS = Math.max(5_000, PATIENCE_MS - 5_000);
-type Task = { task_id: string; tool: string; started: string; status: "running" | "done" | "failed"; result?: unknown; error?: string };
 const tasks = new Map<string, Task>();
 
 const patient = async (tool: string, work: Promise<unknown>): Promise<unknown> => {
@@ -44,7 +60,7 @@ const patient = async (tool: string, work: Promise<unknown>): Promise<unknown> =
   const first = await Promise.race([settled.then(() => "settled" as const), late]);
   clearTimeout(timer);
   if (first === "settled") return work;
-  tasks.set(task.task_id, task);
+  retainTask(tasks, task);
   return {
     still_working: true,
     task_id: task.task_id,
