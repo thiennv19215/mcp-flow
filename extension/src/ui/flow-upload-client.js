@@ -48,6 +48,37 @@ class FlowUploadClient {
     const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
     const kind = options.kind === "video" ? "video" : "image";
     const transferId = "fm-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+    // IMG-09: a stable upload request id, minted where the transfer is
+    // created and threaded through the transfer record (begin metadata),
+    // the finish payload and the flow.media.upload command payload, so
+    // this specific upload stays addressable end to end. Callers learn
+    // it synchronously-ish through options.onRequestId and on the
+    // result; the sidebar uses it to label its per-upload cancel button.
+    const requestId = typeof options.requestId === "string" && options.requestId ? options.requestId : `upload-${transferId}`;
+    const signal = options.signal || null;
+    const cancelledError = () => {
+      const error = new Error("Tải lên đã bị hủy.");
+      error.code = "FLOW_UPLOAD_CANCELLED";
+      error.requestId = requestId;
+      return error;
+    };
+    const throwIfAborted = () => { if (signal?.aborted) throw cancelledError(); };
+    // Dispatches honor the caller's AbortSignal: an abort stops waiting
+    // for the response instead of riding the operation to completion.
+    const dispatch = message => {
+      throwIfAborted();
+      if (!signal) return chrome.runtime.sendMessage(message);
+      let onAbort = null;
+      const aborted = new Promise((_, reject) => {
+        onAbort = () => reject(cancelledError());
+        if (signal.aborted) onAbort();
+        else signal.addEventListener("abort", onAbort, { once: true });
+      });
+      return Promise.race([chrome.runtime.sendMessage(message), aborted])
+        .finally(() => { if (onAbort) signal.removeEventListener?.("abort", onAbort); });
+    };
+    try { options.onRequestId?.(requestId, transferId); } catch {}
+    throwIfAborted();
     const buffer = await file.arrayBuffer();
     const bytes = new Uint8Array(buffer);
     const size = bytes.byteLength;
@@ -61,95 +92,119 @@ class FlowUploadClient {
     // by exact name and verified media ID.
     const safeName = FlowUploadClient.uniqueAssetName(options.name || file.name, transferId, kind, options.referenceIndex);
 
-    // 1. Khởi tạo phiên chuyển nhượng nhị phân
-    const beginRes = await chrome.runtime.sendMessage({
-      type: "flow-mcp:dispatch",
-      operation: "flow.file.upload.begin",
-      payload: {
-        transfer: {
-          transferId,
-          name: safeName,
-          type: file.type || (kind === "video" ? "video/mp4" : "image/png"),
-          size,
-          sha256
-        }
-      }
-    });
-    if (!beginRes?.ok) {
-      throw new Error(beginRes?.error?.message || "Không thể khởi tạo phiên tải file lên Flow");
-    }
-
-    // 2. Stream các chunk 256KB kèm checksum
-    const chunkSize = 256 * 1024;
-    let offset = 0;
-    let index = 0;
-    while (offset < size) {
-      const end = Math.min(offset + chunkSize, size);
-      const chunkBytes = bytes.slice(offset, end);
-      const chunkHashBuf = await crypto.subtle.digest("SHA-256", chunkBytes);
-      const chunkSha256 = [...new Uint8Array(chunkHashBuf)].map(b => b.toString(16).padStart(2, "0")).join("");
-
-      let binary = "";
-      const len = chunkBytes.byteLength;
-      for (let i = 0; i < len; i++) {
-        binary += String.fromCharCode(chunkBytes[i]);
-      }
-      const b64 = btoa(binary);
-
-      const chunkRes = await chrome.runtime.sendMessage({
+    let transferBegun = false;
+    try {
+      // 1. Khởi tạo phiên chuyển nhượng nhị phân
+      const beginRes = await dispatch({
         type: "flow-mcp:dispatch",
-        operation: "flow.file.upload.chunk",
+        operation: "flow.file.upload.begin",
         payload: {
-          chunk: {
+          transfer: {
             transferId,
-            index,
-            offset,
-            data: b64,
-            chunkSha256
+            requestId,
+            name: safeName,
+            type: file.type || (kind === "video" ? "video/mp4" : "image/png"),
+            size,
+            sha256
           }
         }
       });
-      if (!chunkRes?.ok) {
-        throw new Error(chunkRes?.error?.message || `Lỗi truyền dữ liệu chunk ${index}`);
+      if (!beginRes?.ok) {
+        throw new Error(beginRes?.error?.message || "Không thể khởi tạo phiên tải file lên Flow");
+      }
+      transferBegun = true;
+
+      // 2. Stream các chunk 256KB kèm checksum
+      const chunkSize = 256 * 1024;
+      let offset = 0;
+      let index = 0;
+      while (offset < size) {
+        throwIfAborted();
+        const end = Math.min(offset + chunkSize, size);
+        const chunkBytes = bytes.slice(offset, end);
+        const chunkHashBuf = await crypto.subtle.digest("SHA-256", chunkBytes);
+        const chunkSha256 = [...new Uint8Array(chunkHashBuf)].map(b => b.toString(16).padStart(2, "0")).join("");
+
+        let binary = "";
+        const len = chunkBytes.byteLength;
+        for (let i = 0; i < len; i++) {
+          binary += String.fromCharCode(chunkBytes[i]);
+        }
+        const b64 = btoa(binary);
+
+        const chunkRes = await dispatch({
+          type: "flow-mcp:dispatch",
+          operation: "flow.file.upload.chunk",
+          payload: {
+            chunk: {
+              transferId,
+              index,
+              offset,
+              data: b64,
+              chunkSha256
+            }
+          }
+        });
+        if (!chunkRes?.ok) {
+          throw new Error(chunkRes?.error?.message || `Lỗi truyền dữ liệu chunk ${index}`);
+        }
+
+        offset = end;
+        index++;
+        if (onProgress) onProgress(Math.round((offset / size) * 100));
       }
 
-      offset = end;
-      index++;
-      if (onProgress) onProgress(Math.round((offset / size) * 100));
-    }
+      // 3. Hoàn tất phiên chuyển nhượng nhị phân
+      const finishRes = await dispatch({
+        type: "flow-mcp:dispatch",
+        operation: "flow.file.upload.finish",
+        payload: { transferId, requestId }
+      });
+      if (!finishRes?.ok) {
+        throw new Error(finishRes?.error?.message || "Không thể hoàn tất phiên tải file lên Flow");
+      }
 
-    // 3. Hoàn tất phiên chuyển nhượng nhị phân
-    const finishRes = await chrome.runtime.sendMessage({
-      type: "flow-mcp:dispatch",
-      operation: "flow.file.upload.finish",
-      payload: { transferId }
-    });
-    if (!finishRes?.ok) {
-      throw new Error(finishRes?.error?.message || "Không thể hoàn tất phiên tải file lên Flow");
-    }
+      // 4. Kích hoạt upload staging vào Flow Tab
+      const uploadRes = await dispatch({
+        type: "flow-mcp:dispatch",
+        operation: "flow.media.upload",
+        payload: {
+          transferId,
+          requestId,
+          name: safeName,
+          kind
+        }
+      });
 
-    // 4. Kích hoạt upload staging vào Flow Tab
-    const uploadRes = await chrome.runtime.sendMessage({
-      type: "flow-mcp:dispatch",
-      operation: "flow.media.upload",
-      payload: {
+      if (!uploadRes?.ok) {
+        throw new Error(uploadRes?.error?.message || "Lỗi tải media lên Google Flow");
+      }
+
+      const resultName = uploadRes.value?.name || safeName;
+      const resultId = uploadRes.value?.id || uploadRes.value?.mediaId || uploadRes.value?.receipt?.id || null;
+      return {
+        name: resultName,
+        id: resultId,
+        requestId,
         transferId,
-        name: safeName,
-        kind
+        toString() { return this.name; }
+      };
+    } catch (error) {
+      // IMG-09: a cancelled upload drops its staged transfer so the
+      // staged bytes cannot be picked up later; the in-page upload, if
+      // it was already dispatched, is abandoned (its outcome is unknown
+      // to the caller, exactly like a queue-level cancel).
+      if (error?.code === "FLOW_UPLOAD_CANCELLED" && transferBegun) {
+        try {
+          await chrome.runtime.sendMessage({
+            type: "flow-mcp:dispatch",
+            operation: "flow.file.upload.abort",
+            payload: { transferId, requestId },
+          });
+        } catch {}
       }
-    });
-
-    if (!uploadRes?.ok) {
-      throw new Error(uploadRes?.error?.message || "Lỗi tải media lên Google Flow");
+      throw error;
     }
-
-    const resultName = uploadRes.value?.name || safeName;
-    const resultId = uploadRes.value?.id || uploadRes.value?.mediaId || uploadRes.value?.receipt?.id || null;
-    return {
-      name: resultName,
-      id: resultId,
-      toString() { return this.name; }
-    };
   }
 }
 

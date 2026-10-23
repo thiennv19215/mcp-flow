@@ -541,6 +541,25 @@
     }
   }
 
+  // IMG-09: per-upload cancellation. When an upload is named by an
+  // upload request id, uploadStagedMediaInternal registers an
+  // AbortController under that id for the duration of the operation;
+  // cancelFlowUpload aborts exactly that upload (the sidebar's cancel
+  // button for one specific in-flight upload reaches this through the
+  // upload command's request id). Entries are removed as uploads settle;
+  // the cap is only leak insurance for a caller that never settles.
+  const FLOW_UPLOAD_CANCEL_LIMIT = 50;
+  const flowUploadCancellers = new Map();
+
+  function cancelFlowUpload(requestId) {
+    const id = String(requestId || "");
+    if (!id) return false;
+    const controller = flowUploadCancellers.get(id);
+    if (!controller) return false;
+    controller.abort();
+    return true;
+  }
+
   // IMG-03: rich upload receipts + the background media catalog. At
   // confirmation time the observer's media-identity metadata can already
   // map the tile's persistent id (often an `asb:` form) to the canonical
@@ -668,6 +687,15 @@
     const extensionCeiling = extendableTo !== null
       ? Math.max(deadline, Math.min(extendableTo, hardCeiling))
       : callerDeadline !== null ? deadline : hardCeiling;
+    // IMG-09: continuous context guard. The project/route context used
+    // to be evaluated only when the operation started; a mid-confirmation
+    // navigation (the user opens another project, Flow remounts) left
+    // this poll scanning the NEW project's grid, where it could confirm
+    // a same-name tile from the wrong project or burn the whole deadline
+    // and report a misleading timeout. Capture the context here and
+    // re-evaluate it on every iteration below.
+    const guardProjectId = flowUploadProjectId();
+    const guardScope = flowUploadProjectScope();
     let ownerProcessing = false;
     let nextLibraryScanAt = startedAt + 1_500;
     let libraryScans = 0;
@@ -684,6 +712,38 @@
     const getMediaId = root.mediaId || (el => el.getAttribute("data-media-id") || el.getAttribute("id") || "");
 
     while (Date.now() < deadline || (ownerProcessing && deadline < extensionCeiling)) {
+      // IMG-09: an explicit cancellation anywhere in the wait exits
+      // through the same timeout path as the IMG-05b extension guard
+      // below — not only once the deadline has passed.
+      if (options.signal?.aborted) break;
+      // IMG-09: context guard, re-evaluated every iteration. The upload
+      // was dispatched into the project captured above; if the page has
+      // moved to a different project (or left the project route), this
+      // poll must never confirm a tile here. The error is not retryable
+      // into the new project, and its outcome is unknown because the
+      // dispatched file may still land in the ORIGINAL project — the
+      // IMG-02 attempt record is keyed by that project's scope, so
+      // returning to the original project and retrying reconciles the
+      // earlier dispatch instead of re-uploading. The registry-based
+      // scope comparison additionally catches project switches on URL
+      // shapes the project-id parser does not recognize.
+      const currentProjectId = flowUploadProjectId();
+      const currentScope = flowUploadProjectScope();
+      if ((guardProjectId && currentProjectId !== guardProjectId)
+        || (guardScope.startsWith("project:") && currentScope !== guardScope)) {
+        const contextError = fn("FLOW_UPLOAD_CONTEXT_CHANGED", `The Flow project changed while confirming the uploaded ${kind} "${assetName}" (was ${guardProjectId || guardScope}; now ${currentProjectId || currentScope}). The upload was not confirmed against the new project; return to the original project and retry so the earlier dispatch can be reconciled there.`, false, true);
+        contextError.diagnostics = {
+          contextChanged: true,
+          expectedProjectId: guardProjectId,
+          currentProjectId,
+          expectedScope: guardScope,
+          currentScope,
+          exactTileObserved,
+          newOwnerIdLatched: Boolean(ownerId),
+          scansAttempted: libraryScans,
+        };
+        throw contextError;
+      }
       if (Date.now() >= deadline) {
         // IMG-05b: an explicit cancellation wins over the extension — a
         // caller that aborted must never be kept waiting by extra steps.
@@ -844,7 +904,41 @@
     return enrichFlowUploadReceipt(receipt, kind);
   }
 
+  // IMG-09: when the caller names the upload — options.uploadRequestId /
+  // options.requestId, or the same fields on the command — the operation
+  // runs under a registered per-upload AbortController whose signal
+  // replaces (and follows) the caller's signal: a caller abort aborts
+  // the upload exactly as before, and a cancel by request id lands
+  // identically downstream, where the confirmation wait's per-iteration
+  // abort check (and every bounded wait that takes the signal) makes it
+  // prompt. Uploads without a request id keep the caller's signal
+  // untouched — no behavior change.
   async function uploadStagedMediaInternal(file, kind, command, options = {}) {
+    const uploadRequestId = String(
+      options.uploadRequestId || options.requestId || command?.uploadRequestId || command?.requestId || "",
+    ).trim();
+    if (!uploadRequestId || typeof AbortController !== "function") {
+      return uploadStagedMediaCore(file, kind, command, options);
+    }
+    const controller = new AbortController();
+    flowUploadCancellers.delete(uploadRequestId);
+    flowUploadCancellers.set(uploadRequestId, controller);
+    while (flowUploadCancellers.size > FLOW_UPLOAD_CANCEL_LIMIT) {
+      flowUploadCancellers.delete(flowUploadCancellers.keys().next().value);
+    }
+    const callerSignal = options.signal || null;
+    const onCallerAbort = () => controller.abort();
+    if (callerSignal?.aborted) controller.abort();
+    else callerSignal?.addEventListener?.("abort", onCallerAbort, { once: true });
+    try {
+      return await uploadStagedMediaCore(file, kind, command, { ...options, signal: controller.signal });
+    } finally {
+      callerSignal?.removeEventListener?.("abort", onCallerAbort);
+      if (flowUploadCancellers.get(uploadRequestId) === controller) flowUploadCancellers.delete(uploadRequestId);
+    }
+  }
+
+  async function uploadStagedMediaCore(file, kind, command, options = {}) {
     const fn = root.flowError || ((c, m, r, o) => Object.assign(new Error(m), { code: c, retryable: r, outcome_unknown: o }));
     const uploadStartedAt = Date.now();
     const deadline = options.deadline || root.FlowUiDeadline?.makeDeadline(command, 75_000, 15_000) || Date.now() + 60_000;
@@ -1235,6 +1329,9 @@
     }
     static uploadIdentity(file, callerKey) {
       return flowUploadIdentity(file, callerKey);
+    }
+    static cancelUpload(requestId) {
+      return cancelFlowUpload(requestId);
     }
     static findAddMediaButton() {
       return findAddMediaButton();

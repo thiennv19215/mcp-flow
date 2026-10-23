@@ -1393,9 +1393,57 @@
     console.warn(`[Flow ${type}] unresolved reference mentions:`, names);
   }
 
+  // IMG-09: per-upload cancellation. Every sidebar-initiated upload is
+  // tracked with its own AbortController; FlowUploadClient mints the
+  // upload request id (reported through onRequestId) and honors the
+  // signal, so the cancel button rendered for one in-flight upload
+  // aborts exactly that upload — its chunk stream stops and the client
+  // stops waiting for the in-page upload command — while any other
+  // in-flight upload keeps running.
+  const inFlightUploads = new Set();
+
+  function renderUploadCancelBar() {
+    const feedbackBox = document.querySelector("#feedbackBox");
+    if (!feedbackBox?.parentElement) return;
+    let bar = document.querySelector("#uploadCancelBar");
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.id = "uploadCancelBar";
+      feedbackBox.after(bar);
+    }
+    bar.replaceChildren();
+    for (const entry of inFlightUploads) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = `Hủy tải lên: ${entry.label}`;
+      if (entry.requestId) button.dataset.requestId = entry.requestId;
+      button.onclick = () => { entry.controller.abort(); };
+      bar.appendChild(button);
+    }
+    bar.hidden = inFlightUploads.size === 0;
+  }
+
+  async function uploadWithCancel(file, options = {}) {
+    if (!window.FlowUploadClient) throw new Error("Dịch vụ tải media lên chưa sẵn sàng.");
+    const controller = new AbortController();
+    const entry = { controller, requestId: null, label: options.name || file?.name || "tệp" };
+    inFlightUploads.add(entry);
+    renderUploadCancelBar();
+    try {
+      return await window.FlowUploadClient.upload(file, {
+        ...options,
+        signal: controller.signal,
+        onRequestId: requestId => { entry.requestId = requestId; renderUploadCancelBar(); },
+      });
+    } finally {
+      inFlightUploads.delete(entry);
+      renderUploadCancelBar();
+    }
+  }
+
   async function uploadReferenceImage(file, onProgress, referenceIndex) {
     if (window.FlowUploadClient) {
-      return await window.FlowUploadClient.upload(file, { onProgress, kind: "image", referenceIndex });
+      return await uploadWithCancel(file, { onProgress, kind: "image", referenceIndex });
     }
     throw new Error("Dịch vụ tải ảnh lên Flow chưa được khởi tạo");
   }
@@ -2014,7 +2062,7 @@
     if (!window.FlowUploadClient) throw new Error("Dịch vụ tải media lên chưa sẵn sàng.");
     await assertQueueIdleForDirectAction();
     const kind = file.type.startsWith("video/") ? "video" : "image";
-    const uploaded = await window.FlowUploadClient.upload(file, { kind, onProgress: progress => setFeedback(`Đang tải tệp lên Flow: ${progress}%`, true) });
+    const uploaded = await uploadWithCancel(file, { kind, onProgress: progress => setFeedback(`Đang tải tệp lên Flow: ${progress}%`, true) });
     document.querySelector("#flowUploadFile").value = "";
     return uploaded;
   });
