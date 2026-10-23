@@ -1146,7 +1146,7 @@ async function findExistingQueueFlowDownload(flowMediaId, flowTabId, flowProject
     flowTabId,
     flowProjectId: String(flowProjectId || ""),
   };
-  const items = await chrome.downloads.search({ query: String(flowMediaId), orderBy: ["-startTime"], limit: 100 });
+  const items = await chrome.downloads.search({ query: [String(flowMediaId)], orderBy: ["-startTime"], limit: 100 });
   const matching = items.filter(item => queueDownloadMatchesTicket(item, ticket));
   // A completed exact-UUID download is already a successful hand-off. Reuse it
   // after a service-worker restart instead of starting a duplicate download.
