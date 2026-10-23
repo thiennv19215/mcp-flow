@@ -2081,6 +2081,23 @@
               throw flowError("FLOW_CHARACTER_ID_MISMATCH", `Flow attached a different character entity than the exact option selected for "${ref.name}". No generation was submitted.`, false, false);
             }
           }
+          if (kind === "image") {
+            // Mirror the tile path's chip proof: when the new chip exposes a
+            // media UUID, it must be the selected option's canonical id. A
+            // picker race (stale state, recycled grid node) can land a chip
+            // for a different asset; confirming by count alone would attach
+            // the wrong reference. A chip exposing no UUID at all keeps the
+            // count-based confirmation.
+            const observedUuids = chipMediaUuids(chip);
+            if (uuidPattern.test(String(selectedId || "")) && observedUuids.some(id => id !== String(selectedId).toLowerCase())) {
+              const scan = chipAttachEvidence(before, currentChips, added, "picker_chip_uuid_mismatch");
+              updateReferenceActionDiagnostics({ step: "picker reference chip uuid mismatch", chipAttachScan: scan });
+              const error = flowError("FLOW_ASSET_ID_MISMATCH", `Flow attached an image chip whose exposed UUID does not match the exact option selected for "${ref.name}". No generation was submitted.`, false, true);
+              error.diagnostics = { chipAttachScan: scan };
+              console.error("[FlowReferenceAction] picker image chip UUID mismatch", JSON.stringify(scan));
+              throw error;
+            }
+          }
           const result = { name: ref.name, kind: chip.kind, source: chip.source, id: selectedId, confirmed: true };
           metadata.set(chip.element, { name: ref.name, mediaId: selectedId, ...(kind === "character" ? { mediaIdSource: "character_identity_attribute" } : {}) });
           updateReferenceActionDiagnostics({ phase: "completed", step: "reference chip confirmed", lastResult: { name: result.name, id: result.id || null } });
