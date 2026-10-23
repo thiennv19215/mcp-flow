@@ -6,7 +6,8 @@
 // the submission atomically. Without this, a multi-prompt batch validates
 // one job at a time at run time, so earlier prompts can spend Flow credits
 // before a later prompt turns out to be impossible (wrong duration for the
-// model, frames combined with ingredient references, too many references).
+// model, frames combined with ingredient references, too many references,
+// a prompt over the configured length maximum).
 //
 // The checks are deliberately conservative: only fields a job actually
 // specifies are validated, unknown models are left to the content-side
@@ -77,6 +78,20 @@ export function validateFlowJobPayloads(jobs, registry) {
     if (attachments.length > maxReferences) {
       problems.push(jobProblem(index, "FLOW_QUEUE_PREFLIGHT_REFERENCES",
         `Job ${index + 1}: ${attachments.length} references exceed the Flow limit of ${maxReferences} for this model.`));
+    }
+    // Prompt-length admission guard (VID-07): the limit is data, not code —
+    // an optional `maxPromptLength` on the model rule, falling back to
+    // `defaults.maxPromptLength` exactly like maxReferences. Only a positive
+    // finite number activates the check; absent/null/invalid means no check,
+    // so admission is unchanged until a limit is configured (the exact Flow
+    // maximum is server-side knowledge, IMG-B2). Length is the JS string
+    // length of the job's final prompt — the exact string the content side
+    // submits — and each job in a batch is measured on its own prompt.
+    const maxPromptLength = rule?.maxPromptLength ?? registry.defaults?.maxPromptLength;
+    if (typeof maxPromptLength === "number" && Number.isFinite(maxPromptLength) && maxPromptLength > 0 &&
+        typeof payload.prompt === "string" && payload.prompt.length > maxPromptLength) {
+      problems.push(jobProblem(index, "FLOW_QUEUE_PREFLIGHT_PROMPT_LENGTH",
+        `Job ${index + 1}: prompt is ${payload.prompt.length} characters, exceeding the configured maximum of ${maxPromptLength} characters.`));
     }
     if (type === "image" && (duration != null || resolution != null)) {
       problems.push(jobProblem(index, "FLOW_QUEUE_PREFLIGHT_VIDEO_SETTINGS",
