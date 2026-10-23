@@ -636,10 +636,28 @@
     return enriched;
   }
 
+  // IMG-05: upload-confirmation budgets. The base budget is the historical
+  // fixed cap. Once a new-owner tile has latched and is visibly still
+  // processing, the working deadline extends in steps up to the hard cap
+  // (image: a few minutes; video: 8x its base, matching the reference's
+  // hard window) instead of failing FLOW_UPLOAD_TIMEOUT while Flow is
+  // still working on our tile. A caller-provided deadline stays an
+  // absolute cap — extension is armed only when no explicit deadline is
+  // in force — so budgeted callers (IMG-02 reconciliation's bounded
+  // share, the op-deadline upload paths) keep exactly their old waits.
+  const FLOW_UPLOAD_CONFIRM_BASE_MS = { image: 90_000, video: 60_000 };
+  const FLOW_UPLOAD_CONFIRM_HARD_MS = { image: 240_000, video: 480_000 };
+  const FLOW_UPLOAD_CONFIRM_EXTENSION_STEP_MS = 15_000;
+
   async function waitForNativeMediaTile(assetName, command, kind, options = {}) {
     const fn = root.flowError || ((c, m, r, o) => Object.assign(new Error(m), { code: c, retryable: r, outcome_unknown: o }));
-    const deadline = Math.min(options.deadline || Infinity, Date.now() + (kind === "video" ? 60_000 : 90_000));
     const startedAt = Date.now();
+    const callerDeadline = Number.isFinite(options.deadline) && options.deadline > 0 ? options.deadline : null;
+    let deadline = Math.min(callerDeadline ?? Infinity, startedAt + (kind === "video" ? FLOW_UPLOAD_CONFIRM_BASE_MS.video : FLOW_UPLOAD_CONFIRM_BASE_MS.image));
+    const extensionCeiling = callerDeadline !== null
+      ? deadline
+      : startedAt + (kind === "video" ? FLOW_UPLOAD_CONFIRM_HARD_MS.video : FLOW_UPLOAD_CONFIRM_HARD_MS.image);
+    let ownerProcessing = false;
     let nextLibraryScanAt = startedAt + 1_500;
     let libraryScans = 0;
     const maxLibraryScans = Number.isInteger(options.maxLibraryScans) ? Math.max(0, options.maxLibraryScans) : 3;
@@ -654,7 +672,12 @@
     let lastScanErrorCode = null;
     const getMediaId = root.mediaId || (el => el.getAttribute("data-media-id") || el.getAttribute("id") || "");
 
-    while (Date.now() < deadline) {
+    while (Date.now() < deadline || (ownerProcessing && deadline < extensionCeiling)) {
+      if (Date.now() >= deadline) {
+        deadline = Math.min(extensionCeiling, Date.now() + FLOW_UPLOAD_CONFIRM_EXTENSION_STEP_MS);
+        root.emitFlowProgress?.(command, `Flow is still processing the uploaded ${kind} "${assetName}"; extending the confirmation deadline (hard cap ${Math.round((extensionCeiling - startedAt) / 1000)}s).`);
+      }
+      ownerProcessing = false;
       const exactNameMatches = [...document.querySelectorAll("flow-grid-tile-container")]
         .filter(item => matchesFlowTile(item, assetName));
       if (exactNameMatches.length) exactTileObserved = true;
@@ -702,6 +725,9 @@
         const identityMatchesOwner = !requireNewOwner || Boolean(ownerId && hasPersistentIdentity && String(identity) === ownerId && isNewOwner);
         const kindMatches = flowUploadKindMatches(kind, actualKind);
         const ready = root.FlowTiles?.isTileMediaReady?.(tile) ?? !root.isTileBusy?.(tile);
+        // IMG-05: the latched owner's tile is present but not ready —
+        // processing evidence that arms the deadline extension above.
+        if (ownerId && String(identity) === ownerId && !ready) ownerProcessing = true;
         if (requireNewOwner && hasPersistentIdentity && !isNewOwner) {
           // Pre-existing tile
         } else if (ready && kindMatches && identityMatchesOwner && hasPersistentIdentity && flowUploadTileNames(tile).some(name => flowUploadNameMatches(name, assetName))) {
@@ -756,6 +782,9 @@
               const kindMatches = flowUploadKindMatches(kind, asset.kind);
               const kindUnknown = !asset.kind;
               if (!kindMatches && !kindUnknown) throw fn("FLOW_UPLOAD_KIND_MISMATCH", `Flow's new media ID for "${assetName}" hydrated as ${asset.kind}, not ${kind}. Inspect it before retrying.`, false, true);
+              // IMG-05: the latched owner asset is still processing —
+              // same extension evidence as the DOM path above.
+              if (!(asset.ready === true && asset.busy === false)) ownerProcessing = true;
               if (kindMatches && asset.ready === true && asset.busy === false) {
                 const thumbnailUrl = asset.thumbnailUrl || asset.thumbnail || null;
                 return { name: asset.name, id: asset.id, kind, ...(thumbnailUrl ? { thumbnailUrl } : {}) };
