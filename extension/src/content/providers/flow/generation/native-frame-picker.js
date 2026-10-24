@@ -433,12 +433,30 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
       const currentList = listGetter();
       const selected = currentList && deepQueryAll(currentList, '[role="option"]').find(item => isExactOption(item) &&
         (item.getAttribute("aria-selected") === "true" || item.getAttribute("aria-checked") === "true" || item.getAttribute("data-state") === "checked"));
+      // Review round 2, S2: an option selected by identity whose title
+      // drifted never matches the exact-title check above, so without
+      // this it waited the full 5 s and threw UNCONFIRMED despite a
+      // successful attach. A selected-state option whose backend
+      // identity equals the verified selectedId confirms by identity.
+      // Only selected-state options are probed, failures resolve to null
+      // (never break the loop), and the deadline still bounds the work.
+      let identityConfirmed = false;
+      if (!selected && currentList) {
+        const selectedStateOptions = deepQueryAll(currentList, '[role="option"]').filter(item =>
+          item.getAttribute("aria-selected") === "true" || item.getAttribute("aria-checked") === "true" || item.getAttribute("data-state") === "checked");
+        for (const candidate of selectedStateOptions) {
+          if (Date.now() >= selectionDeadline) break;
+          let candidateId = null;
+          try { candidateId = await optionBackendIdentity(candidate); } catch { candidateId = null; }
+          if (candidateId && candidateId === selectedId.toLowerCase()) { identityConfirmed = true; break; }
+        }
+      }
       const slotChanged = slotSignature() !== beforeSlot;
-      if (selected || (slotChanged && !currentList)) {
+      if (selected || identityConfirmed || (slotChanged && !currentList)) {
         attached = true;
         recordFramePickerDiagnostics("selection_confirmed", currentList, {
           selectedMediaId: selectedId.toLowerCase(),
-          confirmation: selected ? "exact_option_selected_state" : "slot_signature_changed_and_exact_list_disappeared",
+          confirmation: selected ? "exact_option_selected_state" : identityConfirmed ? "identity_selected_state" : "slot_signature_changed_and_exact_list_disappeared",
           slotChanged,
         });
         break;

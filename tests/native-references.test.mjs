@@ -1090,6 +1090,76 @@ test('reviewfix false-stamp: a title match that exposes no UUID fails closed ins
   assert.deepEqual(clicks, [], 'nothing is clicked: the unverified title match is rejected before selection');
 });
 
+test('reviewfix picker confirm: an identity-selected option with a drifted title confirms by identity while the picker stays open', async () => {
+  // Before the fix the post-click confirm loop only accepted an option
+  // matching the exact title in a selected state. An option selected by
+  // identity whose title had drifted therefore waited the full 5 s and
+  // threw FLOW_FRAME_ATTACH_UNCONFIRMED (outcomeUnknown=true) even
+  // though the frame had attached. The picker stays open here on purpose
+  // so the slotChanged-and-list-disappeared rescue cannot mask the gap:
+  // only the identity check can confirm.
+  const mediaUuid = '66666666-6666-4666-8666-666666666666';
+  let clock = 0;
+  let pickerOpen = false;
+  let clicked = false;
+  const tile = {
+    getAttribute: name => name === 'aria-label' ? 'Drifted Title' : null,
+    querySelectorAll: () => [],
+  };
+  const option = {
+    name: 'Drifted Title',
+    getAttribute: name => name === 'aria-label' ? 'Drifted Title'
+      : name === 'aria-selected' ? String(clicked) : null,
+    querySelectorAll: selector => selector === 'flow-grid-tile-container' ? [tile] : [],
+    querySelector: () => null,
+    click() { clicked = true; },
+  };
+  const list = {
+    isConnected: true,
+    getAttribute: name => name === 'role' ? 'listbox' : null,
+    querySelectorAll: selector => selector === '[role="option"]' ? [option]
+      : selector === 'flow-grid-tile-container' ? [tile] : [],
+    closest: () => null,
+  };
+  const opener = {
+    name: 'Start',
+    getAttribute: name => name === 'aria-label' ? 'Start' : name === 'aria-expanded' ? String(pickerOpen) : null,
+    innerText: 'Start',
+    parentElement: { parentElement: { querySelectorAll: () => [] } },
+    click() { pickerOpen = !pickerOpen; },
+  };
+  const allTab = { name: 'All', getAttribute: name => name === 'aria-selected' ? 'true' : null };
+  const document = {
+    querySelectorAll(selector) {
+      if (selector === '[role="listbox"]') return pickerOpen ? [list] : [];
+      if (selector === '[role="progressbar"],[aria-busy="true"]') return [];
+      if (selector === '[role="tab"]') return [allTab];
+      return [];
+    },
+    getElementById: () => null,
+    dispatchEvent: () => {},
+  };
+  const context = vm.createContext({ document, location: { href: 'https://flow.google.com/project/test', pathname: '/project/test' },
+    Date: class MockDate extends Date { static now() { return clock; } }, setTimeout, clearTimeout,
+    window: { addEventListener() {}, removeEventListener() {}, dispatchEvent() {} },
+    CustomEvent: class CustomEvent { constructor(type) { this.type = type; } },
+    mediaId: value => value === tile ? mediaUuid : undefined,
+    visible: el => el !== list || pickerOpen,
+    accessibleName: el => el.name || '',
+    flowButton: name => name === 'Start' ? opener : null,
+    flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
+    KeyboardEvent: class KeyboardEvent {},
+    wait: async ms => { clock += ms; },
+  });
+  vm.runInContext(source, context);
+  const result = await context.chooseNativePickerAsset('still.png', 'start', { expectedId: mediaUuid });
+  assert.equal(result.confirmed, true);
+  assert.equal(result.id, mediaUuid);
+  assert.equal(clicked, true, 'the option was clicked');
+  assert.equal(context.FlowNativeFramePicker.inspectDiagnostics().confirmation, 'identity_selected_state',
+    'confirmation must record that identity — not the drifted title — proved the attach');
+});
+
 test('frame picker lets the expected identity decide between options that share a title', async () => {
   const wrongUuid = '33333333-3333-4333-8333-333333333333';
   const rightUuid = '44444444-4444-4444-8444-444444444444';
