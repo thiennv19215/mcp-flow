@@ -22,6 +22,11 @@
       // correlation events for those tiles as well.
       this.jobs = new Map(); // queue job id -> job object
       this.queueSnapshot = null;
+      // FEAT-12: the previous snapshot's slot projection + the cards of
+      // regen attempts that vanished mid-flight (kept as failed
+      // tombstones instead of being purged or stuck "rendering").
+      this._lastRegenSlots = null;
+      this._regenTombstoneIds = new Set();
       this.minimized = false;
       this.positionLocked = false;
       this.isDragging = false;
@@ -686,9 +691,16 @@
 
     syncQueueSnapshot(snapshot) {
       this.queueSnapshot = snapshot || null;
-      const queueJobs = Array.isArray(snapshot?.jobs)
+      const rawJobs = Array.isArray(snapshot?.jobs)
         ? snapshot.jobs
         : Array.isArray(snapshot?.items) ? snapshot.items : [];
+      // FEAT-12: when the snapshot carries the slot projection, cards
+      // are built from slot winners only — the attempts of one item
+      // fold into a single card (newest wins), like the queue panel.
+      const slots = Array.isArray(snapshot?.slots) && snapshot.slots.length ? snapshot.slots : null;
+      const slotByWinnerId = new Map();
+      if (slots) for (const slot of slots) if (slot?.winner?.id) slotByWinnerId.set(String(slot.winner.id), slot);
+      const queueJobs = slots ? slots.map(slot => slot.winner).filter(Boolean) : rawJobs;
       const visibleIds = new Set();
       for (const queueJob of queueJobs) {
         // Sidebar/queue-panel jobs and explicit MCP queue jobs carry one of
@@ -722,12 +734,70 @@
           thumbnail: previous.thumbnail,
           completed,
         });
+        const slot = slotByWinnerId.get(id);
+        if (slot) {
+          previous.slotKey = slot.slotKey;
+          previous.attemptCount = slot.attemptCount;
+          previous.regenRootJobId = slot.rootJobId;
+          if (slot.recoveryExhausted) previous.recoveryExhausted = true;
+          else delete previous.recoveryExhausted;
+        } else {
+          delete previous.slotKey;
+          delete previous.attemptCount;
+          delete previous.regenRootJobId;
+          delete previous.recoveryExhausted;
+        }
+        this._regenTombstoneIds.delete(id);
         this.jobs.set(id, previous);
       }
 
+      if (slots) this.foldVanishedRegenAttempts(slots, rawJobs);
+      else {
+        this._lastRegenSlots = null;
+        this._regenTombstoneIds.clear();
+      }
+
       // A removed/cleared queue item should disappear from the tracker too.
-      for (const id of this.jobs.keys()) if (!visibleIds.has(id)) this.jobs.delete(id);
+      for (const id of this.jobs.keys()) if (!visibleIds.has(id) && !this._regenTombstoneIds.has(id)) this.jobs.delete(id);
       this.render();
+    }
+
+    // FEAT-12: a regen attempt that was active in the previous
+    // projection and is simply gone from this snapshot (its live
+    // snapshot disappeared) must not leave its card stuck "rendering"
+    // or silently revert to the older attempt's result: the card
+    // stays as a failed tombstone with recovery exhausted until a
+    // newer attempt of the same slot supersedes it or it is removed.
+    foldVanishedRegenAttempts(slots, rawJobs) {
+      const currentRawIds = new Set(rawJobs.map(job => String(job?.id || "")).filter(Boolean));
+      for (const previousSlot of this._lastRegenSlots || []) {
+        const winner = previousSlot?.winner;
+        if (!winner?.id) continue;
+        const wasRegen = Boolean(winner.metadata?.regen?.rootJobId || winner.metadata?.regenOf);
+        const wasActive = ["pending", "running", "waiting_for_user"].includes(String(winner.status || ""));
+        if (!wasRegen || !wasActive) continue;
+        if (currentRawIds.has(String(winner.id))) continue;
+        const currentSlot = slots.find(slot => slot.slotKey === previousSlot.slotKey);
+        if (currentSlot && (Number(currentSlot.winner?.addedAt) || 0) >= (Number(winner.addedAt) || 0)) continue;
+        const card = this.jobs.get(String(winner.id));
+        if (!card) continue;
+        card.status = "failed";
+        card.recoveryExhausted = true;
+        card.error = "Lần tạo lại đã biến mất khỏi hàng đợi trước khi hoàn tất — khôi phục đã hết, hãy tạo lại thủ công.";
+        this._regenTombstoneIds.add(String(winner.id));
+      }
+      // A tombstone is superseded only by a NEWER attempt of its slot —
+      // an older attempt still being present (e.g. the original) is the
+      // normal case the tombstone exists for, not a supersession.
+      for (const id of [...this._regenTombstoneIds]) {
+        const card = this.jobs.get(id);
+        const slot = card?.slotKey ? slots.find(candidate => candidate.slotKey === card.slotKey) : null;
+        if (slot && String(slot.winner?.id) !== id && (Number(slot.winner?.addedAt) || 0) > (Number(card.createdAt) || 0)) {
+          this.jobs.delete(id);
+          this._regenTombstoneIds.delete(id);
+        }
+      }
+      this._lastRegenSlots = slots;
     }
 
     setMinimized(val) {
@@ -1076,6 +1146,7 @@
             </div>
             <div class="flow-ft-task-meta">
               <span class="flow-ft-status-tag ${statusClass}">${statusLabel}</span>
+              ${Number(job.attemptCount) > 1 ? `<span class="flow-ft-task-attempts" title="Số lần thử của mục này">↻ ×${Number(job.attemptCount)}</span>` : ""}
               <span class="flow-ft-timer" data-timer-id="${escapeHtml(job.id)}">${percent}</span>
             </div>
             ${job.error ? `<div class="flow-ft-task-error">${escapeHtml(String(job.error))}</div>` : ""}
