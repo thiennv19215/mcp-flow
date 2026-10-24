@@ -245,7 +245,12 @@ export class FlowBridgeClient {
     try {
       const settings = await readBridgeConfig();
       backendOrigin = new URL(settings.bridge).origin;
-      const token = "";
+      // The backend server token the user saved once on the options page
+      // (chrome.storage.local key "serverToken"). Empty means "not saved":
+      // HTTP connect then 401s and the client falls back to WebSocket, the
+      // pre-D5 behaviour. The same token is also passed to the WebSocket
+      // endpoint, so WS auth works when FLOW_MCP_WS_TOKEN is set.
+      const token = typeof settings.serverToken === "string" ? settings.serverToken : "";
       this.stopHttpSession();
       const httpConnected = await this.connectHttp(settings, token);
       if (httpConnected) return;
