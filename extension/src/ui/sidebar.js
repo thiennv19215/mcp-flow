@@ -3215,7 +3215,7 @@
         const useRef = document.createElement("button");
         useRef.type = "button";
         useRef.className = "btn btn-secondary btn-sm";
-        useRef.textContent = "Dùng làm tham chiếu";
+        useRef.textContent = t("sidebar.photosUseReference");
         useRef.dataset.albumRefAlbum = album.id;
         useRef.dataset.albumRefImage = image.id;
         item.appendChild(useRef);
@@ -3514,7 +3514,7 @@
     fillSelect(document.querySelector("#flowVoiceSelect"), voices,
       voice => typeof voice === "string" ? voice : voice.name,
       voice => typeof voice === "string" ? voice : voice.name,
-      "Không dùng giọng nói");
+      t("sidebar.libraryNoVoice"));
     return result;
   }));
 
@@ -4020,7 +4020,7 @@
         const refSection = document.querySelector("#refImagesSection");
         if (refSection) refSection.dataset.maxRefImages = "3";
         const refHint = document.querySelector("#refPickerLimitHint");
-        if (refHint) refHint.textContent = "Tối đa 3 ảnh tham chiếu";
+        if (refHint) refHint.textContent = t("sidebar.referencePickerLimit");
         setGenType(document.querySelector("#genType")?.value || "image");
         void loadFlowModelCapabilities().then(() => applyFlowModelControls());
       }
