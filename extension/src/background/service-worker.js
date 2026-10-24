@@ -1342,8 +1342,29 @@ async function runExtensionFlowJob(job, hooks) {
       ...(observation.domAccepted ? { domAccepted: true } : {}),
     });
   } catch (error) {
+    // Videofix M-I: the old code forced outcomeUnknown=true for EVERY
+    // observe error, discarding observe's deliberate outcomeUnknown=false
+    // for determined render failures (a tile render that certainly
+    // failed, a rate-limit error) — which paused the queue and blocked
+    // retry/auto-retry for jobs that were safe to retry. Force true
+    // only for genuinely ambiguous codes (timeout / cancel /
+    // interference / correlation-unavailable, plus the no-code default);
+    // keep observe's deliberate false for determined errors, and fail
+    // closed to true for errors observe never classified. Both flag
+    // spellings are set so every downstream reader agrees.
+    const ambiguousObserveCodes = new Set([
+      "FLOW_OPERATION_TIMEOUT",
+      "FLOW_GENERATION_TIMEOUT",
+      "FLOW_OPERATION_CANCELLED",
+      "FLOW_GENERATION_INTERFERENCE",
+      "FLOW_GENERATION_CORRELATION_UNAVAILABLE",
+      "FLOW_RENDER_OUTCOME_UNKNOWN",
+    ]);
+    const observeDetermined = error?.outcomeUnknown === false || error?.outcome_unknown === false;
+    const outcomeUnknown = observeDetermined && !ambiguousObserveCodes.has(error?.code) ? false : true;
     throw Object.assign(error, {
-      outcomeUnknown: true,
+      outcomeUnknown,
+      outcome_unknown: outcomeUnknown,
       requestDispatched: true,
       code: error?.code || "FLOW_RENDER_OUTCOME_UNKNOWN",
     });
