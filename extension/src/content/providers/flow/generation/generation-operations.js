@@ -9,16 +9,29 @@
     error(...args) {
       return this.driver.error(...args);
     }
+    // Review round 1, S3: classifies WHY an object frame value is
+    // unusable, so execute can fail fast with a specific message instead
+    // of collapsing every bad frame into null and then into the generic
+    // retryable NATIVE_CAPABILITY_UNSUPPORTED. Returns null when the
+    // value has no identifiable problem (the generic path still owns it).
+    // Shared with frameValue so the two can never drift apart.
+    frameInputProblem(value) {
+      if (!value || typeof value !== "object" || typeof value.assetName !== "string" || !value.assetName.trim()) return null;
+      const kind = String(value.kind || "image").trim().toLowerCase();
+      if (kind !== "image") return `has kind "${value.kind}" — frames accept images only`;
+      const expectedId = value.expectedId;
+      const isUuid = typeof expectedId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(expectedId);
+      const isAsb = typeof expectedId === "string" && expectedId.startsWith("asb:");
+      if (expectedId !== undefined && !isUuid && !isAsb) return `has expectedId "${expectedId}" which is not a Flow media id (expected a UUID or asb: id)`;
+      return null;
+    }
     frameValue(value) {
       if (typeof value === "string" && value.trim()) return { assetName: value.replace(/^asset:/i, "").trim() };
       if (!value || typeof value !== "object") return undefined;
       if (typeof value.assetName === "string" && value.assetName.trim()) {
-        const kind = String(value.kind || "image").trim().toLowerCase();
-        if (kind !== "image") return null;
+        if (this.frameInputProblem(value)) return null;
         const expectedId = value.expectedId;
         const isUuid = typeof expectedId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(expectedId);
-        const isAsb = typeof expectedId === "string" && expectedId.startsWith("asb:");
-        if (expectedId !== undefined && !isUuid && !isAsb) return null;
         return { assetName: value.assetName.trim(), ...(value.kind ? { kind: value.kind } : {}), ...(expectedId ? { expectedId: isUuid ? String(expectedId).toLowerCase() : String(expectedId) } : {}) };
       }
       if (root.validStagedLocalImage?.(value, /(?:start|end)/)) return value;
@@ -217,6 +230,16 @@
         const attachments = Array.isArray(payload.attachments) ? payload.attachments : [];
         const variants = Math.max(1, Math.min(4, Number(payload.variants || payload.count || 1)));
         const firstFrame = this.frameValue(payload.firstFrame), lastFrame = this.frameValue(payload.lastFrame);
+        // Review round 1, S3: a frame whose id/kind is identifiably bad
+        // fails here, fast and non-retryable, naming the frame and the
+        // offending value — retrying could never fix it, and the old
+        // generic retryable error hid which frame was at fault.
+        for (const [slot, raw, value] of [["firstFrame", payload.firstFrame, firstFrame], ["lastFrame", payload.lastFrame, lastFrame]]) {
+          if (value === null) {
+            const problem = this.frameInputProblem(raw);
+            if (problem) throw this.error("FLOW_FRAME_INPUT_INVALID", `Invalid ${slot}: ${problem}. Nothing was submitted.`, false, false);
+          }
+        }
         const requestedVideoMode = String(payload.video_settings?.mode || payload.mode || "").trim().toLowerCase();
         const framesMode = payload.type === "video" && (requestedVideoMode === "frames" || Boolean(firstFrame || lastFrame));
         if (framesMode && !firstFrame && !lastFrame) {

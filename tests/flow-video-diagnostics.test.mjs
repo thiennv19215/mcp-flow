@@ -315,6 +315,30 @@ test('S2 reviewfix: a staged transfer lost before upload fails fast with re-atta
   });
 });
 
+test('S3 reviewfix: a frame with an unrecognizable id fails fast, non-retryable, naming the frame and the id', async () => {
+  // Before the fix frameValue collapsed a bad expectedId into null and
+  // execute threw the generic retryable NATIVE_CAPABILITY_UNSUPPORTED
+  // for the whole job — so the queue retried a job that could never
+  // succeed, with a message that never said which frame or id was bad.
+  const { submit } = dispatchHarness({ waitMode: 'throw-timeout' });
+  await assert.rejects(submit({ firstFrame: { assetName: 'still.png', expectedId: 'bad-id' } }), (error) => {
+    assert.equal(error.code, 'FLOW_FRAME_INPUT_INVALID');
+    assert.equal(error.retryable, false, 'an invalid frame id is not fixed by retrying');
+    assert.match(error.message, /firstFrame/, 'the message names the offending frame');
+    assert.match(error.message, /bad-id/, 'the message names the offending id');
+    return true;
+  });
+});
+
+test('S3 reviewfix control: a malformed frame with no identifiable problem keeps the old generic error', async () => {
+  const { submit } = dispatchHarness({ waitMode: 'throw-timeout' });
+  await assert.rejects(submit({ firstFrame: {} }), (error) => {
+    assert.equal(error.code, 'NATIVE_CAPABILITY_UNSUPPORTED');
+    assert.equal(error.retryable, true);
+    return true;
+  });
+});
+
 test('dispatch wait: exhausting the submit deadline without acknowledgement also carries diagnostics', async () => {
   const { submit } = dispatchHarness({ waitMode: 'advance' });
   await assert.rejects(submit(), error => {
