@@ -189,11 +189,15 @@ export async function startServer(core: Core): Promise<ServerRole> {
 
       const given = req.headers["x-flow-token"] ?? url.searchParams.get("token");
       const apiMethod = url.pathname.match(/^\/api\/(\w+)$/)?.[1] as keyof Core | undefined;
-      if (req.method === "POST" && apiMethod && typeof core[apiMethod] === "function") {
+      // Dispatch is allowlisted to methods with a schemas.ts shape: every
+      // Core interface method has one, so an unknown name (including
+      // private/prototype members) falls through to 404 instead of being
+      // invoked with unvalidated args.
+      const shape = apiMethod ? (shapes as Record<string, z.ZodRawShape>)[apiMethod] : undefined;
+      if (req.method === "POST" && apiMethod && shape && typeof core[apiMethod] === "function") {
         if (given !== token) return json(res, 401, { error: "Missing or wrong token." });
         const raw = (await readBody(req, 1024 * 1024)).toString() || "{}";
-        const shape = (shapes as Record<string, z.ZodRawShape>)[apiMethod];
-        const args = shape ? z.object(shape).parse(JSON.parse(raw)) : undefined;
+        const args = z.object(shape).parse(JSON.parse(raw));
         return json(res, 200, await (core[apiMethod] as (a: unknown) => Promise<unknown>)(args));
       }
 

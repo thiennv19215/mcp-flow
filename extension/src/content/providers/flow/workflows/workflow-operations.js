@@ -16,6 +16,20 @@
     error(...args) {
       return this.driver.error(...args);
     }
+    // Resolve a workflow video source by title. An exact title always
+    // wins; several prefix matches without an exact one are returned so
+    // the caller can raise its existing FLOW_AMBIGUOUS_ASSET error; a
+    // single prefix-only match is refused outright — editing "anh"
+    // must never silently edit "anh 2". Non-video assets never match.
+    resolveWorkflowVideoSource(assets, sourcePrefix) {
+      const norm = value => String(value || "").toLowerCase();
+      const wanted = norm(sourcePrefix);
+      const matches = (assets || []).filter(asset => asset?.kind === "video" && norm(asset.name).startsWith(wanted));
+      const source = matches.find(asset => norm(asset.name) === wanted) || null;
+      if (!source && matches.length === 1) throw this.error("FLOW_VIDEO_NOT_FOUND",
+        `No video titled exactly "${sourcePrefix}"; found "${matches[0].name}" beginning with it. Use the exact title.`, true, false);
+      return { source, matches };
+    }
     workflowDeadline(command, fallbackMs = 120_000) {
       return root.FlowUiDeadline?.makeDeadline(command, fallbackMs, 15_000) || Date.now() + fallbackMs;
     }
@@ -180,9 +194,8 @@
         if (activeAgent?.getAttribute("aria-pressed") === "true") await agent.setNativeAgentMode(false);
         await nav.ensureFlowLibrarySection("All media", { deadline });
         const assets = await menu.scanNativeAssets({ deadline });
-        const matches = assets.filter(asset => asset.kind === "video" && asset.name.toLowerCase().startsWith(sourcePrefix.toLowerCase()));
+        const { source, matches } = this.resolveWorkflowVideoSource(assets, sourcePrefix);
         if (matches.length > 1) throw this.error("FLOW_AMBIGUOUS_ASSET", `${matches.length} videos begin with "${sourcePrefix}". Use the exact title.`, false, false);
-        const source = matches[0];
         if (!source) throw this.error("FLOW_VIDEO_NOT_FOUND", `No video beginning "${sourcePrefix}" exists in the project.`, false, false);
         const tile = await tiles.findFlowTile(source.name);
         if (!tile || !tile.querySelector("flow-video-tile")) throw this.error("FLOW_VIDEO_NOT_FOUND", `Video "${source.name}" is no longer visible.`, false, false);
@@ -228,9 +241,8 @@
         if (activeAgent?.getAttribute("aria-pressed") === "true") await agent.setNativeAgentMode(false);
         await nav.ensureFlowLibrarySection("All media", { deadline });
         const assets = await menu.scanNativeAssets({ deadline });
-        const matches = assets.filter(a => a.kind === "video" && a.name.toLowerCase().startsWith(source.toLowerCase()));
+        const { source: found, matches } = this.resolveWorkflowVideoSource(assets, source);
         if (matches.length > 1) throw this.error("FLOW_AMBIGUOUS_ASSET", `${matches.length} videos begin with "${source}"; no edit was started. Use the full title from flow_assets.`, true, false);
-        const found = matches[0];
         if (!found) throw this.error("FLOW_VIDEO_NOT_FOUND", `No video beginning "${source}" exists in the project. Use flow_assets to list titles.`, true);
         await tiles.stabilizeFlowResultViewport({ deadline, signal: command.signal });
         const before = tiles.collectNativeMedia().map(item => item.id || `title:${item.title}`);
@@ -524,9 +536,8 @@
         if (activeAgent?.getAttribute("aria-pressed") === "true") await agent.setNativeAgentMode(false);
         await nav.ensureFlowLibrarySection("All media", { deadline });
         const assets = await menu.scanNativeAssets({ deadline });
-        const matches = assets.filter(a => a.kind === "video" && a.name.toLowerCase().startsWith(sourcePrefix.toLowerCase()));
+        const { source, matches } = this.resolveWorkflowVideoSource(assets, sourcePrefix);
         if (matches.length > 1) throw this.error("FLOW_AMBIGUOUS_ASSET", `${matches.length} videos begin with "${sourcePrefix}"; no continuation was started. Use the full title from flow_assets.`, true, false);
-        const source = matches[0];
         if (!source) throw this.error("FLOW_VIDEO_NOT_FOUND", `No video beginning "${sourcePrefix}" exists in the project. Use flow_assets to list titles.`, true);
         await tiles.stabilizeFlowResultViewport({ deadline, signal: command.signal });
         const before = tiles.collectNativeMedia().map(item => item.id || `title:${item.title}`);
