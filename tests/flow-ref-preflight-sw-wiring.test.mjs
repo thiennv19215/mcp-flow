@@ -211,3 +211,41 @@ test('IMG-04 wiring: a project mismatch does not resolve another project catalog
   assert.equal(lookups[0].query.projectId, PROJECT_B, 'the lookup is scoped to the job project, not the recorded one');
   assert.equal(lookups[0].entry, null, 'the per-project catalog does not leak entries across projects');
 });
+
+test('reviewfix queue preflight: a catalog miss never fails the job at the queue — the content gate owns the decision', async () => {
+  // DEVIATION, stated plainly: the brief's option (a) — fail at the
+  // queue when the catalog reports a miss — would be a REGRESSION.
+  // The catalog only records entries from upload enrichment; a
+  // library/album-picked reference is NEVER recorded, and the catalog
+  // tracks no deletions — so a miss proves nothing about whether the
+  // asset exists in the project. Failing on it would false-fail
+  // legitimate library-picked jobs. The worker therefore keeps the
+  // pass-through (the service worker has no DOM to scan), and the
+  // content-side revalidation at submit — refNameTrust grading plus
+  // attach-time ID verification — stays the authoritative gate. This
+  // test pins that contract: an uncatalogued library ref passes the
+  // queue untouched instead of throwing.
+  const wiringStart = serviceWorkerSource.indexOf('function createQueueRefPreflight(');
+  assert.ok(wiringStart >= 0, 'the worker wiring factory must exist');
+  // The region spans the pre-function IMG-04 comment (which already
+  // documented the pass-through) and the reviewfix note inside the
+  // factory body (which adds the catalog-miss rationale).
+  const wiringComment = serviceWorkerSource.slice(Math.max(0, wiringStart - 1500), wiringStart + 1500);
+  assert.match(wiringComment, /content-stage pass/i,
+    'the wiring must document that the content-stage revalidation — not the queue pass — is the authoritative gate');
+  assert.match(wiringComment, /never recorded/i,
+    'the wiring must document that library picks are never recorded in the catalog, so a catalog miss cannot fail the job');
+  const emptyCatalog = new FlowMediaCatalog({ storage: memoryStorage() });
+  const { catalog, lookups } = spyCatalog(emptyCatalog);
+  const { queueJobProjectId, createQueueRefPreflight } = loadWorkerWiring();
+  const refPreflight = createQueueRefPreflight({ catalog, projectIdForJob: queueJobProjectId });
+  const { job: validated, reuploaded } = await refPreflight({
+    operation: 'flow.generation.submit',
+    payload: { type: 'image', prompt: 'a still', attachments: [{ assetName: 'Library pick.png', expectedId: MEDIA_ID, kind: 'image' }] },
+    metadata: { flowProjectId: PROJECT },
+  });
+  assert.equal(lookups.length, 1, 'the catalog is consulted');
+  assert.equal(lookups[0].entry, null, 'a library pick has no catalog entry');
+  assert.deepEqual(reuploaded, [], 'nothing is rewritten from the worker');
+  assert.equal(validated.payload.attachments[0].expectedId, MEDIA_ID, 'the uncatalogued ref passes the queue untouched for the content gate to decide');
+});
