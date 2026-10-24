@@ -12,6 +12,7 @@ const PAGE_BLOCKER_ERROR_CODES = new Set([
   "FLOW_AGENT_PREFLIGHT_UNAVAILABLE",
   "FLOW_SCREEN_PREFLIGHT_UNAVAILABLE",
   "FLOW_SESSION_REQUIRED",
+  "FLOW_UNUSUAL_ACTIVITY",
   "FLOW_PROJECT_NAVIGATING",
   "FLOW_PROJECT_LOAD_FAILED",
   "FLOW_PROJECT_REQUIRED",
@@ -32,6 +33,18 @@ const PAGE_BLOCKER_ERROR_CODES = new Set([
   "FLOW_AGENT_CONFIRMATION_UNVERIFIED",
   "FLOW_TRASH_CONFIRM_UNVERIFIED",
   "FLOW_TRASH_CONFIRM_AMBIGUOUS",
+]);
+// VID-05: captcha bounded auto-resume. classifyFlowError
+// (content/shared/dom-utils.js) maps the whole captcha family
+// (PUBLIC_ERROR_UNUSUAL_ACTIVITY, bot_detected, captcha_failed, "unusual
+// activity", …) to category "captcha" with this single code. A blocked job
+// in that category may be automatically resubmitted at most
+// CAPTCHA_RESUBMIT_MAX times across its whole life; the spent budget lives
+// on the persisted job record (captchaResubmits), so a service-worker
+// restart cannot reset it.
+const CAPTCHA_RESUBMIT_MAX = 1;
+const CAPTCHA_ERROR_CODES = new Set([
+  "FLOW_UNUSUAL_ACTIVITY",
 ]);
 const PAGE_BLOCKER_NO_AUTO_RETRY_ERROR_CODES = new Set([
   // A user may resolve these prompts directly in Flow while the queue is
@@ -347,6 +360,7 @@ export class FlowJobQueue {
       addedAt,
       attempts: 0,
       autoRetryCount: 0,
+      captchaResubmits: 0,
     };
   }
 
@@ -636,7 +650,23 @@ export class FlowJobQueue {
     await this.ready;
     if (this.paused && this.attention?.type === "flow-page-blocked") {
       const blockedJob = this.jobs.find(job => job.id === this.attention.jobId);
-      if (blockedJob?.status === "failed" && this.attention.retryOnResume !== false && blockedJob.retrySafe === true && blockedJob.outcomeUnknown !== true) {
+      // VID-05: a captcha-classified blocker gets ONE bounded automatic
+      // resubmit. Resume means the user solved the challenge on the Flow
+      // tab, so instead of requiring the retry-safe flag (or taking the
+      // first pending slot like other blockers), the job is requeued at
+      // the batch tail and its persisted captchaResubmits counter is
+      // incremented. At/over the cap this branch does not fire and the
+      // manual attention flow below applies unchanged.
+      const captchaResubmits = Number.isInteger(blockedJob?.captchaResubmits) && blockedJob.captchaResubmits > 0
+        ? blockedJob.captchaResubmits
+        : 0;
+      const captchaAutoResubmit = blockedJob?.status === "failed" &&
+        this.attention.retryOnResume !== false &&
+        blockedJob.outcomeUnknown !== true &&
+        CAPTCHA_ERROR_CODES.has(String(blockedJob.errorCode || "")) &&
+        captchaResubmits < CAPTCHA_RESUBMIT_MAX;
+      if (captchaAutoResubmit) {
+        blockedJob.captchaResubmits = captchaResubmits + 1;
         blockedJob.status = "pending";
         blockedJob.error = undefined;
         blockedJob.errorCode = undefined;
@@ -644,16 +674,38 @@ export class FlowJobQueue {
         blockedJob.retrySafe = false;
         blockedJob.autoRetryCount = 0;
         blockedJob.overlayRecheckCount = 0;
-        blockedJob.progress = undefined;
+        blockedJob.progress = {
+          phase: "captcha_resubmit",
+          attempt: blockedJob.captchaResubmits,
+          maxAttempts: CAPTCHA_RESUBMIT_MAX,
+          message: "Captcha verification completed. Resubmitting this job once at the end of the batch.",
+        };
         blockedJob.result = undefined;
-      }
-      if (blockedJob?.status === "pending") {
         const currentIndex = this.jobs.indexOf(blockedJob);
-        const firstPendingIndex = this.jobs.findIndex(job => job.status === "pending");
-        if (currentIndex >= 0 && firstPendingIndex >= 0 && currentIndex !== firstPendingIndex) {
+        if (currentIndex >= 0) {
           this.jobs.splice(currentIndex, 1);
-          const nextPendingIndex = this.jobs.findIndex(job => job.status === "pending");
-          this.jobs.splice(nextPendingIndex < 0 ? this.jobs.length : nextPendingIndex, 0, blockedJob);
+          this.jobs.push(blockedJob);
+        }
+      } else {
+        if (blockedJob?.status === "failed" && this.attention.retryOnResume !== false && blockedJob.retrySafe === true && blockedJob.outcomeUnknown !== true) {
+          blockedJob.status = "pending";
+          blockedJob.error = undefined;
+          blockedJob.errorCode = undefined;
+          blockedJob.finishedAt = undefined;
+          blockedJob.retrySafe = false;
+          blockedJob.autoRetryCount = 0;
+          blockedJob.overlayRecheckCount = 0;
+          blockedJob.progress = undefined;
+          blockedJob.result = undefined;
+        }
+        if (blockedJob?.status === "pending") {
+          const currentIndex = this.jobs.indexOf(blockedJob);
+          const firstPendingIndex = this.jobs.findIndex(job => job.status === "pending");
+          if (currentIndex >= 0 && firstPendingIndex >= 0 && currentIndex !== firstPendingIndex) {
+            this.jobs.splice(currentIndex, 1);
+            const nextPendingIndex = this.jobs.findIndex(job => job.status === "pending");
+            this.jobs.splice(nextPendingIndex < 0 ? this.jobs.length : nextPendingIndex, 0, blockedJob);
+          }
         }
       }
       // Resume is the user's confirmation that the shared Flow page has been

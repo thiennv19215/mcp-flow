@@ -146,7 +146,15 @@
           dispatched = tiles.nativeFlowCorrelationMap().get(attemptId)?.requestSeen === true;
           if (!dispatched) throw this.error("FLOW_SUBMIT_UNCONFIRMED", `Flow did not emit a correlated generation request within the dispatch budget (click delivered: ${clickDelivered}). The outcome is unknown; inspect Flow before retrying.`, false, true);
         }
-        return { requestDispatched: true, serverAcceptanceObserved: false, correlationAttemptId: attemptId, activation: activation?.strategy || "dom-click",
+        // WF-ACC: mirror VID-06 — serverAcceptanceObserved reflects THIS
+        // attempt's own correlation receipts via the tiles helper
+        // (response_seen/result_seen only; request_seen alone means the
+        // request merely left the browser). Computed here, before the
+        // finally-block disarm below deletes the entry; a missing helper
+        // or entry keeps the historical false, and the flag never
+        // affects the dispatch verdict.
+        const serverAcceptanceObserved = tiles.nativeFlowCorrelationAcceptanceObserved?.(attemptId) === true;
+        return { requestDispatched: true, serverAcceptanceObserved, correlationAttemptId: attemptId, activation: activation?.strategy || "dom-click",
           ...(confirmationEvidence ? { per_run_confirmation: confirmationEvidence } : {}) };
       } catch (error) {
         if (clickDelivered && error && typeof error === "object" && error.outcome_unknown !== false) error.outcome_unknown = true;

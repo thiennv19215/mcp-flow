@@ -348,6 +348,135 @@
     return flowModelCapabilitiesPromise;
   }
 
+  // GPT-14 — ChatGPT provider wiring for the Gen form.
+  //
+  // The sidebar is a classic script and cannot import the background
+  // GPT-01 registry module (an ES module), so — exactly like
+  // loadFlowModelCapabilities above — it loads the same JSON the build
+  // ships: chatgpt-model-capabilities.json at the repo root, synced into
+  // the extension package by scripts/sync-extension-capabilities.mjs and
+  // copied into dist/extension at build time. Every ratio option and the
+  // ref cap below are read from that registry; there is no second,
+  // hard-coded ChatGPT list in the sidebar.
+  let chatGptCapabilities = null;
+  let chatGptCapabilitiesPromise = null;
+
+  async function loadChatGptCapabilities() {
+    if (chatGptCapabilities) return chatGptCapabilities;
+    if (!chatGptCapabilitiesPromise) {
+      const url = (typeof chrome !== "undefined" && chrome.runtime?.getURL)
+        ? chrome.runtime.getURL("chatgpt-model-capabilities.json")
+        : "../chatgpt-model-capabilities.json";
+      chatGptCapabilitiesPromise = fetch(url)
+        .then(response => {
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return response.json();
+        })
+        .then(registry => {
+          if (!Array.isArray(registry?.defaults?.supportedRatios) || !registry.defaults.supportedRatios.length
+            || !Number.isFinite(Number(registry?.defaults?.maxRefImages))) {
+            throw new Error("The local ChatGPT capability file is invalid.");
+          }
+          chatGptCapabilities = registry;
+          return registry;
+        })
+        .catch(error => {
+          chatGptCapabilitiesPromise = null;
+          console.warn("[Flow UI] local ChatGPT capabilities could not be loaded:", error?.message || error);
+          return null;
+        });
+    }
+    return chatGptCapabilitiesPromise;
+  }
+
+  // GPT-14:BEGIN chatgpt-form-helpers
+  function chatGptNormalizeModelKey(value) {
+    return String(value || "").normalize("NFKC").trim().toLowerCase().replace(/\s+/g, " ");
+  }
+
+  // Mirror of GPT-01's model lookup: substring alias matching, longest
+  // alias wins so a generic alias never shadows a specific rule.
+  function findChatGptModelRule(registry, model) {
+    const normalized = chatGptNormalizeModelKey(model);
+    if (!normalized || !Array.isArray(registry?.models)) return null;
+    let best = null;
+    let bestAliasLength = -1;
+    for (const rule of registry.models) {
+      if (!Array.isArray(rule?.match)) continue;
+      for (const alias of rule.match) {
+        const normalizedAlias = chatGptNormalizeModelKey(alias);
+        if (!normalizedAlias || !normalized.includes(normalizedAlias)) continue;
+        if (normalizedAlias.length > bestAliasLength) {
+          best = rule;
+          bestAliasLength = normalizedAlias.length;
+        }
+      }
+    }
+    return best;
+  }
+
+  function chatGptSupportedRatios(registry, model) {
+    const rule = findChatGptModelRule(registry, model);
+    const ratios = Array.isArray(rule?.aspectRatios) && rule.aspectRatios.length
+      ? rule.aspectRatios
+      : Array.isArray(registry?.defaults?.supportedRatios) ? registry.defaults.supportedRatios : [];
+    return ratios.map(String).filter(Boolean);
+  }
+
+  function chatGptMaxRefImages(registry, model) {
+    const rule = findChatGptModelRule(registry, model);
+    const cap = Number(rule?.maxRefImages ?? registry?.defaults?.maxRefImages);
+    return Number.isFinite(cap) && cap > 0 ? Math.floor(cap) : null;
+  }
+
+  // Repopulates the visible ratio select and its hidden image-ratio twin
+  // from the registry, preserving a still-valid selection and falling
+  // back to the registry default ratio otherwise (replaceSelectOptions
+  // semantics, same as the Flow ratio population).
+  function applyChatGptRatioOptions(registry, model) {
+    const ratios = chatGptSupportedRatios(registry, model);
+    if (!ratios.length) return ratios;
+    const preferred = String(registry?.defaults?.defaultRatio || ratios[0]);
+    replaceSelectOptions(document.querySelector("#aspectRatio"), ratios, value => value, preferred);
+    replaceSelectOptions(document.querySelector("#selectRatioImage"), ratios, value => value, preferred);
+    return ratios;
+  }
+
+  // The sidebar-side ref cap: the ref section carries it as data and the
+  // picker limit hint shows it. (reference-picker.js is outside GPT-14's
+  // scope and keeps its own Flow limit; the enforceable cap for a
+  // ChatGPT job is applied in submitChatGptGeneration, which slices the
+  // attachments to this same registry value, and GPT-09's preflight is
+  // the background backstop.)
+  function applyChatGptRefCap(registry, model) {
+    const cap = chatGptMaxRefImages(registry, model);
+    if (cap === null) return null;
+    const section = document.querySelector("#refImagesSection");
+    if (section) section.dataset.maxRefImages = String(cap);
+    const hint = document.querySelector("#refPickerLimitHint");
+    if (hint) hint.textContent = `Tối đa ${cap} ảnh tham chiếu`;
+    return cap;
+  }
+
+  // The exact queue job the ChatGPT submit enqueues: GPT-02's operation,
+  // GPT-09's payload shape (prompt / ratio / staged-file attachments),
+  // GPT-10's metadata pin (metadata.provider = "chatgpt"), and the label
+  // shape GPT-11's core builder uses for the same job.
+  function buildChatGptGenerationJob({ prompt, ratio, attachments = [], autoDownload = false } = {}) {
+    return {
+      operation: "chatgpt.generation.submit",
+      payload: {
+        prompt,
+        ...(ratio ? { ratio } : {}),
+        attachments: Array.isArray(attachments) ? [...attachments] : [],
+        autoDownload: autoDownload === true,
+      },
+      metadata: { provider: "chatgpt", source: "extension" },
+      label: `ChatGPT image: ${String(prompt || "").slice(0, 80)}`,
+    };
+  }
+  // GPT-14:END chatgpt-form-helpers
+
   function setText(selector, text) {
     const el = document.querySelector(selector);
     if (el) el.textContent = text;
@@ -1022,6 +1151,101 @@
     }
   }
 
+  // GPT-14 — ChatGPT submit for the Gen form. Refs are staged uploads
+  // only (GPT-03's contract): a local file the user picked is read into
+  // a base64 payload record here in the sidebar; a Flow-library
+  // reference carries no payload and is dropped (never resolved against
+  // the Flow library), and the list is capped at the registry's
+  // maxRefImages before the job is built — GPT-09's preflight shape.
+  async function chatGptFileToBase64(file) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+    }
+    return btoa(binary);
+  }
+
+  async function submitChatGptGeneration() {
+    if (isGenerating) {
+      setFeedback("Đang có tác vụ đang chạy, vui lòng đợi!", false);
+      return false;
+    }
+    const prompt = document.querySelector("#promptsArea")?.value.trim()
+      || document.querySelector("#inputPromptImage")?.value.trim() || "";
+    if (!prompt) {
+      setFeedback("Vui lòng nhập câu lệnh prompt cho ảnh!", false);
+      return false;
+    }
+    let prompts;
+    try {
+      prompts = promptsForGeneration(prompt,
+        document.querySelector("#multiPromptCheck")?.checked === true
+        || document.querySelector("#multiPromptImage")?.checked === true);
+    } catch (error) { setFeedback(error.message, false); return false; }
+    isGenerating = true;
+    const btn = document.querySelector("#genSubmitBtn");
+    if (btn) btn.disabled = true;
+    try {
+      const registry = await loadChatGptCapabilities();
+      const ratio = document.querySelector("#aspectRatio")?.value
+        || document.querySelector("#selectRatioImage")?.value
+        || String(registry?.defaults?.defaultRatio || "");
+      const maxRefImages = registry ? chatGptMaxRefImages(registry) : null;
+      const refMode = document.querySelector("#refImageMode")?.value || "all";
+      const selectedRefs = refMode === "none" ? [] : referencePicker.getReferences("image");
+      const stagedRefs = [];
+      let droppedLibraryRefs = 0;
+      for (const reference of selectedRefs) {
+        if (reference?.source === "local" && reference.file) {
+          stagedRefs.push({
+            name: reference.file.name || reference.name || "image",
+            type: reference.file.type || "application/octet-stream",
+            base64: await chatGptFileToBase64(reference.file),
+          });
+        } else if (reference && typeof reference.base64 === "string" && reference.base64) {
+          stagedRefs.push({
+            name: reference.name || "image",
+            type: reference.type || "application/octet-stream",
+            base64: reference.base64,
+          });
+        } else {
+          droppedLibraryRefs++;
+        }
+      }
+      const attachments = maxRefImages !== null ? stagedRefs.slice(0, maxRefImages) : stagedRefs;
+      if (droppedLibraryRefs) {
+        addLog("chatgpt.refs.library_dropped", `${droppedLibraryRefs} tham chiếu thư viện Flow không được gửi sang ChatGPT; chỉ tệp tải lên mới dùng làm tham chiếu.`, true);
+      }
+      if (attachments.length < stagedRefs.length) {
+        addLog("chatgpt.refs.capped", `Chỉ gửi ${attachments.length}/${stagedRefs.length} ảnh tham chiếu theo giới hạn ChatGPT.`, true);
+      }
+      const autoDownload = document.querySelector("#genTabAutoDownload")?.checked === true;
+      const jobs = prompts.map(itemPrompt => buildChatGptGenerationJob({
+        prompt: itemPrompt, ratio, attachments, autoDownload,
+      }));
+      if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) {
+        throw new Error("Không thể kết nối với extension background. Vui lòng mở tiện ích trong Chrome Side Panel.");
+      }
+      const addResult = await chrome.runtime.sendMessage(jobs.length > 1
+        ? { type: "flow-queue:add-batch", jobs, batchLabel: "ChatGPT batch" }
+        : { type: "flow-queue:add", job: jobs[0] });
+      if (!addResult?.ok) throw new Error(addResult?.error?.message || "Không thể thêm tác vụ ChatGPT vào hàng đợi");
+      rememberSubmittedQueueJob(addResult);
+      setFeedback(t("sidebar.workflowQueued"), true);
+      addLog("chatgpt.queue.add", `${jobs.length > 1 ? t("sidebar.multiPromptQueued", { count: jobs.length }) : `[CHATGPT] ${prompt.slice(0, 96)}`}`, true);
+      return true;
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("chatgpt.queue.error", err.message, false);
+      return false;
+    } finally {
+      isGenerating = false;
+      if (btn) btn.disabled = false;
+    }
+  }
+
   const referencePicker = window.createFlowReferencePicker({ dispatchFlowOperation, setFeedback });
   let videoFrameSources = referencePicker.getFrameSources();
   let videoFrameAssignments = [];
@@ -1457,6 +1681,12 @@
 
   // SUBMIT TẠO ẢNH (GENERATE IMAGE)
   document.querySelector("#btnSubmitImage").onclick = async () => {
+    // GPT-14: with ChatGPT selected, this button can never build a Flow
+    // job — the ChatGPT submit owns the click.
+    if (document.querySelector("#genProvider")?.value === "chatgpt") {
+      await submitChatGptGeneration();
+      return;
+    }
     const refFilesImage = referencePicker.getReferences("image");
     const btn = document.querySelector("#btnSubmitImage");
     const btnTextEl = document.querySelector("#txtBtnSubmitImage");
@@ -2416,6 +2646,7 @@
         const provider = tab.getAttribute("data-provider") || "flow";
         const hiddenProvider = document.querySelector("#genProvider");
         if (hiddenProvider) hiddenProvider.value = provider;
+        applyGenProviderConfig(provider);
         if (provider !== "flow") {
           setFeedback(`Provider: ${provider.toUpperCase()} (Tự động thực thi qua Flow MCP Studio)`, true);
         } else {
@@ -2423,6 +2654,52 @@
         }
       });
     });
+
+    // GPT-14: ChatGPT switches the Gen form to its image-only
+    // configuration; every other provider restores the Flow form exactly
+    // (same fields, same defaults — the Flow controls are re-applied
+    // through the existing Flow capability path).
+    function applyGenProviderConfig(provider) {
+      const isChatGpt = provider === "chatgpt";
+      const videoTypeButton = document.querySelector('#genTypeToggle .gen-type-btn[data-value="video"]');
+      if (videoTypeButton) videoTypeButton.disabled = isChatGpt;
+      // Flow-only controls with no ChatGPT counterpart: quantity
+      // (registry supportsQuantity is false) and the Flow character
+      // picker (characters are Flow-library references, which ChatGPT
+      // jobs never carry). Their state is kept, only hidden.
+      for (const selector of ["#quantitySection", "#genCharacterContainer"]) {
+        document.querySelector(selector)?.classList.toggle("hidden", isChatGpt);
+      }
+      const videoOnlySelectors = [
+        "#videoModelContainer", "#videoInputTypeContainer", "#flowVideoDurationContainer",
+        "#flowVideoResolutionContainer", "#genVideoVoiceContainer", "#videoFramesSection", "#genChainSection",
+      ];
+      if (isChatGpt) {
+        setGenType("image");
+        for (const selector of videoOnlySelectors) {
+          document.querySelector(selector)?.classList.add("hidden");
+        }
+        void loadChatGptCapabilities().then(registry => {
+          if (document.querySelector("#genProvider")?.value !== "chatgpt") return;
+          if (!registry) {
+            setFeedback("Không đọc được cấu hình ChatGPT cục bộ của extension. Hãy tải lại extension rồi thử lại.", false);
+            return;
+          }
+          applyChatGptRatioOptions(registry);
+          applyChatGptRefCap(registry);
+        });
+      } else {
+        for (const selector of videoOnlySelectors) {
+          document.querySelector(selector)?.classList.remove("hidden");
+        }
+        const refSection = document.querySelector("#refImagesSection");
+        if (refSection) refSection.dataset.maxRefImages = "3";
+        const refHint = document.querySelector("#refPickerLimitHint");
+        if (refHint) refHint.textContent = "Tối đa 3 ảnh tham chiếu";
+        setGenType(document.querySelector("#genType")?.value || "image");
+        void loadFlowModelCapabilities().then(() => applyFlowModelControls());
+      }
+    }
 
     // Gen Type Toggle
     function setGenType(type = "image") {
@@ -2589,6 +2866,12 @@
 
     // Submit & Stop
     document.querySelector("#genSubmitBtn")?.addEventListener("click", () => {
+      // GPT-14: the submit branch reads #genProvider — ChatGPT builds a
+      // chatgpt.generation.submit queue job; Flow keeps the legacy path.
+      if (document.querySelector("#genProvider")?.value === "chatgpt") {
+        void submitChatGptGeneration();
+        return;
+      }
       const isImage = (document.querySelector("#genType")?.value || "image") === "image";
       const pArea = document.querySelector("#promptsArea");
       if (pArea) {

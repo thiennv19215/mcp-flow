@@ -5,6 +5,8 @@ import { decideDevExtensionReload } from "./dev-extension-reload.js";
 import { flowDocumentMatchesLocale, flowHomeUrl, flowLocaleFromUrl, flowProjectUrl, normalizeFlowLocale } from "./flow-locale.js";
 import { FlowJobQueue } from "./flow-job-queue.js";
 import { resolveProviderForOperation } from "./provider-router.js";
+import { runChatGptQueueJob } from "./chatgpt-queue-runner.js";
+import { loadChatGptCapabilityRegistry } from "./chatgpt-capabilities.js";
 import { FlowBatchDrafts, materializeDraftJobs } from "./flow-batch-drafts.js";
 import { FlowMediaCatalog } from "./flow-media-catalog.js";
 import { revalidateJobReferences } from "./flow-ref-preflight.js";
@@ -981,6 +983,98 @@ function broadcastFlowQueue(snapshot, reason) {
   )).catch(() => {});
 }
 
+// GPT-10: transport for provider content commands that cannot ride the
+// Flow-only execute() path (its tab validation is Flow-URL based). Sends
+// the same flow-mcp:execute envelope execute() builds, unwraps the
+// content response with the same error rehydration, and mirrors
+// execute()'s cancellation + delivery discipline for the one
+// maybe-submitted provider operation (chatgpt.generation.submit): an
+// abort or an ambiguous transport failure may have sent the message, so
+// it is reported outcome_unknown; a definitely undelivered command is
+// not.
+async function sendProviderCommand(tabId, command, signal) {
+  const maybeSubmitted = command?.name === "chatgpt.generation.submit";
+  const cancelPageCommand = () => {
+    void chrome.tabs.sendMessage(tabId, { type: "flow-mcp:cancel", requestId: command?.id }).catch(() => {});
+  };
+  const cancelledError = () => Object.assign(new Error("Provider command was cancelled by the queue."), {
+    code: "FLOW_OPERATION_CANCELLED",
+    outcome_unknown: maybeSubmitted,
+  });
+  if (signal?.aborted) {
+    cancelPageCommand();
+    throw cancelledError();
+  }
+  let rejectCancelled;
+  const cancelledPromise = new Promise((_, reject) => { rejectCancelled = reject; });
+  void cancelledPromise.catch(() => {});
+  const onAbort = () => {
+    cancelPageCommand();
+    rejectCancelled(cancelledError());
+  };
+  signal?.addEventListener("abort", onAbort, { once: true });
+  let response;
+  try {
+    response = await Promise.race([
+      sendFlowCommand(tabId, { type: "flow-mcp:execute", command }),
+      cancelledPromise,
+    ]);
+  } catch (error) {
+    const message = String(error?.message || error);
+    const definitelyNotDelivered = /Receiving end does not exist|Could not establish connection/i.test(message);
+    const explicitlySafe = error?.outcome_unknown === false || error?.outcomeUnknown === false;
+    if (maybeSubmitted && !definitelyNotDelivered && !explicitlySafe) {
+      throw Object.assign(new Error(message), {
+        name: error?.name || "Error",
+        code: error?.code,
+        retryable: Boolean(error?.retryable),
+        outcome_unknown: true,
+        noRetry: error?.noRetry === true,
+        noReplay: error?.noReplay === true,
+      });
+    }
+    throw error;
+  } finally {
+    signal?.removeEventListener("abort", onAbort);
+  }
+  if (!response?.ok) {
+    const error = new Error(response?.error?.message || response?.error || "Provider DOM command failed");
+    error.code = response?.error?.code || "FLOW_DOM_FAILED";
+    error.retryable = Boolean(response?.error?.retryable);
+    error.outcome_unknown = Boolean(response?.error?.outcome_unknown);
+    error.noRetry = response?.error?.noRetry === true;
+    error.noReplay = response?.error?.noReplay === true;
+    // Preserve page-side diagnostics through the extension relay.
+    if (response?.error?.diagnostics && typeof response.error.diagnostics === "object") {
+      error.diagnostics = response.error.diagnostics;
+    }
+    throw error;
+  }
+  return response.value;
+}
+
+// GPT-10: production dependencies for the ChatGPT queue runner branch —
+// real chrome.tabs find-or-create driven by the GPT-08 descriptor, the
+// queue's own metadata store for pins, and the provider command
+// transport above.
+function chatGptQueueRunnerDeps() {
+  return {
+    tabs: {
+      query: async patterns => {
+        const groups = await Promise.all(patterns.map(url => chrome.tabs.query({ url })));
+        const byId = new Map();
+        for (const tab of groups.flat()) if (Number.isInteger(tab?.id)) byId.set(tab.id, tab);
+        return [...byId.values()];
+      },
+      get: tabId => chrome.tabs.get(tabId).catch(() => null),
+      create: url => chrome.tabs.create({ url }),
+    },
+    waitForTabComplete: tabId => waitForTabComplete(tabId, 30_000).catch(() => {}),
+    sendCommand: (tabId, command, signal) => sendProviderCommand(tabId, command, signal),
+    updateMetadata: (jobId, patch) => flowJobQueue.updateMetadata(jobId, patch),
+  };
+}
+
 async function runExtensionFlowJob(job, hooks) {
   const operation = job.operation || job.data?.operation;
   // Provider dispatch (GPT-08): resolve the operation's provider
@@ -989,7 +1083,12 @@ async function runExtensionFlowJob(job, hooks) {
   // thrown, so this only routes — the per-provider runner branches
   // (GPT-10) hang off the descriptor, and Flow jobs flow through the
   // unchanged path below.
-  resolveProviderForOperation(operation);
+  const descriptor = resolveProviderForOperation(operation);
+  if (descriptor.key === "chatgpt") {
+    // GPT-10: ChatGPT jobs run through the provider runner branch
+    // (chatgpt-queue-runner.js); the Flow path below is unchanged.
+    return runChatGptQueueJob(job, hooks, chatGptQueueRunnerDeps());
+  }
   const payload = structuredClone(job.payload || job.data?.payload || {});
   const queuedOperations = new Set([
     ...extensionQueueJobOperations,
@@ -1117,6 +1216,11 @@ async function runExtensionFlowJob(job, hooks) {
         expectedCount: savedObservation.expectedCount,
         correlationAttemptId: savedObservation.correlationAttemptId,
         credits: savedObservation.credits,
+        // SW-FWD (VID-02): carry the restored checkpoint's dispatch stamp
+        // through the rebuilt receipt so it can reach the observe payload
+        // below; without it a resumed observe gets a fresh render window
+        // instead of the time remaining from the original dispatch.
+        ...(savedObservation.dispatchedAt ? { dispatchedAt: savedObservation.dispatchedAt } : {}),
         requestDispatched: true,
       };
     } else if (job.metadata?.manualSubmitPhase === "confirm") {
@@ -1185,6 +1289,7 @@ async function runExtensionFlowJob(job, hooks) {
     expectedCount: Math.max(1, Number(submitted?.expectedCount ?? payload.variants ?? payload.count ?? 1)),
     correlationAttemptId: String(submitted?.correlationAttemptId || ""),
     credits: Number.isFinite(submitted?.credits) ? submitted.credits : null,
+    ...(submitted?.dispatchedAt ? { dispatchedAt: submitted.dispatchedAt } : {}),
     timeoutMs: isVideo ? 600_000 : 300_000,
   };
   if (observation.correlationAttemptId) {
@@ -1204,6 +1309,10 @@ async function runExtensionFlowJob(job, hooks) {
       kind: observation.kind,
       retries: payload.retries,
       timeoutMs: observation.timeoutMs,
+      // SW-FWD (VID-02): forward the dispatch stamp so observe anchors
+      // its deadline at dispatch. Absent on legacy paths, where this
+      // payload stays exactly as it was before.
+      ...(observation.dispatchedAt ? { dispatchedAt: observation.dispatchedAt } : {}),
     });
   } catch (error) {
     throw Object.assign(error, {
@@ -1213,7 +1322,12 @@ async function runExtensionFlowJob(job, hooks) {
     });
   }
   if (Array.isArray(observed?.media) && observed.media.length) {
-    await flowJobQueue.checkpointGenerationResult(job.id, observed.media).catch(error => {
+    // SW-FWD (VID-01): forward a partial result's failed outputs into the
+    // checkpoint as the extras argument, passed through exactly as observe
+    // produced them (the queue checkpoint owns normalization), so a worker
+    // death after observe loses neither half of the outcome. Results
+    // without failed outputs pass no extras argument, exactly as before.
+    await flowJobQueue.checkpointGenerationResult(job.id, observed.media, ...(Array.isArray(observed.failedOutputs) && observed.failedOutputs.length ? [{ failedOutputs: observed.failedOutputs }] : [])).catch(error => {
       console.warn("[FlowQueue] Could not persist the worker-side generation result checkpoint:", error?.message || error);
     });
   }
@@ -1291,6 +1405,10 @@ const flowJobQueue = new FlowJobQueue(runExtensionFlowJob, {
       return null;
     }
   },
+  // GPT-09/GPT-10: ChatGPT admission preflight reads the packaged
+  // ChatGPT capability registry. The shared loader never throws — a null
+  // registry skips validation, mirroring the Flow loader's discipline.
+  loadChatGptCapabilityRegistry: () => loadChatGptCapabilityRegistry(),
   // IMG-04: revalidate generation references at job start against the
   // worker's media catalog (see createQueueRefPreflight for exactly which
   // legs are live at this level and which stay with the content stage).

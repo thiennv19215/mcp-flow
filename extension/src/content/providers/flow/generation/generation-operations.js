@@ -700,6 +700,14 @@
         // observe computes its render deadline from here instead of
         // restarting the clock after a service-worker restart.
         const dispatchedAt = Date.now();
+        // VID-06: serverAcceptanceObserved reflects THIS attempt's own
+        // correlation receipts at acknowledgement time — true only when an
+        // accepted/result stage (response_seen/result_seen) was recorded
+        // for the attempt; request_seen alone means the request merely
+        // left the browser. Read it before the submit-only release below
+        // deletes the entry. A missing entry or helper keeps the
+        // historical false, and the flag never affects the submit verdict.
+        const serverAcceptanceObserved = tiles.nativeFlowCorrelationAcceptanceObserved?.(correlationAttemptId) === true;
         const dispatchReceipt = payload.submitOnly === true
           ? tiles.releaseSubmitOnlyCorrelation?.(correlationAttemptId, acknowledged) || null
           : null;
@@ -725,7 +733,7 @@
           dispatchedAt,
           activation: activation.strategy || "dom-click",
           requestDispatched: acknowledged,
-          serverAcceptanceObserved: false,
+          serverAcceptanceObserved,
           ...(dispatchReceipt ? { correlationReceipt: dispatchReceipt } : {}),
         };
       }
@@ -735,6 +743,16 @@
         const kind = payload.kind === "image" ? "image" : payload.kind === "video" ? "video" : undefined;
         const expected = Math.max(1, Math.min(20, Number(payload.expectedCount || payload.variants || 1)));
         const timeoutMs = Math.max(1000, Math.min(15 * 60000, Number(payload.timeoutMs || 12 * 60000)));
+        // VID-08: virtualization recovery sweep tuning. If neither fresh
+        // media nor receipt progress is seen for the quiet window, observe
+        // runs a bounded number of full-library scans (the media-menu scan
+        // machinery) filtered by the correlated id set, recovering results
+        // whose tiles Flow virtualized out of the grid instead of idling
+        // to the deadline. The sweep lives entirely inside the render
+        // deadline — it never extends it.
+        const OBSERVE_RECOVERY_SWEEP_QUIET_MS = 30_000;
+        const OBSERVE_RECOVERY_SWEEP_MAX = 3;
+        const OBSERVE_RECOVERY_SWEEP_SCAN_MS = 25_000;
         // VID-04: maintain a structured evidence bundle for the whole
         // observation so every terminal observe error can carry it as
         // `diagnostics` — live triage must be able to distinguish "Flow
@@ -754,6 +772,7 @@
           readyCount: 0,
           busyCount: 0,
           failedCount: 0,
+          recoverySweeps: 0,
         };
         const observeError = (code, message, retryable, outcomeUnknown) => {
           const error = this.error(code, message, retryable, outcomeUnknown);
@@ -764,6 +783,7 @@
             readyCount: evidence.readyCount,
             busyCount: evidence.busyCount,
             failedCount: evidence.failedCount,
+            recoverySweeps: evidence.recoverySweeps,
             elapsedMs: Math.max(0, Date.now() - evidenceStartedAt),
           };
           return error;
@@ -793,6 +813,14 @@
         let retriesLeft = Math.max(0, Math.min(3, Number(payload.retries ?? 1)));
         const retriedTiles = new Set();
         const observeStartedAt = Date.now();
+        // VID-08 sweep state: when a poll last showed progress (the
+        // receipt stage / correlated set moved, or the fresh media set's
+        // observable state changed), how many recovery sweeps have run
+        // (mirrored into the VID-04 evidence bundle), and the library
+        // records recovered by those sweeps, keyed by lowercased media id.
+        let lastProgressAt = observeStartedAt;
+        let lastProgressSignature = null;
+        const recoveredById = new Map();
         let renderObservedInFlight = false;
         let apiResultReceipt = correlationEntry?.receipts
           ? [...correlationEntry.receipts].reverse().find(receipt => receipt?.stage === "result_seen") || null
@@ -897,12 +925,40 @@
               allMedia = tiles.collectNativeMedia();
               lastMediaScanAt = Date.now();
             }
-            const fresh = allMedia.filter(item =>
+            let fresh = allMedia.filter(item =>
               !before.includes(item.id || `title:${item.title}`) &&
               !item.title.startsWith("fm-") &&
               (!kind || item.kind === kind || (kind === "video" && item.kind === "scene") || item.failed) &&
               item.id && correlatedIds.has(item.id.toLowerCase())
             );
+            // VID-08: fold media recovered by earlier recovery sweeps into
+            // this poll's fresh set, so recovered results resolve through
+            // exactly the same success / VID-01 partial paths below as
+            // grid-observed media. A settled library record (ready or
+            // failed) replaces an unsettled grid entry for the same
+            // correlated id (a stale ghost tile); a grid entry that is
+            // itself settled is live DOM truth and always wins.
+            if (recoveredById.size) {
+              for (const recovered of recoveredById.values()) {
+                const index = fresh.findIndex(item => item.id?.toLowerCase() === recovered.id.toLowerCase());
+                if (index === -1) { fresh.push(recovered); continue; }
+                const current = fresh[index];
+                if (!(current.mediaReady || current.failed) && (recovered.mediaReady || recovered.failed)) fresh[index] = recovered;
+              }
+            }
+            // VID-08: progress, for quiet-window purposes, is the receipt
+            // stage or correlated id set moving, or the fresh set's
+            // observable state changing (including a busy tile's render
+            // percentage advancing). Anything else is quiet time.
+            const progressSignature = [
+              evidence.lastReceiptStage || "",
+              [...correlatedIds].join(","),
+              fresh.map(item => `${item.id}|${item.busy ? 1 : 0}|${item.mediaReady ? 1 : 0}|${item.failed ? 1 : 0}|${item.progress || ""}`).join(";"),
+            ].join("#");
+            if (progressSignature !== lastProgressSignature) {
+              lastProgressSignature = progressSignature;
+              lastProgressAt = Date.now();
+            }
 
             const failed = fresh.filter(item => item.failed);
             // VID-04: refresh the ready/busy/failed tallies from this
@@ -1050,6 +1106,66 @@
               const classified = root.classifyFlowError?.(newPageError);
               if (classified) throw observeError(classified.code, classified.message, classified.retryable, false);
               throw observeError("FLOW_GENERATION_FAILED", `Flow hiển thị thông báo lỗi: "${newPageError}".`, false, false);
+            }
+
+            // VID-08: virtualization recovery sweep. Reaching this point
+            // means the poll resolved nothing and threw nothing — observe
+            // is still waiting. If a full quiet window passed with no
+            // fresh media and no receipt progress, and sweeps remain in
+            // the bound, scan the whole library once for this attempt's
+            // correlated ids: Flow may have virtualized the claimed tile
+            // out of the grid while its result finished elsewhere in the
+            // library. Recovered records join the fresh set from the next
+            // poll. The scan is clamped to the render deadline, so the
+            // sweep can never extend it; a failed scan is a loss of
+            // observability, never a generation failure — the normal
+            // wait and timeout continue.
+            if (typeof menu?.scanNativeAssets === "function"
+              && correlatedIds.size > 0
+              && evidence.recoverySweeps < OBSERVE_RECOVERY_SWEEP_MAX
+              && Date.now() - lastProgressAt >= OBSERVE_RECOVERY_SWEEP_QUIET_MS
+              && Date.now() < deadline) {
+              evidence.recoverySweeps++;
+              // Space any further sweep by another full quiet window.
+              lastProgressAt = Date.now();
+              try {
+                const assets = await menu.scanNativeAssets({
+                  includeIncomplete: true,
+                  deadline: Math.min(deadline, Date.now() + OBSERVE_RECOVERY_SWEEP_SCAN_MS),
+                  maxDurationMs: OBSERVE_RECOVERY_SWEEP_SCAN_MS,
+                  signal: command.signal,
+                  keepPositionOnMatch: true,
+                });
+                let recoveredNow = 0;
+                for (const asset of Array.isArray(assets) ? assets : []) {
+                  const id = typeof asset?.id === "string" ? asset.id : "";
+                  // Attribution discipline (VID-03/VID-06): only this
+                  // attempt's correlated ids are evidence. Anything else
+                  // the scan saw belongs to another task.
+                  if (!id || !correlatedIds.has(id.toLowerCase())) continue;
+                  const failedAsset = asset.error === true;
+                  const assetKind = typeof asset.kind === "string" && asset.kind ? asset.kind : kind;
+                  if (kind && !(assetKind === kind || (kind === "video" && assetKind === "scene") || failedAsset)) continue;
+                  recoveredById.set(id.toLowerCase(), {
+                    id,
+                    title: asset.name || asset.displayName || "",
+                    kind: assetKind,
+                    busy: asset.busy === true,
+                    mediaReady: asset.ready === true && asset.busy !== true && !failedAsset,
+                    failed: failedAsset,
+                    ...(failedAsset ? { failureReason: "Flow generation failed" } : {}),
+                    recovered: true,
+                  });
+                  recoveredNow++;
+                }
+                if (recoveredNow > 0) {
+                  tiles.emitFlowProgress(command, `Đã quét lại toàn bộ thư viện Flow: tìm thấy ${recoveredNow} kết quả thuộc tác vụ này`);
+                }
+              } catch {
+                // The library could not be scanned (grid not mounted,
+                // scan deadline, cancellation). Cancellation and the
+                // render deadline are re-evaluated at the top of the loop.
+              }
             }
 
             const waitMs = Math.min(apiResultReceipt ? 1_000 : 5_000, Math.max(1, deadline - Date.now()));
