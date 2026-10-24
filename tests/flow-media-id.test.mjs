@@ -168,3 +168,52 @@ test('collectAssets uses the tile persistent-media-id when mediaId only yields a
   assert.equal(assets[0].id, persistentId);
   assert.equal(assets[0].identityDurability, 'persistent');
 });
+
+test('collectAssets prefers real name fields over a UI action aria-label', () => {
+  const realName = 'ref-01-real-photo-abc123.png';
+  const tileName = 'ref-02-tile-name-def456.png';
+  const makeTile = attrs => {
+    const img = mediaElement({ src: 'https://lh3.googleusercontent.com/no-uuid-here', alt: attrs['data-display-name'] || attrs['data-tile-name'] });
+    return {
+      getAttribute: attribute => attrs[attribute] ?? null,
+      querySelector(selector) {
+        if (selector === 'flow-image-tile') return img;
+        if (selector === 'img') return img;
+        return null;
+      },
+      querySelectorAll(selector) {
+        if (selector === 'img,video') return [img];
+        return [];
+      },
+    };
+  };
+  // Flow tiles can expose a UI action string ("Request for text
+  // translation") as aria-label/title; the asset's real name lives in the
+  // dedicated name attributes and must win, or later exact-title lookups
+  // search the picker for the action string and never find the asset.
+  const displayNameTile = makeTile({
+    'aria-label': 'Request for text translation',
+    title: 'Request for text translation',
+    'data-display-name': realName,
+  });
+  const tileNameTile = makeTile({
+    'aria-label': 'Request for text translation',
+    'data-tile-name': tileName,
+    'data-display-name': 'some-other-display-name.png',
+  });
+  const context = vm.createContext({
+    location: LOCATION,
+    URL,
+    console,
+    document: { querySelectorAll: selector => (selector === 'flow-grid-tile-container' ? [displayNameTile, tileNameTile] : []) },
+    mediaId: () => 'title:fallback',
+    FlowTiles: { isTileBusy: () => false, isTileMediaReady: () => true },
+  });
+  vm.runInContext(mediaMenuSource, context);
+
+  const assets = context.collectAssets({ includeIncomplete: true });
+  assert.equal(assets.length, 2);
+  assert.equal(assets[0].name, realName, 'data-display-name beats the action-string aria-label');
+  assert.equal(assets[0].displayName, realName);
+  assert.equal(assets[1].name, tileName, 'data-tile-name beats data-display-name');
+});
