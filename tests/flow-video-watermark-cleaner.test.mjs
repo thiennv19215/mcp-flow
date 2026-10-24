@@ -14,18 +14,21 @@ import { readFileSync } from 'node:fs';
 // the route test below) instead of claiming a clean.
 //
 // What remains tested here:
-// (g)/(g2) the watermark-config bridge still forwards validated video
-//   settings as config (no video cleaner consumes them anymore — they
-//   are inert config, kept so the storage shape does not churn);
+// (g)/(g2) the watermark-config bridge NO LONGER forwards the DL-02 video
+//   settings (videoSampleFrames/videoMaxInputBytes/videoBitrateRatio):
+//   audit cluster F removed them because no consumer ever read them —
+//   the MAIN-world interceptor only spreads them into state.options and
+//   WatermarkRemover (image-only) never reads them. The DL-01 per-kind
+//   `video` flag still forwards.
 // (h) the queue route no longer advertises a video frame pipeline, and
 //   queueWatermarkResult still records op-supplied outcome bookkeeping.
 
 const watermarkConfigSource = readFileSync(new URL('../extension/src/content/bridge/watermark-config.js', import.meta.url), 'utf8');
 
 // ---------------------------------------------------------------------------
-// (g) watermark-config bridge: the video settings ride the same
-// flowWatermark config family (sample count, input cap, bitrate ratio),
-// validated per field; invalid values forward nothing for that field.
+// (g) watermark-config bridge: the DL-02 video settings are gone — a config
+// carrying them must NOT forward them (no consumer ever read them), while
+// the DL-01 per-kind video flag still forwards.
 // ---------------------------------------------------------------------------
 async function configBridgePosts(config) {
   const posted = [];
@@ -49,7 +52,7 @@ async function configBridgePosts(config) {
   return posted.filter(message => message?.action === 'configure');
 }
 
-test('DL-02 (g): the config bridge forwards validated video settings alongside the image config', async () => {
+test('DL-02 (g): the config bridge no longer forwards DL-02 video settings', async () => {
   const posts = await configBridgePosts({
     enabled: true,
     video: true,
@@ -60,23 +63,22 @@ test('DL-02 (g): the config bridge forwards validated video settings alongside t
   assert.equal(posts.length, 1);
   const options = posts[0].options;
   assert.equal(options.video, true, 'the DL-01 per-kind video flag still forwards');
-  assert.equal(options.videoSampleFrames, 8);
-  assert.equal(options.videoMaxInputBytes, 100 * 1024 * 1024);
-  assert.equal(options.videoBitrateRatio, 0.95);
+  assert.equal(options.videoSampleFrames, undefined, 'removed in audit cluster F: no consumer');
+  assert.equal(options.videoMaxInputBytes, undefined, 'removed in audit cluster F: no consumer');
+  assert.equal(options.videoBitrateRatio, undefined, 'removed in audit cluster F: no consumer');
 });
 
-test('DL-02 (g2): invalid video settings are dropped per field, never forwarded', async () => {
+test('DL-02 (g2): a config without video settings posts cleanly', async () => {
   const posts = await configBridgePosts({
     enabled: true,
-    videoSampleFrames: 0,
-    videoMaxInputBytes: 400 * 1024 * 1024,
-    videoBitrateRatio: 9,
+    video: true,
   });
   assert.equal(posts.length, 1);
   const options = posts[0].options;
-  assert.equal(options.videoSampleFrames, undefined, 'a non-positive sample count forwards nothing');
-  assert.equal(options.videoMaxInputBytes, undefined, 'a cap above the hard 300 MB ceiling forwards nothing');
-  assert.equal(options.videoBitrateRatio, undefined, 'an out-of-range bitrate ratio forwards nothing');
+  assert.equal(options.video, true);
+  assert.equal('videoSampleFrames' in options, false);
+  assert.equal('videoMaxInputBytes' in options, false);
+  assert.equal('videoBitrateRatio' in options, false);
 });
 
 // ---------------------------------------------------------------------------

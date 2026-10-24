@@ -164,7 +164,7 @@ server.registerTool(
   {
     title: "Queue Flow generations",
     description:
-      "Queue one clip or image per scene in the open Flow project. Runs one at a time with human-like pauses and spends the user's Google AI credits (approx. per video: Omni 1.1 Flash 7-12, Veo 3.1 Lite 10, Fast 20, Quality 100; images usually 0). Video scenes are checked against max_credits using Flow's own quote before anything is spent; image scenes are submitted without a credit quote check. Returns job ids immediately; use flow_wait for results. A scene may set manual_submit=true to prepare its prompt and settings and wait for you to click Create in Flow; then choose Continue on the extension queue. A scene may set submit_only=true to finish after Flow's correlated request is dispatched, without waiting for render/download; flow_wait reports status=\"submitted\" and request_dispatched=true. Dispatch does not prove server acceptance or a finished result; server_acceptance_observed is reported separately.",
+      "Queue one clip or image per scene in the open Flow project. Runs one at a time with human-like pauses and spends the user's Google AI credits. Video scenes are checked against max_credits using Flow's own live quote before anything is spent (never assume a per-model price — Flow's quote is the only authoritative price); image scenes are submitted without a credit quote check. Returns job ids immediately; use flow_wait for results. A scene may set manual_submit=true to prepare its prompt and settings and wait for you to click Create in Flow; then choose Continue on the extension queue. A scene may set submit_only=true to finish after Flow's correlated request is dispatched, without waiting for render/download; flow_wait reports status=\"submitted\" and request_dispatched=true. Dispatch does not prove server acceptance or a finished result; server_acceptance_observed is reported separately.",
     inputSchema: shapes.generate,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },
@@ -328,7 +328,7 @@ server.registerTool(
   {
     title: "Edit an existing video",
     description:
-      "Video-to-video edit of a clip already in the Flow project (relight, change weather/background, remove or restyle objects) using Flow's edit view. Queued like a generation; use flow_wait for the file. Spends credits without a prior quote (about 20 for a 4 s clip), so ask the user before calling. Set submit_only=true to return after the correlated request dispatch without waiting for rendering or download.",
+      "Video-to-video edit of a clip already in the Flow project (relight, change weather/background, remove or restyle objects) using Flow's edit view. Queued like a generation; use flow_wait for the file. Spends credits without a prior quote, so ask the user before calling. Set submit_only=true to return after the correlated request dispatch without waiting for rendering or download.",
     inputSchema: shapes.edit,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },

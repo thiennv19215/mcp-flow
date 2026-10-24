@@ -10,8 +10,6 @@ export const UPLOAD_DIR = join(HOME_DIR, "uploads");
 // context; the names stay so callers read the same, the values are fixed.
 export const outputRootForContext = (): string => OUTPUT_ROOT;
 
-export const uploadDirForContext = (): string => UPLOAD_DIR;
-
 export const castDirForContext = (): string => CAST_DIR;
 
 export const projectDir = (project = ""): string => {

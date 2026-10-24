@@ -60,7 +60,7 @@ Then sign in, once:
 npm run login
 ```
 
-That opens Flow in your regular browser. Build the project, then load `dist/extension/` in Chrome (Developer mode → Load unpacked). For an existing installation, click Reload and confirm the version shown in `extension/manifest.json`. The extension connects automatically to the active Flow tab and follows when you switch to another Flow tab. The popup's reconnect button is only a recovery fallback. No token entry is required.
+That opens Flow in your regular browser. Build the project, then load `dist/extension/` in Chrome (Developer mode → Load unpacked). For an existing installation, click Reload and confirm the version shown in `extension/manifest.json`. The extension connects automatically to the active Flow tab and follows when you switch to another Flow tab. No token entry is required.
 You sign in yourself; the program never handles your Google password.
 
 The extension handles Flow operations and its queue locally in the browser. MCP remains available as a separate local stdio process for AI clients; it talks to the same local extension connector. There is no account backend.
@@ -144,6 +144,17 @@ never double-drive the Flow tab.
 The web Studio panel was removed with the hosted account build (2026-10-24).
 The local bridge listens on 127.0.0.1 and uses a local per-machine token
 (`~/.flow-mcp/token`) for the sibling-process API and media/upload routes.
+
+## Quy ước version
+
+Hai version trong repo này version độc lập, vì backend và extension phát hành
+theo nhịp khác nhau — đừng "đồng bộ" chúng cho bằng nhau:
+
+- `package.json` → version của backend/MCP server (hiện `0.1.16`).
+- `extension/manifest.json` → version của extension (hiện `0.2.45`).
+
+Khi bump một bên, chỉ bump bên đó. Test không hardcode version: giá trị
+version trong fixture lấy từ `extension/manifest.json` thật.
 
 ---
 

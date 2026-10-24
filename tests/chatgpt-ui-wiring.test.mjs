@@ -286,7 +286,13 @@ test('GPT-14: leaving chatgpt mode restores the Flow form (Flow behavior unchang
   const block = sidebarJs.slice(start, start + 5000);
   assert.match(block, /applyFlowModelControls\(\)/, 'the Flow ratio/model controls are re-applied on restore');
   assert.match(block, /dataset\.maxRefImages = "3"/, 'the ref cap returns to the Flow cap');
-  assert.match(block, /Tối đa 3 ảnh tham chiếu/, 'the picker limit hint returns to the Flow text');
+  // Audit cluster F routes this hint through i18n (it was a raw literal
+  // before): the restore still shows the Flow text, now via the key.
+  assert.match(block, /t\("sidebar\.referencePickerLimit"\)/, 'the picker limit hint returns to the Flow text via i18n');
+  const i18nSource = readFileSync(new URL('../extension/src/content/shared/i18n.js', import.meta.url), 'utf8');
+  vm.runInThisContext(i18nSource);
+  globalThis.I18n._currentLocale = 'vi';
+  assert.equal(globalThis.I18n.t('sidebar.referencePickerLimit'), 'Tối đa 3 ảnh tham chiếu');
   // The Flow submit path itself is untouched: executeGenerationTask still
   // builds flow.generation.submit jobs with the Flow payload shape.
   const execStart = sidebarJs.indexOf('async function executeGenerationTask(');

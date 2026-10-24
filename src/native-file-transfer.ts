@@ -150,7 +150,4 @@ export class DownloadChunkCollector {
     await rm(active.tempPath, { force: true }).catch(() => {});
   }
 
-  async abortAll(): Promise<void> {
-    await Promise.all([...this.transfers.keys()].map(id => this.abort(id)));
-  }
 }
