@@ -902,6 +902,16 @@
       lastScanErrorCode,
       uploadUi: inspectFlowUploadUiState(),
     };
+    // Review round 1, S6: the wait loop breaks on an aborted signal, so
+    // reaching this point with an aborted signal means the caller
+    // cancelled — not that Flow was slow. Report the cancellation
+    // distinctly (not retryable; outcome unknown because the tile may
+    // still land) instead of mislabeling it a timeout.
+    if (options.signal?.aborted) {
+      const cancelledErr = fn("FLOW_UPLOAD_CANCELLED", `Upload confirmation for "${assetName}" was cancelled before Flow confirmed an exact ${kind} library tile. The tile may still land in the library; inspect Flow before retrying.`, false, true);
+      cancelledErr.diagnostics = diagnostics;
+      throw cancelledErr;
+    }
     const timeoutErr = fn("FLOW_UPLOAD_TIMEOUT", `Flow did not confirm an exact ${kind} library tile for "${assetName}" before the bounded deadline. Picker selection confirmed: ${diagnostics.filePickerSelectionConfirmed}; method: ${diagnostics.pickerMethod}; type: ${diagnostics.pickerType}; full-library scans: ${libraryScans}; last scan: ${lastScan ? `${lastScan.uniqueTiles} tiles, ${lastScan.steps} pages, reached end ${lastScan.reachedEnd}` : "no scan diagnostics"}. Visible rejection: ${diagnostics.uploadUi.visibleUploadRejection}; progress indicators: ${diagnostics.uploadUi.visibleProgressIndicatorCount}. Inspect Flow before retrying.`, false, true);
     timeoutErr.diagnostics = diagnostics;
     throw timeoutErr;
