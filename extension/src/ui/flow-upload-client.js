@@ -182,9 +182,18 @@ class FlowUploadClient {
 
       const resultName = uploadRes.value?.name || safeName;
       const resultId = uploadRes.value?.id || uploadRes.value?.mediaId || uploadRes.value?.receipt?.id || null;
+      // Upload identity: the in-page uploader dispatches the file under a
+      // digest-derived uploadName, so the Flow tile carries THAT name —
+      // and the receipt's canonical mediaUuid supersedes an asb: id.
+      // Both must reach the caller: generation attachments built from the
+      // safeName alone name a tile that does not exist.
+      const resultUploadName = uploadRes.value?.uploadName || null;
+      const resultMediaUuid = uploadRes.value?.mediaUuid || uploadRes.value?.receipt?.mediaUuid || null;
       return {
         name: resultName,
         id: resultId,
+        uploadName: resultUploadName,
+        mediaUuid: resultMediaUuid,
         requestId,
         transferId,
         toString() { return this.name; }
