@@ -289,6 +289,24 @@
                   <span data-i18n="gen.multiPromptHint">Separate each prompt with a blank line</span>
                 </div>
               </div>
+              <div class="prompt-assistant-panel hidden" id="promptAssistantPanel">
+                <div class="prompt-assistant-controls">
+                  <select id="paFormat">
+                    <option value="single-en">Single prompt (EN)</option>
+                    <option value="single-vi">Một prompt (VI)</option>
+                    <option value="scenes">Scene breakdown</option>
+                  </select>
+                </div>
+                <textarea id="paIdea" rows="2" placeholder="Ý tưởng của bạn..."></textarea>
+                <button class="btn btn-secondary btn-xs" id="paBuildBtn" type="button">Tạo yêu cầu</button>
+                <textarea id="paRequest" rows="5" readonly placeholder="Yêu cầu gửi cho nhà cung cấp chat sẽ hiện ở đây — sao chép và gửi thủ công."></textarea>
+                <textarea id="paReply" rows="4" placeholder="Dán câu trả lời của nhà cung cấp chat vào đây..."></textarea>
+                <button class="btn btn-secondary btn-xs" id="paParseBtn" type="button">Tách prompt</button>
+                <div id="paPromptList"></div>
+                <textarea id="paI2pReply" rows="4" placeholder="Dán câu trả lời image-to-prompt (khối I2P) vào đây..."></textarea>
+                <button class="btn btn-secondary btn-xs" id="paI2pParseBtn" type="button">Tách I2P</button>
+                <div id="paI2pResult"></div>
+              </div>
               <!-- Hidden backward compatibility prompt inputs -->
               <textarea id="inputPromptImage" class="hidden"></textarea>
               <textarea id="inputPromptVideo" class="hidden"></textarea>

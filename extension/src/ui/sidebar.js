@@ -1142,6 +1142,104 @@
   }
 
 
+  // FEAT-14: Prompt Assistant surface. The pure logic (local format
+  // set, request assembly, reply parsing, image-to-prompt structured
+  // parse) lives in the background (flow-prompt-assistant.js); this
+  // panel talks to it over the flow-prompt-assistant:* message
+  // contract and reports plainly until the handlers are wired. The
+  // assembled request is copied to the chat provider by hand for now —
+  // the live send path waits on the ChatGPT live-DOM phase (GPT-B1).
+  let promptAssistantPrompts = [];
+  let promptAssistantI2p = null;
+
+  function insertPromptIntoComposer(text) {
+    const editor = document.querySelector("#promptsArea");
+    if (!editor || !text) return;
+    editor.value = editor.value.trim() ? `${editor.value.trim()}\n\n${text}` : text;
+    editor.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  function renderPromptAssistantResults() {
+    const list = document.querySelector("#paPromptList");
+    if (list) {
+      list.replaceChildren();
+      for (const [index, prompt] of promptAssistantPrompts.entries()) {
+        const row = document.createElement("article");
+        row.className = "flow-history-item";
+        row.innerHTML = `<div class="flow-history-item__body"><div class="flow-history-item__detail">${escapeHtml(prompt)}</div></div><div class="flow-history-item__actions"><button type="button" class="btn btn-secondary btn-sm" data-pa-insert="${index}">Chèn</button></div>`;
+        list.append(row);
+      }
+    }
+    const result = document.querySelector("#paI2pResult");
+    if (!result) return;
+    result.replaceChildren();
+    if (!promptAssistantI2p) return;
+    const { subject, promptEn, promptVi, complete } = promptAssistantI2p;
+    const lines = [
+      subject ? `Chủ đề: ${subject}` : null,
+      promptEn ? `EN: ${promptEn}` : null,
+      promptVi ? `VI: ${promptVi}` : null,
+      complete ? null : "(Thiếu trường — xem nguyên văn ở ô dán phía trên.)",
+    ].filter(Boolean);
+    for (const line of lines) {
+      const div = document.createElement("div");
+      div.textContent = line;
+      result.append(div);
+    }
+    for (const [lang, value] of [["EN", promptEn], ["VI", promptVi]]) {
+      if (!value) continue;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "btn btn-secondary btn-sm";
+      button.setAttribute("data-pa-insert-i2p", lang);
+      button.textContent = `Chèn ${lang}`;
+      result.append(button);
+    }
+  }
+
+  async function buildPromptAssistantRequest() {
+    const idea = document.querySelector("#paIdea")?.value.trim() || "";
+    const format = document.querySelector("#paFormat")?.value || "single-en";
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-prompt-assistant:build", format, idea });
+      if (!res?.ok) throw new Error(res?.error?.message || "Chưa tạo được yêu cầu.");
+      const out = document.querySelector("#paRequest");
+      if (out) out.value = res.text || "";
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.promptAssistant.build.error", err.message, false);
+    }
+  }
+
+  async function parsePromptAssistantReply() {
+    const text = document.querySelector("#paReply")?.value || "";
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-prompt-assistant:parse", text });
+      if (!res?.ok) throw new Error(res?.error?.message || "Chưa tách được prompt.");
+      promptAssistantPrompts = Array.isArray(res.prompts) ? res.prompts : [];
+      renderPromptAssistantResults();
+      if (!promptAssistantPrompts.length) {
+        setFeedback("Không tách được prompt nào — câu trả lời thiếu khối PROMPTS.", false);
+      }
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.promptAssistant.parse.error", err.message, false);
+    }
+  }
+
+  async function parsePromptAssistantI2p() {
+    const text = document.querySelector("#paI2pReply")?.value || "";
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-prompt-assistant:parse-i2p", text });
+      if (!res?.ok) throw new Error(res?.error?.message || "Chưa tách được I2P.");
+      promptAssistantI2p = res.result || null;
+      renderPromptAssistantResults();
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.promptAssistant.parseI2p.error", err.message, false);
+    }
+  }
+
   function renderSavedPrompts() {
     const list = document.querySelector("#savedPromptsList");
     const empty = document.querySelector("#savedPromptsEmpty");
@@ -1719,6 +1817,24 @@
     if (deleteId) void removeGenTemplate(deleteId);
   });
 
+
+  document.querySelector("#chatAIBtn")?.addEventListener("click", () => {
+    document.querySelector("#promptAssistantPanel")?.classList.toggle("hidden");
+  });
+  document.querySelector("#paBuildBtn")?.addEventListener("click", () => { void buildPromptAssistantRequest(); });
+  document.querySelector("#paParseBtn")?.addEventListener("click", () => { void parsePromptAssistantReply(); });
+  document.querySelector("#paI2pParseBtn")?.addEventListener("click", () => { void parsePromptAssistantI2p(); });
+  document.querySelector("#paPromptList")?.addEventListener("click", event => {
+    const insert = event.target.closest("[data-pa-insert]")?.dataset.paInsert;
+    if (insert === undefined) return;
+    const prompt = promptAssistantPrompts[Number(insert)];
+    if (prompt) insertPromptIntoComposer(prompt);
+  });
+  document.querySelector("#paI2pResult")?.addEventListener("click", event => {
+    const lang = event.target.closest("[data-pa-insert-i2p]")?.dataset.paInsertI2p;
+    if (!lang || !promptAssistantI2p) return;
+    insertPromptIntoComposer(lang === "VI" ? promptAssistantI2p.promptVi : promptAssistantI2p.promptEn);
+  });
 
   let isGenerating = false;
   let flowQueuePanel = null;
