@@ -676,8 +676,20 @@
             tiles.emitFlowProgress(command, progress);
             lastSubmitProgress = progress;
           }
-          if (root.FlowUiDeadline?.boundedWait) await root.FlowUiDeadline.boundedWait(250, submitDeadline, "waiting for Flow request dispatch", true, command.signal);
-          else await root.wait?.(250);
+          try {
+            if (root.FlowUiDeadline?.boundedWait) await root.FlowUiDeadline.boundedWait(250, submitDeadline, "waiting for Flow request dispatch", true, command.signal);
+            else await root.wait?.(250);
+          } catch (error) {
+            // The boundedWait timeout is the live "Timed out while waiting
+            // for Flow request dispatch" failure: the click was delivered
+            // but no generation request was ever observed. Convert it
+            // through unknownSubmitError so it carries the same observer
+            // diagnostics as every sibling submit exit instead of dying
+            // unexplained; code, message and retryable are preserved.
+            if (error?.code !== "FLOW_OPERATION_TIMEOUT") throw error;
+            tiles.disarmNativeFlowCorrelation(correlationAttemptId);
+            throw await unknownSubmitError(error.code, error.message || "Timed out while waiting for Flow request dispatch.", error.retryable === true);
+          }
         }
 
         if (!acknowledged) {

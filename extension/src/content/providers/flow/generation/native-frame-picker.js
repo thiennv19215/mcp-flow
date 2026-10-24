@@ -386,6 +386,16 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
       operationErrorCode: error?.code || "FLOW_FRAME_SELECTION_ERROR",
       operationOutcomeUnknown: error?.outcome_unknown === true,
     });
+    // Attach the just-recorded picker snapshot (phase, opener, visible
+    // options) to the error itself: the queue keeps error.diagnostics, so
+    // the failure becomes self-explaining in the panel instead of living
+    // only in a page global nobody reads. Code and message are untouched.
+    if (error && typeof error === "object") {
+      try {
+        const pickerDiagnostics = inspectNativeFramePickerDiagnostics();
+        if (pickerDiagnostics) error.diagnostics = { ...(error.diagnostics || {}), framePicker: pickerDiagnostics };
+      } catch {}
+    }
     throw error;
   } finally {
     const reportCleanupFailure = (message, diagnostics) => {
