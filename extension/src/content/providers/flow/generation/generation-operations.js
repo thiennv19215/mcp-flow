@@ -329,13 +329,10 @@
             if (named.some(asset => asset?.nameSource === "dedicated")) return "dedicated";
             if (named.length > 0) return "fallback-only";
             // Review round 3 MUST: collectAssets reads only MOUNTED
-            // tiles while the grid is virtualized, so "no mounted tile"
-            // cannot prove a ref WITH an identity is absent — its tile
-            // may simply sit outside the viewport. Downgrade to
-            // "unknown" and let the attach stages verify the id by
-            // picker search/scroll. A name-only ref with no identity
-            // still fails as "absent" below.
-            if (ids.size > 0) return "unknown";
+            // tiles while the grid is virtualized, so "absent" here
+            // means "no mounted tile" — not "not in the project". The
+            // loop below disambiguates identity-bearing absent refs
+            // with one scroll-scan before failing them; see there.
             return "absent";
           };
           // (No separate refAssetExists helper: the loop below reads the
@@ -349,12 +346,49 @@
             // bytes belong to this asset — treat it as not retained.
             return matches.length === 1 ? matches[0] : null;
           };
+          // Review round 3 MUST (disambiguation cache): one scroll-scan
+          // per submit, shared by every absent identity-bearing ref.
+          // null = not attempted yet; a Set of scanned ids, or the
+          // string "incomplete" when the scan could not prove it
+          // reached the end of the grid (or failed outright).
+          let libraryScanIds = null;
+          const disambiguateAbsentRef = async (ref, entry) => {
+            if (libraryScanIds === null) {
+              try {
+                let reachedEnd = false;
+                const scanned = await menu.scanNativeAssets({
+                  deadline: flowDeadline, maxDurationMs: 10_000, includeIncomplete: true,
+                  onDiagnostics: diagnostics => { reachedEnd = diagnostics?.reachedEnd === true; },
+                });
+                libraryScanIds = reachedEnd
+                  ? new Set((Array.isArray(scanned) ? scanned : []).flatMap(asset => [asset?.id, asset?.persistentMediaId]).filter(value => typeof value === "string" && value))
+                  : "incomplete";
+              } catch { libraryScanIds = "incomplete"; }
+            }
+            if (libraryScanIds === "incomplete") return "unknown";
+            const ids = [ref.expectedId, entry?.mediaId, entry?.uuid].filter(value => typeof value === "string" && value);
+            return ids.some(id => libraryScanIds.has(id)) ? "id" : "absent";
+          };
           await runFlowStage("revalidating queued references", async ({ signal }) => {
             const missing = [];
             const missingFallback = [];
             for (const ref of refChecks) {
               const entry = await lookupRefCatalog(ref);
-              const trust = refNameTrust(ref, entry);
+              let trust = refNameTrust(ref, entry);
+              // Review round 3 MUST: a mounted-only "absent" grade for
+              // an identity-bearing ref is ambiguous — the tile may sit
+              // outside the virtualized viewport (off-screen library
+              // pick) or be genuinely gone (removed ref). Disambiguate
+              // with the scroll-scan when one is available: found by id
+              // passes, a complete scan without the id keeps "absent"
+              // (and the restore attempt below still runs first for
+              // uploaded refs), an incomplete/failed scan degrades to
+              // "unknown" so attach-time ID verification decides. When
+              // no scan is available the old "absent" behavior stands,
+              // so the gate still fails fast for removed refs.
+              if (trust === "absent" && (ref.expectedId || entry?.mediaId || entry?.uuid) && typeof menu.scanNativeAssets === "function") {
+                trust = await disambiguateAbsentRef(ref, entry);
+              }
               if (trust === "unknown" || trust === "id" || trust === "dedicated") continue;
               let restoredId = null;
               if (entry?.uploadName) {

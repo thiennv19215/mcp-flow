@@ -67,7 +67,7 @@ const EXPECTED_DIAGNOSTICS = {
 // Part 1 — dispatch wait diagnostics (generation-operations.js)
 // ---------------------------------------------------------------------------
 
-function dispatchHarness({ health = HEALTH, waitMode = 'throw-timeout', activation = null, requestSeen = false, components = null, liveButtonDisabledAfterMs = null, liveTilesAfterMs = null, editorClearedAfterMs = null, editorSwapAfterMs = null, editorSwapNewText = '', menuAssets = null, stagedFiles = null } = {}) {
+function dispatchHarness({ health = HEALTH, waitMode = 'throw-timeout', activation = null, requestSeen = false, components = null, liveButtonDisabledAfterMs = null, liveTilesAfterMs = null, editorClearedAfterMs = null, editorSwapAfterMs = null, editorSwapNewText = '', menuAssets = null, stagedFiles = null, scanAssets = null, scanComplete = true } = {}) {
   const correlationMap = new Map([
     ['attempt-1', { attemptId: 'attempt-1', requestSeen, receipts: [], interfered: false }],
   ]);
@@ -151,7 +151,8 @@ function dispatchHarness({ health = HEALTH, waitMode = 'throw-timeout', activati
     validStagedLocalImage: (value) => Boolean(value && value.transferId),
     stagedNativeFiles: stagedFiles || new Map(),
     FlowTiles: fakeTiles,
-    FlowMediaMenu: { nativeRead: () => ({ signedIn: true, inProject: true }), ...(menuAssets !== null ? { collectAssets: () => menuAssets } : {}) },
+    FlowMediaMenu: { nativeRead: () => ({ signedIn: true, inProject: true }), ...(menuAssets !== null ? { collectAssets: () => menuAssets } : {}),
+      ...(scanAssets !== null ? { scanNativeAssets: async (options) => { options?.onDiagnostics?.({ reachedEnd: scanComplete, uniqueTiles: scanAssets.length }); return scanAssets; } } : {}) },
     FlowAgent: { closeNativeAgentSession: async () => {} },
     FlowScreenState: { inspect: () => ({ state: 'ready' }), assertGenerationReady: () => {} },
     FlowImageActions: { prepare: async () => ({}) },
@@ -339,19 +340,44 @@ test('S3 reviewfix control: a malformed frame with no identifiable problem keeps
   });
 });
 
-test('reviewfix M-A off-screen: an identity-bearing ref with no mounted tile passes the gate for attach-time ID verification', async () => {
+test('reviewfix M-A off-screen: an identity-bearing ref with no mounted tile passes the gate when the scroll-scan finds its id', async () => {
   // Before the fix refNameTrust graded only against MOUNTED assets, so
   // a valid library/album ref whose tile sat outside the virtualized
-  // grid viewport graded "absent" and failed before submit — even though
-  // attach() could have found it by picker search/scroll and verified
-  // its id. Now an "absent" grade with an identity downgrades to
-  // "unknown", and the attach stages decide. The job must get PAST
-  // revalidation (it dies later in this harness, which stubs no picker).
+  // grid viewport graded "absent" and failed before submit. The gate
+  // now disambiguates with one scroll-scan: the id found in the full
+  // grid passes, so the job gets PAST revalidation (it dies later in
+  // this harness, which stubs no picker).
   const { submit } = dispatchHarness({
     waitMode: 'throw-timeout',
     menuAssets: [],
+    scanAssets: [{ id: '11111111-2222-4333-8444-555555555555', name: 'Off-screen photo.png' }],
   });
   await assert.rejects(submit({ firstFrame: { assetName: 'Off-screen photo.png', kind: 'image', expectedId: '11111111-2222-4333-8444-555555555555' } }), (error) => {
+    assert.notEqual(error.code, 'FLOW_QUEUE_PREFLIGHT_REFERENCE_MISSING');
+    return true;
+  });
+});
+
+test('reviewfix M-A off-screen: a complete scroll-scan without the id still fails the removed ref at the gate', async () => {
+  const { submit } = dispatchHarness({
+    waitMode: 'throw-timeout',
+    menuAssets: [],
+    scanAssets: [],
+  });
+  await assert.rejects(submit({ firstFrame: { assetName: 'Removed photo.png', kind: 'image', expectedId: '11111111-2222-4333-8444-555555555555' } }), (error) => {
+    assert.equal(error.code, 'FLOW_QUEUE_PREFLIGHT_REFERENCE_MISSING');
+    return true;
+  });
+});
+
+test('reviewfix M-A off-screen: an incomplete scroll-scan degrades to unknown instead of failing the ref', async () => {
+  const { submit } = dispatchHarness({
+    waitMode: 'throw-timeout',
+    menuAssets: [],
+    scanAssets: [],
+    scanComplete: false,
+  });
+  await assert.rejects(submit({ firstFrame: { assetName: 'Maybe photo.png', kind: 'image', expectedId: '11111111-2222-4333-8444-555555555555' } }), (error) => {
     assert.notEqual(error.code, 'FLOW_QUEUE_PREFLIGHT_REFERENCE_MISSING');
     return true;
   });
