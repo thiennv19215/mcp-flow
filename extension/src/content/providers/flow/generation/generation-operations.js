@@ -408,7 +408,7 @@
               }
               throw this.error("FLOW_REFERENCE_ATTACH_UNAVAILABLE", "Flow's video reference picker is unavailable; no generation was submitted.", false, false);
             }
-            return runFlowStage(`selecting asset ${value.assetName}`, ({ signal }) => this.selectFrameAsset(components, value, slot, { deadline: flowDeadline, signal, command }), true);
+            return runFlowStage(`selecting asset ${assetName}`, ({ signal }) => this.selectFrameAsset(components, value, slot, { deadline: flowDeadline, signal, command }), true);
           }
           return uploadAndResolve(value, slot);
         };
@@ -644,7 +644,23 @@
         }
 
         const submitDeadline = Math.min(Date.now() + 30000, flowDeadline);
+        // DOM acceptance downgrade (TobyFlow semantics): when Flow's own
+        // submit control accepted the click — activateFlowSubmitButton saw
+        // it disable — the submit counts as acknowledged after a short
+        // grace window even if the correlation observer never matches a
+        // request payload. A payload layout the observer cannot decode yet
+        // (e.g. a new video model's reference rows) must not kill a submit
+        // Flow itself accepted. The 5 s grace stays well under the 30 s
+        // dispatch budget, so a genuinely correlated request still wins
+        // whenever it is observable, and this exit deliberately does NOT
+        // disarm the correlation attempt: the observe phase keeps reading
+        // the live entry, so a late requestSeen is still recorded and
+        // ownership tracking continues exactly as on the requestSeen path.
+        const domAcceptanceDeadline = activation.controlAccepted === true
+          ? Math.min(Date.now() + 5_000, submitDeadline)
+          : null;
         let acknowledged = false;
+        let domAccepted = false;
         let lastSubmitProgress = "";
 
         while (Date.now() < submitDeadline) {
@@ -669,6 +685,12 @@
             const classified = root.classifyFlowError?.(newError);
             if (classified) throw await unknownSubmitError(classified.code, classified.message, classified.retryable);
             throw await unknownSubmitError("FLOW_SUBMIT_REJECTED", `Flow displayed an error before a correlated generation request was observed: ${newError}. Inspect Flow before retrying.`);
+          }
+
+          if (domAcceptanceDeadline !== null && Date.now() >= domAcceptanceDeadline) {
+            acknowledged = true;
+            domAccepted = true;
+            break;
           }
 
           const progress = "Waiting for Flow to dispatch the generation request";
@@ -745,6 +767,7 @@
           dispatchedAt,
           activation: activation.strategy || "dom-click",
           requestDispatched: acknowledged,
+          ...(domAccepted ? { confirmationSignal: "dom_acceptance", matchKind: "dom_acceptance" } : {}),
           serverAcceptanceObserved,
           ...(dispatchReceipt ? { correlationReceipt: dispatchReceipt } : {}),
         };

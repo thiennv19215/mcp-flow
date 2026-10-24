@@ -506,6 +506,7 @@
     } catch (_) {}
 
     let mainActivation = null;
+    let mainActivationAmbiguous = false;
     try {
       // 1. Gesture sequence with exact 120ms hold delay (TobyFlow pattern)
       targetButton.dispatchEvent(new PointerEvent("pointerdown", eventOptions));
@@ -574,10 +575,21 @@
       }
 
       const mainListenerInvoked = mainActivation?.success === true && Number(mainActivation?.invoked) > 0;
-      if (mainActivation?.error === "Bridge timeout") {
+      if (mainActivation?.error === "Bridge timeout" && !clickDelivered) {
+        // No click ever landed on the button, so nothing was dispatched:
+        // this timeout is a genuine bridge failure, not an ambiguous one.
         throw root.flowError("FLOW_SUBMIT_BRIDGE_TIMEOUT", "Flow's submit bridge timed out. The request outcome is unknown; inspect the project before retrying.", false, true);
       }
-      if (!mainListenerInvoked) {
+      if (mainActivation?.error === "Bridge timeout") {
+        // The click DID land on the button (the capture listener fired)
+        // but the bridge's result message never arrived — the main-world
+        // listener ran and its reply was lost. Like TobyFlow, treat this
+        // as a delivered-but-ambiguous activation: do not throw, and do
+        // not click again (a second click could submit twice); the
+        // dispatch wait's correlation / DOM-acceptance signals own the
+        // verdict from here.
+        mainActivationAmbiguous = true;
+      } else if (!mainListenerInvoked) {
         // The bridge replied but found no page listener. Try one DOM click; the
         // generation observer owns the later single Enter fallback if needed.
         targetButton.click();
@@ -597,6 +609,7 @@
       clickDelivered: clickDelivered || mainListenerInvoked,
       controlAccepted,
       mainListenerInvoked,
+      mainActivationAmbiguous,
       strategy: mainListenerInvoked ? "angular_main_proxy" : "native_click_fallback",
     };
   }
