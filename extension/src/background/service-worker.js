@@ -1539,6 +1539,16 @@ const flowJobQueue = new FlowJobQueue(runExtensionFlowJob, {
   // worker's media catalog (see createQueueRefPreflight for exactly which
   // legs are live at this level and which stay with the content stage).
   refPreflight: createQueueRefPreflight({ catalog: flowMediaCatalog, projectIdForJob: queueJobProjectId }),
+  // Audit cluster C: the transform-lock admission the UI add paths
+  // consult is enforced inside the queue as well, so EVERY enqueue
+  // path (history rerun, task runs, draft runs, batch-run create/resume,
+  // workflow-graph, agent scene retry, downloads) is gated — not just
+  // the two UI forms. Same-family and non-transform submissions always
+  // pass, so the other paths are unaffected. The arrow resolves the
+  // gate at call time (enqueue), by which point module evaluation has
+  // defined it — the gate intentionally stays after the queue so the
+  // vm-extraction contract in flow-execution-lock-wiring keeps working.
+  admissionCheck: jobs => flowTransformGate.admissionRefusal(jobs),
 });
 // FEAT-07: enqueue one workflow graph handout (a level's worth of
 // compiled jobs, or a single node) and bind the minted runtime ids back

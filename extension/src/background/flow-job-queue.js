@@ -88,13 +88,18 @@ const normalizeFailedOutputs = value => {
  * normal add; callers that intentionally pause the queue can resume it later.
  */
 export class FlowJobQueue {
-  constructor(runner, { storageKey = STORAGE_KEY, storage = globalThis.chrome?.storage?.local, minDelayMs = 5_000, maxDelayMs = 10_000, loadCapabilityRegistry = null, loadChatGptCapabilityRegistry = null, refPreflight = null } = {}) {
+  constructor(runner, { storageKey = STORAGE_KEY, storage = globalThis.chrome?.storage?.local, minDelayMs = 5_000, maxDelayMs = 10_000, loadCapabilityRegistry = null, loadChatGptCapabilityRegistry = null, refPreflight = null, admissionCheck = null } = {}) {
     if (typeof runner !== "function") throw new TypeError("FlowJobQueue requires a runner(job, hooks).");
     if (!storage?.get || !storage?.set) throw new TypeError("FlowJobQueue requires chrome.storage.local or a compatible storage adapter.");
     this.runner = runner;
     this.loadCapabilityRegistry = typeof loadCapabilityRegistry === "function" ? loadCapabilityRegistry : null;
     this.loadChatGptCapabilityRegistry = typeof loadChatGptCapabilityRegistry === "function" ? loadChatGptCapabilityRegistry : null;
     this.refPreflight = typeof refPreflight === "function" ? refPreflight : null;
+    // Audit cluster C: optional admission gate consulted by add() and
+    // addBatch() before anything is staged. Null by default, so direct
+    // queue users (including tests) are unaffected; the service worker
+    // injects the transform-execution-lock admission here.
+    this.admissionCheck = typeof admissionCheck === "function" ? admissionCheck : null;
     this.capabilityRegistryPromise = null;
     this.chatGptCapabilityRegistryPromise = null;
     this.storage = storage;
@@ -333,14 +338,33 @@ export class FlowJobQueue {
     return job;
   }
 
+  async #checkAdmission(jobs) {
+    if (!this.admissionCheck) return;
+    const refusal = await this.admissionCheck(jobs);
+    if (!refusal) return;
+    throw Object.assign(
+      new Error(String(refusal.message || "This submission is refused by queue admission.")),
+      { code: refusal.code || "FLOW_QUEUE_ADMISSION_REFUSED", ...refusal },
+    );
+  }
+
   async add(input) {
     await this.ready;
     const job = this.#makeJob(input);
     if (this.jobs.some(existing => existing.id === job.id)) throw new Error(`Flow job already exists: ${job.id}`);
     this.#stampRegen(job);
+    await this.#checkAdmission([job]);
     await this.#preflight([job]);
     this.jobs.push(job);
-    await this.#persist();
+    try {
+      await this.#persist();
+    } catch (error) {
+      // Mirror addBatch(): a failed persist must not leave the job
+      // staged to run later while its caller was told the add failed.
+      const index = this.jobs.indexOf(job);
+      if (index >= 0) this.jobs.splice(index, 1);
+      throw error;
+    }
     this.#emit("added");
     return clone(job);
   }
@@ -403,6 +427,7 @@ export class FlowJobQueue {
       ids.add(job.id);
     }
     for (const job of jobs) this.#stampRegen(job, jobs);
+    await this.#checkAdmission(jobs);
     await this.#preflight(jobs);
     this.jobs.push(...jobs);
     try {
@@ -439,6 +464,34 @@ export class FlowJobQueue {
     };
   }
 
+  // Audit cluster C: every path that returns a job to pending must reset
+  // the SAME attempt fields, or stale diagnostics/partial markers survive
+  // onto the next attempt (and the panel shows them under a fresh run).
+  // Fields reset: status, error, errorCode, diagnostics, finishedAt,
+  // retrySafe, autoRetryCount, overlayRecheckCount, progress, result,
+  // partial, failedOutputs, and the generation metadata checkpoints.
+  // NOT reset here (owned by their own flows): captchaResubmits (a
+  // lifetime budget), attempts, startedAt, batch/regen lineage.
+  #resetJobForRetry(job) {
+    job.status = "pending";
+    job.error = undefined;
+    job.errorCode = undefined;
+    job.diagnostics = undefined;
+    job.finishedAt = undefined;
+    job.retrySafe = false;
+    job.autoRetryCount = 0;
+    job.overlayRecheckCount = 0;
+    job.progress = undefined;
+    job.result = undefined;
+    job.partial = undefined;
+    job.failedOutputs = undefined;
+    if (job.metadata) {
+      delete job.metadata.generationObservation;
+      delete job.metadata.generationResultCheckpoint;
+      delete job.metadata.generationQuoteFields;
+    }
+  }
+
   #restoreDependencyDescendants(parentIds) {
     const readyParents = new Set(parentIds);
     let restored = true;
@@ -447,14 +500,7 @@ export class FlowJobQueue {
       for (const job of this.jobs) {
         if (job.status !== "cancelled" || job.errorCode !== "FLOW_SCENE_DEPENDENCY_SKIPPED" ||
             !readyParents.has(job.metadata?.dependsOnId)) continue;
-        job.status = "pending";
-        job.error = undefined;
-        job.errorCode = undefined;
-        job.diagnostics = undefined;
-        job.finishedAt = undefined;
-        job.retrySafe = false;
-        job.progress = undefined;
-        job.result = undefined;
+        this.#resetJobForRetry(job);
         readyParents.add(job.id);
         restored = true;
       }
@@ -741,21 +787,14 @@ export class FlowJobQueue {
         CAPTCHA_ERROR_CODES.has(String(blockedJob.errorCode || "")) &&
         captchaResubmits < CAPTCHA_RESUBMIT_MAX;
       if (captchaAutoResubmit) {
+        this.#resetJobForRetry(blockedJob);
         blockedJob.captchaResubmits = captchaResubmits + 1;
-        blockedJob.status = "pending";
-        blockedJob.error = undefined;
-        blockedJob.errorCode = undefined;
-        blockedJob.finishedAt = undefined;
-        blockedJob.retrySafe = false;
-        blockedJob.autoRetryCount = 0;
-        blockedJob.overlayRecheckCount = 0;
         blockedJob.progress = {
           phase: "captcha_resubmit",
           attempt: blockedJob.captchaResubmits,
           maxAttempts: CAPTCHA_RESUBMIT_MAX,
           message: "Captcha verification completed. Resubmitting this job once at the end of the batch.",
         };
-        blockedJob.result = undefined;
         const currentIndex = this.jobs.indexOf(blockedJob);
         if (currentIndex >= 0) {
           this.jobs.splice(currentIndex, 1);
@@ -763,15 +802,10 @@ export class FlowJobQueue {
         }
       } else {
         if (blockedJob?.status === "failed" && this.attention.retryOnResume !== false && blockedJob.retrySafe === true && blockedJob.outcomeUnknown !== true) {
-          blockedJob.status = "pending";
-          blockedJob.error = undefined;
-          blockedJob.errorCode = undefined;
-          blockedJob.finishedAt = undefined;
-          blockedJob.retrySafe = false;
-          blockedJob.autoRetryCount = 0;
-          blockedJob.overlayRecheckCount = 0;
-          blockedJob.progress = undefined;
-          blockedJob.result = undefined;
+          // Same shared reset as retry()/retryBatch()/captcha-resubmit:
+          // a resumed page-blocked job must not carry stale diagnostics
+          // or partial markers into its next attempt either.
+          this.#resetJobForRetry(blockedJob);
         }
         if (blockedJob?.status === "pending") {
           const currentIndex = this.jobs.indexOf(blockedJob);
@@ -818,21 +852,7 @@ export class FlowJobQueue {
     if (!job || job.status !== "failed") return false;
     if (job.outcomeUnknown === true) throw new Error("This Flow job may already have been submitted. Inspect Flow; it cannot be retried from the queue.");
     if (job.retrySafe !== true) throw Object.assign(new Error("This Flow job is not marked safe to retry."), { code: "FLOW_QUEUE_RETRY_UNSAFE" });
-    job.status = "pending";
-    job.error = undefined;
-    job.errorCode = undefined;
-    job.diagnostics = undefined;
-    job.finishedAt = undefined;
-    job.retrySafe = false;
-    job.autoRetryCount = 0;
-    job.overlayRecheckCount = 0;
-    job.progress = undefined;
-    job.result = undefined;
-    if (job.metadata) {
-      delete job.metadata.generationObservation;
-      delete job.metadata.generationResultCheckpoint;
-      delete job.metadata.generationQuoteFields;
-    }
+    this.#resetJobForRetry(job);
     this.#restoreDependencyDescendants([job.id]);
     await this.#persist();
     this.#emit("retried");
@@ -846,20 +866,7 @@ export class FlowJobQueue {
     if (!jobs.length) return { retried: [], skipped: 0 };
     const retryable = jobs.filter(job => job.status === "failed" && job.retrySafe === true && job.outcomeUnknown !== true);
     for (const job of retryable) {
-      job.status = "pending";
-      job.error = undefined;
-      job.errorCode = undefined;
-      job.finishedAt = undefined;
-      job.retrySafe = false;
-      job.autoRetryCount = 0;
-      job.overlayRecheckCount = 0;
-      job.progress = undefined;
-      job.result = undefined;
-      if (job.metadata) {
-        delete job.metadata.generationObservation;
-        delete job.metadata.generationResultCheckpoint;
-        delete job.metadata.generationQuoteFields;
-      }
+      this.#resetJobForRetry(job);
     }
     if (retryable.length) {
       this.#restoreDependencyDescendants(retryable.map(job => job.id));
@@ -1150,7 +1157,19 @@ export class FlowJobQueue {
         } catch (thrown) {
           const error = asError(thrown);
           const explicitlySafe = error?.outcomeUnknown === false || error?.outcome_unknown === false;
-          const unknown = mayHaveDispatched(error) || (!explicitlySafe && this.stopRequested && this.controller?.signal.aborted);
+          // Audit cluster C: a stop/abort alone must not imply the request
+          // may have been submitted. That conservatism was correct only
+          // when the runner had actually reached the submit phase — the
+          // job carries positive evidence of that: a dispatch flag, a
+          // dispatch checkpoint stamp, or a submit-phase progress report
+          // from the runner. A job cancelled during ref-preflight (or any
+          // earlier phase) fails cleanly instead of pausing the queue
+          // with a "may have submitted" warning it never earned.
+          const reachedSubmitPhase = job.requestDispatched === true ||
+            job.serverAcceptanceObserved === true ||
+            Number(job.metadata?.generationObservation?.dispatchedAt) > 0 ||
+            job.progress?.phase === "submit" || job.progress?.phase === "submitted";
+          const unknown = mayHaveDispatched(error) || (!explicitlySafe && this.stopRequested && this.controller?.signal.aborted && reachedSubmitPhase);
           const downloadFailure = Boolean(error?.downloadError) || String(error?.code || "").toUpperCase().includes("DOWNLOAD");
           pageBlocked = !unknown && PAGE_BLOCKER_ERROR_CODES.has(String(error?.code || ""));
           job.status = "failed";
@@ -1248,7 +1267,10 @@ export class FlowJobQueue {
             job.progress = {
               phase: "auto_retry",
               attempt: job.autoRetryCount,
-              maxAttempts: AUTO_RETRY_MAX,
+              // Audit cluster C: report the job's own budget, not the
+              // global cap — a job declaring retries: 1 used to display
+              // "attempt 1/2" and then fail outright.
+              maxAttempts: retryBudget,
               errorCode: error.code || "FLOW_JOB_RETRYABLE_ERROR",
               reason: String(error.message || error).slice(0, 500),
             };
