@@ -3,6 +3,15 @@
  * the Flow tab, or submit work.
  */
 
+// FEAT-06: the shared character/voice selection normalization layer
+// (content/shared/selection-normalize.js) is a classic script that
+// attaches its API to the global root; importing it for its side effect
+// makes the one normalization function available to these planners, the
+// sidebar modal and the content side alike.
+import "../content/shared/selection-normalize.js";
+
+const sharedSelectionNormalize = () => globalThis.FlowSelectionNormalize || null;
+
 export class FlowWorkflowPlanError extends Error {
   constructor(message, code = "FLOW_INVALID_ARGUMENT", category = "invalid_argument") {
     super(message);
@@ -196,7 +205,7 @@ function validateCapabilities(scene, index, capabilityRegistry) {
 }
 
 /** Build generation jobs while preserving the per-call scene order and dependencies. */
-export function planFlowBatch({ project, output_dir = project, scenes }, { queue = [], knownAssets = [], outputAssets = knownAssets, characterLooks = {}, techniques = [], capabilityRegistry } = {}) {
+export function planFlowBatch({ project, output_dir = project, scenes, characterCatalog, voiceCatalog }, { queue = [], knownAssets = [], outputAssets = knownAssets, characterLooks = {}, techniques = [], capabilityRegistry } = {}) {
   nonempty(project, "project");
   if (!Array.isArray(scenes) || scenes.length < 1 || scenes.length > 100) throw new FlowWorkflowPlanError("scenes must contain between 1 and 100 scenes.");
   const invalidChain = scenes.findIndex((scene, i) => scene.chain_previous && (i === 0 || scene.first_frame || (scene.type || "video") === "image"));
@@ -225,6 +234,21 @@ export function planFlowBatch({ project, output_dir = project, scenes }, { queue
       : reference_previous ? { type: "reference_previous", sequence: index - 1, requiredKind: "image", resolution: "extension_runner" } : undefined;
     const workflow = { project, sceneNumber, sequence: index, ...(dependency ? { dependency } : {}) };
     const attachments = flowAttachments(reference_images, knownAssets, project);
+    // FEAT-06: when the caller rides a scraped character/voice catalog
+    // along with the plan, the scene's selections (explicit character
+    // fields plus `character:` references, and the voice chip name) are
+    // normalized through the shared layer and shaped onto the payload as
+    // primary + full list. Without catalogs the payload is unchanged.
+    const selectionNormalize = sharedSelectionNormalize();
+    const characterSelection = selectionNormalize && characterCatalog
+      ? selectionNormalize.shapeCharacterSelectionPayload([
+        source.character, source.characters,
+        ...(reference_images || []).filter(reference => typeof reference === "string" && /^character:/i.test(reference)),
+      ], characterCatalog)
+      : null;
+    const voiceSelection = selectionNormalize && voiceCatalog && source.voice
+      ? selectionNormalize.shapeVoiceSelectionPayload(source.voice, voiceCatalog)
+      : null;
     const aspectRatio = aspect_ratio;
     const maxCredits = max_credits;
     const submitOnly = submit_only;
@@ -241,6 +265,8 @@ export function planFlowBatch({ project, output_dir = project, scenes }, { queue
         ...(first_frame ? { firstFrame: frameInput(first_frame, `Scene ${index + 1} first_frame`) } : {}),
         ...(last_frame ? { lastFrame: frameInput(last_frame, `Scene ${index + 1} last_frame`) } : {}),
         ...(attachments.length ? { attachments } : {}),
+        ...(characterSelection && characterSelection.selections.length ? { characterSelection } : {}),
+        ...(voiceSelection && voiceSelection.selections.length ? { voiceSelection } : {}),
         ...(aspectRatio !== undefined ? { aspectRatio } : {}),
         ...(maxCredits !== undefined ? { maxCredits } : {}),
         ...(submitOnly !== undefined ? { submitOnly } : {}),
