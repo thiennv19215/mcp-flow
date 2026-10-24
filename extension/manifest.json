@@ -72,6 +72,7 @@
         "build-revision.js",
         "content/shared/i18n.js",
         "content/shared/dom-utils.js",
+        "content/shared/selection-normalize.js",
         "content/providers/flow/core/selectors.js",
         "content/shared/activity-overlay.js",
         "content/shared/native-file-transfer.js",

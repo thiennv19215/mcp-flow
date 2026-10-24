@@ -271,3 +271,25 @@ test('characterLookForSelection resolves slug / JSON / object / array selections
   assert.equal(characterLookForSelection('nguoi-la', looks), undefined);
   assert.equal(characterLookForSelection(null, looks), undefined);
 });
+
+// ---------------------------------------------------------------------------
+// Production wiring (FEAT-06b, coordinator): the shared module must actually
+// load in the Flow content world and in the sidebar, before its consumers.
+// ---------------------------------------------------------------------------
+
+test('manifest loads selection-normalize in the Flow isolated world before its consumers', () => {
+  const manifest = JSON.parse(readFileSync(new URL('../extension/manifest.json', import.meta.url), 'utf8'));
+  const flowEntry = manifest.content_scripts.find(entry => (entry.matches || []).some(m => m.includes('flow.google.com')) && entry.world !== 'MAIN');
+  assert.ok(flowEntry, 'Flow isolated content_scripts entry exists');
+  const idx = flowEntry.js.indexOf('content/shared/selection-normalize.js');
+  assert.ok(idx >= 0, 'selection-normalize.js is in the Flow entry');
+  assert.ok(idx < flowEntry.js.indexOf('content/providers/flow/characters/flow-characters.js'), 'loads before flow-characters');
+  assert.ok(idx < flowEntry.js.indexOf('content/providers/flow/composer/reference-actions.js'), 'loads before reference-actions');
+});
+
+test('sidebar.html loads selection-normalize before sidebar.js', () => {
+  const html = readFileSync(new URL('../extension/src/ui/sidebar.html', import.meta.url), 'utf8');
+  const tag = '<script src="../content/shared/selection-normalize.js"></script>';
+  assert.ok(html.includes(tag), 'sidebar.html has the selection-normalize script tag');
+  assert.ok(html.indexOf(tag) < html.indexOf('<script src="sidebar.js"></script>'), 'tag precedes sidebar.js');
+});
