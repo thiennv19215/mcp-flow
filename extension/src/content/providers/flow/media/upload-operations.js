@@ -79,7 +79,26 @@
         const kind = payload.kind === "video" ? "video" : "image";
         if (!file || file.name !== assetName) throw this.error("FLOW_TRANSFER_UNKNOWN", "The staged media file is missing or its name does not match.", true);
         const deadline = root.FlowUiDeadline?.makeDeadline(command, 75_000, 15_000) || Date.now() + 60_000;
-        const receipt = await components.uploadStagedFlowMedia(file, kind, command, { deadline, signal: command.signal });
+        // IMG-01: a caller may pin the upload identity to its own reference
+        // key; without one the uploader derives the identity key from the
+        // staged file's original name. The receipt keeps name = assetName
+        // (the original) and gains the content-derived uploadName.
+        const callerKey = payload.callerKey ?? payload.uploadKey ?? undefined;
+        // IMG-09b: forward the caller's per-upload request id so a cancel
+        // by id (FlowUploader.cancelUpload) reaches the in-page upload.
+        // Without it the id stopped at the client layer: the uploader
+        // never registered a canceller, and an already-dispatched
+        // confirmation loop could not be aborted from the sidebar.
+        const requestId = payload.requestId ?? payload.uploadRequestId ?? undefined;
+        // IMG-05b: the 75 s deadline above remains the budget for every
+        // upload phase (navigation, baseline, menu, picker dispatch).
+        // Only the post-dispatch tile confirmation may extend past it
+        // while Flow is still processing the latched tile — bounded by
+        // the uploader's hard caps (image 240 s, video 480 s) and by this
+        // command's own timeout, which the uploader derives from the
+        // command itself. confirmExtendable opts this call into that
+        // extension; all other upload callers keep the absolute deadline.
+        const receipt = await components.uploadStagedFlowMedia(file, kind, command, { deadline, signal: command.signal, callerKey, requestId, confirmExtendable: true });
         // Upload can leave Flow's asset picker or upload menu mounted while
         // the media tile finishes rendering. Close and verify it before the
         // caller starts image/video generation or another DOM operation.

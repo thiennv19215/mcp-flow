@@ -16,6 +16,126 @@ export async function nativeDownloadIds(): Promise<Set<number>> {
   return new Set((await extensionDownloads()).map(item => item.id));
 }
 
+// Provenance rules mirroring the extension queue's own download matching
+// (flow-queue-downloads.js isFlowMediaHost/flowUrl): a download only counts
+// as Flow output when its URL chain points at Flow or Google media hosts.
+export function isFlowMediaHost(hostname: string): boolean {
+  const host = String(hostname || "").toLowerCase();
+  return host === "flow.google.com" || host.endsWith(".flow.google.com") ||
+    host === "labs.google" || host.endsWith(".labs.google") ||
+    host === "storage.googleapis.com" || host.endsWith(".storage.googleapis.com") ||
+    host === "googleusercontent.com" || host.endsWith(".googleusercontent.com") ||
+    host === "googleapis.com" || host.endsWith(".googleapis.com") ||
+    host === "usercontent.goog" || host.endsWith(".usercontent.goog");
+}
+
+export function isFlowUrl(value?: string): boolean {
+  try {
+    const raw = String(value || "");
+    if (!raw) return false;
+    if (raw.startsWith("blob:")) return raw.includes("flow.google.com") || raw.includes("labs.google");
+    return isFlowMediaHost(new URL(raw).hostname);
+  } catch { return false; }
+}
+
+export function hasFlowDownloadProvenance(item: { url?: string; finalUrl?: string; referrer?: string }): boolean {
+  return isFlowUrl(item.url) || isFlowUrl(item.finalUrl) || isFlowUrl(item.referrer);
+}
+
+// DL-05: interrupted-download classification, mirrored from the extension
+// queue's download module (flow-queue-downloads.js) so both waiters speak
+// the same vocabulary. Only transient network/transport-class reasons may
+// resume, and only when Chrome says the download can resume; identity/
+// provenance, auth/policy and integrity reasons never resume, and unknown
+// reasons fail closed as fatal. The resume itself (chrome.downloads.resume
+// under FLOW_DOWNLOAD_RESUME_BUDGET per wait) lives in the extension
+// background, the only side with direct chrome.downloads access — the
+// connector bridge exposes no resume method and does not forward
+// canResume — so the native waiters attach this classification to the
+// interruption errors they throw instead of resuming from here.
+export const FLOW_DOWNLOAD_RESUME_BUDGET = 3;
+
+const TRANSIENT_DOWNLOAD_INTERRUPTIONS = new Set([
+  "NETWORK_FAILED", "NETWORK_TIMEOUT", "NETWORK_DISCONNECTED", "NETWORK_SERVER_DOWN",
+  "SERVER_FAILED", "SERVER_UNREACHABLE", "SERVER_NO_RANGE", "SERVER_CONTENT_LENGTH_MISMATCH",
+  "FILE_TRANSIENT_ERROR", "CRASH",
+]);
+
+export function classifyDownloadInterruption(error?: string, canResume?: boolean): { category: "transient" | "fatal"; reason: string; resumable: boolean } {
+  const reason = String(error || "").trim().toUpperCase() || "UNKNOWN";
+  const transient = TRANSIENT_DOWNLOAD_INTERRUPTIONS.has(reason);
+  return {
+    category: transient ? "transient" : "fatal",
+    reason,
+    resumable: transient && canResume === true,
+  };
+}
+
+// DL-07: explicit HTML-response rejection, mirrored from the extension
+// queue's download module so both waiters speak the same vocabulary.
+// Detection is mime OR filename (mime `text/html`, parameters/case
+// tolerated, or a filename ending .html/.htm) — the OR is pinned: a
+// .html filename rejects even when the item also carries a real media
+// mime. Ordering mirrors the queue side: the check runs on a completed
+// or interrupted sighting BEFORE the item can be selected/returned as
+// media and BEFORE the interruption handling — an interrupted HTML-ish
+// item is not a media download at all. Removal limits differ by side:
+// the queue (extension background) removes the file through
+// chrome.downloads.removeFile, but the connector bridge this backend
+// talks to exposes only flow.downloads.recent and flow.downloads.read
+// — no removal method — so the native waiters cannot remove the file
+// from here; their errors record fileRemoved: false /
+// removalAvailable: false honestly instead of pretending otherwise.
+// (The ExtensionDownload shape carries no mime field today; when the
+// bridge does not supply one, detection rests on the filename signal,
+// which the bridge does expose.)
+export function detectFlowDownloadHtmlResponse(item: { filename?: string | null; mime?: string | null }): { via: "mime" | "filename"; mime: string; filename: string } | null {
+  if (!item || typeof item !== "object") return null;
+  const mime = String(item.mime || "").split(";")[0].trim().toLowerCase();
+  const filename = String(item.filename || "").split(/[\\/]/).pop()?.trim() || "";
+  if (mime === "text/html") return { via: "mime", mime, filename };
+  if (/\.html?$/i.test(filename)) return { via: "filename", mime, filename };
+  return null;
+}
+
+function throwIfHtmlNativeDownload(item: NativeDownload): void {
+  if (!item || (item.state !== "complete" && item.state !== "interrupted")) return;
+  const signal = detectFlowDownloadHtmlResponse(item as { filename?: string; mime?: string });
+  if (!signal) return;
+  throw Object.assign(new Error(`Chrome download for a Flow result arrived as an HTML page instead of media (detected via ${signal.via === "mime" ? `mime "${signal.mime}"` : `filename "${signal.filename}"`}); the HTML payload is not the generated media. The media remains in Flow.`), {
+    code: "FLOW_DOWNLOAD_HTML_RESPONSE", retryable: false, outcome_unknown: false,
+    downloadHtmlResponse: {
+      downloadId: item.id,
+      via: signal.via,
+      mime: signal.mime || null,
+      filename: signal.filename || null,
+      fileRemoved: false,
+      removalAvailable: false,
+    },
+  });
+}
+
+function downloadInterruptionDiagnostics(item: { error?: string; canResume?: boolean }): { reason: string; category: "transient" | "fatal"; canResume: boolean; resumable: boolean } {
+  const classification = classifyDownloadInterruption(item.error, item.canResume);
+  return {
+    reason: classification.reason,
+    category: classification.category,
+    canResume: item.canResume === true,
+    resumable: classification.resumable,
+  };
+}
+
+/** Pick the completed Flow download out of a poll of Chrome downloads. The
+ * user's own unrelated download finishing in the same window must never be
+ * materialized as the scene's output file. */
+export function selectCompletedFlowDownload(items: NativeDownload[], before: ReadonlySet<number>): NativeDownload | undefined {
+  return items.find(item => !before.has(item.id) && hasFlowDownloadProvenance(item) &&
+    item.state === "complete" && item.filename && (item.totalBytes > 0 || item.bytesReceived > 0) &&
+    // DL-07: an HTML payload is never selected as a media result.
+    !detectFlowDownloadHtmlResponse(item as { filename?: string; mime?: string }) &&
+    (!existsSync(item.filename) || statSync(item.filename).size > 0));
+}
+
 /** Wait for a Chrome download initiated by the content script. */
 export async function waitForNativeDownload(
   before: ReadonlySet<number>,
@@ -25,13 +145,17 @@ export async function waitForNativeDownload(
   const deadline = Date.now() + timeoutMs;
   let lastProgress = "";
   while (Date.now() < deadline) {
-    const items = (await extensionDownloads()).filter(item => !before.has(item.id));
-    const complete = items.find(item => item.state === "complete" && item.filename && (item.totalBytes > 0 || item.bytesReceived > 0) && (!existsSync(item.filename) || statSync(item.filename).size > 0));
+    const items = (await extensionDownloads()).filter(item => !before.has(item.id) && hasFlowDownloadProvenance(item));
+    // DL-07: HTML check on every poll sighting — before selection/return
+    // and before the interruption failure below.
+    for (const item of items) throwIfHtmlNativeDownload(item);
+    const complete = selectCompletedFlowDownload(items, before);
     if (complete) return complete;
 
     const failed = items.find(item => item.state === "interrupted");
     if (failed) throw Object.assign(new Error(`Chrome download failed: ${failed.error ?? "unknown error"} (${failed.bytesReceived}/${failed.totalBytes} bytes). The media remains in Flow.`), {
       code: "FLOW_DOWNLOAD_FAILED", retryable: false, outcome_unknown: false,
+      downloadInterruption: downloadInterruptionDiagnostics(failed as { error?: string; canResume?: boolean }),
     });
 
     const active = items.find(item => item.state === "in_progress");
@@ -167,10 +291,14 @@ export async function materializeQueuedNativeDownloads(
         await new Promise(resolve => setTimeout(resolve, 750));
         continue;
       }
+      // DL-07: HTML check on every poll sighting — before the completion
+      // break and before the interruption failure below.
+      throwIfHtmlNativeDownload(download);
       if (download.state === "complete" && download.filename && (download.totalBytes > 0 || download.bytesReceived > 0)) break;
       if (download.state === "interrupted") {
         throw Object.assign(new Error(`Chrome download failed: ${download.error ?? "unknown error"} (${download.bytesReceived}/${download.totalBytes} bytes). The media remains in Flow.`), {
           code: "FLOW_DOWNLOAD_FAILED", retryable: false, outcome_unknown: false,
+          downloadInterruption: downloadInterruptionDiagnostics(download as { error?: string; canResume?: boolean }),
         });
       }
       job && (job.progress = download.totalBytes > 0

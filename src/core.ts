@@ -1,6 +1,5 @@
-const defaultAdd = (params: any) => ({ id: 'mock-job', status: 'queued', params, files: [], attempts: 0 });
-import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { extname, isAbsolute, join, relative, resolve } from "node:path";
 import { assemble } from "./assemble.js";
 import { clearFlowPrompt, createFlowProject, downloadAsset, renameAsset, trashAsset, getCorrelationObserverHealth, getFlowState, listAssets, listCharacters, listFlowProjects, listFlowVoiceOptions, openFlowProject, rememberCharacter, uploadFlowMediaToProject } from "./flow.js";
 import type { Job } from "./job-types.js";
@@ -40,12 +39,36 @@ export const jobView = ({ id, status, params, files, attempts, credits, progress
   operation_diagnostics: !outcomeUnknown && !requestDispatched ? sanitizeFlowOperationDiagnostics(operationDiagnostics) ?? null : null,
 });
 
+export const CHATGPT_GENERATION_OPERATION = "chatgpt.generation.submit";
+
+// Arguments for the ChatGPT generation surface. The queue payload built
+// from these is the one GPT-09's admission preflight validates and the
+// content-side submit-payload builder (GPT-02) consumes at drain time:
+// prompt/ratio/model pass through, refs travel as payload-carrying
+// `attachments` records (uploaded references only — bare library/tile ids
+// are rejected by that preflight, never resolved here).
+export interface ChatGptGenerateArgs {
+  project: string;
+  prompt: string;
+  file_stem?: string;
+  ratio?: string;
+  model?: string;
+  conversation_id?: string;
+  refs?: Array<Record<string, unknown>>;
+  timeout_ms?: number;
+}
+
 // One implementation runs in whichever process owns the Flow tab; the other process talks to it over HTTP (remote.ts).
 export interface Core {
   status(a: Args<"status">): Promise<unknown>;
   observer_health(a: Args<"observer_health">): Promise<unknown>;
   clear_prompt(a: Args<"clear_prompt">): Promise<unknown>;
   generate(a: Args<"generate">): Promise<unknown>;
+  // Optional on the interface: RemoteCore's forwarding properties are an
+  // explicit list that does not include this method yet, so a relay-hosted
+  // MCP server answers chatgpt_generate with a clear error (handled in
+  // mcp-tools.ts) instead of the tool silently missing.
+  chatgpt_generate?(a: ChatGptGenerateArgs): Promise<unknown>;
   wait(a: Args<"wait">): Promise<unknown>;
   cancel(a: Args<"cancel">): Promise<unknown>;
   retry(a: Args<"retry">): Promise<unknown>;
@@ -74,30 +97,12 @@ export interface Core {
 }
 
 // Flow's own voices: still offered when giving a character a voice, but narration no longer goes through Flow.
-export const VOICES = [
-  { name: "Achernar", description: "female, soft, high pitch" },
-  { name: "Achird", description: "male, friendly, mid pitch" },
-  { name: "Algenib", description: "male, gravelly, low pitch" },
-  { name: "Algieba", description: "male, easy-going, mid-low pitch" },
-  { name: "Alnilam", description: "male, firm, mid-low pitch" },
-  { name: "Aoede", description: "female, breezy, mid pitch" },
-  { name: "Autonoe", description: "female, bright, mid pitch" },
-  { name: "Callirrhoe", description: "female, easy-going, mid pitch" },
-  { name: "Charon", description: "male, informative, lower pitch" },
-  { name: "Despina", description: "female, smooth, mid pitch" },
-  { name: "Enceladus", description: "male, breathy, lower pitch" },
-  { name: "Erinome", description: "female, clear, mid pitch" },
-  { name: "Fenrir", description: "male, excitable, younger pitch" },
-  { name: "Gacrux", description: "female, mature, mid pitch" },
-  { name: "Iapetus", description: "male, clear, mid-low pitch" },
-];
-
 const BUSY = "A generation is running in the Flow tab. Wait for it to finish (flow_wait), then retry.";
 
 type ExtensionQueueJob = {
   id: string; operation: string; payload?: Record<string, any>; metadata?: Record<string, any>;
   label?: string; status: string; result?: any; progress?: any; error?: string; errorCode?: string;
-  outcomeUnknown?: boolean; retrySafe?: boolean; attempts?: number; addedAt?: number;
+  outcomeUnknown?: boolean; retrySafe?: boolean; attempts?: number; addedAt?: number; diagnostics?: any;
   requestDispatched?: boolean; serverAcceptanceObserved?: boolean; creditQuoteVerified?: boolean; credits?: number;
 };
 type ExtensionQueueSnapshot = { jobs: ExtensionQueueJob[]; items?: ExtensionQueueJob[]; isRunning?: boolean; isPaused?: boolean; isStopped?: boolean };
@@ -116,13 +121,20 @@ async function extensionQueueSnapshot(): Promise<ExtensionQueueSnapshot> {
   }
 }
 
-function extensionJobParams(job: ExtensionQueueJob): any {
-  return job.operation === "flow.generation.submit" ? job.payload || {} : job.payload?.params || job.payload || {};
+function isChatGptQueueJob(job: ExtensionQueueJob): boolean {
+  return typeof job.operation === "string" && job.operation.startsWith("chatgpt.");
 }
 
-function extensionJobAsLegacy(job: ExtensionQueueJob): Job {
+function extensionJobParams(job: ExtensionQueueJob): any {
+  // A ChatGPT submit payload IS the job params (prompt/ratio/model/...),
+  // like flow.generation.submit — it is not wrapped in a `params` key.
+  return job.operation === "flow.generation.submit" || isChatGptQueueJob(job) ? job.payload || {} : job.payload?.params || job.payload || {};
+}
+
+export function extensionJobAsLegacy(job: ExtensionQueueJob): Job {
   const params = extensionJobParams(job);
   const outcome = job.result?.result || job.result || {};
+  const chatGpt = isChatGptQueueJob(job);
   const workflow = job.metadata?.workflow || job.payload?.workflow || params.workflow || {};
   const outputDir = job.metadata?.output_dir || params.output_dir || workflow.output_dir || "";
   const fileStem = job.metadata?.file_stem || params.file_stem || (workflow.sceneNumber ? `scene-${String(workflow.sceneNumber).padStart(2, "0")}` : "");
@@ -133,8 +145,11 @@ function extensionJobAsLegacy(job: ExtensionQueueJob): Job {
     params: { ...params, output_dir: outputDir, file_stem: fileStem },
     files: job.metadata?.files || [],
     attempts: job.attempts || 0,
-    credits: typeof job.credits === "number" ? job.credits : typeof outcome.credits === "number" ? outcome.credits : null,
-    creditQuoteVerified: typeof job.creditQuoteVerified === "boolean"
+    // ChatGPT jobs have no credit accounting at all: credits stay null even
+    // if a job/result record happens to carry a numeric credits field, and
+    // no credit quote is ever verified for them.
+    credits: chatGpt ? null : typeof job.credits === "number" ? job.credits : typeof outcome.credits === "number" ? outcome.credits : null,
+    creditQuoteVerified: chatGpt ? false : typeof job.creditQuoteVerified === "boolean"
       ? job.creditQuoteVerified
       : typeof outcome.creditQuoteVerified === "boolean" ? outcome.creditQuoteVerified
         : job.operation === "flow.generation.submit" && params.type === "video" && typeof outcome.credits === "number",
@@ -148,20 +163,56 @@ function extensionJobAsLegacy(job: ExtensionQueueJob): Job {
     outcomeUnknown: job.outcomeUnknown === true,
     requestDispatched: job.requestDispatched === true || job.result?.requestDispatched === true,
     serverAcceptanceObserved: job.serverAcceptanceObserved === true || job.result?.result?.serverAcceptanceObserved === true,
-    requestDiagnostics: undefined,
-    operationDiagnostics: undefined,
+    requestDiagnostics: job.diagnostics?.requestDiagnostics,
+    operationDiagnostics: job.diagnostics?.operationDiagnostics,
   } as unknown as Job;
 }
 
 async function queueIsActive(core?: any): Promise<boolean> {
-  if (core?.queue?.busy || (Array.isArray(core?.queue?.list?.()) && core.queue.list().some((j: any) => ["pending", "running", "queued", "waiting_for_user"].includes(j?.status)))) {
-    return true;
-  }
   const snapshot = await extensionQueueSnapshot();
   return snapshot.isRunning === true || snapshot.jobs.some(job => ["pending", "running", "waiting_for_user"].includes(job.status));
 }
 
-async function materializeQueueJob(job: ExtensionQueueJob): Promise<ExtensionQueueJob> {
+function chatGptResultImageUrls(result: any): string[] {
+  const urls = result?.imageUrls;
+  return Array.isArray(urls) ? urls.filter((url): url is string => typeof url === "string" && url.length > 0) : [];
+}
+
+const CHATGPT_IMAGE_EXTENSIONS: Record<string, string> = {
+  "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif", "image/avif": ".avif",
+};
+
+// ChatGPT results arrive as plain result URLs on the job record (no Flow
+// asset id to trigger, no browser download to adopt), so materializing
+// fetches the bytes directly. An HTML payload is refused with the same
+// DL-07 code the native download paths use — a sign-in page is not media.
+async function downloadChatGptImageUrls(imageUrls: string[], outputDir: string, fileStem: string): Promise<string[]> {
+  mkdirSync(outputDir, { recursive: true });
+  const files: string[] = [];
+  for (const [index, url] of imageUrls.entries()) {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`ChatGPT image download failed (${response.status}) for ${url}.`);
+    const contentType = (response.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+    const bytes = Buffer.from(await response.arrayBuffer());
+    const head = bytes.subarray(0, 512).toString("utf8").trimStart().toLowerCase();
+    if (contentType === "text/html" || contentType === "application/xhtml+xml" || head.startsWith("<!doctype") || head.startsWith("<html")) {
+      throw Object.assign(new Error(`ChatGPT image download returned an HTML page instead of image bytes for ${url}; the HTML payload is not the generated media.`), {
+        code: "FLOW_DOWNLOAD_HTML_RESPONSE", retryable: false, outcome_unknown: false,
+      });
+    }
+    let extension = CHATGPT_IMAGE_EXTENSIONS[contentType] || "";
+    if (!extension) {
+      try { extension = extname(new URL(url).pathname).toLowerCase(); } catch { extension = ""; }
+    }
+    if (!/^\.(png|jpe?g|webp|gif|avif)$/.test(extension)) extension = ".png";
+    const destination = join(outputDir, `${imageUrls.length > 1 ? `${fileStem}-v${index + 1}` : fileStem}${extension}`);
+    writeFileSync(destination, bytes);
+    files.push(destination);
+  }
+  return files;
+}
+
+export async function materializeQueueJob(job: ExtensionQueueJob): Promise<ExtensionQueueJob> {
   if (job.status !== "completed" || job.metadata?.submit_only === true) return job;
   const params = extensionJobParams(job);
   if (params.submit_only === true || params.submitOnly === true) return job;
@@ -176,6 +227,29 @@ async function materializeQueueJob(job: ExtensionQueueJob): Promise<ExtensionQue
       id: job.id, patch: { downloadError },
     }, 20_000).catch(() => null);
     return updated?.job || { ...job, metadata: { ...job.metadata, downloadError } };
+  }
+  if (isChatGptQueueJob(job)) {
+    // ChatGPT branch: the runner records { imageUrls, turnId } on the job
+    // result; materialization is what turns those URLs into files[].
+    const imageUrls = chatGptResultImageUrls(result);
+    if (!outputDir || !fileStem || !imageUrls.length) return job;
+    if (job.metadata?.downloadComplete === true && Array.isArray(job.metadata?.files)) return job;
+    let files: string[];
+    try {
+      files = await downloadChatGptImageUrls(imageUrls, outputDir, fileStem);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const updated = await extensionQueueCall<{ job: ExtensionQueueJob }>("flow.queue.metadata", {
+        id: job.id, patch: { downloadError: message },
+      }, 20_000).catch(() => null);
+      return updated?.job || { ...job, metadata: { ...job.metadata, downloadError: message } };
+    }
+    // Unlike the Flow path below, a failed metadata write must not bury
+    // files that are already on disk: fall back to the locally merged job.
+    const updated = await extensionQueueCall<{ job: ExtensionQueueJob }>("flow.queue.metadata", {
+      id: job.id, patch: { files, downloadComplete: true },
+    }, 20_000).catch(() => null);
+    return updated?.job || { ...job, metadata: { ...job.metadata, files, downloadComplete: true } };
   }
   if (!outputDir || !fileStem || ((!Array.isArray(media) || !media.length) && (!Array.isArray(browserDownloads) || !browserDownloads.length))) return job;
   const current = job.metadata?.files;
@@ -223,12 +297,33 @@ async function enqueueWorkflow(operation: string, payload: Record<string, unknow
   return waitExtensionJob(job.id, 12 * 60_000);
 }
 
+// The generic queue submission for one ChatGPT image generation — the same
+// flow.queue.add machinery enqueueWorkflow uses for Flow operations, with
+// the chatgpt operation GPT-09's preflight admits and GPT-02's builder
+// consumes. Pure: building the job record never touches the bridge.
+export function chatGptGenerationQueueJob(args: ChatGptGenerateArgs): {
+  operation: string; payload: Record<string, unknown>; metadata: Record<string, unknown>; label: string;
+} {
+  const payload: Record<string, unknown> = { prompt: args.prompt };
+  if (args.ratio) payload.ratio = args.ratio;
+  if (args.model) payload.model = args.model;
+  if (args.refs?.length) payload.attachments = args.refs;
+  if (args.conversation_id) payload.conversationId = args.conversation_id;
+  if (args.timeout_ms) payload.timeoutMs = args.timeout_ms;
+  const file_stem = args.file_stem || "chatgpt-01";
+  return {
+    operation: CHATGPT_GENERATION_OPERATION,
+    payload,
+    metadata: { provider: "chatgpt", source: "mcp", output_dir: projectDir(args.project), file_stem },
+    label: `ChatGPT image: ${args.prompt.slice(0, 80)}`,
+  };
+}
+
 const castOutputDir = () => castDirForContext();
 
 export class LocalCore implements Core {
   private detailedState: ReturnType<typeof getFlowState> | undefined;
   private mediaUploadActive = false;
-  public queue: any = { list: () => [], add: defaultAdd, get busy() { return false; }, get: (_id: string) => undefined };
   constructor(_scopeId = "local") {}
 
   async status({ detailed }: Args<"status">) {
@@ -259,12 +354,6 @@ export class LocalCore implements Core {
     finally { this.mediaUploadActive = false; }
   }
 
-  suspendDevice(): void {
-    void extensionQueueSnapshot().then(snapshot => Promise.all(snapshot.jobs.filter(job => job.status === "pending").map(job =>
-      extensionQueueCall("flow.queue.cancel", { id: job.id }, 10_000),
-    ))).catch(() => {});
-  }
-
   async generate({ project, scenes }: Args<"generate">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     const invalid = scenes.findIndex((s, i) => s.chain_previous && (i === 0 || s.first_frame || s.type === "image"));
@@ -275,8 +364,6 @@ export class LocalCore implements Core {
     if (noPrev >= 0) throw new Error("Scene 1 has no previous scene to reference.");
     const unknown = scenes.find((s) => s.technique && !techniqueById(s.technique));
     if (unknown) throw new Error(`Unknown technique "${unknown.technique}". Call flow_techniques for valid ids.`);
-    const { validateFlowSceneCapabilities } = await import("./flow-capabilities.js");
-    for (const [index, scene] of scenes.entries()) validateFlowSceneCapabilities(scene, index);
     const videoReferenceScene = scenes.findIndex(scene => scene.video_reference);
     if (videoReferenceScene >= 0) {
       throw Object.assign(new Error(`Scene ${videoReferenceScene + 1}: Toby-style video-reference editing requires Flow's dynamic video_edit_submit RPC configuration, which is not available in the native extension yet. Nothing was submitted.`), {
@@ -287,21 +374,10 @@ export class LocalCore implements Core {
       });
     }
 
-    if (this.queue && this.queue.add !== defaultAdd) {
-      const output_dir = projectDir(project);
-      const jobs = scenes.map((scene, i) => this.queue.add({
-        ...scene,
-        output_dir,
-        file_stem: `scene-${String(i + 1).padStart(2, "0")}`,
-        retries: scene.submit_only ? 0 : undefined,
-      }));
-      return { output_dir, jobs: jobs.map((j: any) => jobView(j)) };
-    }
-
     const output_dir = projectDir(project);
     const knownAssets = await listAssets();
     const outputAssets = existsSync(output_dir) ? readdirSync(output_dir).map(name => ({ name, project: output_dir })) : [];
-    const { flowCapabilityRegistry } = await import("./flow-capabilities.js");
+    const flowCapabilityRegistry = JSON.parse(readFileSync(new URL("../flow-model-capabilities.json", import.meta.url), "utf8"));
     const result = await extensionQueueCall<{ jobs: ExtensionQueueJob[] }>("flow.queue.generate", {
       project, output_dir, scenes, knownAssets, outputAssets,
       techniques: TECHNIQUES.map(({ id, phrase }) => ({ id, phrase })),
@@ -309,6 +385,19 @@ export class LocalCore implements Core {
     }, 60_000);
     return { output_dir, jobs: (result.jobs || []).map(job => jobView(extensionJobAsLegacy(job))) };
   }
+
+  async chatgpt_generate(args: ChatGptGenerateArgs) {
+    if (!args?.project?.trim()) throw new Error("chatgpt_generate needs a project folder name for the downloaded images.");
+    if (!args?.prompt?.trim()) throw new Error("chatgpt_generate needs a non-empty prompt.");
+    const queued = chatGptGenerationQueueJob(args);
+    const result = await extensionQueueCall<{ job?: ExtensionQueueJob; jobs?: ExtensionQueueJob[] }>("flow.queue.add", {
+      job: queued,
+    }, 45_000);
+    const job = result.job || result.jobs?.[0];
+    if (!job) throw new Error("The extension did not return the queued ChatGPT job.");
+    return { output_dir: queued.metadata.output_dir as string, jobs: [jobView(extensionJobAsLegacy(job))] };
+  }
+
   async wait({ job_ids, timeout_seconds }: Args<"wait">) {
     const deadline = Date.now() + timeout_seconds * 1000;
     let queue = await extensionQueueSnapshot();
@@ -463,13 +552,6 @@ export class LocalCore implements Core {
   async agent({ project, scenes, aspect_ratio, download_quality, submit_only }: Args<"agent">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     const output_dir = projectDir(project);
-    if (this.queue && this.queue.add !== defaultAdd) {
-      const job = this.queue.add({
-        project, output_dir, scenes, aspect_ratio, download_quality, submit_only,
-        retries: submit_only ? 0 : undefined,
-      });
-      return { output_dir, jobs: [jobView(job)] };
-    }
     const result = await extensionQueueCall<any>("flow.queue.agent", {
       project, output_dir, scenes, aspect_ratio, download_quality, submit_only,
       outputAssets: this.localAssets(output_dir).map(name => ({ name, project: output_dir })),
@@ -479,13 +561,6 @@ export class LocalCore implements Core {
   async edit({ project, asset, prompt, download_quality, submit_only }: Args<"edit">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     const output_dir = projectDir(project);
-    if (this.queue && this.queue.add !== defaultAdd) {
-      const job = this.queue.add({
-        project, output_dir, asset, prompt, download_quality, submit_only,
-        retries: submit_only ? 0 : undefined,
-      });
-      return { output_dir, jobs: [jobView(job)] };
-    }
     const result = await extensionQueueCall<any>("flow.queue.edit", {
       project, output_dir, asset, prompt, download_quality, submit_only,
       outputAssets: this.localAssets(output_dir).map(name => ({ name, project: output_dir })),
@@ -496,13 +571,6 @@ export class LocalCore implements Core {
   async continue_shot({ project, from_asset, prompt, attach, aspect_ratio, mode, download_quality, force, submit_only }: Args<"continue_shot">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
     const output_dir = projectDir(project);
-    if (this.queue && this.queue.add !== defaultAdd) {
-      const job = this.queue.add({
-        project, output_dir, from_asset, prompt, attach, aspect_ratio, mode, download_quality, force, submit_only,
-        retries: submit_only ? 0 : undefined,
-      });
-      return { output_dir, jobs: [jobView(job)] };
-    }
     const knownAssets = await listAssets();
     const result = await extensionQueueCall<any>("flow.queue.continue", {
       project, output_dir, from_asset, prompt, attach, aspect_ratio, mode, download_quality, force, submit_only,

@@ -38,7 +38,7 @@ test('RemoteCore calls the local voice_options API endpoint', async t => {
   await once(server, 'listening');
   t.after(() => new Promise(resolve => server.close(resolve)));
 
-  const remote = new RemoteCore({ baseUrl: `http://127.0.0.1:${server.address().port}`, deviceToken: 'test-device-token' });
+  const remote = new RemoteCore(`http://127.0.0.1:${server.address().port}`);
   assert.deepEqual(await remote.voice_options(), { voices: ['Voice Alpha'], count: 1, source: 'flow_v2_picker', readOnly: true });
   assert.deepEqual(calls, [{ method: 'POST', url: '/api/voice_options', body: {} }]);
 });

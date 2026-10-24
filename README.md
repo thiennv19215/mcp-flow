@@ -1,10 +1,10 @@
 # Flow MCP Native Automation
 
-The Chrome extension owns Flow operations and its queue. A separate local stdio MCP process remains available for AI clients. The VPS service handles account and device verification only. Unsupported extension inputs fail before dispatch. See [ARCHITECTURE.md](ARCHITECTURE.md) and [NATIVE-MIGRATION-RUNBOOK.md](NATIVE-MIGRATION-RUNBOOK.md) for operation coverage and limitations.
+The Chrome extension owns Flow operations and its queue. A separate local stdio MCP process remains available for AI clients. The system is local-only: the hosted account/device service was removed (2026-10-24); the backend is a thin local bridge (MCP host + extension connector + file services). Unsupported extension inputs fail before dispatch. See [ARCHITECTURE.md](ARCHITECTURE.md) and [NATIVE-MIGRATION-RUNBOOK.md](NATIVE-MIGRATION-RUNBOOK.md) for operation coverage and limitations.
 
 The side panel uses the Flow MCP Native interface, with Create, Prompts, Tasks, Photos and Flow Images, History, Queue, and Settings. Prompts and local history use `chrome.storage.local`; Flow actions still enter the shared extension queue and execute through native DOM operations in the selected Flow tab.
 
-Windows: double-click **Start Flow.cmd** to build and start Studio in the background. Double-click **Stop Flow.cmd** to stop that Studio and release port **18899** (or `FLOW_MCP_PORT`). Logs are saved under `%LOCALAPPDATA%\FlowMCP\port-18899`. If another launcher already owns the port, close it first so both shortcuts can manage the same process.
+Start the local MCP process with `npm start`; it binds port **18899** (or `FLOW_MCP_PORT`) on loopback. If another flow-mcp process already owns the port, new processes forward to it instead of driving Flow twice.
 
 Drive **Google Flow** (flow.google.com) from Claude, Codex or any other MCP app, or from a local control
 panel, using Flow's own credits (free with any Google account: 50 a day), not the pay-per-use video API.
@@ -19,7 +19,6 @@ Extension side panel → extension queue → selected Chrome tab → Flow
 **MCP** = Model Context Protocol, the standard that lets Claude use outside tools.
 New here? [GETTING-STARTED.md](GETTING-STARTED.md) takes you from nothing to your first video, step by step, and
 [OVERVIEW.md](OVERVIEW.md) explains what it does in plain English, with no code names.
-For the account-verification-only Docker/Caddy VPS setup, see [VPS-DEPLOYMENT.md](VPS-DEPLOYMENT.md).
 
 ---
 
@@ -64,7 +63,7 @@ npm run login
 That opens Flow in your regular browser. Build the project, then load `dist/extension/` in Chrome (Developer mode → Load unpacked). For an existing installation, click Reload and confirm the version shown in `extension/manifest.json`. The extension connects automatically to the active Flow tab and follows when you switch to another Flow tab. The popup's reconnect button is only a recovery fallback. No token entry is required.
 You sign in yourself; the program never handles your Google password.
 
-The extension handles Flow operations and its queue locally in the browser. The VPS is used only to verify the extension account and issue a revocable device token. MCP remains available as a separate local stdio process for AI clients; it uses the local extension connector and does not send Flow jobs through the account backend.
+The extension handles Flow operations and its queue locally in the browser. MCP remains available as a separate local stdio process for AI clients; it talks to the same local extension connector. There is no account backend.
 
 ---
 
@@ -138,49 +137,13 @@ Nothing below costs a credit until step 4, and the assistant asks before spendin
 
 ## The control panel
 
-The same features, without an AI assistant in the loop:
+The same features, without an AI assistant in the loop: use the extension's
+side panel. It shares the same extension queue, so panel work and MCP work
+never double-drive the Flow tab.
 
-```bash
-npm run studio     # then open http://127.0.0.1:18899
-```
-
-### Chrome extension driver
-
-The Flow MCP Connector driver is the default. Build the project, start `npm start` (or `npm run studio`), and load/reload this repo's extension in your existing Flow Chrome profile. See [setup and maintenance notes](EXTENSION-PORT.md).
-
-The local MCP uses the selected Flow tab through this repository's extension. Extension-side queue tasks run in the browser independently of the MCP process and VPS account service.
-
-or double-click **Flow Studio.command** (Mac) or **Flow Studio.cmd** (Windows).
-
-Seven tabs, in the order you would use them:
-
-- **Cast**: reusable characters. Create them, edit them in place, or build one from a picture.
-- **Frames**: free stills, with *match previous frame* to keep a set on-model.
-- **Shots**: paid clips, with first/last frames, chaining, a live credit estimate, and a card that
-  continues a finished clip from its own last frame.
-- **Voice**: free narration in Google's voices or your computer's own. Your saved narrations are listed
-  here to play or delete, and there's a field for your Google AI Studio key (checked with Google, stored
-  only on your computer; never paste it into a chat).
-- **Restyle**: change a clip you already have.
-- **Cut**: join any videos into one film, in the order you pick. Upload one, or choose from films you've
-  already made. Add a narration (from your saved ones or an upload) and music, and turn the clips' own
-  sound down so the narration sits on top.
-- **Library**: everything in your Flow project. Download it again for free (a scene comes down as one
-  finished film, not loose clips), or move it to Flow's Trash.
-
-A progress monitor and a gallery of your saved work sit alongside. The gallery shows stills or clips
-on the tabs that use them. On a wide screen, each side scrolls on its own. Two kinds of delete, clearly
-labelled: **Move to the Mac's Trash / Recycle Bin** removes a file from your computer; **Move to
-Flow's Trash** removes it from your Flow project only. Both can be undone.
-
-The panel ships with the repo but is not started for you: run `npm run studio` when you want it.
-Opening `studio/index.html` as a plain file does nothing; the page needs the server behind it, and
-says so in red if you try.
-
-The optional Studio server and MCP process use a loopback relay to reach the extension connector.
-Flow jobs themselves stay in extension storage, so the side panel and MCP see the same queue. The
-relay listens on 127.0.0.1 by default and uses a local per-run token (`~/.flow-mcp/token`); the VPS
-authentication service is not in this Flow command path.
+The web Studio panel was removed with the hosted account build (2026-10-24).
+The local bridge listens on 127.0.0.1 and uses a local per-machine token
+(`~/.flow-mcp/token`) for the sibling-process API and media/upload routes.
 
 ---
 

@@ -33,6 +33,22 @@
     const callerBudget = Number.isFinite(callerTimeout) && callerTimeout > 0 ? Math.max(250, callerTimeout - reserveMs) : fallbackMs;
     return Date.now() + Math.min(fallbackMs, callerBudget);
   };
+  // IMG-03: the background media catalog resolves identities that uploads
+  // registered at upload time. It is consulted BEFORE the observer-event
+  // wait (and long before any DOM grid scan): a hit answers from storage
+  // even after the asset's tile has been detached from the page. Every
+  // failure mode — no background, no entry, a rejected message — degrades
+  // to null so the caller falls back to the existing resolution paths.
+  async function lookupFlowMediaCatalog(query) {
+    try {
+      const sendMessage = root.chrome?.runtime?.sendMessage;
+      if (typeof sendMessage !== "function") return null;
+      const response = await sendMessage.call(root.chrome.runtime, { type: "flow-media-catalog:lookup", query });
+      return response?.ok ? response.entry || null : null;
+    } catch {
+      return null;
+    }
+  }
   async function resolveNativeMediaUuid(id, expectedType = "image") {
     const value = String(id || "");
     const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -41,6 +57,10 @@
     if (!asb || !["image", "video"].includes(expectedType)) return undefined;
     const projectId = location.pathname.match(/\/project\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/|$)/i)?.[1]?.toLowerCase();
     if (!projectId) return undefined;
+    const catalogEntry = await lookupFlowMediaCatalog({ projectId, mediaId: value });
+    if (catalogEntry?.uuid && uuidPattern.test(String(catalogEntry.uuid))) {
+      return String(catalogEntry.uuid).toLowerCase();
+    }
     const identitiesEvent = "TOBY_FLOW_MEDIA_IDENTITIES";
     const identitiesV2Event = "TOBY_FLOW_V2_MEDIA_IDENTITIES";
     const readEvent = "TOBY_FLOW_MEDIA_IDENTITIES_READ";
@@ -59,7 +79,13 @@
         const detail = event?.detail;
         if (String(detail?.projectId || "").toLowerCase() !== projectId || !Array.isArray(detail?.entries)) return;
         const matches = detail.entries.filter(entry => entry?.asb === asb && entry?.mediaType === expectedType && uuidPattern.test(String(entry?.mediaUuid || "")));
-        finish(matches.length === 1 ? String(matches[0].mediaUuid).toLowerCase() : undefined);
+        // A publish that does not contain this ASB yet is not proof it will
+        // never arrive: right after an upload the observer republishes as
+        // identities hydrate. Only settle early on an exact match (or on
+        // ambiguity, which can never resolve to one UUID); otherwise keep
+        // waiting for a later publish until the window expires.
+        if (matches.length === 1) finish(String(matches[0].mediaUuid).toLowerCase());
+        else if (matches.length > 1) finish(undefined);
       };
       const timer = setTimeout(() => finish(undefined), 500);
       window.addEventListener(identitiesEvent, onIdentities);
@@ -1839,6 +1865,25 @@
       }
     }
   }
+  // Content signature of a start/end frame slot, mirroring the native frame
+  // picker's confirmation evidence: the slot opener's label/text plus the
+  // media and named descendants inside the slot container. Volatile state
+  // (aria-expanded flips when the picker opens/closes) is deliberately
+  // excluded so picker visibility alone never looks like a slot change.
+  function frameSlotSignature(slot) {
+    const button = slot === "start" ? flowButton("Start") : slot === "end" ? flowButton("End") : null;
+    if (!button) return "missing";
+    const container = button.parentElement?.parentElement || button.parentElement || button;
+    const media = [...(container.querySelectorAll?.("img,video") || [])];
+    const labels = [...(container.querySelectorAll?.("[aria-label],[title]") || [])];
+    return JSON.stringify({
+      label: button.getAttribute?.("aria-label") || null,
+      title: button.getAttribute?.("title") || null,
+      text: String(button.innerText || button.textContent || "").replace(/\s+/g, " ").trim(),
+      media: media.map(el => el.currentSrc || el.getAttribute?.("src") || el.getAttribute?.("alt") || ""),
+      names: labels.map(el => el.getAttribute?.("aria-label") || el.getAttribute?.("title") || ""),
+    });
+  }
   async function attach(value, slot, config = {}) {
     const ref = parse(value);
     const deadline = config.deadline || makeDeadline(config.command, 45_000, 10_000);
@@ -2017,6 +2062,7 @@
         throw flowError("FLOW_ASSET_ID_MISMATCH", `Flow's reference picker did not prove that "${ref.name}" matches the completed upload ID. No generation was submitted.`, false, false);
       }
       const before = chips();
+      const slotSignatureBefore = slot ? frameSlotSignature(slot) : null;
       // A character thumbnail can be on flow-content.google while its chip is on
       // /asb/. Those are different representations, not interchangeable IDs.
       // Only reuse a chip whose selection provenance this driver recorded.
@@ -2055,15 +2101,39 @@
               throw flowError("FLOW_CHARACTER_ID_MISMATCH", `Flow attached a different character entity than the exact option selected for "${ref.name}". No generation was submitted.`, false, false);
             }
           }
+          if (kind === "image") {
+            // Mirror the tile path's chip proof: when the new chip exposes a
+            // media UUID, it must be the selected option's canonical id. A
+            // picker race (stale state, recycled grid node) can land a chip
+            // for a different asset; confirming by count alone would attach
+            // the wrong reference. A chip exposing no UUID at all keeps the
+            // count-based confirmation.
+            const observedUuids = chipMediaUuids(chip);
+            if (uuidPattern.test(String(selectedId || "")) && observedUuids.some(id => id !== String(selectedId).toLowerCase())) {
+              const scan = chipAttachEvidence(before, currentChips, added, "picker_chip_uuid_mismatch");
+              updateReferenceActionDiagnostics({ step: "picker reference chip uuid mismatch", chipAttachScan: scan });
+              const error = flowError("FLOW_ASSET_ID_MISMATCH", `Flow attached an image chip whose exposed UUID does not match the exact option selected for "${ref.name}". No generation was submitted.`, false, true);
+              error.diagnostics = { chipAttachScan: scan };
+              console.error("[FlowReferenceAction] picker image chip UUID mismatch", JSON.stringify(scan));
+              throw error;
+            }
+          }
           const result = { name: ref.name, kind: chip.kind, source: chip.source, id: selectedId, confirmed: true };
           metadata.set(chip.element, { name: ref.name, mediaId: selectedId, ...(kind === "character" ? { mediaIdSource: "character_identity_attribute" } : {}) });
           updateReferenceActionDiagnostics({ phase: "completed", step: "reference chip confirmed", lastResult: { name: result.name, id: result.id || null } });
           return result;
         }
         if (slot && !picker()) {
-          const result = { name: ref.name, kind, confirmed: true, slot };
-          updateReferenceActionDiagnostics({ phase: "completed", step: "frame slot confirmed", lastResult: { name: result.name, slot } });
-          return result;
+          // The picker closing is not proof of a frame selection: a backdrop
+          // click or a re-render can dismiss it without choosing anything.
+          // Confirm only when the slot's content signature actually changed
+          // (the native frame picker requires the same evidence); otherwise
+          // keep waiting and let the loop fail as unconfirmed.
+          if (frameSlotSignature(slot) !== slotSignatureBefore) {
+            const result = { name: ref.name, kind, confirmed: true, slot };
+            updateReferenceActionDiagnostics({ phase: "completed", step: "frame slot confirmed", lastResult: { name: result.name, slot } });
+            return result;
+          }
         }
         const add = findPickerAddToPromptButton();
         if (!confirmedClick && add && !isFlowActionDisabled(add) && picker()) {

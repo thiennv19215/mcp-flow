@@ -2,6 +2,7 @@
   "version": 1,
   "defaults": {
     "maxReferences": 3,
+    "maxPromptLength": null,
     "videoAspectRatios": ["16:9", "9:16"],
     "imageAspectRatios": ["16:9", "9:16", "1:1", "4:3", "3:4"],
     "frameInputs": 2,
@@ -24,12 +25,36 @@
         "labels": { "vi": "Veo 3.1 (Mới nhất)", "en": "Veo 3.1 (Latest)" }
       },
       {
+        "value": "veo 3.1 lite",
+        "labels": { "vi": "Veo 3.1 Lite", "en": "Veo 3.1 Lite" }
+      },
+      {
+        "value": "veo 3.1 fast",
+        "labels": { "vi": "Veo 3.1 Fast", "en": "Veo 3.1 Fast" }
+      },
+      {
+        "value": "veo 3.1 quality",
+        "labels": { "vi": "Veo 3.1 Quality", "en": "Veo 3.1 Quality" }
+      },
+      {
         "value": "omni 1.1 flash",
         "labels": { "vi": "Omni 1.1 Flash", "en": "Omni 1.1 Flash" }
       }
     ]
   },
   "models": [
+    {
+      "match": ["veo 3.1 lite", "veo 3.1 fast", "veo 3.1 quality", "veo 3.1 - lite", "veo 3.1 - fast", "veo 3.1 - quality"],
+      "types": ["video"],
+      "fixedDuration": 8,
+      "durations": [8],
+      "resolutions": [],
+      "aspectRatios": ["16:9", "9:16"],
+      "maxReferences": 3,
+      "maxPromptLength": null,
+      "supportsFrames": true,
+      "framesAndReferencesMutuallyExclusive": true
+    },
     {
       "match": ["veo 3.1"],
       "types": ["video"],
@@ -38,6 +63,7 @@
       "resolutions": [],
       "aspectRatios": ["16:9", "9:16"],
       "maxReferences": 3,
+      "maxPromptLength": null,
       "supportsFrames": true,
       "framesAndReferencesMutuallyExclusive": true
     },
@@ -52,6 +78,7 @@
       "defaultQuantity": 1,
       "aspectRatios": ["16:9", "9:16"],
       "maxReferences": 3,
+      "maxPromptLength": null,
       "supportsFrames": true,
       "framesAndReferencesMutuallyExclusive": true
     },
@@ -62,6 +89,7 @@
       "resolutions": [],
       "aspectRatios": ["16:9", "9:16", "1:1", "4:3", "3:4"],
       "maxReferences": 3,
+      "maxPromptLength": null,
       "supportsFrames": false,
       "framesAndReferencesMutuallyExclusive": false
     }

@@ -1,6 +1,6 @@
 # Architecture
 
-Flow UI operations and the user-facing queue run in the Chrome extension. The VPS process is an isolated account/device verification service. AI clients can use a separate local stdio MCP process; it communicates with the local extension connector and does not use the VPS as a Flow relay. Extension source lives in `extension/src/`; `npm run build` packages a loadable extension at `dist/extension/` while the MCP build remains under `dist/`.
+Flow UI operations and the user-facing queue run in the Chrome extension. AI clients can use a separate local stdio MCP process; it communicates with the local extension connector. The system is local-only — the hosted VPS account/device service and the web Studio were removed on 2026-10-24. Extension source lives in `extension/src/`; `npm run build` packages a loadable extension at `dist/extension/` while the MCP build remains under `dist/`.
 
 ## Runtime boundaries
 
@@ -8,7 +8,7 @@ Flow UI operations and the user-facing queue run in the Chrome extension. The VP
 - `extension/src/content/providers/flow/` owns page-level Flow actions, generation observation, references, uploads, library operations, and workflow operations.
 - `extension/src/ui/` contains the extension side panel and its queue UI. Side-panel jobs and AI MCP jobs use the same `chrome.storage.local` queue and run sequentially with the same pacing and recovery rules.
 - `src/index.ts`, `src/mcp-tools.ts`, and `src/core.ts` form the optional local AI MCP process. `src/server.ts` provides its localhost bridge and local support APIs.
-- `src/auth-server.ts` serves account login, device verification, and admin account/device management only. `src/serve.ts` is a compatibility entry point for this auth service. The auth server has no MCP, Flow command, upload, media, or job routes.
+- The local bridge (`src/server.ts`) serves only the extension connector endpoints, the sibling-process API, and media/upload file services on loopback. There is no auth/account server anymore.
 
 ## Flow module ownership
 
@@ -48,9 +48,9 @@ Image creation and video creation share the submit/observe lifecycle but do not 
 
 ### Selector updates and release versions
 
-`flow-selectors.json` is the backend-managed selector configuration. `src/selectors.ts` watches its containing directory (including atomic editor saves), reloads the file, and broadcasts updates to connected extensions. The extension persists the received configuration in `chrome.storage.local`; `extension/src/content/providers/flow/core/selectors.js` merges it with local defaults. Existing selector keys can therefore be adjusted without rebuilding the extension. A new selector key needs a code default in `extension/src/content/providers/flow/core/selectors.js`, and a behavior change needs an extension code update/reload.
+Selectors live in exactly one place: the `FlowSelectors` defaults embedded in `extension/src/content/providers/flow/core/selectors.js`. (A backend-managed `flow-selectors.json` sync channel existed until 2026-10-24 and was removed as a duplicate source of truth; the extension is the source of truth for everything Flow-facing.) Adjusting a selector therefore means editing that file and reloading/rebuilding the extension.
 
-When shipping code changes, update both release identifiers: `package.json` for the package and `extension/manifest.json` for Chrome. The values are intentionally read from those files rather than duplicated here. Selector-only backend configuration changes do not require a package or extension version bump.
+When shipping code changes, update both release identifiers: `package.json` for the package and `extension/manifest.json` for Chrome. The values are intentionally read from those files rather than duplicated here.
 
 ## Extension queue
 
@@ -60,9 +60,9 @@ Queue execution calls the same content driver as direct extension operations. Hi
 
 ## MCP and authentication
 
-The MCP server is optional and runs locally over stdio. Its tool schemas stay AI-facing, while queued Flow workflows are planned and executed by the extension through the local browser connector. Its tool files and runtime remain separate from the VPS auth entry point. The VPS is never in the Flow command path.
+The MCP server is optional and runs locally over stdio. Its tool schemas stay AI-facing, while queued Flow workflows are planned and executed by the extension through the local browser connector.
 
-The extension calls the VPS only for account/device login and verification. Device records support revocation and account administration. `FLOW_AUTH_ALLOWED_HOSTS`, HTTPS, and admin credentials are required when the auth process binds beyond loopback. Deployment instructions are in [VPS-DEPLOYMENT.md](VPS-DEPLOYMENT.md).
+The extension connects only to the local bridge on loopback; there are no accounts, device records, or remote servers. The bridge refuses non-loopback binds.
 
 ## Flow constraints and recovery
 

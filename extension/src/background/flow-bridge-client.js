@@ -148,13 +148,6 @@ export class FlowBridgeClient {
   }
 
   applyBackendEvent(message) {
-    if (message?.type === "event" && message.method === "flow.selectors.sync") {
-      const payload = message.params?.[0];
-      if (payload && typeof payload === "object") {
-        console.log("[Flow MCP] Dynamic selectors sync received from the local MCP host");
-        chrome.storage.local.set({ flow_remote_selectors: payload });
-      }
-    }
     this.onEvent?.(message);
   }
 
@@ -241,12 +234,6 @@ export class FlowBridgeClient {
       this.lastError = `HTTPS polling disconnected: ${String(error?.message || error)}`;
       this.scheduleReconnect();
     });
-    try {
-      const selectors = await fetch(`${bridge}/api/flow-selectors`, { cache: "no-store" }).then(r => r.ok ? r.json() : null);
-      if (selectors && typeof selectors === "object" && Object.keys(selectors).length > 0) {
-        await chrome.storage.local.set({ flow_remote_selectors: selectors });
-      }
-    } catch (_) {}
     return true;
   }
 
@@ -272,17 +259,6 @@ export class FlowBridgeClient {
         this.lastError = "";
         const capabilities = this.getCapabilities ? this.getCapabilities() : [];
         this.send({ type: "event", method: "extension.initialized", params: [{ protocol: 2, version: chrome.runtime.getManifest().version, capabilities }] });
-        try {
-          const bridgeOrigin = new URL(settings.bridge).origin;
-          fetch(`${bridgeOrigin}/api/flow-selectors`)
-            .then(r => r.ok ? r.json() : null)
-            .then(data => {
-              if (data && typeof data === "object" && Object.keys(data).length > 0) {
-                chrome.storage.local.set({ flow_remote_selectors: data });
-              }
-            })
-            .catch(() => {});
-        } catch (_) {}
         this.heartbeat = setInterval(() => {
           this.send({ type: "ping" });
           const selectedId = this.getSelectedTabId?.();

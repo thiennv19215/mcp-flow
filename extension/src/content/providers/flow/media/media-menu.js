@@ -1,15 +1,278 @@
 (function (root) {
   "use strict";
 
-  function armWatermarkDownload(meta = {}) {
+  // The interceptor reports each cleaning attempt on this window event.
+  // DL-01 kept only the latest event and a download guessed that an event
+  // seen during the op was its own. DL-03: events carry the operation id
+  // of the per-download interceptor context, so outcomes are attributed
+  // exactly — recorded per operation id below. An event WITHOUT an
+  // operation id (a legacy/explicit-marker clean) may be claimed only by
+  // the one download currently awaiting an outcome, and only when the
+  // kind matches. `lastWatermarkResult` is retained for diagnostics.
+  let lastWatermarkResult = null;
+  const watermarkOutcomes = new Map();
+  let pendingWatermarkClaim = null;
+  function recordWatermarkOutcome(detail) {
+    const at = Date.now();
+    const outcome = {
+      at,
+      ok: detail.ok === true,
+      changed: detail.changed === true,
+      kind: typeof detail.kind === "string" ? detail.kind : undefined,
+      status: typeof detail.status === "string" ? detail.status : null,
+      reason: typeof detail.reason === "string" ? detail.reason : null,
+    };
+    lastWatermarkResult = outcome;
+    let operationId = typeof detail.operationId === "string" && detail.operationId ? detail.operationId : null;
+    if (!operationId && pendingWatermarkClaim && at >= pendingWatermarkClaim.armedAt &&
+        (!outcome.kind || !pendingWatermarkClaim.kind || outcome.kind === pendingWatermarkClaim.kind)) {
+      operationId = pendingWatermarkClaim.operationId;
+    }
+    if (!operationId) return;
+    watermarkOutcomes.set(operationId, outcome);
+    for (const [key, value] of watermarkOutcomes) {
+      if (at - value.at > 5 * 60_000 || watermarkOutcomes.size > 20) watermarkOutcomes.delete(key);
+    }
+  }
+  try {
+    root.addEventListener?.("TOBY_FLOW_WATERMARK_RESULT", event => {
+      const detail = event?.detail;
+      if (!detail || typeof detail !== "object") return;
+      recordWatermarkOutcome(detail);
+    });
+  } catch (_) {}
+
+  // DL-12: the interceptor also dispatches phase signals
+  // (TOBY_FLOW_WATERMARK_PHASE: fetching / cleaning / saving /
+  // original / cleaning_failed) while a download runs. They are
+  // recorded per operation id with the same attribution discipline as
+  // outcomes: an event carrying an operation id belongs to exactly
+  // that download; an event WITHOUT one may be claimed only by the one
+  // download currently awaiting an outcome, and only when the kind
+  // matches. Signals from another concurrent download are stored under
+  // THEIR operation id and never move this download's phases.
+  const WATERMARK_PHASE_NAMES = new Set(["fetching", "cleaning", "saving", "original", "cleaning_failed"]);
+  const watermarkPhaseSignals = new Map();
+  function recordWatermarkPhase(detail) {
+    const phase = typeof detail.phase === "string" ? detail.phase : null;
+    if (!phase || !WATERMARK_PHASE_NAMES.has(phase)) return;
+    const at = Date.now();
+    let operationId = typeof detail.operationId === "string" && detail.operationId ? detail.operationId : null;
+    if (!operationId && pendingWatermarkClaim && at >= pendingWatermarkClaim.armedAt &&
+        (!detail.kind || !pendingWatermarkClaim.kind || detail.kind === pendingWatermarkClaim.kind)) {
+      operationId = pendingWatermarkClaim.operationId;
+    }
+    if (!operationId) return;
+    let entry = watermarkPhaseSignals.get(operationId);
+    if (!entry) {
+      entry = { at, phases: [] };
+      watermarkPhaseSignals.set(operationId, entry);
+    }
+    entry.at = at;
+    if (entry.phases.at(-1) !== phase) entry.phases.push(phase);
+    for (const [key, value] of watermarkPhaseSignals) {
+      if (at - value.at > 5 * 60_000 || watermarkPhaseSignals.size > 20) watermarkPhaseSignals.delete(key);
+    }
+  }
+  try {
+    root.addEventListener?.("TOBY_FLOW_WATERMARK_PHASE", event => {
+      const detail = event?.detail;
+      if (!detail || typeof detail !== "object") return;
+      recordWatermarkPhase(detail);
+    });
+  } catch (_) {}
+
+  // DL-12: build the HONEST phase sequence for one armed download from
+  // its attributed outcome (DL-03) plus its own phase signals:
+  //  - cleaned:  fetching → cleaning → saving
+  //  - original: fetching → original → saving — the original/saving
+  //    sequence replaces cleaning entirely; a detection attempt may
+  //    have signalled a cleaning stage, but the saved bytes were not
+  //    cleaned, so no cleaning phase is ever recorded for them.
+  //  - failed:   fetching → cleaning → cleaning_failed — a terminal
+  //    phase consistent with the recorded outcome, never a stuck
+  //    "cleaning" state (when the failure happened before cleaning
+  //    could start, e.g. no mask, the cleaning stage is omitted).
+  //  - unknown / no outcome yet: only the stages this download's own
+  //    signals actually proved are shown; no terminal phase is
+  //    invented.
+  function downloadPhaseSequence(outcome, attribution) {
+    if (!outcome?.armed) return [];
+    const signals = outcome.operationId ? (watermarkPhaseSignals.get(outcome.operationId)?.phases || []) : [];
+    const status = attribution?.status || null;
+    const phases = [];
+    const push = phase => { if (!phases.includes(phase)) phases.push(phase); };
+    push("fetching");
+    if (status === "cleaned") {
+      push("cleaning");
+      push("saving");
+    } else if (status === "original") {
+      push("original");
+      push("saving");
+    } else if (status === "failed") {
+      if (!signals.length || signals.includes("cleaning")) push("cleaning");
+      push("cleaning_failed");
+    } else {
+      if (signals.includes("cleaning")) push("cleaning");
+      if (signals.includes("cleaning_failed")) push("cleaning_failed");
+      else if (signals.includes("original")) push("original");
+      else if (signals.includes("saving")) push("saving");
+    }
+    return phases;
+  }
+
+  // Structural gate for a locally supplied mask: the value must be base64
+  // (optionally a data: URL) decoding to a PNG whose IHDR carries an alpha
+  // channel (color type 4/6) or that declares a tRNS chunk before IDAT.
+  // Anything else can never drive the remover, so it must not arm
+  // cleaning. (The same gate lives in bridge/watermark-config.js, which
+  // forwards the config to the MAIN world.)
+  const WATERMARK_MASK_MAX_B64_CHARS = 2_800_000;
+  function watermarkMaskHasAlpha(value) {
+    if (typeof value !== "string") return false;
+    let raw = value.trim();
+    const dataUrl = /^data:image\/png;base64,([\s\S]+)$/i.exec(raw);
+    if (dataUrl) raw = dataUrl[1].trim();
+    if (!raw || raw.length > WATERMARK_MASK_MAX_B64_CHARS || raw.length % 4 === 1 || !/^[A-Za-z0-9+/]+={0,2}$/.test(raw)) return false;
+    let binary;
+    try { binary = atob(raw); } catch (_) { return false; }
+    if (binary.length < 33) return false;
+    const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+    for (let index = 0; index < signature.length; index++) {
+      if (binary.charCodeAt(index) !== signature[index]) return false;
+    }
+    let offset = 8;
+    let sawIhdr = false;
+    for (let chunk = 0; chunk < 64 && offset + 12 <= binary.length; chunk++) {
+      const length = binary.charCodeAt(offset) * 0x1000000 +
+        (binary.charCodeAt(offset + 1) << 16) + (binary.charCodeAt(offset + 2) << 8) + binary.charCodeAt(offset + 3);
+      const type = binary.slice(offset + 4, offset + 8);
+      if (type === "IHDR") {
+        if (length < 10) return false;
+        sawIhdr = true;
+        const colorType = binary.charCodeAt(offset + 17);
+        if (colorType === 4 || colorType === 6) return true;
+      } else if (type === "tRNS") {
+        return sawIhdr;
+      } else if (type === "IDAT") {
+        break;
+      }
+      if (length < 0 || offset + 12 + length > binary.length) break;
+      offset += 12 + length;
+    }
+    return false;
+  }
+
+  function normalizeWatermarkMode(value) {
+    const mode = String(value || "").trim().toLowerCase();
+    return mode === "clean" || mode === "original" || mode === "inherit" ? mode : "inherit";
+  }
+
+  async function loadWatermarkConfig() {
+    try {
+      if (typeof chrome === "undefined" || !chrome.storage?.local?.get) return {};
+      const stored = await chrome.storage.local.get(["flowWatermark", "watermark"]);
+      const config = stored?.flowWatermark || stored?.watermark;
+      return config && typeof config === "object" ? config : {};
+    } catch (_) { return {}; }
+  }
+
+  // Resolve the per-download watermark mode from the job's requested mode
+  // plus the persisted flowWatermark config. Explicit modes act as
+  // one-shot tickets: "original" always posts a suppressing arm (the
+  // interceptor honors it for this download regardless of the global
+  // setting) and "clean" arms whenever a valid mask is configured.
+  // "inherit" follows the config: master toggle off or the per-kind flag
+  // off → no arm at all, and an enabled config without a valid alpha-PNG
+  // mask never arms cleaning either.
+  async function resolveWatermarkArm(meta = {}) {
+    const requested = normalizeWatermarkMode(meta.mode);
+    const kindKey = meta.kind === "image" ? "image" : "video";
+    const config = await loadWatermarkConfig();
+    const maskValid = watermarkMaskHasAlpha(config.alpha_png_b64);
+    if (requested === "original") return { post: true, mode: "original", reason: "explicit_original" };
+    if (requested === "clean") {
+      return maskValid
+        ? { post: true, mode: "clean", reason: "explicit_clean" }
+        : { post: false, mode: "clean", reason: "mask_missing_or_invalid" };
+    }
+    if (config.enabled !== true) return { post: false, mode: "original", reason: "disabled" };
+    if (config[kindKey] === false) return { post: false, mode: "original", reason: "kind_disabled" };
+    if (!maskValid) return { post: false, mode: "original", reason: "mask_missing_or_invalid" };
+    return { post: true, mode: "clean", reason: "inherit_clean" };
+  }
+
+  // Normalize one attributed interceptor outcome into the op-level
+  // watermark fields. Events from DL-03 contexts carry an explicit
+  // status; legacy events only carry ok/changed, from which the status
+  // is derived (an unchanged-but-ok clean means no watermark was found).
+  function watermarkAttributionFromEvent(event) {
+    if (!event) return null;
+    let status = event.status;
+    if (status !== "cleaned" && status !== "original" && status !== "failed") {
+      status = event.ok ? (event.changed ? "cleaned" : "original") : "failed";
+    }
+    return {
+      cleaned: status === "cleaned",
+      status,
+      outcomeReason: status === "original" && !event.reason
+        ? "not_found"
+        : (typeof event.reason === "string" && event.reason ? event.reason : null),
+    };
+  }
+
+  // Resolve the watermark outcome for one armed download. Only an event
+  // attributed to THIS download's operation id counts; a foreign outcome
+  // is never claimed. The click initiates the download synchronously, but
+  // cleaning finishes asynchronously, so a clean image arm waits a
+  // bounded grace for its outcome event; when none arrives the result
+  // stays honestly unknown (cleaned: null, status: "unknown") instead of
+  // DL-01's any-event-during-the-op guess.
+  async function settleWatermarkOutcome(outcome, helpers) {
+    if (!outcome?.armed) return { cleaned: false, status: null, outcomeReason: null };
+    if (outcome.mode !== "clean") return { cleaned: false, status: "original", outcomeReason: null };
+    if (outcome.kind !== "image") return { cleaned: null, status: null, outcomeReason: null };
+    const attributed = () => outcome.operationId ? watermarkOutcomes.get(outcome.operationId) || null : null;
+    let event = attributed();
+    for (let round = 0; !event && round < 50; round++) {
+      try { await helpers.wait(100, "confirming the watermark cleanup outcome"); }
+      catch (_) { break; }
+      event = attributed();
+    }
+    if (pendingWatermarkClaim?.operationId === outcome.operationId) pendingWatermarkClaim = null;
+    if (!event) return { cleaned: null, status: "unknown", outcomeReason: null };
+    return watermarkAttributionFromEvent(event);
+  }
+
+  async function armWatermarkDownload(meta = {}) {
+    const resolution = await resolveWatermarkArm(meta);
+    const outcome = { mode: resolution.mode, armed: false, reason: resolution.reason, kind: meta.kind, armedAt: null, operationId: null };
+    if (!resolution.post) return outcome;
+    const operationId = `wm-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 10)}`;
     try {
       window.postMessage({
         source: "flow-mcp-watermark-v1",
         action: "arm",
         requestId: `watermark-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        options: { ...meta, timeoutMs: Math.min(120_000, Math.max(5_000, Number(meta.timeoutMs) || 45_000)) },
+        options: {
+          title: meta.title,
+          kind: meta.kind,
+          quality: meta.quality,
+          mode: resolution.mode,
+          enabled: resolution.mode === "clean",
+          operationId,
+          ...(meta.url ? { url: meta.url } : {}),
+          timeoutMs: Math.min(120_000, Math.max(5_000, Number(meta.timeoutMs) || 45_000)),
+        },
       }, location.origin);
+      outcome.armed = true;
+      outcome.armedAt = Date.now();
+      outcome.operationId = operationId;
+      if (resolution.mode === "clean") {
+        pendingWatermarkClaim = { operationId, kind: meta.kind, armedAt: outcome.armedAt };
+      }
     } catch (_) {}
+    return outcome;
   }
 
   function flowTileOptionsButton(tile) {
@@ -175,10 +438,490 @@
     throw root.flowError("FLOW_MEDIA_NOT_READY", `Flow has not finished loading media for "${title}" (${lastState}).`, true);
   }
 
+  // DL-08 — direct-bytes fallback route. The Flow menu is the web route's
+  // only download mechanism; when it breaks before any download started
+  // (menu never opens, submenu or quality choice missing), the fallback
+  // fetches verified bytes directly from the tile media element's URL,
+  // canonicalized to full size (Google size suffix stripped) or rewritten
+  // to the requested size, and saves them through a blob anchor under the
+  // planned filename. Only these pre-click menu failures engage it: a
+  // click may already have started a browser download, and re-saving
+  // after that would double-save.
+  const DIRECT_FALLBACK_MENU_CODES = new Set([
+    "FLOW_TILE_MENU_MISSING",
+    "FLOW_DOWNLOAD_SUBMENU_MISSING",
+    "FLOW_DOWNLOAD_QUALITY_MISSING",
+  ]);
+
+  // Magic-byte sniffing decides the real mime (the reference rule: the
+  // bytes, never the header, are authoritative). HTML/JSON/text bodies
+  // are not media and are rejected by the caller with a distinct error.
+  function sniffMediaBytes(bytes) {
+    if (!bytes || bytes.length === 0) return null;
+    const startsWith = (signature, offset = 0) =>
+      bytes.length >= offset + signature.length && signature.every((value, index) => bytes[offset + index] === value);
+    const asciiAt = (text, offset = 0) =>
+      bytes.length >= offset + text.length && [...text].every((char, index) => bytes[offset + index] === char.charCodeAt(0));
+    if (startsWith([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return { mime: "image/png", extension: ".png", kind: "image" };
+    if (startsWith([0xff, 0xd8, 0xff])) return { mime: "image/jpeg", extension: ".jpg", kind: "image" };
+    if (asciiAt("GIF8")) return { mime: "image/gif", extension: ".gif", kind: "image" };
+    if (asciiAt("RIFF") && asciiAt("WEBP", 8)) return { mime: "image/webp", extension: ".webp", kind: "image" };
+    if (asciiAt("ftyp", 4)) return { mime: "video/mp4", extension: ".mp4", kind: "video" };
+    if (startsWith([0x1a, 0x45, 0xdf, 0xa3])) return { mime: "video/webm", extension: ".webm", kind: "video" };
+    let first = 0;
+    while (first < bytes.length && (bytes[first] === 0x20 || bytes[first] === 0x09 || bytes[first] === 0x0d || bytes[first] === 0x0a)) first++;
+    if (bytes[first] === 0x3c) return { html: true }; // '<' — a markup body, never media
+    return null;
+  }
+
+  // Full-size URL canonicalization for the fallback fetch: the Google
+  // media size suffix ("=s512", "=w1280-h720") is a display detail —
+  // stripping it yields the original-resolution bytes; a numeric
+  // requested size ("720", "720p") rewrites it to "=s720". The ASB
+  // poster transform (the other half of reference behavior D9) is
+  // blocked on a server-delivered pattern (DL-B4) and is NOT attempted.
+  // Placeholder and media.html URLs are rejected up front (returns null),
+  // as are non-https URLs, which can never be rewritten safely.
+  function directBytesTargetUrl(rawUrl, quality) {
+    let url;
+    try { url = new URL(String(rawUrl || ""), location.href); } catch (_) { return null; }
+    if (url.protocol !== "https:") return null;
+    const path = url.pathname.toLowerCase();
+    if (path.includes("media.html") || path.endsWith(".html")) return null;
+    if (/(?:placeholder|spinner|loading|skeleton)/i.test(url.pathname)) return null;
+    const sizeMatch = /^(\d{3,4})(?:p)?$/i.exec(String(quality || "").trim());
+    url.pathname = url.pathname.replace(/=[^/]*$/, sizeMatch ? `=s${sizeMatch[1]}` : "");
+    url.hash = "";
+    return url.toString();
+  }
+
+  // The planned filename: an explicit caller-supplied name first, then
+  // the tile's own data-file-name (the name Flow planned for the menu
+  // download — the same source collectAssets reports), then the asset
+  // title. Never a name derived from the media URL. The extension is
+  // always the sniffed one (the queue ticket applies the same rule when
+  // it assigns the final filename).
+  function plannedFallbackFilename({ operationOptions, tile, mediaElement, title, sniffed }) {
+    const explicit = [operationOptions?.filename, operationOptions?.fileName]
+      .find(value => typeof value === "string" && value.trim());
+    const tileName = tile?.getAttribute?.("data-file-name") || tile?.getAttribute?.("data-filename") ||
+      mediaElement?.getAttribute?.("data-file-name") || mediaElement?.getAttribute?.("data-filename") || "";
+    const raw = String(explicit || tileName || title || "flow-media");
+    let base = raw.replace(/[<>:\"/\\|?*\u0000-\u001f]/g, "-").replace(/\s+/g, "-").replace(/-+/g, "-")
+      .replace(/^[-.]+|[-.]+$/g, "").slice(0, 120).replace(/\.[a-z0-9]{1,10}$/i, "");
+    if (!base) base = "flow-media";
+    return `${base}${sniffed.extension}`;
+  }
+
+  // Save verified bytes through a blob anchor — the same trigger the
+  // interceptor itself uses to deliver cleaned bytes. A blob: href is
+  // not a Flow media URL, so the interceptor's anchor claim ignores it:
+  // no double processing, no context consumption.
+  function saveVerifiedBytes(blob, filename) {
+    const objectUrl = URL.createObjectURL(blob);
+    try {
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      (document.body || document.documentElement)?.appendChild?.(anchor);
+      anchor.click();
+      anchor.remove?.();
+    } finally {
+      setTimeout(() => { try { URL.revokeObjectURL(objectUrl); } catch (_) {} }, 10_000);
+    }
+  }
+
+  // The fallback proper. Returns the op result on success, null when the
+  // fallback cannot engage at all (no fetch in this world, or no usable
+  // media URL — the caller then rethrows the original menu failure), and
+  // throws its own distinct errors when the fetched bytes fail
+  // verification.
+  //
+  // Watermark contract: media-menu runs in the ISOLATED world while the
+  // interceptor wraps the MAIN world's fetch, so this fetch can never
+  // pass through cleaning. The fallback therefore posts NO arm (an
+  // unconsumed context would linger and could claim a later page fetch),
+  // and its result reports the saved bytes honestly: when the resolved
+  // mode was "clean", the outcome is status "original" with reason
+  // "direct_bytes_fallback" and cleaned:false — the bytes are the
+  // original bytes, never claimed as cleaned.
+  async function directBytesDownloadFallback({ tile, title, kind, quality, operationOptions, helpers, menuError }) {
+    if (typeof fetch !== "function") return null;
+    const mediaElement = tile?.querySelector?.("img,video") || null;
+    const rawUrl = mediaElement?.currentSrc || mediaElement?.src || mediaElement?.getAttribute?.("src") || "";
+    const targetUrl = directBytesTargetUrl(rawUrl, quality);
+    if (!targetUrl) return null;
+    helpers.checkActive("fetching the Flow media bytes directly");
+    // Resolve (never arm) the job's requested mode for honest reporting.
+    const { watermarkMode } = operationOptions;
+    const arm = await resolveWatermarkArm({ mode: watermarkMode, kind });
+    let response = null;
+    let fetchFailure = null;
+    for (const credentials of ["include", "omit"]) {
+      try {
+        const attempt = await fetch(targetUrl, {
+          credentials,
+          ...(operationOptions.signal ? { signal: operationOptions.signal } : {}),
+        });
+        if (attempt?.ok) { response = attempt; break; }
+        fetchFailure = new Error(`HTTP ${attempt?.status || "unknown"}`);
+      } catch (error) {
+        if (operationOptions.signal?.aborted) helpers.checkActive("fetching the Flow media bytes directly");
+        fetchFailure = error;
+      }
+    }
+    if (!response) {
+      throw root.flowError("FLOW_DOWNLOAD_FALLBACK_FETCH_FAILED",
+        `Flow's download menu failed (${menuError?.code || "unknown"}) and the direct fetch of "${title}" also failed: ${String(fetchFailure?.message || fetchFailure || "no response")}.`,
+        true, false);
+    }
+    const blob = await response.blob();
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const sniffed = sniffMediaBytes(bytes);
+    const contentType = response.headers?.get?.("content-type") || "";
+    if (sniffed?.html || (!sniffed && /text\/html/i.test(contentType))) {
+      throw root.flowError("FLOW_DOWNLOAD_HTML_RESPONSE",
+        `Flow's download menu failed (${menuError?.code || "unknown"}) and the direct route for "${title}" returned an HTML page instead of media; nothing was saved.`,
+        false, false);
+    }
+    if (!sniffed) {
+      throw root.flowError("FLOW_DOWNLOAD_BYTES_INVALID",
+        `Flow's download menu failed (${menuError?.code || "unknown"}) and the direct route for "${title}" returned ${bytes.length} byte(s) that are not recognizable media; nothing was saved.`,
+        false, false);
+    }
+    if (sniffed.kind !== kind) {
+      throw root.flowError("FLOW_DOWNLOAD_BYTES_INVALID",
+        `Flow's download menu failed (${menuError?.code || "unknown"}) and the direct route for "${title}" returned ${sniffed.mime} bytes for a ${kind} download; nothing was saved.`,
+        false, false);
+    }
+    helpers.checkActive("saving the directly fetched Flow media");
+    const filename = plannedFallbackFilename({ operationOptions, tile, mediaElement, title, sniffed });
+    const verifiedBlob = blob.type === sniffed.mime ? blob : new Blob([bytes], { type: sniffed.mime });
+    try {
+      saveVerifiedBytes(verifiedBlob, filename);
+    } catch (error) {
+      throw root.flowError("FLOW_DOWNLOAD_FALLBACK_SAVE_FAILED",
+        `The direct route fetched verified ${sniffed.mime} bytes for "${title}" but could not start the browser download: ${String(error?.message || error)}.`,
+        true, false);
+    }
+    return {
+      title,
+      kind,
+      downloadTriggered: true,
+      trustedGesture: false,
+      route: "direct-bytes",
+      fallback: {
+        menuError: menuError?.code || null,
+        url: targetUrl,
+        mime: sniffed.mime,
+        bytes: bytes.length,
+        filename,
+      },
+      watermark: {
+        mode: arm.mode,
+        armed: false,
+        cleaned: false,
+        status: "original",
+        outcomeReason: "direct_bytes_fallback",
+        reason: arm.reason,
+        // DL-12: the fallback itself fetched and saved original bytes —
+        // its honest phase sequence is fetching → original → saving.
+        phases: ["fetching", "original", "saving"],
+      },
+    };
+  }
+
+  // DL-09 — download-path tile robustness (study D3/D4/D5/D6, gap G9).
+  // The download op now:
+  //  (1) checks the page's current project against the media's project
+  //      BEFORE any sweep or click (FLOW_PROJECT_MISMATCH);
+  //  (2) locates a media-id target by REUSING the generation side's
+  //      tile-loading sweep (FlowTiles.sweepFlowTileByMediaId) with an
+  //      on-mounted callback and the sweep's failure cooldown
+  //      (DOWNLOAD_TILE_SWEEP_COOLDOWN_MS = 60_000, the reference
+  //      window: at most one real sweep per target per window, a repeat
+  //      inside the window fails fast with FLOW_TILE_SWEEP_COOLDOWN);
+  //  (3) verifies the tile against the identity ALIAS SET the
+  //      generation side already accepts (media id / persistent id /
+  //      UUID / asb forms) — a tile mounting with a different identity
+  //      is never clicked;
+  //  (4) recovers or withholds broken (load-error) tiles: recovery is
+  //      attempted through the generation side's retry machinery plus
+  //      an in-place refresh, and if the tile is still broken the op
+  //      fails with FLOW_DOWNLOAD_BROKEN_TILE and NO download click
+  //      (and no DL-08 fallback) happens.
+  const DOWNLOAD_TILE_SWEEP_COOLDOWN_MS = 60_000;
+  const DOWNLOAD_TILE_RECOVERY_TIMEOUT_MS = 2_000;
+
+  function downloadExpectedProjectId(operationOptions = {}) {
+    const value = [operationOptions.projectId, operationOptions.expectedProjectId,
+      operationOptions.mediaProjectId, operationOptions.project_id, operationOptions.expected_project_id]
+      .find(candidate => typeof candidate === "string" && candidate.trim());
+    return value ? value.trim() : null;
+  }
+
+  function currentDownloadProjectId() {
+    try {
+      const described = (root.ProviderRegistry || root.FlowDriverRegistry)?.describeUrl?.(location.href);
+      if (described?.projectId) return String(described.projectId);
+    } catch (_) {}
+    const match = /\/project\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i
+      .exec(String(location.href || location.pathname || ""));
+    return match ? match[1] : null;
+  }
+
+  function assertDownloadProject(operationOptions = {}) {
+    const expected = downloadExpectedProjectId(operationOptions);
+    if (!expected) return;
+    const current = currentDownloadProjectId();
+    if (!current || current.toLowerCase() !== expected.toLowerCase()) {
+      throw root.flowError("FLOW_PROJECT_MISMATCH",
+        `The Flow page is in project "${current || "unknown"}", but the requested media belongs to project "${expected}"; no download was started.`,
+        false, false);
+    }
+  }
+
+  function assertTileProject(tile) {
+    let tileProject = null;
+    try { tileProject = tile?.getAttribute?.("data-project-id") || tile?.getAttribute?.("data-project") || null; } catch (_) {}
+    if (!tileProject) return;
+    const current = currentDownloadProjectId();
+    if (current && String(current).toLowerCase() !== String(tileProject).toLowerCase()) {
+      throw root.flowError("FLOW_PROJECT_MISMATCH",
+        `The tile for this download belongs to project "${tileProject}", but the Flow page is in project "${current}"; no download was started.`,
+        false, false);
+    }
+  }
+
+  function downloadIdentityValuesMatch(left, right) {
+    const fromTiles = root.FlowTiles?.tileIdentityValuesMatch;
+    if (typeof fromTiles === "function") return fromTiles(left, right);
+    const a = String(left || "").trim();
+    const b = String(right || "").trim();
+    if (!a || !b) return false;
+    if (/^[0-9a-f-]{36}$/i.test(a) && /^[0-9a-f-]{36}$/i.test(b)) return a.toLowerCase() === b.toLowerCase();
+    const aAsb = /^asb:(.+)$/i.exec(a)?.[1];
+    const bAsb = /^asb:(.+)$/i.exec(b)?.[1];
+    if (aAsb || bAsb) return (aAsb || a) === (bAsb || b);
+    return a === b;
+  }
+
+  // The tile's identity alias set. The generation side's extractor
+  // (FlowTiles.tileIdentityAliases, tiles.js) is authoritative when it
+  // is loaded — in the shipped content script it always is (manifest
+  // order) — and the local mirror below only covers harnesses that load
+  // media-menu alone; both collect the same alias forms.
+  function downloadTileIdentityAliases(tile) {
+    const fromTiles = root.FlowTiles?.tileIdentityAliases;
+    if (typeof fromTiles === "function") {
+      try { return fromTiles(tile); } catch (_) {}
+    }
+    const aliases = [];
+    const add = value => {
+      const text = typeof value === "string" ? value.trim() : "";
+      if (text && !aliases.includes(text)) aliases.push(text);
+    };
+    if (!tile) return aliases;
+    try { add(root.mediaId?.(tile)); } catch (_) {}
+    const identityAttributes = ["data-persistent-media-id", "data-media-id", "data-media-uuid", "data-uuid"];
+    for (const attribute of identityAttributes) {
+      try { add(tile.getAttribute?.(attribute)); } catch (_) {}
+    }
+    try {
+      const descendants = tile.querySelectorAll?.("[data-persistent-media-id],[data-media-id],[data-media-uuid],[data-uuid]") || [];
+      for (const node of descendants) {
+        for (const attribute of identityAttributes) {
+          try { add(node.getAttribute?.(attribute)); } catch (_) {}
+        }
+      }
+    } catch (_) {}
+    try {
+      const mediaNodes = tile.querySelectorAll?.("img,video") || [];
+      for (const node of mediaNodes) {
+        for (const attribute of identityAttributes) {
+          try { add(node.getAttribute?.(attribute)); } catch (_) {}
+        }
+        const src = String(node.currentSrc || node.src || node.getAttribute?.("src") || "");
+        if (!src) continue;
+        add(src.match(/[0-9a-f]{8}-[0-9a-f-]{27}/i)?.[0]);
+        try {
+          const url = new URL(src, location.href);
+          if (url.pathname.startsWith("/asb/")) {
+            const rest = url.pathname.slice("/asb/".length).replace(/=(?:s\d+(?:-[a-z]+)*|mm,\d+,\d+)$/i, "");
+            if (rest) { add(`asb:${rest}`); add(rest); }
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
+    return aliases;
+  }
+
+  function downloadRequestedAliases(operationOptions = {}) {
+    const values = [];
+    for (const key of ["mediaAliases", "identityAliases", "aliases", "mediaAlias", "identityAlias"]) {
+      const raw = operationOptions[key];
+      if (Array.isArray(raw)) values.push(...raw);
+      else if (typeof raw === "string" && raw.trim()) values.push(raw);
+    }
+    return values;
+  }
+
+  function downloadTileMatchesIdentity(tile, mediaHandle, extraAliases = []) {
+    const requested = [mediaHandle, ...extraAliases]
+      .map(value => String(value || "").trim())
+      .filter(value => value && !value.startsWith("title:"));
+    if (!requested.length) return true;
+    const aliases = downloadTileIdentityAliases(tile);
+    if (!aliases.length) return false;
+    return aliases.some(alias => requested.some(value => downloadIdentityValuesMatch(alias, value)));
+  }
+
+  // Locate the target tile through the generation side's sweep. The
+  // sweep fires onMounted the moment a tile whose alias set contains
+  // the requested identity mounts; identity is re-verified at that
+  // moment here, and the caller's own onTileMounted hook runs after
+  // the verification (its errors are ignored — it is an observer, the
+  // verification above is the gate). Without the generation module
+  // (isolated test harnesses only) the fallback is a mounted-tiles-only
+  // alias match — it never scrolls on its own.
+  async function locateDownloadTile(mediaHandle, { title, operationOptions = {}, deadline } = {}) {
+    const requestedAliases = downloadRequestedAliases(operationOptions);
+    const sweep = root.FlowTiles?.sweepFlowTileByMediaId || root.sweepFlowTileByMediaId ||
+      root.FlowTiles?.findFlowTileByMediaId || root.findFlowTileByMediaId;
+    if (typeof sweep === "function") {
+      const owner = typeof root.FlowTiles?.sweepFlowTileByMediaId === "function" ? root.FlowTiles
+        : (typeof root.sweepFlowTileByMediaId === "function" ? root : root.FlowTiles);
+      return sweep.call(owner, mediaHandle, {
+        aliases: requestedAliases,
+        deadline,
+        signal: operationOptions.signal,
+        failureCooldownMs: DOWNLOAD_TILE_SWEEP_COOLDOWN_MS,
+        onMounted: async mounted => {
+          if (!downloadTileMatchesIdentity(mounted, mediaHandle, requestedAliases)) {
+            throw root.flowError("FLOW_ASSET_CHANGED",
+              `A tile mounted while locating "${title}", but its identity does not match "${mediaHandle}"; it was not clicked.`,
+              false, false);
+          }
+          const external = operationOptions.onTileMounted || operationOptions.onMounted;
+          if (typeof external === "function") {
+            try { await external(mounted); } catch (_) {}
+          }
+        },
+      });
+    }
+    const candidates = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", document, { checkVisible: false }) : null) ||
+      [...document.querySelectorAll("flow-grid-tile-container")];
+    return candidates.find(candidate => downloadTileMatchesIdentity(candidate, mediaHandle, requestedAliases)) || null;
+  }
+
+  function findDownloadRetryControl(tile) {
+    const buttons = [...(tile?.querySelectorAll?.('button,[role="button"]') || [])];
+    return buttons.find(el => {
+      let label = "";
+      try { label = flowMenuLabel(el); } catch (_) {}
+      const accessible = (root.accessibleName?.(el) || "").replace(/\s+/g, " ").trim();
+      const icon = (root.flowFindIcon ? root.flowFindIcon(el) : el.querySelector?.("mat-icon, .mat-icon, .google-symbols"))?.textContent?.trim() || "";
+      return /^(?:retry|try again|thử lại)(?:\s+.*)?$/i.test(label || accessible) ||
+        /^(?:refresh|replay|retry)$/i.test(icon);
+    }) || null;
+  }
+
+  // A tile is broken for download purposes when Flow shows its load
+  // error surface (error tile or a retry/refresh control), when its
+  // image element finished loading with no pixels, or when its video
+  // element is in a network/codec error state. A merely still-loading
+  // tile (incomplete image, no error surface) is NOT broken — the
+  // existing waitForFlowTileMedia wait handles that case.
+  function downloadTileLoadError(tile) {
+    if (!tile) return null;
+    const errorTile = (typeof root.flowQuery === "function" ? root.flowQuery("tiles.error", tile, { checkVisible: false }) : null) ||
+      tile.querySelector?.("flow-error-tile");
+    const retryControl = findDownloadRetryControl(tile);
+    if (errorTile || retryControl) {
+      const reason = (errorTile?.innerText || errorTile?.textContent || "").replace(/\s+/g, " ").trim();
+      return { kind: "error-tile", reason, retryControl };
+    }
+    let media = [];
+    try {
+      media = [
+        ...((typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.mediaElements", tile, { checkVisible: false }) : null) || tile.querySelectorAll("video,img,canvas,[role='img'],flow-video-tile,flow-image-tile")),
+      ];
+    } catch (_) { media = []; }
+    // Only flag the tile when NO media element on it is healthy: a
+    // video tile whose poster image failed but whose video element is
+    // fine (and vice versa) can still download normally.
+    let brokenCandidate = null;
+    for (const element of media) {
+      const tag = String(element?.tagName || "").toLowerCase();
+      const isImage = (typeof HTMLImageElement !== "undefined" && element instanceof HTMLImageElement) || tag === "img";
+      const isVideo = (typeof HTMLVideoElement !== "undefined" && element instanceof HTMLVideoElement) || tag === "video";
+      if (isImage) {
+        const src = element.currentSrc || element.getAttribute?.("src") || "";
+        if (src && element.complete === true && element.naturalWidth > 0) return null;
+        if (!brokenCandidate && src && element.complete === true && element.naturalWidth === 0) {
+          brokenCandidate = { kind: "broken-image", reason: "image failed to load", media: element };
+        }
+      } else if (isVideo) {
+        const src = element.currentSrc || element.getAttribute?.("src") || "";
+        if (src && !element.error && element.networkState !== 3) return null;
+        if (!brokenCandidate && (element.error || element.networkState === 3)) {
+          brokenCandidate = { kind: "broken-video", reason: "video failed to load", media: element };
+        }
+      }
+    }
+    return brokenCandidate;
+  }
+
+  async function recoverDownloadTile(tile, { title, kind, mediaHandle, helpers, operationOptions = {}, deadline }) {
+    const broken = downloadTileLoadError(tile);
+    if (!broken) return tile;
+    // Recovery attempt 1: the generation side's error-tile retry
+    // machinery (the same helper upload/generation recovery uses).
+    let accepted = false;
+    const retry = root.FlowTiles?.retryNativeErrorTile || root.retryNativeErrorTile;
+    if (typeof retry === "function") {
+      try {
+        const result = await retry(
+          { id: mediaHandle || (() => { try { return root.mediaId?.(tile); } catch (_) { return undefined; } })(), title, kind, element: tile },
+          { attempted: new Set(), deadline, timeoutMs: DOWNLOAD_TILE_RECOVERY_TIMEOUT_MS, signal: operationOptions.signal });
+        accepted = Boolean(result?.accepted ?? result);
+      } catch (_) { accepted = false; }
+    }
+    // Recovery attempt 2: an in-place refresh — activate the tile's own
+    // retry/refresh control, or reload a broken media element's src so
+    // the browser fetches the preview again.
+    if (!accepted) {
+      const control = broken.retryControl || findDownloadRetryControl(tile);
+      if (control && typeof control.click === "function") {
+        try { control.click(); } catch (_) {}
+        await helpers.wait(200, "recovering the broken Flow tile");
+      } else if (broken.media) {
+        const src = broken.media.currentSrc || broken.media.getAttribute?.("src") || broken.media.src || "";
+        if (src) {
+          try { broken.media.src = ""; broken.media.src = src; } catch (_) {}
+          await helpers.wait(200, "recovering the broken Flow tile");
+        }
+      }
+    }
+    let current = tile?.isConnected ? tile : null;
+    if (!current && mediaHandle) {
+      const candidates = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", document, { checkVisible: false }) : null) ||
+        [...document.querySelectorAll("flow-grid-tile-container")];
+      current = candidates.find(candidate => downloadTileMatchesIdentity(candidate, mediaHandle, downloadRequestedAliases(operationOptions))) || null;
+    }
+    if (!current || downloadTileLoadError(current)) {
+      throw root.flowError("FLOW_DOWNLOAD_BROKEN_TILE",
+        `The tile for "${title}" failed to load${broken.reason ? `: ${broken.reason}` : ""}; recovery was attempted but the tile is still broken, so no download was started rather than risk saving a placeholder or the wrong asset.`,
+        true, false);
+    }
+    return current;
+  }
+
   function triggerFlowDownload(title, quality = "original", mediaHandle, operationOptions = {}) {
     return (async () => {
       const deadline = Date.now() + Math.max(5000, Math.min(90_000, Number(operationOptions.timeoutMs) || 45_000));
       let downloadMayHaveStarted = false;
+      let watermarkOutcome = null;
       const checkActive = operation => {
         if (operationOptions.signal?.aborted) {
           throw root.flowError("FLOW_OPERATION_CANCELLED", `The Flow queue stopped while ${operation}.${downloadMayHaveStarted ? " The download may already have started; check the browser downloads before retrying." : " No download was started."}`, false, downloadMayHaveStarted);
@@ -194,6 +937,9 @@
       };
       const helpers = { checkActive, wait };
       checkActive("preparing the Flow download");
+      // DL-09: the project check is FIRST — before tab activation, any
+      // sweep, or any click (study D3).
+      assertDownloadProject(operationOptions);
       if (document.visibilityState === "hidden") {
         const activated = await chrome.runtime.sendMessage({ type: "flow-mcp:ensure-active-tab" });
         if (!activated?.ok) throw root.flowError("FLOW_TAB_ACTIVATION_FAILED", activated?.error || "Flow tab could not be activated for its download menu.", true);
@@ -201,40 +947,57 @@
       }
       let tile;
       if (mediaHandle) {
-        const scroller = root.FlowTiles?.flowMediaGridScrollContainer?.() || root.flowMediaGridScrollContainer?.();
-        if (scroller) scroller.scrollTop = 0;
-        for (let step = 0; step < 180 && !tile; step++) {
-          checkActive("locating the selected Flow media");
-          tile = [...document.querySelectorAll("flow-grid-tile-container")].find(candidate => root.mediaId?.(candidate) === mediaHandle);
-          if (tile || !scroller) break;
-          const top = scroller.scrollTop, max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-          if (top >= max - 2) break;
-          scroller.scrollTop = Math.min(max, top + Math.max(200, scroller.clientHeight * 0.78));
-          await wait(300, "locating the selected Flow media");
-        }
+        // DL-09: locate through the generation side's tile-loading
+        // sweep (with on-mounted callback + failure cooldown), which
+        // mounts a target scrolled out of the virtualized grid and
+        // only ever returns a tile whose identity alias set contains
+        // the requested media id.
+        checkActive("locating the selected Flow media");
+        tile = await locateDownloadTile(mediaHandle, { title, operationOptions, deadline });
         if (!tile) throw root.flowError("FLOW_ASSET_NOT_FOUND", `Could not find media id "${mediaHandle}" in the project library; refusing to substitute another tile named "${title}".`, true);
       }
       if (!tile) tile = await root.findFlowTile?.(title);
       if (!tile) throw root.flowError("FLOW_ASSET_NOT_FOUND", `Could not find "${title}" in the project library.`, true);
       const scene = Boolean(typeof root.flowQuery === "function" ? root.flowQuery("tiles.scene", tile, { checkVisible: false }) : tile.querySelector("flow-scene-tile"));
       const kind = (typeof root.flowQuery === "function" ? root.flowQuery("tiles.video", tile, { checkVisible: false }) : tile.querySelector("flow-video-tile")) ? "video" : "image";
-      if (!scene) await waitForFlowTileMedia(tile, title, 20_000, helpers);
-      if (!tile.isConnected || mediaHandle && root.mediaId?.(tile) !== mediaHandle) {
+      // DL-03: the tile's media URL lets the arm bind its interceptor
+      // context to exactly this download (canonicalized on both sides).
+      let watermarkUrl;
+      try {
+        const mediaElement = tile.querySelector("img,video");
+        watermarkUrl = mediaElement?.currentSrc || mediaElement?.src || mediaElement?.getAttribute?.("src") || undefined;
+      } catch (_) {}
+      assertTileProject(tile);
+      if (!scene) {
+        // DL-09: a broken (load-error) tile is recovered first; if it
+        // cannot recover, recoverDownloadTile throws and no download
+        // click (or DL-08 fallback) ever happens.
+        tile = await recoverDownloadTile(tile, { title, kind, mediaHandle, helpers, operationOptions, deadline });
+        await waitForFlowTileMedia(tile, title, 20_000, helpers);
+      }
+      if (!tile.isConnected || (mediaHandle && !downloadTileMatchesIdentity(tile, mediaHandle, downloadRequestedAliases(operationOptions)))) {
         tile = mediaHandle
-          ? ((typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", document, { checkVisible: false }) : null) ||
-            [...document.querySelectorAll("flow-grid-tile-container")]).find(candidate => root.mediaId?.(candidate) === mediaHandle)
+          ? await locateDownloadTile(mediaHandle, { title, operationOptions, deadline })
           : await root.findFlowTile?.(title);
         if (!tile) throw root.flowError("FLOW_ASSET_CHANGED", `The selected Flow tile for "${title}" changed before its menu opened.`, true);
         tile.scrollIntoView({ behavior: "instant", block: "center" });
-        if (!scene) await waitForFlowTileMedia(tile, title, 20_000, helpers);
+        assertTileProject(tile);
+        if (!scene) {
+          tile = await recoverDownloadTile(tile, { title, kind, mediaHandle, helpers, operationOptions, deadline });
+          await waitForFlowTileMedia(tile, title, 20_000, helpers);
+        }
       }
+      // DL-08: a pre-click menu failure gets one direct-bytes fallback
+      // attempt (see directBytesDownloadFallback); anything else rethrows.
+      let menuFailure = null;
+      try {
       if (scene) {
         tile.click();
         await wait(1200, "opening the Flow scene");
         const download = root.flowButton?.("Download scene") || root.flowButton?.("Tải xuống cảnh") || root.flowButton?.("Tải cảnh");
         if (!download) throw root.flowError("FLOW_SCENE_DOWNLOAD_MISSING", "Scene view opened but Download scene is unavailable.", true);
         checkActive("starting the Flow scene download");
-        armWatermarkDownload({ title, kind: "video", quality });
+        watermarkOutcome = await armWatermarkDownload({ title, kind: "video", quality, mode: operationOptions.watermarkMode, url: watermarkUrl });
         download.click();
         downloadMayHaveStarted = true;
       } else {
@@ -279,18 +1042,45 @@
               throw root.flowError("FLOW_DOWNLOAD_QUALITY_MISSING", `Flow's download menu for "${title}" has no ${quality} option. Available: ${available}.`, true);
             }
             checkActive("starting the Flow media download");
-            armWatermarkDownload({ title, kind, quality });
+            watermarkOutcome = await armWatermarkDownload({ title, kind, quality, mode: operationOptions.watermarkMode, url: watermarkUrl });
             choice.click();
             downloadMayHaveStarted = true;
           } else {
             checkActive("starting the Flow media download");
-            armWatermarkDownload({ title, kind, quality });
+            watermarkOutcome = await armWatermarkDownload({ title, kind, quality, mode: operationOptions.watermarkMode, url: watermarkUrl });
             download.click();
             downloadMayHaveStarted = true;
           }
         } else throw root.flowError("FLOW_TILE_MENU_MISSING", `Could not open options for "${title}".`, true);
       }
-      return { title, kind: scene ? "scene" : tile.querySelector("flow-video-tile") ? "video" : "image", downloadTriggered: true, trustedGesture: false };
+      } catch (error) {
+        menuFailure = error;
+      }
+      if (menuFailure) {
+        if (!scene && !downloadMayHaveStarted && DIRECT_FALLBACK_MENU_CODES.has(menuFailure?.code) && !operationOptions.signal?.aborted) {
+          const fallbackResult = await directBytesDownloadFallback({ tile, title, kind, quality, operationOptions, helpers, menuError: menuFailure });
+          if (fallbackResult) return fallbackResult;
+        }
+        throw menuFailure;
+      }
+      const watermarkAttribution = await settleWatermarkOutcome(watermarkOutcome, helpers);
+      const downloadPhases = downloadPhaseSequence(watermarkOutcome, watermarkAttribution);
+      return {
+        title,
+        kind: scene ? "scene" : tile.querySelector("flow-video-tile") ? "video" : "image",
+        downloadTriggered: true,
+        trustedGesture: false,
+        watermark: {
+          mode: watermarkOutcome?.mode || "original",
+          armed: watermarkOutcome?.armed === true,
+          cleaned: watermarkAttribution.cleaned,
+          ...(watermarkOutcome?.reason ? { reason: watermarkOutcome.reason } : {}),
+          ...(watermarkOutcome?.operationId ? { operationId: watermarkOutcome.operationId } : {}),
+          ...(watermarkAttribution.status ? { status: watermarkAttribution.status } : {}),
+          ...(watermarkAttribution.outcomeReason ? { outcomeReason: watermarkAttribution.outcomeReason } : {}),
+          ...(downloadPhases.length ? { phases: downloadPhases } : {}),
+        },
+      };
     })();
   }
 
@@ -344,7 +1134,11 @@
       const persistentMediaId = tile.getAttribute("data-persistent-media-id") || tile.getAttribute("data-media-id") ||
         mediaElement?.getAttribute?.("data-media-id") || undefined;
       const rawId = root.mediaId?.(tile);
-      const id = rawId && !rawId.startsWith("title:") ? rawId : undefined;
+      // persistentMediaId was already resolved from the tile's own identity
+      // attributes above; use it when mediaId() could only derive a title
+      // fallback, otherwise the asset is dropped from baseline/confirmation
+      // scans even though Flow exposed a stable ID for it.
+      const id = rawId && !rawId.startsWith("title:") ? rawId : persistentMediaId;
       if ((!kind || !name) && (!includeIncomplete || !id)) return null;
       const busy = Boolean(root.FlowTiles?.isTileBusy?.(tile) ?? root.isTileBusy?.(tile));
       const ready = Boolean(root.FlowTiles?.isTileMediaReady?.(tile) ?? (!busy && root.isTileMediaReady?.(tile)));
@@ -931,6 +1725,17 @@
 
   const FlowMediaMenu = Object.freeze({
     triggerFlowDownload,
+    downloadTileIdentityAliases,
+    downloadTileMatchesIdentity,
+    downloadTileLoadError,
+    currentDownloadProjectId,
+    DOWNLOAD_TILE_SWEEP_COOLDOWN_MS,
+    DOWNLOAD_TILE_RECOVERY_TIMEOUT_MS,
+    resolveWatermarkArm,
+    downloadPhaseSequence,
+    watermarkMaskHasAlpha,
+    sniffMediaBytes,
+    directBytesTargetUrl,
     scanNativeAssets,
     scanGalleryTiles,
     scanNativeProjects,

@@ -4,6 +4,12 @@ import { inspectExtensionBuild } from "./flow-build-info.js";
 import { decideDevExtensionReload } from "./dev-extension-reload.js";
 import { flowDocumentMatchesLocale, flowHomeUrl, flowLocaleFromUrl, flowProjectUrl, normalizeFlowLocale } from "./flow-locale.js";
 import { FlowJobQueue } from "./flow-job-queue.js";
+import { resolveProviderForOperation } from "./provider-router.js";
+import { runChatGptQueueJob } from "./chatgpt-queue-runner.js";
+import { loadChatGptCapabilityRegistry } from "./chatgpt-capabilities.js";
+import { FlowBatchDrafts, materializeDraftJobs } from "./flow-batch-drafts.js";
+import { FlowMediaCatalog } from "./flow-media-catalog.js";
+import { revalidateJobReferences } from "./flow-ref-preflight.js";
 import { FlowBridgeClient, readBridgeConfig, postHttpMessage } from "./flow-bridge-client.js";
 import { planFlowAgentBatch, planFlowBatch, planFlowContinue, planFlowEdit } from "./flow-workflows.js";
 import {
@@ -65,14 +71,10 @@ const GENERATED_MEDIA_DOWNLOAD_OPERATION = "flow.queue.download-generated";
 const queueDownloadEnqueues = new Map();
 let socket = null;
 let httpSession = null;
-let bridgeTransport = "disconnected";
-let opening = false;
-let reconnectTimer;
-let reconnectAttempt = 0;
-let heartbeat;
 let selectedTabId;
 let lastError = "";
 let progressReceiptSequence = 0;
+let uiDispatchSequence = 0;
 let lastProgressDiagnostic = null;
 const activeInteractiveRequests = new Map();
 const activeInteractiveCounts = new Map();
@@ -476,7 +478,6 @@ const bridgeClient = new FlowBridgeClient({
       else reject(res?.result?.error || new Error("Command failed"));
     });
   }),
-  onEvent: applyBackendEvent,
   getSelectedTabId: () => selectedTabId,
   getCapabilities: () => [...nativeFlowOperations].map(name => `flow.native.${name.slice(5)}`),
 });
@@ -563,32 +564,46 @@ async function execute(_ws, method, args = [], { queueOwner = false, connectorOw
         }
         const defaultFlowTarget = await captureFlowTargetMetadata();
         const batchId = crypto.randomUUID();
-        const added = [];
-        for (const [index, source] of plannedJobs.entries()) {
+        // Build every job input before enqueueing anything. Ids are minted
+        // up front (same rule the queue applies: caller id wins) so workflow
+        // dependency metadata can point at the previous job's id before the
+        // batch is admitted.
+        const jobIds = plannedJobs.map(source => source.id || crypto.randomUUID());
+        const jobInputs = plannedJobs.map((source, index) => {
           const operation = String(source.operation || source.data?.operation || "flow.generation.submit");
           if (!extensionQueueJobOperations.has(operation)) throw Object.assign(new Error(`Unsupported queued Flow operation: ${operation}`), {
             code: "FLOW_QUEUE_OPERATION_UNSUPPORTED", retryable: false, outcome_unknown: false,
           });
           const jobPayload = source.payload ?? source.data?.payload;
           const workflow = jobPayload?.workflow || jobPayload?.params?.workflow || source.workflow || {};
-          const previous = added[index - 1];
+          const previousId = index > 0 ? jobIds[index - 1] : undefined;
           const metadata = {
             source: 'mcp',
             ...(source.metadata ?? source.data?.metadata ?? {}),
             ...(source.metadata?.flowTabId === undefined && source.data?.metadata?.flowTabId === undefined ? defaultFlowTarget : {}),
             batchId,
             ...(workflow && Object.keys(workflow).length ? { workflow } : {}),
-            ...(previous && workflow.dependency ? { dependsOnId: previous.id, dependencyType: workflow.dependency.type } : {}),
+            ...(previousId && workflow.dependency ? { dependsOnId: previousId, dependencyType: workflow.dependency.type } : {}),
             ...(typeof jobPayload?.output_dir === "string" ? { output_dir: jobPayload.output_dir } : {}),
             ...(typeof jobPayload?.file_stem === "string" ? { file_stem: jobPayload.file_stem } : {}),
             ...(typeof jobPayload?.params?.output_dir === "string" ? { output_dir: jobPayload.params.output_dir } : {}),
             ...(typeof jobPayload?.params?.file_stem === "string" ? { file_stem: jobPayload.params.file_stem } : {}),
           };
-          added.push(await flowJobQueue.add({
-            id: source.id, operation, payload: jobPayload,
+          return {
+            id: jobIds[index], operation, payload: jobPayload,
             label: source.label || source.name, metadata,
-          }));
-        }
+          };
+        });
+        // Admit the submission atomically: a multi-job batch goes through
+        // addBatch, which validates ids and preflights every job before any
+        // of them enters the queue. Enqueueing one-by-one here would leave
+        // earlier jobs queued (and spending credits) when a later job fails,
+        // even though the caller is told the whole submission failed.
+        const added = jobInputs.length === 0
+          ? []
+          : jobInputs.length === 1
+            ? [await flowJobQueue.add(jobInputs[0])]
+            : await flowJobQueue.addBatch(jobInputs, { batchId });
         // Match the extension UI: adding work must not implicitly clear a
         // queue pause caused by an unresolved Flow page blocker or a manual
         // submit. Only an explicit Resume command may continue that queue.
@@ -968,8 +983,112 @@ function broadcastFlowQueue(snapshot, reason) {
   )).catch(() => {});
 }
 
+// GPT-10: transport for provider content commands that cannot ride the
+// Flow-only execute() path (its tab validation is Flow-URL based). Sends
+// the same flow-mcp:execute envelope execute() builds, unwraps the
+// content response with the same error rehydration, and mirrors
+// execute()'s cancellation + delivery discipline for the one
+// maybe-submitted provider operation (chatgpt.generation.submit): an
+// abort or an ambiguous transport failure may have sent the message, so
+// it is reported outcome_unknown; a definitely undelivered command is
+// not.
+async function sendProviderCommand(tabId, command, signal) {
+  const maybeSubmitted = command?.name === "chatgpt.generation.submit";
+  const cancelPageCommand = () => {
+    void chrome.tabs.sendMessage(tabId, { type: "flow-mcp:cancel", requestId: command?.id }).catch(() => {});
+  };
+  const cancelledError = () => Object.assign(new Error("Provider command was cancelled by the queue."), {
+    code: "FLOW_OPERATION_CANCELLED",
+    outcome_unknown: maybeSubmitted,
+  });
+  if (signal?.aborted) {
+    cancelPageCommand();
+    throw cancelledError();
+  }
+  let rejectCancelled;
+  const cancelledPromise = new Promise((_, reject) => { rejectCancelled = reject; });
+  void cancelledPromise.catch(() => {});
+  const onAbort = () => {
+    cancelPageCommand();
+    rejectCancelled(cancelledError());
+  };
+  signal?.addEventListener("abort", onAbort, { once: true });
+  let response;
+  try {
+    response = await Promise.race([
+      sendFlowCommand(tabId, { type: "flow-mcp:execute", command }),
+      cancelledPromise,
+    ]);
+  } catch (error) {
+    const message = String(error?.message || error);
+    const definitelyNotDelivered = /Receiving end does not exist|Could not establish connection/i.test(message);
+    const explicitlySafe = error?.outcome_unknown === false || error?.outcomeUnknown === false;
+    if (maybeSubmitted && !definitelyNotDelivered && !explicitlySafe) {
+      throw Object.assign(new Error(message), {
+        name: error?.name || "Error",
+        code: error?.code,
+        retryable: Boolean(error?.retryable),
+        outcome_unknown: true,
+        noRetry: error?.noRetry === true,
+        noReplay: error?.noReplay === true,
+      });
+    }
+    throw error;
+  } finally {
+    signal?.removeEventListener("abort", onAbort);
+  }
+  if (!response?.ok) {
+    const error = new Error(response?.error?.message || response?.error || "Provider DOM command failed");
+    error.code = response?.error?.code || "FLOW_DOM_FAILED";
+    error.retryable = Boolean(response?.error?.retryable);
+    error.outcome_unknown = Boolean(response?.error?.outcome_unknown);
+    error.noRetry = response?.error?.noRetry === true;
+    error.noReplay = response?.error?.noReplay === true;
+    // Preserve page-side diagnostics through the extension relay.
+    if (response?.error?.diagnostics && typeof response.error.diagnostics === "object") {
+      error.diagnostics = response.error.diagnostics;
+    }
+    throw error;
+  }
+  return response.value;
+}
+
+// GPT-10: production dependencies for the ChatGPT queue runner branch —
+// real chrome.tabs find-or-create driven by the GPT-08 descriptor, the
+// queue's own metadata store for pins, and the provider command
+// transport above.
+function chatGptQueueRunnerDeps() {
+  return {
+    tabs: {
+      query: async patterns => {
+        const groups = await Promise.all(patterns.map(url => chrome.tabs.query({ url })));
+        const byId = new Map();
+        for (const tab of groups.flat()) if (Number.isInteger(tab?.id)) byId.set(tab.id, tab);
+        return [...byId.values()];
+      },
+      get: tabId => chrome.tabs.get(tabId).catch(() => null),
+      create: url => chrome.tabs.create({ url }),
+    },
+    waitForTabComplete: tabId => waitForTabComplete(tabId, 30_000).catch(() => {}),
+    sendCommand: (tabId, command, signal) => sendProviderCommand(tabId, command, signal),
+    updateMetadata: (jobId, patch) => flowJobQueue.updateMetadata(jobId, patch),
+  };
+}
+
 async function runExtensionFlowJob(job, hooks) {
   const operation = job.operation || job.data?.operation;
+  // Provider dispatch (GPT-08): resolve the operation's provider
+  // descriptor up front. Unknown prefixes throw the same typed
+  // unsupported-operation error the allowlist check below has always
+  // thrown, so this only routes — the per-provider runner branches
+  // (GPT-10) hang off the descriptor, and Flow jobs flow through the
+  // unchanged path below.
+  const descriptor = resolveProviderForOperation(operation);
+  if (descriptor.key === "chatgpt") {
+    // GPT-10: ChatGPT jobs run through the provider runner branch
+    // (chatgpt-queue-runner.js); the Flow path below is unchanged.
+    return runChatGptQueueJob(job, hooks, chatGptQueueRunnerDeps());
+  }
   const payload = structuredClone(job.payload || job.data?.payload || {});
   const queuedOperations = new Set([
     ...extensionQueueJobOperations,
@@ -1097,6 +1216,11 @@ async function runExtensionFlowJob(job, hooks) {
         expectedCount: savedObservation.expectedCount,
         correlationAttemptId: savedObservation.correlationAttemptId,
         credits: savedObservation.credits,
+        // SW-FWD (VID-02): carry the restored checkpoint's dispatch stamp
+        // through the rebuilt receipt so it can reach the observe payload
+        // below; without it a resumed observe gets a fresh render window
+        // instead of the time remaining from the original dispatch.
+        ...(savedObservation.dispatchedAt ? { dispatchedAt: savedObservation.dispatchedAt } : {}),
         requestDispatched: true,
       };
     } else if (job.metadata?.manualSubmitPhase === "confirm") {
@@ -1165,6 +1289,7 @@ async function runExtensionFlowJob(job, hooks) {
     expectedCount: Math.max(1, Number(submitted?.expectedCount ?? payload.variants ?? payload.count ?? 1)),
     correlationAttemptId: String(submitted?.correlationAttemptId || ""),
     credits: Number.isFinite(submitted?.credits) ? submitted.credits : null,
+    ...(submitted?.dispatchedAt ? { dispatchedAt: submitted.dispatchedAt } : {}),
     timeoutMs: isVideo ? 600_000 : 300_000,
   };
   if (observation.correlationAttemptId) {
@@ -1184,6 +1309,10 @@ async function runExtensionFlowJob(job, hooks) {
       kind: observation.kind,
       retries: payload.retries,
       timeoutMs: observation.timeoutMs,
+      // SW-FWD (VID-02): forward the dispatch stamp so observe anchors
+      // its deadline at dispatch. Absent on legacy paths, where this
+      // payload stays exactly as it was before.
+      ...(observation.dispatchedAt ? { dispatchedAt: observation.dispatchedAt } : {}),
     });
   } catch (error) {
     throw Object.assign(error, {
@@ -1193,7 +1322,12 @@ async function runExtensionFlowJob(job, hooks) {
     });
   }
   if (Array.isArray(observed?.media) && observed.media.length) {
-    await flowJobQueue.checkpointGenerationResult(job.id, observed.media).catch(error => {
+    // SW-FWD (VID-01): forward a partial result's failed outputs into the
+    // checkpoint as the extras argument, passed through exactly as observe
+    // produced them (the queue checkpoint owns normalization), so a worker
+    // death after observe loses neither half of the outcome. Results
+    // without failed outputs pass no extras argument, exactly as before.
+    await flowJobQueue.checkpointGenerationResult(job.id, observed.media, ...(Array.isArray(observed.failedOutputs) && observed.failedOutputs.length ? [{ failedOutputs: observed.failedOutputs }] : [])).catch(error => {
       console.warn("[FlowQueue] Could not persist the worker-side generation result checkpoint:", error?.message || error);
     });
   }
@@ -1201,9 +1335,86 @@ async function runExtensionFlowJob(job, hooks) {
   await hooks.progress(queueCompletionProgress(operationResult, "Flow generation completed."));
   return { completed: true, requestDispatched: true, ...quoteFields, result: operationResult };
 }
+const flowMediaCatalog = new FlowMediaCatalog();
+// IMG-04: resolve the project a queued job targets, read-only, mirroring
+// where the runner pins it: the job metadata first (captured at enqueue
+// time or pinned by a previous attempt), then the pinned or selected Flow
+// tab's URL. Deliberately no chooseTab() here — choosing a tab prepares
+// and may adopt it, a side effect a drain-time lookup must not have; with
+// no resolvable target the catalog leg simply abstains.
+async function queueJobProjectId(job) {
+  const metadata = job && typeof job.metadata === "object" && job.metadata ? job.metadata : {};
+  if (typeof metadata.flowProjectId === "string" && metadata.flowProjectId) return metadata.flowProjectId.toLowerCase();
+  const tabId = Number.isInteger(metadata.flowTabId) ? metadata.flowTabId : selectedTabId;
+  if (!Number.isInteger(tabId)) return null;
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  return tab && flowUrl(tab.url) ? flowProjectIdFromUrl(tab.url) : null;
+}
+// IMG-04: the queue-level reference revalidation pass, wired with the
+// dependencies the worker can supply faithfully. The worker owns the
+// IMG-03 media catalog, so the catalog leg resolves here directly — same
+// query shape as the content-stage pass (project, expected id, name).
+// The other two legs cannot be supplied faithfully at drain time:
+// - Existence: the only page scan reachable from the worker
+//   (flow.assets.list) actively scrolls the media grid of whichever
+//   project the tab currently shows for up to 25 s, and the queue drains
+//   before the runner pins and navigates the tab to this job's project —
+//   a negative could condemn an asset that exists in the target project,
+//   and for an uploaded ref the failure would be unrecoverable at this
+//   level. Follow the content pass's own degrade discipline instead: an
+//   absence that cannot be proven is not an absence, so this leg reports
+//   "exists" and the content-stage pass re-checks against the live grid
+//   on the right project before any settings/prompt work.
+// - Re-upload: no content operation re-uploads retained staged bytes by
+//   catalog identity — flow.media.upload requires the original transfer
+//   id and the exact staged file name, and a queued library ref carries
+//   neither. The by-name retained-bytes recovery exists only inside the
+//   submit path, so recovery stays with the content-stage pass and this
+//   leg reports "bytes not retained".
+function createQueueRefPreflight(environment) {
+  const catalog = environment && environment.catalog ? environment.catalog : null;
+  const projectIdForJob = environment && typeof environment.projectIdForJob === "function" ? environment.projectIdForJob : async () => null;
+  return job => revalidateJobReferences(job, {
+    catalogLookup: async ref => {
+      if (!catalog) return null;
+      const projectId = await projectIdForJob(job);
+      if (!projectId) return null;
+      return catalog.lookup({
+        projectId,
+        ...(ref.expectedId ? { mediaId: ref.expectedId } : {}),
+        name: ref.assetName,
+      });
+    },
+    assetExists: async () => true,
+    reupload: async () => null,
+  });
+}
 // Keep a small cooldown between generations to avoid hammering Flow while
 // removing most of the previous 5–10 second idle wait between queued jobs.
-const flowJobQueue = new FlowJobQueue(runExtensionFlowJob, { minDelayMs: 1_000, maxDelayMs: 2_000 });
+const flowJobQueue = new FlowJobQueue(runExtensionFlowJob, {
+  minDelayMs: 1_000,
+  maxDelayMs: 2_000,
+  // Admission preflight reads the same capability registry the sidebar and
+  // content scripts validate against, so a batch is checked as a whole
+  // before its first job can spend credits.
+  loadCapabilityRegistry: async () => {
+    try {
+      const response = await fetch(chrome.runtime.getURL("flow-model-capabilities.json"));
+      return response.ok ? await response.json() : null;
+    } catch {
+      return null;
+    }
+  },
+  // GPT-09/GPT-10: ChatGPT admission preflight reads the packaged
+  // ChatGPT capability registry. The shared loader never throws — a null
+  // registry skips validation, mirroring the Flow loader's discipline.
+  loadChatGptCapabilityRegistry: () => loadChatGptCapabilityRegistry(),
+  // IMG-04: revalidate generation references at job start against the
+  // worker's media catalog (see createQueueRefPreflight for exactly which
+  // legs are live at this level and which stay with the content stage).
+  refPreflight: createQueueRefPreflight({ catalog: flowMediaCatalog, projectIdForJob: queueJobProjectId }),
+});
+const flowBatchDrafts = new FlowBatchDrafts();
 flowJobQueue.subscribe((snapshot, reason) => {
   broadcastFlowQueue(snapshot, reason);
   // Failures during queue preflight happen before the download runner can mark
@@ -1224,15 +1435,6 @@ flowJobQueue.subscribe((snapshot, reason) => {
 void flowJobQueue.ready.then(() => flowJobQueue.resumeRecovered()).catch(error => {
   console.error("[FlowQueue] Could not resume a checkpointed job after worker restart:", error?.message || error);
 });
-function applyBackendEvent(message) {
-  if (message?.type === "event" && message.method === "flow.selectors.sync") {
-    const payload = message.params?.[0];
-    if (payload && typeof payload === "object") {
-      console.log("[Flow MCP] Dynamic selectors sync received from the local MCP host");
-      chrome.storage.local.set({ flow_remote_selectors: payload });
-    }
-  }
-}
 function dispatchCommand(command, sendResult) {
   const commandId = command.id ?? command.request_id ?? command.requestId;
   if (commandId === undefined || commandId === null) throw new Error("Command is missing request id");
@@ -1297,13 +1499,7 @@ chrome.runtime.onStartup.addListener(() => { chrome.alarms.create("flow-mcp-conn
 chrome.alarms.onAlarm.addListener(() => { void connect(); void checkDevExtensionReload(); });
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local" || !changes.bridge) return;
-  clearTimeout(reconnectTimer); reconnectTimer = undefined;
-  stopHttpSession();
-  bridgeTransport = "disconnected";
-  const previousSocket = socket;
-  socket = null;
-  clearInterval(heartbeat);
-  if (previousSocket) previousSocket.close(1000, "Bridge URL changed");
+  bridgeClient.disconnect("Bridge URL changed");
   void connect();
 });
 chrome.runtime.onMessage.addListener((message, _sender, respond) => {
@@ -1328,6 +1524,10 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
         case "flow-queue:add": {
           const source = message.job || {};
           addedJob = await flowJobQueue.add({
+            // Preserve a client-assigned job id: chained submissions name
+            // their jobs up front and reference them from dependsOnId, so
+            // dropping the id would orphan every dependency edge.
+            ...(typeof source.id === "string" && source.id ? { id: source.id } : {}),
             operation: source.operation,
             payload: source.payload,
             label: source.label || source.name,
@@ -1346,6 +1546,7 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
           const source = Array.isArray(message.jobs) ? message.jobs : [];
           const metadata = { source: "extension", ...await captureFlowTargetMetadata() };
           addedJob = await flowJobQueue.addBatch(source.map(job => ({
+            ...(typeof job?.id === "string" && job.id ? { id: job.id } : {}),
             operation: job?.operation,
             payload: job?.payload,
             label: job?.label || job?.name,
@@ -1422,6 +1623,97 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
     })().then(respond).catch(error => respond({
       ok: false,
       error: { code: error?.code || "FLOW_QUEUE_FAILED", message: String(error?.message || error) },
+    }));
+    return true;
+  }
+  if (typeof message?.type === "string" && message.type.startsWith("flow-batch:")) {
+    if (_sender?.id !== chrome.runtime.id || _sender?.tab) {
+      respond({ ok: false, error: { code: "FLOW_BATCH_FORBIDDEN", message: "Batch drafts are available only from the extension UI." } });
+      return;
+    }
+    void (async () => {
+      await flowBatchDrafts.ready;
+      switch (message.type) {
+        case "flow-batch:list":
+          return { ok: true, drafts: await flowBatchDrafts.list() };
+        case "flow-batch:save": {
+          const draft = await flowBatchDrafts.save({ id: message.id, label: message.label, jobs: message.jobs });
+          return { ok: true, draft, drafts: await flowBatchDrafts.list() };
+        }
+        case "flow-batch:remove": {
+          const removed = await flowBatchDrafts.remove(String(message.id || ""));
+          return { ok: true, removed, drafts: await flowBatchDrafts.list() };
+        }
+        case "flow-batch:run": {
+          const draftId = String(message.id || "");
+          if (!flowBatchDrafts.beginRun(draftId)) {
+            throw Object.assign(new Error("This batch draft is already being queued."), { code: "FLOW_BATCH_DRAFT_RUN_IN_PROGRESS" });
+          }
+          try {
+            const draft = await flowBatchDrafts.get(draftId);
+            if (!draft) throw Object.assign(new Error(`No batch draft with id ${message.id}.`), { code: "FLOW_BATCH_DRAFT_NOT_FOUND" });
+            const target = await captureFlowTargetMetadata();
+            const jobs = materializeDraftJobs(draft).map(job => ({
+              ...job,
+              // The current tab/project target wins over any target metadata
+              // stored with the draft: a draft runs here and now.
+              metadata: { source: "extension", ...(job.metadata || {}), ...target },
+            }));
+            let snapshot;
+            let runBatchId = null;
+            if (jobs.length === 1) {
+              const added = await flowJobQueue.add(jobs[0]);
+              runBatchId = added?.batch?.batchId || null;
+              snapshot = await flowJobQueue.snapshot();
+            } else {
+              const added = await flowJobQueue.addBatch(jobs, { batchLabel: draft.label });
+              runBatchId = added[0]?.batch?.batchId || null;
+              snapshot = await flowJobQueue.snapshot();
+            }
+            // Bookkeeping must not misreport a successful enqueue as failed.
+            const updated = await flowBatchDrafts.recordRun(draft.id, runBatchId).catch(() => draft);
+            snapshot = message.autoStart === false || snapshot.isPaused || snapshot.waitingForUser > 0
+              ? snapshot
+              : await flowJobQueue.resume();
+            return { ok: true, draft: updated, drafts: await flowBatchDrafts.list(), ...flowQueueSnapshot(snapshot) };
+          } finally {
+            flowBatchDrafts.endRun(draftId);
+          }
+        }
+        default:
+          throw Object.assign(new Error(`Unsupported batch draft action: ${message.type}`), { code: "FLOW_BATCH_ACTION_UNSUPPORTED" });
+      }
+    })().then(respond).catch(error => respond({
+      ok: false,
+      error: { code: error?.code || "FLOW_BATCH_FAILED", message: String(error?.message || error) },
+    }));
+    return true;
+  }
+  if (typeof message?.type === "string" && message.type.startsWith("flow-media-catalog:")) {
+    // The catalog is written and read by the Flow tab's content scripts
+    // (upload receipts register identities; reference resolution looks them
+    // up) and by extension UI pages. Foreign extensions are rejected, and
+    // a tab sender must be a Flow tab — the same discipline the
+    // flow-queue/flow-batch handlers apply to their senders.
+    if (_sender?.id !== chrome.runtime.id || (_sender?.tab && !flowUrl(_sender.tab.url))) {
+      respond({ ok: false, error: { code: "FLOW_MEDIA_CATALOG_FORBIDDEN", message: "The media catalog is available only to this extension's Flow tabs and UI pages." } });
+      return;
+    }
+    void (async () => {
+      await flowMediaCatalog.ready;
+      switch (message.type) {
+        case "flow-media-catalog:record":
+          return { ok: true, entry: await flowMediaCatalog.record(message.entry || {}) };
+        case "flow-media-catalog:lookup":
+          return { ok: true, entry: await flowMediaCatalog.lookup(message.query || {}) };
+        case "flow-media-catalog:list":
+          return { ok: true, entries: await flowMediaCatalog.list(message.projectId) };
+        default:
+          throw Object.assign(new Error(`Unsupported media catalog action: ${message.type}`), { code: "FLOW_MEDIA_CATALOG_ACTION_UNSUPPORTED" });
+      }
+    })().then(respond).catch(error => respond({
+      ok: false,
+      error: { code: error?.code || "FLOW_MEDIA_CATALOG_FAILED", message: String(error?.message || error) },
     }));
     return true;
   }
@@ -1529,13 +1821,25 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
     return;
   }
   if (message?.type === "flow-mcp:dispatch") {
+    // Dispatch runs an operation directly against the Flow tab, bypassing
+    // the queue (no preflight, no pause state, no retry budget). Like the
+    // flow-batch:* handlers, it is restricted to this extension's own UI
+    // pages; a content script in a tab must never reach it.
+    if (_sender?.id !== chrome.runtime.id || _sender?.tab) {
+      respond({ ok: false, error: { code: "FLOW_DISPATCH_FORBIDDEN", message: "Flow dispatch is available only from the extension UI." } });
+      return true;
+    }
     void (async () => {
       const { operation, payload } = message;
       const command = {
         op: "flowOperation",
         name: operation,
         payload: payload || {},
-        id: "ui-" + Date.now(),
+        // The sequence suffix keeps ids unique for dispatches minted in the
+        // same millisecond; begin/end interactive-request tracking keys off
+        // this id, so a collision would leak the count and stick the
+        // activity overlay on.
+        id: `ui-${Date.now()}-${++uiDispatchSequence}`,
       };
       const result = await execute(null, "flow.dom.execute", [command]);
       respond({ ok: true, value: result });
@@ -1555,13 +1859,7 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
       const activeFlowTab = flowTabs.find(tab => activeTabs.some(active => active.id === tab.id));
       if (activeFlowTab) await adoptFlowTab(activeFlowTab, true);
       else await chooseTab();
-      clearTimeout(reconnectTimer); reconnectTimer = undefined;
-      stopHttpSession();
-      bridgeTransport = "disconnected";
-      const previousSocket = socket;
-      socket = null;
-      clearInterval(heartbeat);
-      if (previousSocket) previousSocket.close(1000, "User reconnect");
+      bridgeClient.disconnect("User reconnect");
       await connect();
       respond({ ok: true });
     })().catch(error => respond({ ok: false, error: String(error?.message || error) }));

@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { validateFlowSceneCapabilities } from "./flow-capabilities.js";
 
 const frameAssetSchema = z.object({
   asset: z.string().trim().min(1).describe("Exact image title in the open Flow project."),
@@ -27,6 +26,8 @@ export const sceneSchema = z.object({
     asset: z.string().trim().min(1).describe("Exact video asset title from flow_assets."),
     start_frame_index: z.number().int().min(0),
     end_frame_index: z.number().int().min(1),
+  }).refine(value => value.end_frame_index > value.start_frame_index, {
+    message: "video_reference needs a nonempty frame range (end_frame_index must exceed start_frame_index).",
   }).optional().describe("Toby-style video reference edit. Uses the exact source video and configured frame range, through Flow's dedicated video_edit_submit RPC."),
   voice: z.string().trim().min(1).max(120).optional().describe("Exact Flow v2 voice name to select as a composer chip for video generation. Not for images or frame mode; this selects Flow's video voice and is separate from TTS narration."),
   reference_images: z
@@ -48,8 +49,9 @@ export const sceneSchema = z.object({
     .optional()
     .describe("Continue the previous scene in this call: its last frame becomes this scene's first frame. Not valid on the first scene or together with first_frame."),
 }).superRefine((scene, context) => {
-  try { validateFlowSceneCapabilities(scene); }
-  catch (error) { context.addIssue({ code: "custom", message: error instanceof Error ? error.message : String(error) }); }
+  // Model capability rules (durations, resolutions, reference caps) are
+  // validated once, by the extension queue's admission preflight, against
+  // the same registry — the backend no longer keeps a second copy.
   if (scene.voice && scene.type !== "video") {
     context.addIssue({ code: "custom", path: ["voice"], message: "Flow voice chips are available for video generation only." });
   }
@@ -58,6 +60,12 @@ export const sceneSchema = z.object({
   }
   if (scene.video_reference && scene.type !== "video") {
     context.addIssue({ code: "custom", path: ["video_reference"], message: "Video-reference editing is only supported for video scenes." });
+  }
+  if (scene.video_reference && (scene.first_frame || scene.last_frame)) {
+    context.addIssue({ code: "custom", path: ["video_reference"], message: "Video-reference editing cannot be combined with first/last frames." });
+  }
+  if (scene.video_reference && scene.reference_images?.length) {
+    context.addIssue({ code: "custom", path: ["video_reference"], message: "Video-reference editing cannot be combined with reference images." });
   }
   if (scene.first_frame && typeof scene.first_frame === "object" && scene.last_frame && typeof scene.last_frame === "object" &&
       scene.first_frame.id.toLowerCase() === scene.last_frame.id.toLowerCase()) {

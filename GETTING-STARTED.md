@@ -171,7 +171,7 @@ Nothing needs to run all the time.
 
 So Flow Studio is only running while your assistant is open, or while its own window is. If the panel says
 *"Not connected"*, start it again. On a Mac, if double-clicking the launcher says it *"can't be opened"*,
-right-click it → **Open**, or run `npm run studio` in the `flow-mcp` folder.
+right-click it → **Open**, or run `npm start` in the `flow-mcp` folder.
 
 ---
 

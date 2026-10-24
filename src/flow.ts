@@ -1,64 +1,17 @@
-import { copyFileSync, mkdirSync, rmSync, statSync } from "node:fs";
-import { basename, dirname, extname, join } from "node:path";
-import type { FrameAssetInput, Job } from "./job-types.js";
+import { copyFileSync, mkdirSync, rmSync } from "node:fs";
+import { dirname, extname, join } from "node:path";
+import type { Job } from "./job-types.js";
 import { executeFlowDom, extensionSupportsCapability } from "./extension.js";
 import { nativeDownloadIds, waitForNativeDownload, downloadNativeResults, extensionOf, materializeNativeDownload, unpackTakes } from "./native-downloads.js";
-import { uploadFlowMediaToProject, getCachedProjectMedia, cacheProjectMedia } from "./flow-transfer.js";
 import type { FlowState, FlowAsset, FlowProject, FlowCharacter, DownloadQuality, MediaKind, NativeMedia, CharacterParams } from "./types.js";
-import { validateFlowSceneCapabilities } from "./flow-capabilities.js";
 
 export type { FlowState, FlowAsset, FlowProject, FlowCharacter, DownloadQuality, MediaKind, NativeMedia, CharacterParams };
 export { characterLook, rememberCharacter, createCharacter, editCharacter } from "./characters.js";
 export { uploadFlowMediaToProject } from "./flow-transfer.js";
 
-export function mapFlowFrameInput(
-  value: FrameAssetInput | undefined,
-  slot: "start" | "end",
-  uploadedAssetByPath: Map<string, string> = new Map(),
-): { assetName: string; slot?: "start" | "end"; expectedId?: string } | undefined {
-  if (!value) return undefined;
-  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  if (typeof value === "object") {
-    if (!value.asset.trim() || !uuidPattern.test(value.id)) {
-      throw Object.assign(new Error("Frame asset inputs require an exact title and a valid Flow media UUID."), {
-        code: "FLOW_FRAME_ID_INVALID", retryable: false, outcome_unknown: false,
-      });
-    }
-    return { assetName: value.asset.trim(), expectedId: value.id.toLowerCase() };
-  }
-  if (/^asset:/i.test(value)) return { assetName: value.slice(ASSET_PREFIX.length).trim() };
-  const assetName = uploadedAssetByPath.get(value);
-  if (!assetName) throw new Error(`No staged Flow asset was recorded for local frame input: ${basename(value)}`);
-  return { assetName, slot };
-}
-
 const IMAGE_TIMEOUT_MS = 3 * 60_000;
 const VIDEO_TIMEOUT_MS = 12 * 60_000;
-const ASSET_PREFIX = "asset:";
-const flowMediaUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-/** Bind named asset references to the exact UUID returned by Flow's library read. */
-export function bindFlowReferenceIds(references: string[], assets: FlowAsset[]): Array<string | { assetName: string; expectedId: string }> {
-  return references.map(value => {
-    if (/^character:/i.test(value) || !/^asset:/i.test(value)) return value;
-    const name = value.slice(ASSET_PREFIX.length).trim();
-    const matches = assets.filter(asset => asset.kind === "image" && asset.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase());
-    if (matches.length !== 1) {
-      throw Object.assign(new Error(matches.length
-        ? `The exact image asset title "${name}" is duplicated in the Flow library; no reference was selected.`
-        : `No exact image asset titled "${name}" was returned by Flow's library read; no reference was selected.`), {
-        code: matches.length ? "FLOW_ASSET_AMBIGUOUS" : "FLOW_ASSET_NOT_FOUND", retryable: false, outcome_unknown: false,
-      });
-    }
-    const id = matches[0].id;
-    if (!id || !flowMediaUuid.test(id)) {
-      throw Object.assign(new Error(`Flow did not return a stable UUID for image asset "${name}"; no reference was selected.`), {
-        code: "FLOW_ASSET_ID_UNAVAILABLE", retryable: false, outcome_unknown: false,
-      });
-    }
-    return { assetName: name, expectedId: id.toLowerCase() };
-  });
-}
 const nativeJobTargets = new WeakMap<object, NativeFlowTarget>();
 type NativeFlowTarget = { driverKey: string; origin: string; projectId: string | null; routePrefix: string; isProjectEditor: boolean; tabId: number };
 
@@ -165,151 +118,6 @@ export async function openFlowProject(projectId: string, language?: string): Pro
 
 export async function listFlowVoiceOptions(): Promise<{ voices: string[]; count: number; source: string; readOnly: true }> {
   return nativeOperation("flow.voices.options", {}, "flow.native.voices.options", undefined, 35_000);
-}
-
-export async function runGeneration(job: Job): Promise<string[]> {
-  const s = job.params;
-  validateFlowSceneCapabilities(s);
-  const refs = s.reference_images ?? [];
-  const framesMode = s.type === "video" && Boolean(s.first_frame || s.last_frame);
-  // Frames and references are mutually exclusive in Flow. When frames are present,
-  // keep the frame inputs and ignore references before validating or uploading them.
-  const activeRefs = framesMode ? [] : refs;
-  const isAssetReference = (value: string) => typeof value === "string" && /^asset:/i.test(value);
-  const isCharacterReference = (value: string) => /^character:/i.test(value);
-  const localFileSupported = (file?: string) => {
-    if (!file || isAssetReference(file) || isCharacterReference(file)) return true;
-    try {
-      const info = statSync(file);
-      return [".png", ".jpg", ".jpeg", ".webp", ".gif", ".heic", ".heif", ".avif"].includes(extname(file).toLowerCase()) && info.isFile() && info.size > 0 && info.size <= 25 * 1024 * 1024;
-    } catch { return false; }
-  };
-  const frameInputSupported = (file?: FrameAssetInput) => !file || (typeof file === "object"
-    ? Boolean(file.asset.trim() && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(file.id))
-    : !isCharacterReference(file) && localFileSupported(file));
-  if ((!framesMode && (refs.length > 3 || !activeRefs.every(localFileSupported))) || !frameInputSupported(s.first_frame) || !frameInputSupported(s.last_frame)) {
-    throw Object.assign(new Error("Generation accepts up to three references and PNG/JPG/JPEG/WebP/GIF/HEIC/HEIF/AVIF local inputs up to 25 MiB each."), { code: "NATIVE_CAPABILITY_UNSUPPORTED", retryable: true });
-  }
-  requireCapabilities(
-    "flow.native.generation.submit", "flow.native.generation.observe", "flow.native.asset.download",
-  );
-  if (activeRefs.length) requireCapabilities("flow.native.references.attach");
-  const localInputs = [
-    ...(typeof s.first_frame === "string" && !isAssetReference(s.first_frame) ? [{ path: s.first_frame, slot: "start" }] : []),
-    ...(typeof s.last_frame === "string" && !isAssetReference(s.last_frame) ? [{ path: s.last_frame, slot: "end" }] : []),
-    ...activeRefs.flatMap((file, index) => isAssetReference(file) || isCharacterReference(file) ? [] : [{ path: file, slot: `ref${index + 1}` }]),
-  ];
-  if (localInputs.length) requireCapabilities("flow.native.generation.upload.preflight");
-
-  // Pre-upload all local reference/frame files so they become project assets on Flow FIRST
-  const uploadedAssetByPath = new Map<string, string>();
-  if (localInputs.length) {
-    const target = await nativeTarget(job);
-    const projectId = target.projectId || "default";
-    for (const { path: filePath } of localInputs) {
-      if (!uploadedAssetByPath.has(filePath)) {
-        const cached = getCachedProjectMedia(projectId, filePath);
-        if (cached) {
-          uploadedAssetByPath.set(filePath, cached.name);
-          continue;
-        }
-        job.note = `Uploading reference "${basename(filePath)}" to Flow project...`;
-        const uploaded = await uploadFlowMediaToProject(filePath, job);
-        cacheProjectMedia(projectId, filePath, uploaded);
-        uploadedAssetByPath.set(filePath, uploaded.name);
-      }
-    }
-  }
-
-  const frame = (value?: FrameAssetInput, slot: "start" | "end" = "start") => mapFlowFrameInput(value, slot, uploadedAssetByPath);
-
-  let boundAssetReferences: Array<string | { assetName: string; expectedId: string }> = activeRefs;
-  if (activeRefs.some(isAssetReference)) {
-    const assets = await nativeOperation<FlowAsset[]>("flow.assets.list", {}, "flow.native.assets.list", job, 90_000);
-    boundAssetReferences = bindFlowReferenceIds(activeRefs, assets);
-  }
-  const attachments = boundAssetReferences.map((value, index) => typeof value !== "string" ? value : isCharacterReference(value) ? { assetName: value }
-    : isAssetReference(value)
-    ? { assetName: value.slice(ASSET_PREFIX.length).trim() }
-    : { assetName: uploadedAssetByPath.get(value)!, slot: `ref${index + 1}` });
-
-  if (framesMode && refs.length) {
-    job.note = [job.note, `first/last frames were set, so ${refs.length} reference image(s) were skipped — Flow allows one or the other.`].filter(Boolean).join(" · ");
-  }
-
-  function normalizeAspectRatio(input?: string): string | undefined {
-    if (!input) return undefined;
-    const lower = String(input).trim().toLowerCase();
-    const map: Record<string, string> = {
-      "9:16": "9:16", "dọc": "9:16", "doc": "9:16", "story": "9:16", "portrait": "9:16", "vertical": "9:16",
-      "16:9": "16:9", "ngang": "16:9", "widescreen": "16:9", "landscape": "16:9", "horizontal": "16:9",
-      "1:1": "1:1", "vuông": "1:1", "vuong": "1:1", "square": "1:1",
-      "4:3": "4:3", "3:4": "3:4", "21:9": "21:9"
-    };
-    return map[lower] || input;
-  }
-  const normalizedRatio = normalizeAspectRatio(s.aspect_ratio);
-
-  const submitted = await nativeOperation<{ submitted: boolean; requestDispatched?: boolean; serverAcceptanceObserved?: boolean; before: string[]; type: MediaKind; expectedCount: number; credits?: number | null; correlationAttemptId?: string }>("flow.generation.submit", {
-    prompt: s.prompt, type: s.type, model: s.model, aspectRatio: normalizedRatio, duration: s.duration,
-    resolution: s.resolution, variants: s.variants, ...(s.type === "video" ? { maxCredits: s.max_credits } : {}),
-    ...(s.voice ? { voice: s.voice } : {}),
-    submitOnly: s.submit_only === true,
-    firstFrame: frame(s.first_frame, "start"), lastFrame: frame(s.last_frame, "end"), attachments,
-  }, "flow.native.generation.submit", job, 120_000);
-
-  // Persist this receipt before checking quote policy or taking any later path.
-  // A backend restart after this point can report submit_only work as submitted
-  // instead of losing the dispatch evidence with the in-memory Job object.
-  job.requestDispatched = submitted.requestDispatched === true;
-  job.serverAcceptanceObserved = submitted.serverAcceptanceObserved === true;
-  job.persistNow?.();
-  if (!submitted.submitted) {
-    throw Object.assign(new Error("Native Flow submit did not confirm a submitted request; inspect Flow before retrying."), {
-      code: "FLOW_SUBMIT_RECEIPT_INCOMPLETE",
-      retryable: false,
-      outcome_unknown: submitted.requestDispatched === true,
-    });
-  }
-  if (submitted.requestDispatched !== true) {
-    const error = Object.assign(new Error("Flow did not provide correlated evidence that this submit request was dispatched. Inspect Flow before retrying."), {
-      code: "FLOW_SUBMIT_DISPATCH_UNCONFIRMED",
-      retryable: false,
-      outcome_unknown: true,
-    });
-    throw error;
-  }
-  if (s.type === "video") {
-    const quoteVerified = typeof submitted.credits === "number";
-    job.creditQuoteVerified = quoteVerified;
-    if (!quoteVerified) {
-      throw Object.assign(new Error("Flow dispatched the request but did not return its verified credit quote; inspect Flow before retrying."), {
-        code: "FLOW_SUBMIT_RECEIPT_INCOMPLETE",
-        retryable: false,
-        outcome_unknown: true,
-      });
-    }
-    job.credits = submitted.credits!;
-    if (job.credits > s.max_credits) {
-      throw Object.assign(new Error(`Flow dispatched a request quoted at ${job.credits} credits, above max_credits=${s.max_credits}; inspect Flow before retrying.`), {
-        code: "FLOW_MAX_CREDITS_EXCEEDED",
-        retryable: false,
-        outcome_unknown: true,
-      });
-    }
-  }
-  if (s.submit_only) {
-    job.progress = undefined;
-    job.note = "Flow submit request was dispatched; rendering and downloads were not awaited.";
-    return [];
-  }
-  const observed = await nativeOperation<{ media: NativeMedia[] }>("flow.generation.observe", {
-    before: submitted.before, kind: submitted.type, expectedCount: submitted.expectedCount,
-    correlationAttemptId: submitted.correlationAttemptId,
-    timeoutMs: s.type === "image" ? IMAGE_TIMEOUT_MS : VIDEO_TIMEOUT_MS, retries: s.retries ?? 2,
-  }, "flow.native.generation.observe", job, s.type === "image" ? IMAGE_TIMEOUT_MS : VIDEO_TIMEOUT_MS);
-  job.progress = undefined;
-  return downloadNativeResults(observed.media, s.output_dir, s.file_stem, s.download_quality ?? "original", job);
 }
 
 export async function attachReferences(references: string[], inspectOnly = false): Promise<unknown> {

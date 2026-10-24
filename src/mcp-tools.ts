@@ -1,7 +1,25 @@
 import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
 import { shapes, type Core } from "./core.js";
 import { PLAYBOOK } from "./playbook.js";
+
+export type Task = { task_id: string; tool: string; started: string; status: "running" | "done" | "failed"; result?: unknown; error?: string };
+
+// Slow-call results are kept so flow_wait/flow_status can answer for them,
+// but a long-lived MCP process must not accumulate every result forever:
+// beyond the cap the oldest entries are evicted (Map order is insertion
+// order). An evicted id is later answered like a restarted process's id —
+// its answer is gone, and flow_wait says so instead of inventing one.
+export const MAX_RETAINED_TASKS = 100;
+export function retainTask(map: Map<string, Task>, task: Task): void {
+  map.set(task.task_id, task);
+  while (map.size > MAX_RETAINED_TASKS) {
+    const oldest = map.keys().next().value as string | undefined;
+    if (oldest === undefined) break;
+    map.delete(oldest);
+  }
+}
 
 export function createFlowMcpServer(core: Core, studio?: string): McpServer {
 const server = new McpServer({ name: "flow-mcp", version: "0.2.0" });
@@ -24,7 +42,6 @@ const reply = async (work: Promise<unknown>, extra: object = {}): Promise<ToolRe
 // FLOW_MCP_PATIENCE_MS lowers it for an app with a shorter limit (and lets a test reach the slow path quickly).
 const PATIENCE_MS = Number(process.env.FLOW_MCP_PATIENCE_MS ?? 45_000);
 const WAIT_MS = Math.max(5_000, PATIENCE_MS - 5_000);
-type Task = { task_id: string; tool: string; started: string; status: "running" | "done" | "failed"; result?: unknown; error?: string };
 const tasks = new Map<string, Task>();
 
 const patient = async (tool: string, work: Promise<unknown>): Promise<unknown> => {
@@ -44,7 +61,7 @@ const patient = async (tool: string, work: Promise<unknown>): Promise<unknown> =
   const first = await Promise.race([settled.then(() => "settled" as const), late]);
   clearTimeout(timer);
   if (first === "settled") return work;
-  tasks.set(task.task_id, task);
+  retainTask(tasks, task);
   return {
     still_working: true,
     task_id: task.task_id,
@@ -153,6 +170,35 @@ server.registerTool(
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },
   (args) => reply(core.generate(args)),
+);
+
+// The chatgpt_generate input shape lives here, not in schemas.ts: the
+// generic HTTP bridge validates against schemas, and this surface is
+// MCP-only for now (the Core method is an optional interface member —
+// RemoteCore does not forward it yet).
+const chatgptGenerateShape = {
+  project: z.string().min(1).describe("Folder name for the downloaded images, e.g. 'ChatGPTArt'."),
+  prompt: z.string().min(1).describe("Image prompt for ChatGPT. Image generation only; there is no text-task mode."),
+  file_stem: z.string().min(1).optional().describe("Base file name for the downloaded images. Default 'chatgpt-01'; pass a distinct stem per call into the same project so later calls do not reuse the same names."),
+  ratio: z.string().min(1).optional().describe("Aspect ratio spelling or label, e.g. '16:9' or 'square'. Normalized against the ChatGPT capability registry by the extension; unsupported spellings are rejected by the queue preflight."),
+  model: z.string().min(1).optional().describe("ChatGPT image model label. Omitted keeps the provider default."),
+  conversation_id: z.string().min(1).optional().describe("Continue an existing ChatGPT conversation instead of starting a new one."),
+  refs: z.array(z.record(z.string(), z.unknown())).max(10).optional().describe("Reference images as payload records (base64, dataUrl or bytes fields). Uploaded references only: bare library or tile ids carry no payload and are rejected by the queue preflight."),
+  timeout_ms: z.number().int().min(1).max(1_800_000).optional().describe("Generation timeout in milliseconds."),
+};
+
+server.registerTool(
+  "chatgpt_generate",
+  {
+    title: "Generate an image with ChatGPT",
+    description:
+      "Queue one ChatGPT image generation in the signed-in ChatGPT tab (a separate provider from Flow: no project, no credits — the job view always reports credits as null). Returns the queued job immediately; use flow_wait or flow_status for the result and the downloaded file paths, and flow_cancel to cancel a job that has not started. Reference images must be payload records (base64/dataUrl/bytes); library or tile ids are not accepted.",
+    inputSchema: chatgptGenerateShape,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  },
+  (args) => reply(core.chatgpt_generate
+    ? core.chatgpt_generate(args)
+    : Promise.reject(new Error("chatgpt_generate is not available in this process: the relay core (RemoteCore) does not forward it yet. Run chatgpt_generate against the owner process."))),
 );
 
 server.registerTool(

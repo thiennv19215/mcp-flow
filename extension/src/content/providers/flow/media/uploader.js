@@ -53,6 +53,30 @@
     });
   }
 
+  // Byte size a library tile exposes for its underlying file, when Flow puts
+  // one in the DOM. Only plain byte counts in file-size attributes count as
+  // evidence; anything else (dimensions, labels) is not comparable.
+  function flowUploadTileFileSize(tile) {
+    if (!tile) return null;
+    const readSize = el => {
+      if (!el || typeof el.getAttribute !== "function") return null;
+      for (const attribute of ["data-file-size", "data-filesize", "data-size-bytes", "data-byte-size", "data-content-length"]) {
+        const raw = el.getAttribute(attribute);
+        if (raw === null || raw === undefined) continue;
+        const text = String(raw).trim().replace(/,/g, "");
+        if (!/^\d+(?:\s*(?:b|bytes))?$/i.test(text)) continue;
+        const value = Number(text.replace(/[^0-9]/g, ""));
+        if (Number.isSafeInteger(value) && value > 0) return value;
+      }
+      return null;
+    };
+    const own = readSize(tile);
+    if (own !== null) return own;
+    try {
+      return readSize(tile.querySelector?.("img,video,flow-image-tile,flow-video-tile,flow-scene-tile"));
+    } catch { return null; }
+  }
+
   function flowUploadTileKind(tile) {
     if (!tile) return null;
     if (tile.querySelector("flow-scene-tile")) return "scene";
@@ -406,10 +430,273 @@
     throw error;
   }
 
+  // Deterministic content-derived upload identity (IMG-01). A staged file is
+  // dispatched under a synthetic name derived from a digest over (a fixed
+  // salt, the caller key, the MIME type, and the SHA-256 of the file bytes),
+  // formatted as a UUID-shaped token with the original extension. Flow names
+  // the new tile after the dispatched file, so every tile match, reuse check
+  // and confirmation that keys off this name is content-exact by
+  // construction: the same file + caller key always derives the same name,
+  // and different bytes can never derive the same name — name+size collisions
+  // between genuinely different files stop mattering. Files whose bytes
+  // cannot be read (legacy plain-object callers) get no identity and keep
+  // the historical name-based behavior untouched.
+  const FLOW_UPLOAD_IDENTITY_SALT = "flow-mcp:upload-identity:v1";
+  const flowUploadIdentityCache = new WeakMap();
+
+  async function flowUploadSha256Hex(data) {
+    const subtle = root.crypto?.subtle;
+    if (!subtle?.digest) return null;
+    let buffer = data;
+    if (typeof data === "string") {
+      if (typeof root.TextEncoder !== "function") return null;
+      buffer = new root.TextEncoder().encode(data);
+    }
+    const digest = await subtle.digest("SHA-256", buffer);
+    return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
+  }
+
+  function flowUploadIdentityExtension(file) {
+    const fromName = String(file?.name || "").match(/\.(png|jpe?g|webp|gif|heic|heif|avif|mp4|m4v|mov|webm|avi|mkv|3gp)$/i);
+    if (fromName) return `.${fromName[1].toLowerCase()}`;
+    const byMime = {
+      "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif",
+      "video/mp4": ".mp4", "video/webm": ".webm", "video/quicktime": ".mov",
+    };
+    return byMime[String(file?.type || "").toLowerCase()] || "";
+  }
+
+  async function computeFlowUploadIdentity(file, callerKey) {
+    try {
+      if (!file || typeof file !== "object" || typeof file.arrayBuffer !== "function") return null;
+      if (typeof root.File !== "function" || !root.crypto?.subtle?.digest) return null;
+      const bytesHash = await flowUploadSha256Hex(await file.arrayBuffer());
+      if (!bytesHash) return null;
+      const key = String(callerKey || file.name || "");
+      const digest = await flowUploadSha256Hex([FLOW_UPLOAD_IDENTITY_SALT, key, String(file.type || ""), bytesHash].join("\n"));
+      if (!digest) return null;
+      const uploadName = `${digest.slice(0, 8)}-${digest.slice(8, 12)}-${digest.slice(12, 16)}-${digest.slice(16, 20)}-${digest.slice(20, 32)}${flowUploadIdentityExtension(file)}`;
+      return { uploadName, bytesHash, digest };
+    } catch {
+      return null;
+    }
+  }
+
+  // Hashed at most once per (staged file, caller key); the cache lives on
+  // the file object itself, so every upload path that fetches the staged
+  // file from stagedNativeFiles shares the one computation.
+  function flowUploadIdentity(file, callerKey) {
+    if (!file || typeof file !== "object") return Promise.resolve(null);
+    let byKey = flowUploadIdentityCache.get(file);
+    if (!byKey) {
+      byKey = new Map();
+      flowUploadIdentityCache.set(file, byKey);
+    }
+    const cacheKey = String(callerKey || "");
+    if (!byKey.has(cacheKey)) byKey.set(cacheKey, computeFlowUploadIdentity(file, callerKey));
+    return byKey.get(cacheKey);
+  }
+
+  // IMG-02: dispatched-but-unconfirmed upload attempts, keyed by
+  // (project, content-derived upload name). When an upload was dispatched
+  // — Flow accepted the file — but its confirmation was interrupted
+  // (timeout, worker/tab hiccup, an error after dispatch), a retry must
+  // reconcile against the ORIGINAL baseline (the tile set captured before
+  // that dispatch) and confirm the already-present tile instead of
+  // dispatching a duplicate: a fresh baseline would absorb the first
+  // tile, and the retry's confirmation would then latch onto the
+  // duplicate. The map lives next to the upload identity cache because
+  // attempt state is a property of the upload operation, not of the
+  // staged file (stagedNativeFiles is keyed by transfer id and holds
+  // Files). Records exist only for content-identified uploads — the
+  // synthetic upload name is content-exact, so a tile carrying it is
+  // provably this file — and only for this content-script session.
+  // Lifecycle: a record is written at dispatch time, deleted on confirmed
+  // success or when Flow definitively rejected the tile, and dropped when
+  // a reconciliation finds no trace of the tile (the dispatch evidently
+  // never landed, so a real dispatch follows). The map is size-capped
+  // with oldest-first eviction; session lifetime bounds the rest.
+  const FLOW_UPLOAD_ATTEMPT_LIMIT = 50;
+  const flowUploadAttempts = new Map();
+
+  function flowUploadProjectScope() {
+    try {
+      const described = root.ProviderRegistry?.describeUrl?.(root.location?.href || "")
+        || root.FlowDriverRegistry?.describeUrl?.(root.location?.href || "");
+      if (described?.projectId) return `project:${described.projectId}`;
+    } catch {}
+    try { return `url:${String(root.location?.href || "")}`; } catch { return "url:"; }
+  }
+
+  function flowUploadAttemptKey(projectScope, uploadName) {
+    return `${projectScope}\n${uploadName}`;
+  }
+
+  function rememberFlowUploadAttempt(key, attempt) {
+    if (!key) return;
+    flowUploadAttempts.delete(key);
+    flowUploadAttempts.set(key, attempt);
+    while (flowUploadAttempts.size > FLOW_UPLOAD_ATTEMPT_LIMIT) {
+      flowUploadAttempts.delete(flowUploadAttempts.keys().next().value);
+    }
+  }
+
+  // IMG-09: per-upload cancellation. When an upload is named by an
+  // upload request id, uploadStagedMediaInternal registers an
+  // AbortController under that id for the duration of the operation;
+  // cancelFlowUpload aborts exactly that upload (the sidebar's cancel
+  // button for one specific in-flight upload reaches this through the
+  // upload command's request id). Entries are removed as uploads settle;
+  // the cap is only leak insurance for a caller that never settles.
+  const FLOW_UPLOAD_CANCEL_LIMIT = 50;
+  const flowUploadCancellers = new Map();
+
+  function cancelFlowUpload(requestId) {
+    const id = String(requestId || "");
+    if (!id) return false;
+    const controller = flowUploadCancellers.get(id);
+    if (!controller) return false;
+    controller.abort();
+    return true;
+  }
+
+  // IMG-03: rich upload receipts + the background media catalog. At
+  // confirmation time the observer's media-identity metadata can already
+  // map the tile's persistent id (often an `asb:` form) to the canonical
+  // media UUID; resolving it here — instead of at attach time — means the
+  // receipt carries the durable identity bundle (mediaUuid, projectId,
+  // thumbnailUrl) and the asset is registered in the per-project catalog
+  // that later identity resolutions consult before any DOM scan. Every
+  // step degrades silently: no metadata, no background, or a rejected
+  // message leaves the receipt exactly as it was before this item.
+  const FLOW_MEDIA_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  function flowUploadProjectId() {
+    try {
+      return root.location?.pathname?.match(/\/project\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/|$)/i)?.[1]?.toLowerCase() || null;
+    } catch { return null; }
+  }
+
+  async function flowMediaCatalogLookup(query) {
+    try {
+      const sendMessage = root.chrome?.runtime?.sendMessage;
+      if (typeof sendMessage !== "function") return null;
+      const response = await sendMessage.call(root.chrome.runtime, { type: "flow-media-catalog:lookup", query });
+      return response?.ok ? response.entry || null : null;
+    } catch { return null; }
+  }
+
+  function flowMediaCatalogRecord(entry) {
+    try {
+      const sendMessage = root.chrome?.runtime?.sendMessage;
+      if (typeof sendMessage !== "function") return;
+      // Fire-and-forget: registration must never fail or delay an upload.
+      Promise.resolve(sendMessage.call(root.chrome.runtime, { type: "flow-media-catalog:record", entry })).catch(() => {});
+    } catch {}
+  }
+
+  function flowUploadTileThumbnailUrl(tile) {
+    if (!tile) return null;
+    try {
+      const images = typeof tile.querySelectorAll === "function"
+        ? [...tile.querySelectorAll("img")]
+        : [tile.querySelector?.("img")].filter(Boolean);
+      for (const image of images) {
+        const src = image?.currentSrc || (typeof image?.getAttribute === "function" ? image.getAttribute("src") : null) || image?.src || "";
+        if (!src) continue;
+        try {
+          const parsed = new URL(String(src), root.location?.href || "https://flow.google.com/");
+          if (parsed.protocol === "https:") return parsed.href;
+        } catch {}
+      }
+    } catch {}
+    return null;
+  }
+
+  async function enrichFlowUploadReceipt(receipt, kind) {
+    if (!receipt || typeof receipt !== "object") return receipt;
+    const enriched = { ...receipt };
+    const projectId = flowUploadProjectId();
+    if (projectId && !enriched.projectId) enriched.projectId = projectId;
+    let uuid = null;
+    if (typeof enriched.mediaUuid === "string" && FLOW_MEDIA_UUID_PATTERN.test(enriched.mediaUuid)) {
+      uuid = enriched.mediaUuid.toLowerCase();
+    } else if (typeof enriched.id === "string" && FLOW_MEDIA_UUID_PATTERN.test(enriched.id)) {
+      uuid = enriched.id.toLowerCase();
+    }
+    if (!uuid && typeof enriched.id === "string" && enriched.id.startsWith("asb:")) {
+      // A previous upload of this same asset may already have registered
+      // its canonical UUID; the catalog answers without any page work.
+      if (projectId) {
+        const known = await flowMediaCatalogLookup({ projectId, mediaId: enriched.id });
+        if (known?.uuid && FLOW_MEDIA_UUID_PATTERN.test(String(known.uuid))) uuid = String(known.uuid).toLowerCase();
+      }
+      // Otherwise ask the correlation observer's identity channel — the
+      // same bounded probe reference resolution uses at attach time.
+      if (!uuid && typeof root.resolveNativeMediaUuid === "function") {
+        try { uuid = await root.resolveNativeMediaUuid(enriched.id, kind); } catch {}
+        if (uuid && !FLOW_MEDIA_UUID_PATTERN.test(String(uuid))) uuid = null;
+        if (uuid) uuid = String(uuid).toLowerCase();
+      }
+    }
+    if (uuid) enriched.mediaUuid = uuid;
+    if (projectId && (enriched.id || uuid)) {
+      flowMediaCatalogRecord({
+        projectId,
+        mediaId: typeof enriched.id === "string" ? enriched.id : null,
+        uuid,
+        uploadName: typeof enriched.uploadName === "string" ? enriched.uploadName : null,
+        originalName: typeof enriched.originalName === "string" ? enriched.originalName : null,
+        name: typeof enriched.name === "string" ? enriched.name : null,
+        thumbnailUrl: typeof enriched.thumbnailUrl === "string" ? enriched.thumbnailUrl : null,
+        kind: enriched.kind || kind || null,
+      });
+    }
+    return enriched;
+  }
+
+  // IMG-05: upload-confirmation budgets. The base budget is the historical
+  // fixed cap. Once a new-owner tile has latched and is visibly still
+  // processing, the working deadline extends in steps up to the hard cap
+  // (image: a few minutes; video: 8x its base, matching the reference's
+  // hard window) instead of failing FLOW_UPLOAD_TIMEOUT while Flow is
+  // still working on our tile. A caller-provided deadline stays an
+  // absolute cap — extension is armed only when no explicit deadline is
+  // in force — so budgeted callers (IMG-02 reconciliation's bounded
+  // share) keep exactly their old waits.
+  //
+  // IMG-05b: the production flow.media.upload path always passes an op
+  // deadline, so IMG-05's extension never armed there. A caller may now
+  // mark its deadline as an extendable op budget by passing
+  // `extendableTo`: an absolute ceiling the caller has already bounded by
+  // any external (command-level) deadline. The working deadline may then
+  // extend past the caller's deadline while the owner tile processes —
+  // never past extendableTo and never past the hard cap. Callers that do
+  // not pass the hint keep IMG-05's absolute-deadline contract untouched.
+  const FLOW_UPLOAD_CONFIRM_BASE_MS = { image: 90_000, video: 60_000 };
+  const FLOW_UPLOAD_CONFIRM_HARD_MS = { image: 240_000, video: 480_000 };
+  const FLOW_UPLOAD_CONFIRM_EXTENSION_STEP_MS = 15_000;
+
   async function waitForNativeMediaTile(assetName, command, kind, options = {}) {
     const fn = root.flowError || ((c, m, r, o) => Object.assign(new Error(m), { code: c, retryable: r, outcome_unknown: o }));
-    const deadline = Math.min(options.deadline || Infinity, Date.now() + (kind === "video" ? 60_000 : 90_000));
     const startedAt = Date.now();
+    const callerDeadline = Number.isFinite(options.deadline) && options.deadline > 0 ? options.deadline : null;
+    let deadline = Math.min(callerDeadline ?? Infinity, startedAt + (kind === "video" ? FLOW_UPLOAD_CONFIRM_BASE_MS.video : FLOW_UPLOAD_CONFIRM_BASE_MS.image));
+    const hardCeiling = startedAt + (kind === "video" ? FLOW_UPLOAD_CONFIRM_HARD_MS.video : FLOW_UPLOAD_CONFIRM_HARD_MS.image);
+    const extendableTo = Number.isFinite(options.extendableTo) && options.extendableTo > 0 ? options.extendableTo : null;
+    const extensionCeiling = extendableTo !== null
+      ? Math.max(deadline, Math.min(extendableTo, hardCeiling))
+      : callerDeadline !== null ? deadline : hardCeiling;
+    // IMG-09: continuous context guard. The project/route context used
+    // to be evaluated only when the operation started; a mid-confirmation
+    // navigation (the user opens another project, Flow remounts) left
+    // this poll scanning the NEW project's grid, where it could confirm
+    // a same-name tile from the wrong project or burn the whole deadline
+    // and report a misleading timeout. Capture the context here and
+    // re-evaluate it on every iteration below.
+    const guardProjectId = flowUploadProjectId();
+    const guardScope = flowUploadProjectScope();
+    let ownerProcessing = false;
     let nextLibraryScanAt = startedAt + 1_500;
     let libraryScans = 0;
     const maxLibraryScans = Number.isInteger(options.maxLibraryScans) ? Math.max(0, options.maxLibraryScans) : 3;
@@ -424,7 +711,47 @@
     let lastScanErrorCode = null;
     const getMediaId = root.mediaId || (el => el.getAttribute("data-media-id") || el.getAttribute("id") || "");
 
-    while (Date.now() < deadline) {
+    while (Date.now() < deadline || (ownerProcessing && deadline < extensionCeiling)) {
+      // IMG-09: an explicit cancellation anywhere in the wait exits
+      // through the same timeout path as the IMG-05b extension guard
+      // below — not only once the deadline has passed.
+      if (options.signal?.aborted) break;
+      // IMG-09: context guard, re-evaluated every iteration. The upload
+      // was dispatched into the project captured above; if the page has
+      // moved to a different project (or left the project route), this
+      // poll must never confirm a tile here. The error is not retryable
+      // into the new project, and its outcome is unknown because the
+      // dispatched file may still land in the ORIGINAL project — the
+      // IMG-02 attempt record is keyed by that project's scope, so
+      // returning to the original project and retrying reconciles the
+      // earlier dispatch instead of re-uploading. The registry-based
+      // scope comparison additionally catches project switches on URL
+      // shapes the project-id parser does not recognize.
+      const currentProjectId = flowUploadProjectId();
+      const currentScope = flowUploadProjectScope();
+      if ((guardProjectId && currentProjectId !== guardProjectId)
+        || (guardScope.startsWith("project:") && currentScope !== guardScope)) {
+        const contextError = fn("FLOW_UPLOAD_CONTEXT_CHANGED", `The Flow project changed while confirming the uploaded ${kind} "${assetName}" (was ${guardProjectId || guardScope}; now ${currentProjectId || currentScope}). The upload was not confirmed against the new project; return to the original project and retry so the earlier dispatch can be reconciled there.`, false, true);
+        contextError.diagnostics = {
+          contextChanged: true,
+          expectedProjectId: guardProjectId,
+          currentProjectId,
+          expectedScope: guardScope,
+          currentScope,
+          exactTileObserved,
+          newOwnerIdLatched: Boolean(ownerId),
+          scansAttempted: libraryScans,
+        };
+        throw contextError;
+      }
+      if (Date.now() >= deadline) {
+        // IMG-05b: an explicit cancellation wins over the extension — a
+        // caller that aborted must never be kept waiting by extra steps.
+        if (options.signal?.aborted) break;
+        deadline = Math.min(extensionCeiling, Date.now() + FLOW_UPLOAD_CONFIRM_EXTENSION_STEP_MS);
+        root.emitFlowProgress?.(command, `Flow is still processing the uploaded ${kind} "${assetName}"; extending the confirmation deadline (hard cap ${Math.round((extensionCeiling - startedAt) / 1000)}s).`);
+      }
+      ownerProcessing = false;
       const exactNameMatches = [...document.querySelectorAll("flow-grid-tile-container")]
         .filter(item => matchesFlowTile(item, assetName));
       if (exactNameMatches.length) exactTileObserved = true;
@@ -472,10 +799,15 @@
         const identityMatchesOwner = !requireNewOwner || Boolean(ownerId && hasPersistentIdentity && String(identity) === ownerId && isNewOwner);
         const kindMatches = flowUploadKindMatches(kind, actualKind);
         const ready = root.FlowTiles?.isTileMediaReady?.(tile) ?? !root.isTileBusy?.(tile);
+        // IMG-05: the latched owner's tile is present but not ready —
+        // processing evidence that arms the deadline extension above.
+        if (ownerId && String(identity) === ownerId && !ready) ownerProcessing = true;
         if (requireNewOwner && hasPersistentIdentity && !isNewOwner) {
           // Pre-existing tile
         } else if (ready && kindMatches && identityMatchesOwner && hasPersistentIdentity && flowUploadTileNames(tile).some(name => flowUploadNameMatches(name, assetName))) {
-          return { name: flowUploadTileNames(tile).find(name => flowUploadNameMatches(name, assetName)) || assetName, id: identity, kind };
+          const thumbnailUrl = flowUploadTileThumbnailUrl(tile);
+          return { name: flowUploadTileNames(tile).find(name => flowUploadNameMatches(name, assetName)) || assetName, id: identity, kind,
+            ...(thumbnailUrl ? { thumbnailUrl } : {}) };
         }
       }
       if (!tabActivationAttempted && document.visibilityState === "hidden" && Date.now() - startedAt > 5000) {
@@ -524,7 +856,13 @@
               const kindMatches = flowUploadKindMatches(kind, asset.kind);
               const kindUnknown = !asset.kind;
               if (!kindMatches && !kindUnknown) throw fn("FLOW_UPLOAD_KIND_MISMATCH", `Flow's new media ID for "${assetName}" hydrated as ${asset.kind}, not ${kind}. Inspect it before retrying.`, false, true);
-              if (kindMatches && asset.ready === true && asset.busy === false) return { name: asset.name, id: asset.id, kind };
+              // IMG-05: the latched owner asset is still processing —
+              // same extension evidence as the DOM path above.
+              if (!(asset.ready === true && asset.busy === false)) ownerProcessing = true;
+              if (kindMatches && asset.ready === true && asset.busy === false) {
+                const thumbnailUrl = asset.thumbnailUrl || asset.thumbnail || null;
+                return { name: asset.name, id: asset.id, kind, ...(thumbnailUrl ? { thumbnailUrl } : {}) };
+              }
             }
           }
         } catch (error) {
@@ -558,11 +896,68 @@
     throw timeoutErr;
   }
 
+  // IMG-03: every successful upload receipt passes through enrichment —
+  // canonical media UUID, project id, catalog registration — regardless of
+  // which path (fresh dispatch, reconciliation, reuse) produced it.
   async function uploadStagedMedia(file, kind, command, options = {}) {
+    const receipt = await uploadStagedMediaInternal(file, kind, command, options);
+    return enrichFlowUploadReceipt(receipt, kind);
+  }
+
+  // IMG-09: when the caller names the upload — options.uploadRequestId /
+  // options.requestId, or the same fields on the command — the operation
+  // runs under a registered per-upload AbortController whose signal
+  // replaces (and follows) the caller's signal: a caller abort aborts
+  // the upload exactly as before, and a cancel by request id lands
+  // identically downstream, where the confirmation wait's per-iteration
+  // abort check (and every bounded wait that takes the signal) makes it
+  // prompt. Uploads without a request id keep the caller's signal
+  // untouched — no behavior change.
+  async function uploadStagedMediaInternal(file, kind, command, options = {}) {
+    const uploadRequestId = String(
+      options.uploadRequestId || options.requestId || command?.uploadRequestId || command?.requestId || "",
+    ).trim();
+    if (!uploadRequestId || typeof AbortController !== "function") {
+      return uploadStagedMediaCore(file, kind, command, options);
+    }
+    const controller = new AbortController();
+    flowUploadCancellers.delete(uploadRequestId);
+    flowUploadCancellers.set(uploadRequestId, controller);
+    while (flowUploadCancellers.size > FLOW_UPLOAD_CANCEL_LIMIT) {
+      flowUploadCancellers.delete(flowUploadCancellers.keys().next().value);
+    }
+    const callerSignal = options.signal || null;
+    const onCallerAbort = () => controller.abort();
+    if (callerSignal?.aborted) controller.abort();
+    else callerSignal?.addEventListener?.("abort", onCallerAbort, { once: true });
+    try {
+      return await uploadStagedMediaCore(file, kind, command, { ...options, signal: controller.signal });
+    } finally {
+      callerSignal?.removeEventListener?.("abort", onCallerAbort);
+      if (flowUploadCancellers.get(uploadRequestId) === controller) flowUploadCancellers.delete(uploadRequestId);
+    }
+  }
+
+  async function uploadStagedMediaCore(file, kind, command, options = {}) {
     const fn = root.flowError || ((c, m, r, o) => Object.assign(new Error(m), { code: c, retryable: r, outcome_unknown: o }));
+    const uploadStartedAt = Date.now();
     const deadline = options.deadline || root.FlowUiDeadline?.makeDeadline(command, 75_000, 15_000) || Date.now() + 60_000;
     const checkTime = (operation, outcomeUnknown = false) => root.FlowUiDeadline?.requireTime(deadline, operation, outcomeUnknown, options.signal);
     checkTime("starting the Flow media upload");
+
+    // IMG-01: derive the content-exact upload identity before any tile
+    // matching or dispatch. When an identity exists, matching keys off the
+    // synthetic upload name (never the user-facing original name) and the
+    // file is dispatched under that name so Flow's tile carries it; receipts
+    // keep the original name for callers and add uploadName/originalName.
+    const identity = await flowUploadIdentity(file, options.callerKey);
+    const matchName = identity ? identity.uploadName : file.name;
+    const identityFields = identity ? { uploadName: identity.uploadName, originalName: file.name } : {};
+    const dispatchFile = identity ? new root.File([file], identity.uploadName, { type: file.type || "" }) : file;
+    // IMG-02: only content-identified uploads carry an attempt record —
+    // the synthetic upload name is content-exact, so reconciliation can
+    // never latch onto a different file's tile.
+    const attemptKey = identity ? flowUploadAttemptKey(flowUploadProjectScope(), identity.uploadName) : null;
 
     const scroller = root.FlowTiles?.flowMediaGridScrollContainer?.() || root.flowMediaGridScrollContainer?.() || null;
     if (scroller && scroller.scrollTop > 5) {
@@ -570,48 +965,127 @@
       await root.FlowUiDeadline?.boundedWait(150, deadline, "scrolling to the Flow composer", false, options.signal);
     }
 
-    const existingTiles = [...document.querySelectorAll("flow-grid-tile-container")].filter(item => matchesFlowTile(item, file.name));
+    // IMG-02: a previous call in this session may have dispatched this
+    // exact file and lost its confirmation. Reconcile first, against the
+    // ORIGINAL baseline stored with the attempt: the tile that dispatch
+    // created is new against that baseline, so the strict new-owner
+    // confirmation below can latch it — while ambiguity (more than one
+    // new tile with this content-exact name) fails closed exactly like a
+    // fresh confirmation. Reconciliation gets a bounded share of the
+    // remaining deadline so a no-trace outcome still leaves budget for
+    // the real dispatch it falls through to.
+    if (attemptKey) {
+      const priorAttempt = flowUploadAttempts.get(attemptKey);
+      if (priorAttempt) {
+        const reconcileBudgetMs = Math.max(2_000, Math.floor((deadline - Date.now()) / 3));
+        const reconcileDeadline = Math.min(deadline, Date.now() + reconcileBudgetMs);
+        try {
+          const confirmed = await waitForNativeMediaTile(matchName, command, kind, {
+            deadline: reconcileDeadline, signal: options.signal,
+            baselineIds: priorAttempt.baselineIds, requireNewOwner: true,
+            selectionDiagnostics: priorAttempt.selectionDiagnostics,
+          });
+          flowUploadAttempts.delete(attemptKey);
+          root.emitFlowProgress?.(command, `Reconciled the earlier dispatched Flow ${kind} upload "${file.name}" as media ID ${confirmed.id}; no duplicate upload was dispatched.`);
+          return { ...confirmed, uploaded: true, name: file.name, kind, ...identityFields, reconciled: true };
+        } catch (error) {
+          if (error?.code === "FLOW_UPLOAD_REJECTED") {
+            // The dispatched tile is definitively dead. Forget the
+            // attempt so a retry takes the normal path, which surfaces
+            // the same rejection from the tile itself.
+            flowUploadAttempts.delete(attemptKey);
+            throw error;
+          }
+          const noTrace = error?.code === "FLOW_UPLOAD_TIMEOUT"
+            && error.diagnostics?.exactTileObserved !== true
+            && error.diagnostics?.newOwnerIdLatched !== true;
+          if (!noTrace) throw error;
+          // No tile from the earlier dispatch exists in this project:
+          // the dispatch evidently never landed. Forget the attempt and
+          // fall through to the normal reuse/baseline/dispatch flow —
+          // reconciliation must never block a real upload.
+          flowUploadAttempts.delete(attemptKey);
+          root.emitFlowProgress?.(command, `The earlier dispatched upload of "${file.name}" left no tile in this project; uploading it now.`);
+        }
+      }
+    }
+
+    const existingTiles = [...document.querySelectorAll("flow-grid-tile-container")].filter(item => matchesFlowTile(item, matchName));
+    // A matching name alone does not prove a tile is the staged file: camera
+    // exports and repeated downloads routinely collide on names like
+    // IMG_1234.png, and reusing the wrong tile silently generates from the
+    // wrong reference. When the staged size is known (production staged
+    // files are real Files), a tile is reuse-eligible only when it exposes
+    // the same byte size; a proven mismatch — or no comparable evidence at
+    // all — means "upload instead" (a duplicate tile is recoverable, a
+    // wrong reference is not). Callers whose file carries no size keep the
+    // legacy name-only behavior. With a content identity (IMG-01) the
+    // matched name is the synthetic upload name, which only this exact file
+    // can produce, so a matched tile is content-proven: its size verdict is
+    // "match" by construction and the size evidence below is subsumed.
+    const stagedSize = Number.isSafeInteger(file?.size) && file.size >= 0 ? file.size : null;
     const namedTileDetails = existingTiles.map(tile => {
       const id = typeof root.mediaId === "function" ? root.mediaId(tile) : "";
       const actualKind = flowUploadTileKind(tile);
       const ready = root.FlowTiles?.isTileMediaReady?.(tile) ?? !root.isTileBusy?.(tile);
-      return { tile, id: id && !String(id).startsWith("title:") ? String(id) : null, actualKind, ready,
+      const tileSize = flowUploadTileFileSize(tile);
+      const sizeVerdict = identity ? "match"
+        : stagedSize === null ? "legacy"
+          : tileSize === null ? "unverifiable"
+            : tileSize === stagedSize ? "match" : "mismatch";
+      return { tile, id: id && !String(id).startsWith("title:") ? String(id) : null, actualKind, ready, tileSize, sizeVerdict,
+        reuseEligible: sizeVerdict === "legacy" || sizeVerdict === "match",
         error: Boolean(tile.querySelector("flow-error-tile")) };
     }).filter(Boolean);
-    const matchingKindTiles = namedTileDetails.filter(item => !item.error && (!item.actualKind || flowUploadKindMatches(kind, item.actualKind)));
+    const eligibleDetails = namedTileDetails.filter(item => item.reuseEligible);
+    const eligibleTiles = eligibleDetails.map(item => item.tile);
+    const excludedTiles = namedTileDetails.length - eligibleDetails.length;
+    if (excludedTiles > 0) {
+      root.emitFlowProgress?.(command, `Ignored ${excludedTiles} same-name Flow tile(s) for "${file.name}" whose size does not match the staged file; uploading instead of reusing.`);
+    }
+    const matchingKindTiles = eligibleDetails.filter(item => !item.error && (!item.actualKind || flowUploadKindMatches(kind, item.actualKind)));
     const reusableTiles = matchingKindTiles.filter(item => item.id);
     if (reusableTiles.length) {
       // Use the first exact-title, matching-kind asset in Flow's current grid order and carry its UUID into the picker selection.
       const chosen = reusableTiles.find(item => item.actualKind && item.ready) || reusableTiles[0];
       if (chosen.actualKind && chosen.ready) {
         root.emitFlowProgress?.(command, `Reusing existing Flow ${kind} media ID ${chosen.id} for "${file.name}"; skipped upload.`);
-        return { uploaded: true, name: file.name, kind, id: chosen.id, reused: true };
+        const thumbnailUrl = flowUploadTileThumbnailUrl(chosen.tile);
+        return { uploaded: true, name: file.name, kind, id: chosen.id, ...identityFields, reused: true,
+          ...(thumbnailUrl ? { thumbnailUrl } : {}) };
       }
-      const confirmed = await waitForNativeMediaTile(file.name, command, kind, { deadline, signal: options.signal, expectedId: chosen.id });
+      const confirmed = await waitForNativeMediaTile(matchName, command, kind, { deadline, signal: options.signal, expectedId: chosen.id });
       root.emitFlowProgress?.(command, `Reusing existing Flow ${kind} media ID ${confirmed.id} for "${file.name}" after readiness confirmation; skipped upload.`);
-      return { ...confirmed, uploaded: true, name: file.name, kind, reused: true };
+      return { ...confirmed, uploaded: true, name: file.name, kind, ...identityFields, reused: true };
     }
-    if (existingTiles.length === 1) {
-      if (existingTiles[0].querySelector("flow-error-tile")) {
-        throw fn("FLOW_UPLOAD_REJECTED", `Flow already has an error tile for "${file.name}". Inspect it before retrying.`, false, true);
+    // The name-only branches below confirm by title alone, so they may run
+    // only when every same-name tile is reuse-eligible. If any tile was
+    // excluded on size evidence, fall through to a fresh upload instead: the
+    // baseline + requireNewOwner confirmation further down accepts only a
+    // genuinely new tile, never one of the excluded ones.
+    if (eligibleTiles.length && eligibleTiles.length === namedTileDetails.length) {
+      if (eligibleTiles.length === 1) {
+        if (eligibleTiles[0].querySelector("flow-error-tile")) {
+          throw fn("FLOW_UPLOAD_REJECTED", `Flow already has an error tile for "${file.name}". Inspect it before retrying.`, false, true);
+        }
+        const actualKind = assertReusableFlowUploadKind(eligibleTiles[0], file.name, kind);
+        if (actualKind && !flowUploadKindMatches(kind, actualKind)) throw fn("FLOW_UPLOAD_KIND_MISMATCH", `Flow already has a ${actualKind} tile named "${file.name}", not the requested ${kind}. No upload was started.`, false, false);
+        const confirmed = await waitForNativeMediaTile(matchName, command, kind, { deadline, signal: options.signal });
+        return { uploaded: true, name: file.name, kind, id: confirmed.id, ...identityFields, reused: true };
       }
-      const actualKind = assertReusableFlowUploadKind(existingTiles[0], file.name, kind);
-      if (actualKind && !flowUploadKindMatches(kind, actualKind)) throw fn("FLOW_UPLOAD_KIND_MISMATCH", `Flow already has a ${actualKind} tile named "${file.name}", not the requested ${kind}. No upload was started.`, false, false);
-      const confirmed = await waitForNativeMediaTile(file.name, command, kind, { deadline, signal: options.signal });
-      return { uploaded: true, name: file.name, kind, id: confirmed.id, reused: true };
-    }
-    if (existingTiles.length > 1) {
-      const knownKinds = existingTiles.map(flowUploadTileKind).filter(Boolean);
-      if (knownKinds.length === existingTiles.length && !knownKinds.some(actualKind => flowUploadKindMatches(kind, actualKind))) {
-        throw fn("FLOW_UPLOAD_KIND_MISMATCH", `Flow has tiles named "${file.name}", but none are ${kind} media. No upload was started.`, false, false);
+      if (eligibleTiles.length > 1) {
+        const knownKinds = eligibleTiles.map(flowUploadTileKind).filter(Boolean);
+        if (knownKinds.length === eligibleTiles.length && !knownKinds.some(actualKind => flowUploadKindMatches(kind, actualKind))) {
+          throw fn("FLOW_UPLOAD_KIND_MISMATCH", `Flow has tiles named "${file.name}", but none are ${kind} media. No upload was started.`, false, false);
+        }
+        if (matchingKindTiles.length) {
+          throw fn("FLOW_UPLOAD_ID_UNAVAILABLE", `Flow already has media tiles named "${file.name}", but none exposes a stable ID that can be selected safely. No duplicate upload was started.`, true, false);
+        }
+        if (eligibleDetails.every(item => item.error)) {
+          throw fn("FLOW_UPLOAD_REJECTED", `All Flow tiles named "${file.name}" are in an error state. No duplicate upload was started.`, false, true);
+        }
+        throw fn("FLOW_UPLOAD_ID_UNAVAILABLE", `Flow has multiple tiles named "${file.name}", but their media IDs or types are not sufficient to choose an existing ${kind} asset safely. No duplicate upload was started.`, true, false);
       }
-      if (matchingKindTiles.length) {
-        throw fn("FLOW_UPLOAD_ID_UNAVAILABLE", `Flow already has media tiles named "${file.name}", but none exposes a stable ID that can be selected safely. No duplicate upload was started.`, true, false);
-      }
-      if (namedTileDetails.every(item => item.error)) {
-        throw fn("FLOW_UPLOAD_REJECTED", `All Flow tiles named "${file.name}" are in an error state. No duplicate upload was started.`, false, true);
-      }
-      throw fn("FLOW_UPLOAD_ID_UNAVAILABLE", `Flow has multiple tiles named "${file.name}", but their media IDs or types are not sufficient to choose an existing ${kind} asset safely. No duplicate upload was started.`, true, false);
     }
 
     let baselineAssets;
@@ -740,6 +1214,21 @@
     const selectionDiagnostics = { filePickerSelectionConfirmed: false, pickerMethod: "unknown", pickerType: "unknown", dropAttempted: false, dropReceiptConfirmed: false,
       confirmationDialogSeen: false, confirmationButtonClicked: false, confirmationDialogUnrecognized: false };
 
+    // IMG-02: once the file has been dispatched — or the dispatch outcome
+    // is unknown — record the attempt against the baseline captured above,
+    // so an interrupted confirmation can be reconciled by a later call
+    // instead of re-dispatching. Last write wins: the post-dispatch call
+    // snapshots the final selection diagnostics.
+    const rememberAttempt = () => {
+      if (!attemptKey) return;
+      rememberFlowUploadAttempt(attemptKey, {
+        baselineIds: [...baselineIds],
+        selectionDiagnostics: { ...selectionDiagnostics },
+        dispatchedAt: Date.now(),
+        kind,
+      });
+    };
+
     if (!uploadButton) {
       const controls = uploadControlDiagnostics();
       root.emitFlowProgress?.(command, `Upload trigger unavailable; composer controls: ${JSON.stringify(controls).slice(0, 2200)}`);
@@ -773,7 +1262,7 @@
         throw error;
       } else {
         try {
-          const pickerReceipt = await root.FlowNativeFileTransfer.selectFileThroughPicker(file, async () => {
+          const pickerReceipt = await root.FlowNativeFileTransfer.selectFileThroughPicker(dispatchFile, async () => {
             checkTime("opening Flow's file picker");
             if (!uploadItem?.isConnected || !isVisible(uploadItem)) {
               await switchUploadCategoryTab(menuRoots());
@@ -785,21 +1274,50 @@
           selectionDiagnostics.filePickerSelectionConfirmed = pickerReceipt?.selected === true;
           selectionDiagnostics.pickerMethod = safeFlowPickerMethod(pickerReceipt?.method);
           selectionDiagnostics.pickerType = safeFlowPickerType(pickerReceipt?.type);
-          root.emitFlowProgress?.(command, `Flow's scoped Upload picker confirmed ${file.name} via ${pickerReceipt.method || "Flow file input"}`);
+          root.emitFlowProgress?.(command, `Flow's scoped Upload picker confirmed ${dispatchFile.name} via ${pickerReceipt.method || "Flow file input"}`);
         } catch (error) {
-          if (error?.outcome_unknown || error?.code === "FLOW_UPLOAD_PICKER_OUTCOME_UNKNOWN") throw error;
-          if (error?.code === "FLOW_OPERATION_TIMEOUT") throw error;
-          console.warn(`[Flow MCP upload] File-picker trap failed before selection (${String(error?.message || error)}); falling back to drag-and-drop for ${kind} "${file.name}".`);
-          selectionDiagnostics.dropAttempted = true;
-          const dropReceipt = await root.FlowNativeFileTransfer.dropFileToFlow(file);
-          selectionDiagnostics.dropReceiptConfirmed = dropReceipt?.dropped === true || dropReceipt?.accepted === true;
+          if (error?.outcome_unknown || error?.code === "FLOW_UPLOAD_PICKER_OUTCOME_UNKNOWN") { rememberAttempt(); throw error; }
+          if (error?.code === "FLOW_OPERATION_TIMEOUT") { rememberAttempt(); throw error; }
+          // IMG-08: the picker trap failed before any selection was made,
+          // so nothing was dispatched. Surface the trap error with its
+          // diagnostics instead of falling back to a drag-and-drop dispatch
+          // whose initiation cannot be verified.
+          throw error;
         }
       }
     }
+    rememberAttempt();
     checkTime("confirming the Flow media upload", true);
     if (kind === "video") Object.assign(selectionDiagnostics, await confirmFlowVideoUploadIfPrompted(deadline, options.signal, selectionDiagnostics));
-    const confirmed = await waitForNativeMediaTile(file.name, command, kind, { deadline, signal: options.signal, baselineIds, requireNewOwner: true, selectionDiagnostics });
-    return { ...confirmed, uploaded: true, name: file.name, kind };
+    let confirmed;
+    try {
+      const confirmOptions = { deadline, signal: options.signal, baselineIds, requireNewOwner: true, selectionDiagnostics };
+      if (options.confirmExtendable === true) {
+        // IMG-05b: the op deadline above stays the budget for every phase
+        // up to here (baseline, menu, picker dispatch). Only this
+        // post-dispatch confirmation may extend past it while the new
+        // owner tile processes — up to the IMG-05 hard cap, and never
+        // past the caller's own command timeout when the command carries
+        // one: that external deadline (and the abort signal, honored by
+        // the wait itself) always wins over the extension.
+        const callerTimeoutMs = Number(command?.timeoutMs ?? command?.timeout_ms);
+        const externalDeadline = Number.isFinite(callerTimeoutMs) && callerTimeoutMs > 0
+          ? uploadStartedAt + callerTimeoutMs
+          : Infinity;
+        confirmOptions.extendableTo = Math.min(
+          Date.now() + (kind === "video" ? FLOW_UPLOAD_CONFIRM_HARD_MS.video : FLOW_UPLOAD_CONFIRM_HARD_MS.image),
+          externalDeadline,
+        );
+      }
+      confirmed = await waitForNativeMediaTile(matchName, command, kind, confirmOptions);
+    } catch (error) {
+      // A definitively rejected tile ends the attempt; any other failure
+      // (timeout, interruption) leaves the record for a reconciling retry.
+      if (attemptKey && error?.code === "FLOW_UPLOAD_REJECTED") flowUploadAttempts.delete(attemptKey);
+      throw error;
+    }
+    if (attemptKey) flowUploadAttempts.delete(attemptKey);
+    return { ...confirmed, uploaded: true, name: file.name, kind, ...identityFields };
   }
 
   /**
@@ -808,6 +1326,12 @@
   class FlowUploader {
     static upload(file, kind, command, options) {
       return uploadStagedMedia(file, kind, command, options);
+    }
+    static uploadIdentity(file, callerKey) {
+      return flowUploadIdentity(file, callerKey);
+    }
+    static cancelUpload(requestId) {
+      return cancelFlowUpload(requestId);
     }
     static findAddMediaButton() {
       return findAddMediaButton();

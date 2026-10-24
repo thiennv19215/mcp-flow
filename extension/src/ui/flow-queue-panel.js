@@ -16,6 +16,10 @@
     retry: "flow-queue:retry",
     retryBatch: "flow-queue:retry-batch",
     download: "flow-queue:download",
+    draftList: "flow-batch:list",
+    draftSave: "flow-batch:save",
+    draftRun: "flow-batch:run",
+    draftRemove: "flow-batch:remove",
   });
 
   const RETRYABLE_OPERATIONS = new Set([
@@ -64,6 +68,8 @@
       autoDownloadLabel: "Tự động tải kết quả về máy",
       editLabel: "Sửa", continueLabel: "Nối tiếp", agentLabel: "Agent", scenes: "cảnh",
       retryBatch: "Thử lại {n} tác vụ lỗi an toàn",
+      saveDraft: "Lưu nháp", draftsTitle: "Batch nháp", draftEmpty: "Chưa có batch nháp nào.",
+      draftMeta: "{n} tác vụ · đã chạy {runs} lần", runDraft: "Chạy", deleteDraft: "Xóa",
     },
     en: {
       aria: "Flow task queue", title: "Flow queue", loading: "Loading…",
@@ -100,6 +106,8 @@
       autoDownloadLabel: "Automatically download results",
       editLabel: "Edit", continueLabel: "Continue", agentLabel: "Agent", scenes: "scenes",
       retryBatch: "Retry {n} safe failed tasks",
+      saveDraft: "Save draft", draftsTitle: "Batch drafts", draftEmpty: "No batch drafts yet.",
+      draftMeta: "{n} tasks · ran {runs} time(s)", runDraft: "Run", deleteDraft: "Delete",
     },
   });
 
@@ -125,6 +133,7 @@
     .flow-queue-panel__items{display:flex;flex-direction:column;gap:7px;max-height:42vh;overflow:auto}
     .flow-queue-panel__item{padding:9px;border:1px solid var(--border,rgba(255,255,255,.1));border-radius:7px;background:var(--card,#292929);min-width:0}
     .flow-queue-panel__label{font-weight:600;overflow-wrap:anywhere}
+    .flow-queue-panel__provider-badge{white-space:nowrap}
     .flow-queue-panel__status{white-space:nowrap;color:var(--text-muted,#8b8b92);font-size:11px}
     .flow-queue-panel__detail{margin-top:4px;color:var(--text-muted,#8b8b92);white-space:pre-wrap;overflow-wrap:anywhere}
     .flow-queue-panel__detail--download-error{color:#f87171}
@@ -156,6 +165,14 @@
 
   function taskIdentity(task, index) {
     return String(task?.id ?? task?.taskId ?? task?.task_id ?? task?.requestId ?? `queue-item-${index}`);
+  }
+
+  // GPT-14: the provider badge is driven ONLY by job.metadata.provider.
+  // Absent/blank -> null -> no badge, and the row keeps today's Flow
+  // presentation; the operation or source never imply a provider.
+  function providerBadgeForTask(task) {
+    const provider = task?.metadata?.provider;
+    return typeof provider === "string" && provider.trim() ? provider.trim() : null;
   }
 
   function progressPercent(task) {
@@ -222,6 +239,7 @@
     }
 
     async refresh() {
+      void this._loadDrafts();
       return this._send(MESSAGE.get);
     }
 
@@ -353,6 +371,10 @@
       }
       const submit = makeElement("button", "", text.submit);
       submit.type = "submit";
+      const saveDraft = makeElement("button", "", text.saveDraft);
+      saveDraft.type = "submit";
+      saveDraft.name = "intent";
+      saveDraft.value = "draft";
       const autoDownloadLabel = makeElement("label", "flow-queue-panel__manual");
       const autoDownloadCheckbox = makeElement("input");
       autoDownloadCheckbox.type = "checkbox";
@@ -369,18 +391,21 @@
       batchCheckbox.type = "checkbox";
       batchCheckbox.name = "batch_mode";
       batchLabel.append(batchCheckbox, makeElement("span", "", text.batchLabel));
-      form.append(input, type, this.assetInput, ratio, refsInput, refMode, refCountWrap, firstFramesInput, lastFramesInput, submit, autoDownloadLabel, manualLabel, batchLabel);
+      form.append(input, type, this.assetInput, ratio, refsInput, refMode, refCountWrap, firstFramesInput, lastFramesInput, submit, saveDraft, autoDownloadLabel, manualLabel, batchLabel);
 
       this.error = makeElement("div", "flow-queue-panel__error");
       this.error.setAttribute("role", "alert");
       this.error.hidden = true;
       this.itemsElement = makeElement("div", "flow-queue-panel__items");
       this.itemsElement.setAttribute("aria-live", "polite");
+      const draftsHeading = makeElement("div", "flow-queue-panel__title", text.draftsTitle);
+      this.draftsElement = makeElement("div", "flow-queue-panel__items");
 
-      panel.append(heading, toolbar, this.attentionBanner, form, this.error, this.itemsElement);
+      panel.append(heading, toolbar, this.attentionBanner, form, this.error, this.itemsElement, draftsHeading, this.draftsElement);
       this.container.replaceChildren(panel);
       this.panel = panel;
       this._syncFields();
+      void this._loadDrafts();
     }
 
     _button(label, action) {
@@ -499,14 +524,22 @@
       item.dataset.flowQueueItem = id;
       const head = makeElement("div", "flow-queue-panel__item-head");
       const label = task?.label ?? task?.title ?? task?.name ?? task?.prompt ?? task?.payload?.prompt ?? task?.job?.label ?? task?.job?.payload?.prompt ?? task?.task?.prompt ?? `Task ${index + 1}`;
-      const source = task?.metadata?.source || (String(label).toLowerCase().includes("ai") || String(label).toLowerCase().includes("mcp") ? "mcp" : "manual");
+      const source = task?.metadata?.source || "manual";
       const sourceBadge = makeElement("span", "flow-queue-panel__badge", source === "mcp" ? this._text("mcp") : this._text("manual"));
       sourceBadge.style.cssText = source === "mcp"
         ? "font-size:10px;padding:2px 6px;border-radius:4px;background:rgba(204,255,0,0.15);color:var(--primary,#ccff00);margin-right:6px;border:1px solid rgba(204,255,0,0.3);font-weight:600"
         : "font-size:10px;padding:2px 6px;border-radius:4px;background:rgba(255,255,255,0.08);color:var(--text-muted,#8b8b92);margin-right:6px;border:1px solid rgba(255,255,255,0.15);font-weight:600";
       const labelContainer = makeElement("span", "flow-queue-panel__label-container");
       labelContainer.style.cssText = "display:flex;align-items:center;min-width:0;overflow:hidden";
-      labelContainer.append(sourceBadge, makeElement("span", "flow-queue-panel__label", label));
+      labelContainer.append(sourceBadge);
+      const provider = providerBadgeForTask(task);
+      if (provider) {
+        const providerBadge = makeElement("span", "flow-queue-panel__provider-badge", provider);
+        providerBadge.dataset.provider = provider;
+        providerBadge.style.cssText = "font-size:10px;padding:2px 6px;border-radius:4px;background:rgba(56,189,248,0.15);color:#38bdf8;margin-right:6px;border:1px solid rgba(56,189,248,0.3);font-weight:600";
+        labelContainer.append(providerBadge);
+      }
+      labelContainer.append(makeElement("span", "flow-queue-panel__label", label));
       const attention = this.snapshot?.attention ?? this.snapshot?.state?.attention;
       const isBlockedTask = ["flow-page-blocked", "flow-outcome-unknown", "flow-dependency-blocked"].includes(attention?.type) && String(attention.jobId || "") === id && String(task?.status || "").toLowerCase() === "failed";
       const status = makeElement("span", `flow-queue-panel__status${isBlockedTask ? " flow-queue-panel__status--attention" : ""}`, isBlockedTask ? this._text("needsAttention") : this._status(task));
@@ -669,15 +702,23 @@
           : [];
         return names.map(assetName => ({ assetName }));
       };
-      let makePayload = (itemPrompt, itemIndex) => ({
-        type, prompt: itemPrompt, aspect_ratio: aspectRatio, variants: 1,
-        attachments: hasFrames ? [] : attachmentsForPrompt(itemIndex),
-        ...(hasFrames ? {
-          ...(firstFrames[itemIndex] ? { firstFrame: { assetName: firstFrames.length === 1 ? firstFrames[0] : firstFrames[itemIndex] } } : {}),
-          ...(lastFrames[itemIndex] ? { lastFrame: { assetName: lastFrames.length === 1 ? lastFrames[0] : lastFrames[itemIndex] } } : {}),
-        } : {}),
-        video_settings: {},
-      });
+      // A single frame line is shared by every prompt; otherwise each prompt
+      // uses its own line. (Reading firstFrames[itemIndex] directly dropped
+      // the shared frame for prompts 2..n because those indexes are undefined.)
+      const frameForPrompt = (frames, itemIndex) => frames[itemIndex] ?? (frames.length === 1 ? frames[0] : undefined);
+      let makePayload = (itemPrompt, itemIndex) => {
+        const firstFrame = hasFrames ? frameForPrompt(firstFrames, itemIndex) : undefined;
+        const lastFrame = hasFrames ? frameForPrompt(lastFrames, itemIndex) : undefined;
+        return {
+          type, prompt: itemPrompt, aspect_ratio: aspectRatio, variants: 1,
+          attachments: hasFrames ? [] : attachmentsForPrompt(itemIndex),
+          ...(hasFrames ? {
+            ...(firstFrame ? { firstFrame: { assetName: firstFrame } } : {}),
+            ...(lastFrame ? { lastFrame: { assetName: lastFrame } } : {}),
+          } : {}),
+          video_settings: {},
+        };
+      };
       let makeLabel = itemPrompt => itemPrompt.slice(0, 96);
       if (type === "edit" || type === "continue") {
         if (!asset) { this._showError(this._text("assetRequired")); return; }
@@ -698,14 +739,60 @@
       const autoDownload = form.elements.namedItem("auto_download")?.checked !== false;
       const downloadAwareMakePayload = makePayload;
       makePayload = (...args) => ({ ...downloadAwareMakePayload(...args), autoDownload });
+      const jobs = prompts.map((itemPrompt, index) => ({ operation, payload: makePayload(itemPrompt, index), label: makeLabel(itemPrompt) }));
+      if (event.submitter?.value === "draft") {
+        const firstLabel = jobs[0]?.label || this._text("batchName");
+        const label = jobs.length > 1 ? `${firstLabel} (+${jobs.length - 1})` : firstLabel;
+        const response = await this._send(MESSAGE.draftSave, { label, jobs });
+        if (response?.ok !== false && !response?.error && input) input.value = "";
+        await this._loadDrafts();
+        return;
+      }
       if (batchMode && prompts.length > 1) {
-        const jobs = prompts.map((itemPrompt, index) => ({ operation, payload: makePayload(itemPrompt, index), label: makeLabel(itemPrompt) }));
         const response = await this._send(MESSAGE.addBatch, { jobs, batchLabel: this._text("batchName") });
         if (response?.ok !== false && !response?.error && input) input.value = "";
         return;
       }
-      const response = await this.add({ operation, payload: makePayload(prompts[0], 0), label: makeLabel(prompts[0]) });
+      const response = await this.add(jobs[0]);
       if (response?.ok !== false && !response?.error && input) input.value = "";
+    }
+
+    async _loadDrafts() {
+      if (!this.draftsElement || !this.runtime?.sendMessage) return;
+      try {
+        const response = await this.runtime.sendMessage({ type: MESSAGE.draftList });
+        if (response?.ok === false || response?.error) return;
+        this.drafts = Array.isArray(response?.drafts) ? response.drafts : [];
+        this._renderDrafts();
+      } catch { /* drafts are an enhancement; the queue itself must keep working */ }
+    }
+
+    _renderDrafts() {
+      if (!this.draftsElement) return;
+      const drafts = Array.isArray(this.drafts) ? this.drafts : [];
+      this.draftsElement.replaceChildren();
+      if (!drafts.length) {
+        this.draftsElement.append(makeElement("div", "flow-queue-panel__empty", this._text("draftEmpty")));
+        return;
+      }
+      const fragment = document.createDocumentFragment();
+      for (const draft of drafts) {
+        const item = makeElement("article", "flow-queue-panel__item");
+        const head = makeElement("div", "flow-queue-panel__item-head");
+        head.append(makeElement("span", "flow-queue-panel__label", draft.label || this._text("batchName")));
+        item.append(head);
+        item.append(makeElement("div", "flow-queue-panel__detail",
+          this._text("draftMeta", { n: Array.isArray(draft.jobs) ? draft.jobs.length : 0, runs: draft.runCount || 0 })));
+        const actions = makeElement("div", "flow-queue-panel__item-actions");
+        const run = this._button(this._text("runDraft"), "draft-run");
+        run.dataset.draftId = String(draft.id);
+        const remove = this._button(this._text("deleteDraft"), "draft-remove");
+        remove.dataset.draftId = String(draft.id);
+        actions.append(run, remove);
+        item.append(actions);
+        fragment.append(item);
+      }
+      this.draftsElement.append(fragment);
     }
 
     _handleChange(event) {
@@ -753,6 +840,16 @@
         return this._send(MESSAGE.retry, { id: taskIdentity(task, index), taskId: taskIdentity(task, index) });
       }
       if (action === "retry-batch") return this._send(MESSAGE.retryBatch, { batchId: button.dataset.batchId });
+      if (action === "draft-run") {
+        const response = await this._send(MESSAGE.draftRun, { id: button.dataset.draftId });
+        await this._loadDrafts();
+        return response;
+      }
+      if (action === "draft-remove") {
+        const response = await this._send(MESSAGE.draftRemove, { id: button.dataset.draftId });
+        await this._loadDrafts();
+        return response;
+      }
     }
 
     _setBusy(value) {

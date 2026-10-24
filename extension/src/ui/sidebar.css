@@ -667,6 +667,27 @@ a:hover {
   display: none !important
 }
 
+.no-flow-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 12px 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(245, 158, 11, .4);
+  border-radius: 8px;
+  background: rgba(245, 158, 11, .1);
+  font-size: 12.5px
+}
+
+.no-flow-banner__text {
+  flex: 1;
+  min-width: 0
+}
+
+.no-flow-banner .btn {
+  flex-shrink: 0
+}
+
 .auth-gate-content {
   display: flex;
   flex-direction: column;

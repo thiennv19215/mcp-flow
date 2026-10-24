@@ -61,12 +61,18 @@
           matchKind: typeof rawReceipt.matchKind === "string" ? rawReceipt.matchKind : null,
         };
         if (prepared.submitOnly === true) tiles.releaseSubmitOnlyCorrelation?.(attemptId, true);
+        // VID-02: this confirm is the submit acknowledgement for a manual
+        // dispatch — stamp the dispatch moment for the observation
+        // checkpoint exactly like the automatic submit path, so a resumed
+        // observe anchors its render deadline here.
+        const dispatchedAt = Date.now();
         await tiles.emitFlowProgress(command, "Flow accepted the manual generation request; saved a recovery checkpoint.", {
           generationObservation: {
             before: Array.isArray(prepared.before) ? prepared.before : [],
             kind: prepared.type === "image" ? "image" : "video",
             expectedCount: Math.max(1, Math.min(4, Number(prepared.expectedCount) || 1)),
             correlationAttemptId: attemptId,
+            dispatchedAt,
             credits: Number.isFinite(prepared.credits) ? prepared.credits : null,
             timeoutMs: prepared.type === "image" ? 300_000 : 600_000,
             submitOnly: prepared.submitOnly === true,
@@ -79,6 +85,7 @@
           expectedCount: Math.max(1, Math.min(4, Number(prepared.expectedCount) || 1)),
           credits: Number.isFinite(prepared.credits) ? prepared.credits : null,
           correlationAttemptId: attemptId,
+          dispatchedAt,
           requestDispatched: true,
           manualSubmit: true,
           correlationReceipt: receipt,
@@ -215,6 +222,107 @@
           return !root.validStagedLocalImage?.(item, /(?:ref[1-3]|attach[1-3])/);
         }))) throw this.error("NATIVE_CAPABILITY_UNSUPPORTED", "Native generation accepts project asset names or staged local image attachments only; nothing was submitted.", true, false);
         const referenceAttachments = framesMode ? [] : attachments;
+        // IMG-04: pre-generation reference revalidation (the content-side
+        // run of the flow-ref-preflight contract; the background module of
+        // the same name is the canonical implementation the queue hook
+        // uses). References were resolved when this job was created, but a
+        // queued job can run much later — a referenced library tile may
+        // have been deleted, or an uploaded asset may have vanished.
+        // Revalidate BEFORE any settings/prompt work: the IMG-03 catalog is
+        // consulted first, then a targeted existence check for the specific
+        // asset; an uploaded ref whose staged bytes are still retained is
+        // re-uploaded and the expectedId the attach stages below use is
+        // rewritten. A missing library ref fails here with the distinct
+        // preflight code instead of surfacing as a mid-submit attach
+        // error. Existence here only proves presence (by id or by name);
+        // the attach stages still verify identity exactly as before.
+        const refChecks = [];
+        const addRefCheck = (assetName, expectedId, kind, applyId) => {
+          const name = typeof assetName === "string" ? assetName.replace(/^asset:/i, "").trim() : "";
+          if (!name) return;
+          refChecks.push({ assetName: name, expectedId: typeof expectedId === "string" && expectedId ? expectedId : undefined, kind, applyId: applyId || null });
+        };
+        for (const item of referenceAttachments) {
+          if (typeof item === "string") addRefCheck(item, undefined, undefined, null);
+          else if (item && typeof item === "object" && typeof item.assetName === "string") {
+            addRefCheck(item.assetName, item.expectedId, item.kind, newId => { item.expectedId = newId; });
+          }
+          // Staged local attachments (transferId) carry their own bytes
+          // into this submit and are uploaded by uploadAndResolve; skip.
+        }
+        if (firstFrame) addRefCheck(firstFrame.assetName, firstFrame.expectedId, firstFrame.kind, newId => {
+          firstFrame.expectedId = newId;
+          if (payload.firstFrame && typeof payload.firstFrame === "object") payload.firstFrame.expectedId = newId;
+        });
+        if (lastFrame) addRefCheck(lastFrame.assetName, lastFrame.expectedId, lastFrame.kind, newId => {
+          lastFrame.expectedId = newId;
+          if (payload.lastFrame && typeof payload.lastFrame === "object") payload.lastFrame.expectedId = newId;
+        });
+        if (refChecks.length) {
+          const catalogProjectId = (() => {
+            try { return root.location?.pathname?.match(/\/project\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/|$)/i)?.[1]?.toLowerCase() || null; } catch { return null; }
+          })();
+          const lookupRefCatalog = async ref => {
+            if (!catalogProjectId) return null;
+            try {
+              const sendMessage = root.chrome?.runtime?.sendMessage;
+              if (typeof sendMessage !== "function") return null;
+              const response = await sendMessage.call(root.chrome.runtime, {
+                type: "flow-media-catalog:lookup",
+                query: { projectId: catalogProjectId, ...(ref.expectedId ? { mediaId: ref.expectedId } : {}), name: ref.assetName },
+              });
+              return response?.ok ? response.entry || null : null;
+            } catch { return null; }
+          };
+          const refAssetExists = (ref, entry) => {
+            // Absence must be provable: when the asset scan is unavailable
+            // or fails, the ref cannot be declared missing — the attach
+            // stages below remain the authority, exactly as before this
+            // pass existed (same degrade discipline as the catalog lookup).
+            if (typeof menu.collectAssets !== "function") return true;
+            let assets;
+            try { assets = menu.collectAssets({ includeIncomplete: true }); } catch { return true; }
+            const ids = new Set([ref.expectedId, entry?.mediaId, entry?.uuid].filter(value => typeof value === "string" && value));
+            return assets.some(asset => (ids.size > 0 && (ids.has(asset?.id) || ids.has(asset?.persistentMediaId))) ||
+              String(asset?.name || "").trim() === ref.assetName);
+          };
+          const retainedRefFile = entry => {
+            const wanted = [entry?.originalName, entry?.uploadName].filter(value => typeof value === "string" && value);
+            if (!wanted.length || !root.stagedNativeFiles) return null;
+            const matches = [...root.stagedNativeFiles.values()].filter(file => file && wanted.includes(file.name));
+            // A name shared by several staged files cannot prove which
+            // bytes belong to this asset — treat it as not retained.
+            return matches.length === 1 ? matches[0] : null;
+          };
+          await runFlowStage("revalidating queued references", async ({ signal }) => {
+            const missing = [];
+            for (const ref of refChecks) {
+              const entry = await lookupRefCatalog(ref);
+              if (refAssetExists(ref, entry)) continue;
+              let restoredId = null;
+              if (entry?.uploadName) {
+                const file = retainedRefFile(entry);
+                if (file) {
+                  const receipt = await components.uploadStagedFlowMedia(file, ref.kind === "video" ? "video" : "image", command, { deadline: flowDeadline, signal });
+                  if (typeof receipt?.id === "string" && receipt.id) restoredId = receipt.id;
+                }
+              }
+              if (restoredId) {
+                ref.applyId?.(restoredId);
+                continue;
+              }
+              missing.push(ref.assetName);
+            }
+            if (missing.length) {
+              throw this.error(
+                "FLOW_QUEUE_PREFLIGHT_REFERENCE_MISSING",
+                `Flow reference${missing.length === 1 ? "" : "s"} missing before generation: ${missing.join(", ")}. The referenced asset is no longer in the Flow project library, and no retained upload bytes are available to restore it. Re-attach the reference or remove it from the job; nothing was submitted.`,
+                false,
+                false,
+              );
+            }
+          });
+        }
         const expectedMediaReferenceIds = [];
         const expectedCharacterIds = [];
         const expectedVideoReferenceIds = [];
@@ -429,8 +537,14 @@
         requireFlowTime("preparing the Flow submit request", expectedVideoReferenceIds.length + expectedMediaReferenceIds.length + expectedCharacterIds.length > 0);
 
         let credits;
-        if (payload.type !== "image") {
-          const maxCredits = payload.maxCredits ?? payload.max_credits ?? payload.params?.maxCredits ?? payload.params?.max_credits;
+        const maxCredits = payload.maxCredits ?? payload.max_credits ?? payload.params?.maxCredits ?? payload.params?.max_credits;
+        // The credit-quote gate guards every generation type, not just
+        // video: whenever a maxCredits cap is set, the composer's quote must
+        // be read and enforced before submit, failing closed when no quote
+        // can be read. Video jobs also read the quote without a cap because
+        // the submit result reports the charged credits; uncapped image jobs
+        // keep the historical behavior and skip the read entirely.
+        if (payload.type !== "image" || maxCredits !== undefined) {
           try {
             const renderedCredits = await runFlowStage("reading Flow's credit quote", ({ signal }) => editor.waitForGenerationCreditQuote(Number.isFinite(settingsCredits) ? 1000 : 2000, { deadline: flowDeadline, signal }));
             credits = Number.isFinite(renderedCredits)
@@ -442,7 +556,7 @@
             credits = Number.isFinite(settingsCredits) ? settingsCredits : undefined;
           }
           if (maxCredits !== undefined && !Number.isFinite(credits)) {
-            throw this.error("FLOW_CREDIT_QUOTE_UNAVAILABLE", "Flow did not show a verifiable credit quote. Because maxCredits is set, no video request was submitted.", false, false);
+            throw this.error("FLOW_CREDIT_QUOTE_UNAVAILABLE", `Flow did not show a verifiable credit quote. Because maxCredits is set, no ${payload.type === "image" ? "image" : "video"} request was submitted.`, false, false);
           }
           if (maxCredits !== undefined && credits > Number(maxCredits)) {
             throw this.error("FLOW_MAX_CREDITS_EXCEEDED", `Flow quotes ${credits} credits, above max_credits=${maxCredits}. Nothing was submitted.`, false, false);
@@ -457,6 +571,17 @@
 
         const errorsBeforeSubmit = new Set(editor.currentFlowSubmitErrors());
         const projectId = (root.ProviderRegistry || root.FlowDriverRegistry).describeUrl(location.href)?.projectId;
+        // VID-03: a caller that already knows the wire model key / ratio
+        // enum supplies them on the payload (top level or the params bag,
+        // the same convention as maxCredits) and they are forwarded as
+        // correlation expectations. The submit path itself only knows UI
+        // labels (payload.model) and aspect strings ("16:9"); no
+        // label-to-wire-key or aspect-to-enum mapping exists in this repo,
+        // so those are deliberately NOT converted into expectations —
+        // absent expectations keep attribution exactly as before.
+        const expectedVideoModelKey = payload.expectedVideoModelKey ?? payload.params?.expectedVideoModelKey;
+        const expectedVideoRatioEnum = payload.expectedVideoRatioEnum ?? payload.params?.expectedVideoRatioEnum;
+        const expectedImageModelKey = payload.expectedImageModelKey ?? payload.params?.expectedImageModelKey;
         const correlationAttemptId = await runFlowStage("arming the request observer", () => tiles.armNativeFlowCorrelation({
           projectId,
           mediaType: payload.type === "image" ? "image" : "video",
@@ -467,6 +592,9 @@
           expectedCharacterIds: payload.type === "image" ? validCharacterUuids : [],
           expectedVoiceCount: payload.voice ? 1 : 0,
           unverifiedMediaCount: unverifiedUploadRefCount,
+          ...(expectedVideoModelKey !== undefined ? { expectedVideoModelKey } : {}),
+          ...(expectedVideoRatioEnum !== undefined ? { expectedVideoRatioEnum } : {}),
+          ...(expectedImageModelKey !== undefined ? { expectedImageModelKey } : {}),
         }));
         if (!correlationAttemptId || !tiles.nativeFlowCorrelationMap().has(correlationAttemptId)) {
           throw this.error(
@@ -567,6 +695,19 @@
           }
         }
 
+        // VID-02: stamp the dispatch moment once, at submit acknowledgement.
+        // The observation checkpoint persists this stamp so a resumed
+        // observe computes its render deadline from here instead of
+        // restarting the clock after a service-worker restart.
+        const dispatchedAt = Date.now();
+        // VID-06: serverAcceptanceObserved reflects THIS attempt's own
+        // correlation receipts at acknowledgement time — true only when an
+        // accepted/result stage (response_seen/result_seen) was recorded
+        // for the attempt; request_seen alone means the request merely
+        // left the browser. Read it before the submit-only release below
+        // deletes the entry. A missing entry or helper keeps the
+        // historical false, and the flag never affects the submit verdict.
+        const serverAcceptanceObserved = tiles.nativeFlowCorrelationAcceptanceObserved?.(correlationAttemptId) === true;
         const dispatchReceipt = payload.submitOnly === true
           ? tiles.releaseSubmitOnlyCorrelation?.(correlationAttemptId, acknowledged) || null
           : null;
@@ -576,6 +717,7 @@
             kind: payload.type === "image" ? "image" : "video",
             expectedCount: variants,
             correlationAttemptId,
+            dispatchedAt,
             credits: Number.isFinite(credits) ? credits : null,
             timeoutMs: payload.type === "video" ? 600_000 : 300_000,
             submitOnly: payload.submitOnly === true || payload.submit_only === true,
@@ -588,9 +730,10 @@
           expectedCount: variants,
           credits: Number.isFinite(credits) ? credits : null,
           correlationAttemptId,
+          dispatchedAt,
           activation: activation.strategy || "dom-click",
           requestDispatched: acknowledged,
-          serverAcceptanceObserved: false,
+          serverAcceptanceObserved,
           ...(dispatchReceipt ? { correlationReceipt: dispatchReceipt } : {}),
         };
       }
@@ -599,11 +742,67 @@
         const before = Array.isArray(payload.before) ? payload.before : [];
         const kind = payload.kind === "image" ? "image" : payload.kind === "video" ? "video" : undefined;
         const expected = Math.max(1, Math.min(20, Number(payload.expectedCount || payload.variants || 1)));
-        const deadline = Date.now() + Math.max(1000, Math.min(15 * 60000, Number(payload.timeoutMs || 12 * 60000)));
+        const timeoutMs = Math.max(1000, Math.min(15 * 60000, Number(payload.timeoutMs || 12 * 60000)));
+        // VID-08: virtualization recovery sweep tuning. If neither fresh
+        // media nor receipt progress is seen for the quiet window, observe
+        // runs a bounded number of full-library scans (the media-menu scan
+        // machinery) filtered by the correlated id set, recovering results
+        // whose tiles Flow virtualized out of the grid instead of idling
+        // to the deadline. The sweep lives entirely inside the render
+        // deadline — it never extends it.
+        const OBSERVE_RECOVERY_SWEEP_QUIET_MS = 30_000;
+        const OBSERVE_RECOVERY_SWEEP_MAX = 3;
+        const OBSERVE_RECOVERY_SWEEP_SCAN_MS = 25_000;
+        // VID-04: maintain a structured evidence bundle for the whole
+        // observation so every terminal observe error can carry it as
+        // `diagnostics` — live triage must be able to distinguish "Flow
+        // never started" (requestSeen false, zeroed tallies) from
+        // "rendered but unmatched" (request seen, correlated ids known,
+        // tiles still busy at the deadline). The counters are refreshed
+        // from each poll below and the snapshot is taken at throw time,
+        // so the bundle always reflects the final observed state.
+        // Diagnostics are additive metadata only: verdicts, deadlines
+        // (VID-02) and retry classification are unchanged, and success /
+        // VID-01 partial resolutions never gain the bundle.
+        const evidenceStartedAt = Date.now();
+        const evidence = {
+          requestSeen: false,
+          lastReceiptStage: null,
+          correlatedMediaIds: [],
+          readyCount: 0,
+          busyCount: 0,
+          failedCount: 0,
+          recoverySweeps: 0,
+        };
+        const observeError = (code, message, retryable, outcomeUnknown) => {
+          const error = this.error(code, message, retryable, outcomeUnknown);
+          error.diagnostics = {
+            requestSeen: evidence.requestSeen,
+            lastReceiptStage: evidence.lastReceiptStage,
+            correlatedMediaIds: [...evidence.correlatedMediaIds],
+            readyCount: evidence.readyCount,
+            busyCount: evidence.busyCount,
+            failedCount: evidence.failedCount,
+            recoverySweeps: evidence.recoverySweeps,
+            elapsedMs: Math.max(0, Date.now() - evidenceStartedAt),
+          };
+          return error;
+        };
+        // VID-02: anchor the render deadline at dispatch when the caller
+        // carries the submit-acknowledgement stamp (persisted in the
+        // observation checkpoint): a service-worker restart resumes with the
+        // remaining budget instead of a fresh full window, and a window that
+        // already expired while the worker was down times out immediately
+        // via the loop exit below. Legacy payloads without a valid stamp
+        // keep the historical behavior — a fresh window from observe entry.
+        const dispatchedAt = Number(payload.dispatchedAt);
+        const deadline = Number.isFinite(dispatchedAt) && dispatchedAt > 0
+          ? dispatchedAt + timeoutMs
+          : Date.now() + timeoutMs;
         const correlationAttemptId = String(payload.correlationAttemptId || "");
         const correlationEntry = correlationAttemptId ? tiles.nativeFlowCorrelationMap().get(correlationAttemptId) : null;
         if (!correlationEntry) {
-          throw this.error(
+          throw observeError(
             "FLOW_GENERATION_CORRELATION_UNAVAILABLE",
             "Flow's task correlation receipt is missing, so the generated media cannot be safely matched to this task. The result was not selected or downloaded; inspect Flow before retrying.",
             false,
@@ -614,6 +813,14 @@
         let retriesLeft = Math.max(0, Math.min(3, Number(payload.retries ?? 1)));
         const retriedTiles = new Set();
         const observeStartedAt = Date.now();
+        // VID-08 sweep state: when a poll last showed progress (the
+        // receipt stage / correlated set moved, or the fresh media set's
+        // observable state changed), how many recovery sweeps have run
+        // (mirrored into the VID-04 evidence bundle), and the library
+        // records recovered by those sweeps, keyed by lowercased media id.
+        let lastProgressAt = observeStartedAt;
+        let lastProgressSignature = null;
+        const recoveredById = new Map();
         let renderObservedInFlight = false;
         let apiResultReceipt = correlationEntry?.receipts
           ? [...correlationEntry.receipts].reverse().find(receipt => receipt?.stage === "result_seen") || null
@@ -633,12 +840,18 @@
         }
         let lastMediaScanAt = 0;
         let allMedia = [];
+        // Snapshot the page errors that already exist when observation
+        // starts. A lingering toast from a previous job or an unrelated
+        // alert predates this generation and is not evidence about it;
+        // mirror the submit path (errorsBeforeSubmit) and only react to
+        // errors that appear after this snapshot.
+        const errorsBeforeObserve = new Set(editor.currentFlowSubmitErrors());
 
         try {
           while (Date.now() < deadline) {
-            if (command.signal?.aborted) throw this.error("FLOW_OPERATION_CANCELLED", "The Flow queue stopped while waiting for generation results. The generation was already submitted; inspect Flow before retrying.", false, true);
+            if (command.signal?.aborted) throw observeError("FLOW_OPERATION_CANCELLED", "The Flow queue stopped while waiting for generation results. The generation was already submitted; inspect Flow before retrying.", false, true);
             if (correlationEntry?.interfered) {
-              throw this.error("FLOW_GENERATION_INTERFERENCE", "A trusted interaction changed the Flow composer before this generation request was observed. The result cannot be safely attributed; inspect the project before retrying.", false, true);
+              throw observeError("FLOW_GENERATION_INTERFERENCE", "A trusted interaction changed the Flow composer before this generation request was observed. The result cannot be safely attributed; inspect the project before retrying.", false, true);
             }
 
             const quotaAlert = root.checkFlowCreditLimitAlert?.();
@@ -646,26 +859,35 @@
               console.warn(`[FlowObserve] Quota alert observed: "${quotaAlert}".`);
             }
 
-            const currentErrors = editor.currentFlowSubmitErrors();
-            if (currentErrors.length > 0) {
-              const failureText = currentErrors[0];
-              const classified = root.classifyFlowError?.(failureText);
-              if (classified) throw this.error(classified.code, classified.message, classified.retryable, false);
-              throw this.error("FLOW_GENERATION_FAILED", `Flow hiển thị thông báo lỗi: "${failureText}".`, false, false);
-            }
-
             const receipt = correlationEntry ? tiles.nativeFlowCorrelationReceipt(correlationAttemptId) : null;
+            // VID-04: refresh the request evidence from this poll before
+            // any terminal branch below can throw, so receipt-stage errors
+            // carry the same bundle as the timeout path. The stage prefers
+            // this poll's terminal receipt, then the API result receipt,
+            // then the correlation entry's latest recorded stage.
+            if (correlationEntry?.requestSeen || receipt) evidence.requestSeen = true;
+            const pollStage = typeof receipt?.stage === "string" && receipt.stage
+              ? receipt.stage
+              : typeof apiResultReceipt?.stage === "string" && apiResultReceipt.stage
+                ? apiResultReceipt.stage
+                : null;
+            if (pollStage) evidence.lastReceiptStage = pollStage;
+            else if (Array.isArray(correlationEntry?.receipts) && correlationEntry.receipts.length) {
+              const entryStage = correlationEntry.receipts[correlationEntry.receipts.length - 1]?.stage;
+              if (typeof entryStage === "string" && entryStage) evidence.lastReceiptStage = entryStage;
+            }
+            if (evidence.requestSeen && !evidence.lastReceiptStage) evidence.lastReceiptStage = "request_seen";
             if (receipt?.error) {
               const classified = root.classifyFlowError?.(receipt.error);
-              if (classified) throw this.error(classified.code, classified.message, classified.retryable, false);
-              throw this.error("FLOW_GENERATION_FAILED", `Flow báo cáo lỗi tạo: ${receipt.error}`, false, false);
+              if (classified) throw observeError(classified.code, classified.message, classified.retryable, false);
+              throw observeError("FLOW_GENERATION_FAILED", `Flow báo cáo lỗi tạo: ${receipt.error}`, false, false);
             }
             const failedChild = receipt?.children?.find(c => c?.status === "failed" || c?.error);
             if (failedChild) {
               const errText = failedChild.error || failedChild.statusReason || "Generation failed";
               const classified = root.classifyFlowError?.(errText);
-              if (classified) throw this.error(classified.code, classified.message, classified.retryable, false);
-              throw this.error("FLOW_GENERATION_FAILED", `Flow báo cáo lỗi: ${errText}`, false, false);
+              if (classified) throw observeError(classified.code, classified.message, classified.retryable, false);
+              throw observeError("FLOW_GENERATION_FAILED", `Flow báo cáo lỗi: ${errText}`, false, false);
             }
 
             const receiptMediaIds = [
@@ -673,7 +895,7 @@
               ...(receipt?.children || []).map(child => child?.mediaId),
             ].filter(id => typeof id === "string" && id.trim());
             if (apiResultReceipt && receiptMediaIds.length === 0) {
-              throw this.error(
+              throw observeError(
                 "FLOW_GENERATION_MEDIA_ID_MISSING",
                 "Flow completed this generation response without exposing a task-owned media ID. The extension did not guess from the gallery or download a file; inspect the Flow result manually.",
                 false,
@@ -682,8 +904,11 @@
             }
 
             const correlatedIds = new Set(receiptMediaIds.map(id => id.toLowerCase()));
+            // VID-04: the correlated id set is part of the evidence
+            // bundle — record it before the ambiguity guard can throw.
+            evidence.correlatedMediaIds = [...correlatedIds];
             if (correlatedIds.size > expected) {
-              throw this.error(
+              throw observeError(
                 "FLOW_GENERATION_MEDIA_ID_AMBIGUOUS",
                 `Flow correlated ${correlatedIds.size} media IDs to a task that requested ${expected} output(s). The extension did not choose a subset or download any file.`,
                 false,
@@ -700,35 +925,110 @@
               allMedia = tiles.collectNativeMedia();
               lastMediaScanAt = Date.now();
             }
-            const fresh = allMedia.filter(item =>
+            let fresh = allMedia.filter(item =>
               !before.includes(item.id || `title:${item.title}`) &&
               !item.title.startsWith("fm-") &&
               (!kind || item.kind === kind || (kind === "video" && item.kind === "scene") || item.failed) &&
               item.id && correlatedIds.has(item.id.toLowerCase())
             );
+            // VID-08: fold media recovered by earlier recovery sweeps into
+            // this poll's fresh set, so recovered results resolve through
+            // exactly the same success / VID-01 partial paths below as
+            // grid-observed media. A settled library record (ready or
+            // failed) replaces an unsettled grid entry for the same
+            // correlated id (a stale ghost tile); a grid entry that is
+            // itself settled is live DOM truth and always wins.
+            if (recoveredById.size) {
+              for (const recovered of recoveredById.values()) {
+                const index = fresh.findIndex(item => item.id?.toLowerCase() === recovered.id.toLowerCase());
+                if (index === -1) { fresh.push(recovered); continue; }
+                const current = fresh[index];
+                if (!(current.mediaReady || current.failed) && (recovered.mediaReady || recovered.failed)) fresh[index] = recovered;
+              }
+            }
+            // VID-08: progress, for quiet-window purposes, is the receipt
+            // stage or correlated id set moving, or the fresh set's
+            // observable state changing (including a busy tile's render
+            // percentage advancing). Anything else is quiet time.
+            const progressSignature = [
+              evidence.lastReceiptStage || "",
+              [...correlatedIds].join(","),
+              fresh.map(item => `${item.id}|${item.busy ? 1 : 0}|${item.mediaReady ? 1 : 0}|${item.failed ? 1 : 0}|${item.progress || ""}`).join(";"),
+            ].join("#");
+            if (progressSignature !== lastProgressSignature) {
+              lastProgressSignature = progressSignature;
+              lastProgressAt = Date.now();
+            }
 
             const failed = fresh.filter(item => item.failed);
+            // VID-04: refresh the ready/busy/failed tallies from this
+            // poll's fresh set, so any terminal throw below (and the
+            // timeout thrown after the loop) reports the final observed
+            // state rather than a stale snapshot.
+            evidence.readyCount = fresh.filter(item => item.mediaReady && !item.busy && !item.failed).length;
+            evidence.busyCount = fresh.filter(item => item.busy && !item.failed).length;
+            evidence.failedCount = failed.length;
             if (failed.length) {
               const failureDetails = failed[0]?.failureReason || "";
               const classified = root.classifyFlowError?.(failureDetails);
               if (classified?.category === "rate_limit") {
-                throw this.error(classified.code, classified.message, true, false);
+                throw observeError(classified.code, classified.message, true, false);
               }
+              // VID-01: a terminally failed tile must not discard outputs
+              // that already rendered. The failed set is judged only once
+              // no sibling is still processing — a busy output is not a
+              // failure, and while one remains the loop keeps waiting
+              // (deadline semantics unchanged) so the sibling can still
+              // join the ready set or the failed set. When the set has
+              // settled with at least one ready output, resolve with the
+              // ready media plus a structured failedOutputs list; the
+              // queue records a partial state instead of failing the job.
+              const readySettled = [...correlatedIds]
+                .map(id => fresh.find(item => item.id?.toLowerCase() === id && item.mediaReady && !item.busy && !item.failed))
+                .filter(Boolean);
+              const stillProcessing = fresh.some(item => item.busy && !item.failed);
+              const partialResult = async () => {
+                const media = readySettled.map(({ id, title, kind: mediaKind }) => ({
+                  id,
+                  title,
+                  // Same scene→video normalization as the full-success path.
+                  kind: mediaKind === "scene" ? "video" : mediaKind,
+                }));
+                const failedOutputs = failed.map(item => ({
+                  title: item.title,
+                  code: root.classifyFlowError?.(item.failureReason || "")?.code || "FLOW_GENERATION_FAILED",
+                }));
+                await tiles.emitFlowProgress(command, `Tạo ${kind === "video" ? "video" : "ảnh"} hoàn tất một phần: ${media.length}/${expected} kết quả, ${failedOutputs.length} tile lỗi`, {
+                  generationResult: { media },
+                });
+                return { media, failedOutputs, partial: true };
+              };
               if (classified && !classified.retryable) {
-                throw this.error(classified.code, classified.message, false, false);
+                // A classified non-retryable failure is terminal (never
+                // retried in place). With a ready sibling and nothing
+                // still processing, resolve partially; with no ready
+                // output the classified throw is unchanged.
+                if (!stillProcessing) {
+                  if (readySettled.length >= 1) return await partialResult();
+                  throw observeError(classified.code, classified.message, false, false);
+                }
+              } else {
+                const retryable = failed.find(item => !retriedTiles.has(tiles.retryIdentity?.(item)));
+                if (retryable && retriesLeft > 0 && await tiles.retryNativeErrorTile(retryable, {
+                  attempted: retriedTiles,
+                  deadline,
+                  timeoutMs: Math.min(5000, Math.max(250, deadline - Date.now())),
+                })) {
+                  retriesLeft--;
+                  tiles.emitFlowProgress(command, `Flow thất bại render; đang thử lại (${Math.max(0, Number(payload.retries ?? 1) - retriesLeft)}/${Number(payload.retries ?? 1)})`);
+                  continue;
+                }
+                if (!stillProcessing) {
+                  if (readySettled.length >= 1) return await partialResult();
+                  const details = failed.map(item => `${item.title}${item.failureReason ? `: ${item.failureReason}` : ""}`).join("; ");
+                  throw observeError("FLOW_GENERATION_FAILED", `Flow báo cáo ${failed.length} tile render thất bại: ${details}. Chưa bị trừ tín dụng cho render lỗi này.`, false, false);
+                }
               }
-              const retryable = failed.find(item => !retriedTiles.has(tiles.retryIdentity?.(item)));
-              if (retryable && retriesLeft > 0 && await tiles.retryNativeErrorTile(retryable, {
-                attempted: retriedTiles,
-                deadline,
-                timeoutMs: Math.min(5000, Math.max(250, deadline - Date.now())),
-              })) {
-                retriesLeft--;
-                tiles.emitFlowProgress(command, `Flow thất bại render; đang thử lại (${Math.max(0, Number(payload.retries ?? 1) - retriesLeft)}/${Number(payload.retries ?? 1)})`);
-                continue;
-              }
-              const details = failed.map(item => `${item.title}${item.failureReason ? `: ${item.failureReason}` : ""}`).join("; ");
-              throw this.error("FLOW_GENERATION_FAILED", `Flow báo cáo ${failed.length} tile render thất bại: ${details}. Chưa bị trừ tín dụng cho render lỗi này.`, false, false);
             }
 
             if (Date.now() - observeStartedAt > 5000 && fresh.length === 0 && !renderObservedInFlight) {
@@ -737,7 +1037,7 @@
               const hasText = composerBox && Boolean(editor.getEditorUserText(composerBox));
               const buttonReady = submitBtn && !submitBtn.disabled && submitBtn.getAttribute("aria-disabled") !== "true";
               if (hasText && buttonReady) {
-                throw this.error("FLOW_SUBMIT_REJECTED", "Flow không tiếp nhận yêu cầu tạo ảnh/video (câu lệnh vẫn còn trong ô nhập và nút Tạo đã mở lại). Vui lòng kiểm tra lại câu lệnh hoặc hạn mức tài khoản.", false, false);
+                throw observeError("FLOW_SUBMIT_REJECTED", "Flow không tiếp nhận yêu cầu tạo ảnh/video (câu lệnh vẫn còn trong ô nhập và nút Tạo đã mở lại). Vui lòng kiểm tra lại câu lệnh hoặc hạn mức tài khoản.", false, false);
               }
             }
 
@@ -796,6 +1096,78 @@
               continue;
             }
 
+            // Page-level error banners are unscoped evidence: check them
+            // only after this task's correlated receipt and media state
+            // (above), and only when the error is new since observation
+            // began — a pre-existing banner must never fail a generation
+            // that already dispatched or already succeeded.
+            const newPageError = editor.currentFlowSubmitErrors().find(message => !errorsBeforeObserve.has(message));
+            if (newPageError) {
+              const classified = root.classifyFlowError?.(newPageError);
+              if (classified) throw observeError(classified.code, classified.message, classified.retryable, false);
+              throw observeError("FLOW_GENERATION_FAILED", `Flow hiển thị thông báo lỗi: "${newPageError}".`, false, false);
+            }
+
+            // VID-08: virtualization recovery sweep. Reaching this point
+            // means the poll resolved nothing and threw nothing — observe
+            // is still waiting. If a full quiet window passed with no
+            // fresh media and no receipt progress, and sweeps remain in
+            // the bound, scan the whole library once for this attempt's
+            // correlated ids: Flow may have virtualized the claimed tile
+            // out of the grid while its result finished elsewhere in the
+            // library. Recovered records join the fresh set from the next
+            // poll. The scan is clamped to the render deadline, so the
+            // sweep can never extend it; a failed scan is a loss of
+            // observability, never a generation failure — the normal
+            // wait and timeout continue.
+            if (typeof menu?.scanNativeAssets === "function"
+              && correlatedIds.size > 0
+              && evidence.recoverySweeps < OBSERVE_RECOVERY_SWEEP_MAX
+              && Date.now() - lastProgressAt >= OBSERVE_RECOVERY_SWEEP_QUIET_MS
+              && Date.now() < deadline) {
+              evidence.recoverySweeps++;
+              // Space any further sweep by another full quiet window.
+              lastProgressAt = Date.now();
+              try {
+                const assets = await menu.scanNativeAssets({
+                  includeIncomplete: true,
+                  deadline: Math.min(deadline, Date.now() + OBSERVE_RECOVERY_SWEEP_SCAN_MS),
+                  maxDurationMs: OBSERVE_RECOVERY_SWEEP_SCAN_MS,
+                  signal: command.signal,
+                  keepPositionOnMatch: true,
+                });
+                let recoveredNow = 0;
+                for (const asset of Array.isArray(assets) ? assets : []) {
+                  const id = typeof asset?.id === "string" ? asset.id : "";
+                  // Attribution discipline (VID-03/VID-06): only this
+                  // attempt's correlated ids are evidence. Anything else
+                  // the scan saw belongs to another task.
+                  if (!id || !correlatedIds.has(id.toLowerCase())) continue;
+                  const failedAsset = asset.error === true;
+                  const assetKind = typeof asset.kind === "string" && asset.kind ? asset.kind : kind;
+                  if (kind && !(assetKind === kind || (kind === "video" && assetKind === "scene") || failedAsset)) continue;
+                  recoveredById.set(id.toLowerCase(), {
+                    id,
+                    title: asset.name || asset.displayName || "",
+                    kind: assetKind,
+                    busy: asset.busy === true,
+                    mediaReady: asset.ready === true && asset.busy !== true && !failedAsset,
+                    failed: failedAsset,
+                    ...(failedAsset ? { failureReason: "Flow generation failed" } : {}),
+                    recovered: true,
+                  });
+                  recoveredNow++;
+                }
+                if (recoveredNow > 0) {
+                  tiles.emitFlowProgress(command, `Đã quét lại toàn bộ thư viện Flow: tìm thấy ${recoveredNow} kết quả thuộc tác vụ này`);
+                }
+              } catch {
+                // The library could not be scanned (grid not mounted,
+                // scan deadline, cancellation). Cancellation and the
+                // render deadline are re-evaluated at the top of the loop.
+              }
+            }
+
             const waitMs = Math.min(apiResultReceipt ? 1_000 : 5_000, Math.max(1, deadline - Date.now()));
             if (apiResultSignal && !apiResultReceipt) {
               await Promise.race([apiResultSignal, root.wait?.(waitMs) || new Promise(resolve => setTimeout(resolve, waitMs))]);
@@ -803,7 +1175,7 @@
               await root.wait?.(waitMs);
             }
           }
-          throw this.error("FLOW_GENERATION_TIMEOUT", "Hết thời gian chờ Flow render. Lệnh có thể đã được tiếp nhận; vui lòng kiểm tra giao diện Flow trước khi thử lại.", false, true);
+          throw observeError("FLOW_GENERATION_TIMEOUT", "Hết thời gian chờ Flow render. Lệnh có thể đã được tiếp nhận; vui lòng kiểm tra giao diện Flow trước khi thử lại.", false, true);
         } finally {
           if (correlationEntry) {
             window.removeEventListener("TOBY_FLOW_CORRELATION_RECEIPT", onApiResult);

@@ -148,7 +148,7 @@
     }
 
     return {
-      success: invoked > 0,
+      success: invoked > 0 && errors < invoked,
       invoked: invoked,
       listeners: listeners.length,
       errors: errors,

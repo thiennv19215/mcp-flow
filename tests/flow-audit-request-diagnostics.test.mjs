@@ -1,40 +1,38 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { JobQueue } from '../dist/queue.js';
 import { jobView } from '../dist/core.js';
+import { sanitizeUnknownSubmitDiagnostics } from '../dist/flow-request-diagnostics.js';
 import { auditLatestJob } from '../scripts/audit-native-report.mjs';
 
-test('unknown submit diagnostics survive queue, job view, and final audit evidence with secrets stripped', async () => {
-  const queue = new JobQueue(async () => {
-    throw Object.assign(new Error('Flow submit outcome is unknown.'), {
-      outcome_unknown: true,
-      diagnostics: {
-        clickDelivered: true,
-        observerReady: true,
-        xhrHookActive: true,
-        fetchHookActive: true,
-        rawPrompt: 'private prompt contents',
-        requestDiagnostics: { version: 1, count: 1, events: [{
-          observedAt: '2026-10-21T03:35:36.000Z', attemptId: 'attempt-private', rpcId: 'rpc-private',
-          mediaType: 'image', transport: 'fetch', path: '/api/private-image?token=raw-token', payloadVersion: 2,
-          payloadShape: 'image_request', pathClass: 'image', pathRecognized: true, payloadMatched: false,
-          fields: { shape: true, prompt: true, model: false, quantity: true, referenceIds: false, project: true,
-            'raw-token': true, rawtoken: true, private_id: true },
-          reasons: ['reference_ids_mismatch', 'raw-token', 'rawtoken', 'secret_prompt'], rawUrl: 'https://example.test/?token=raw-token',
-        }] },
-      },
-    });
-  }, 'test-audit-request-diagnostics');
-  queue.persist = () => {};
-  queue.add({ prompt: 'private prompt contents', type: 'image', max_credits: 0, submit_only: true, retries: 0, output_dir: 'private-project', file_stem: 'private-scene' });
-  for (let wait = 0; wait < 100 && ['queued', 'running'].includes(queue.list()[0]?.status); wait++) {
-    await new Promise(resolve => setTimeout(resolve, 5));
-  }
+// The backend JobQueue that used to carry these diagnostics was removed
+// (the extension queue owns jobs now); the sanitizer, jobView, and the
+// audit report are the live path, so they are exercised directly.
+test('unknown submit diagnostics survive sanitizing, job view, and final audit evidence with secrets stripped', async () => {
+  const rawDiagnostics = {
+    clickDelivered: true,
+    observerReady: true,
+    xhrHookActive: true,
+    fetchHookActive: true,
+    rawPrompt: 'private prompt contents',
+    requestDiagnostics: { version: 1, count: 1, events: [{
+      observedAt: '2026-10-21T03:35:36.000Z', attemptId: 'attempt-private', rpcId: 'rpc-private',
+      mediaType: 'image', transport: 'fetch', path: '/api/private-image?token=raw-token', payloadVersion: 2,
+      payloadShape: 'image_request', pathClass: 'image', pathRecognized: true, payloadMatched: false,
+      fields: { shape: true, prompt: true, model: false, quantity: true, referenceIds: false, project: true,
+        'raw-token': true, rawtoken: true, private_id: true },
+      reasons: ['reference_ids_mismatch', 'raw-token', 'rawtoken', 'secret_prompt'], rawUrl: 'https://example.test/?token=raw-token',
+    }] },
+  };
 
-  const job = queue.list()[0];
-  assert.equal(job.status, 'failed');
-  assert.equal(job.outcomeUnknown, true);
-  assert.equal(job.requestDiagnostics?.requestDiagnostics.count, 1);
+  const stored = sanitizeUnknownSubmitDiagnostics(rawDiagnostics);
+  assert.equal(stored?.requestDiagnostics.count, 1);
+
+  const job = {
+    id: 'job-diagnostics-2', status: 'failed',
+    params: { output_dir: 'private-project', file_stem: 'private-scene', prompt: 'private prompt contents' },
+    files: [], attempts: 1, outcomeUnknown: true,
+    requestDiagnostics: rawDiagnostics,
+  };
   const view = jobView(job);
   const report = {
     probes: [{ name: 'image-reference', status: 'outcome_unknown', request_diagnostics: view.request_diagnostics }],

@@ -209,6 +209,12 @@
         </button>
       </nav>
 
+      <!-- Shown only while no Flow tab is open (toggled by renderStatus) -->
+      <div class="no-flow-banner hidden" id="noFlowBanner" role="alert">
+        <span class="no-flow-banner__text" data-i18n="popup.noFlowTabHint">Chưa có tab Flow nào đang mở. Mở Flow để bắt đầu tạo ảnh/video.</span>
+        <button class="btn btn-primary btn-sm" id="btnOpenFlowBanner" type="button" data-i18n="popup.btnOpenFlow">Mở Google Flow</button>
+      </div>
+
       <!-- ============================================== -->
       <!-- TABS CONTENT                                   -->
       <!-- ============================================== -->
@@ -400,12 +406,18 @@
                   <div class="input-group select-group compact-select">
                     <select id="videoModel">
                       <option value="veo 3.1" selected>Veo 3.1</option>
+                      <option value="veo 3.1 lite">Veo 3.1 Lite</option>
+                      <option value="veo 3.1 fast">Veo 3.1 Fast</option>
+                      <option value="veo 3.1 quality">Veo 3.1 Quality</option>
                       <option value="omni 1.1 flash">Omni 1.1 Flash</option>
                     </select>
                     <svg class="select-arrow" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
                   </div>
                   <select id="selectModelVideo" class="hidden">
                     <option value="veo 3.1">Veo 3.1</option>
+                    <option value="veo 3.1 lite">Veo 3.1 Lite</option>
+                    <option value="veo 3.1 fast">Veo 3.1 Fast</option>
+                    <option value="veo 3.1 quality">Veo 3.1 Quality</option>
                     <option value="omni 1.1 flash">Omni 1.1 Flash</option>
                   </select>
                 </div>
@@ -541,10 +553,24 @@
                   <select id="addonPromptSelect" class="hidden"><option value="">Style</option></select>
                 </div>
               </div>
+
+              <!-- Video chain option (#genChainSection): continue each video from the previous video -->
+              <div id="genChainSection">
+                <div id="videoChainOption" hidden>
+                  <div class="gen-chain-row">
+                    <label class="toolbar-toggle wm-toggle" for="chainVideoFromPrevious">
+                      <input type="checkbox" id="chainVideoFromPrevious" />
+                      <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                      <span class="toggle-label" id="videoChainLabel">Nối video từ video trước</span>
+                    </label>
+                  </div>
+                </div>
+                <p class="section-hint" id="videoChainHint" hidden></p>
+              </div>
             </section>
 
             <!-- Reference Section (#refImagesSection) -->
-            <section class="section" id="refImagesSection">
+            <section class="section" id="refImagesSection" data-max-ref-images="3">
               <div class="section-header section-header--with-select">
                 <label>
                   <svg width="18" height="18" viewBox="0 0 20 20" fill="currentColor">
@@ -686,6 +712,18 @@
                       <span class="toggle-track"><span class="toggle-thumb"></span></span>
                       <span class="toggle-label" data-i18n="gen.removeWatermark">No watermark</span>
                     </label>
+                    <span class="wm-kind-flags" id="genTabWatermarkKinds">
+                      <label class="toolbar-toggle wm-toggle wm-toggle--xs" for="genTabWatermarkImage" title="Xóa logo cho ảnh">
+                        <input type="checkbox" id="genTabWatermarkImage" checked />
+                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                        <span class="toggle-label" data-i18n="gen.removeWatermarkImages">Images</span>
+                      </label>
+                      <label class="toolbar-toggle wm-toggle wm-toggle--xs" for="genTabWatermarkVideo" title="Xóa logo cho video">
+                        <input type="checkbox" id="genTabWatermarkVideo" checked />
+                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                        <span class="toggle-label" data-i18n="gen.removeWatermarkVideos">Videos</span>
+                      </label>
+                    </span>
                   </span>
                 </span>
               </div>

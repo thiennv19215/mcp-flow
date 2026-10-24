@@ -613,7 +613,7 @@
         await waitPreparation(options, 100, `confirming Flow ${name} mode`);
       }
     }
-    throw root.flowError("FLOW_OPTION_SELECTION_FAILED", `Flow did not confirm that "${name}" was selected. Nothing was submitted.", true`);
+    throw root.flowError("FLOW_OPTION_SELECTION_FAILED", `Flow did not confirm that "${name}" was selected. Nothing was submitted.`, true, false);
   }
 
   async function chooseNativeVariantCount(count, options = {}) {
@@ -778,8 +778,10 @@
     }
     const selectedModel = payload.model || (findModelPickerButton()?.innerText || findModelPickerButton()?.textContent || "");
     const normalized = normalizeModelLabel(selectedModel);
-    const hasUnverifiedVeoTier = /\bveo\b/.test(normalized) && /\b(lite|fast|quality)\b/.test(normalized);
-    const rule = hasUnverifiedVeoTier ? undefined : registry.models.find(item => item.match.some(alias => normalized.includes(normalizeModelLabel(alias))));
+    // Veo 3.1 tiers (Lite/Fast/Quality) have their own registry rule, listed
+    // before the plain "veo 3.1" rule, so they validate like any other model
+    // instead of skipping capability checks entirely.
+    const rule = registry.models.find(item => item.match.some(alias => normalized.includes(normalizeModelLabel(alias))));
     const referenceCount = Array.isArray(payload.attachments) ? payload.attachments.length : 0;
     const maxReferences = rule?.maxReferences ?? registry.defaults.maxReferences;
     if (referenceCount > maxReferences) {
@@ -816,6 +818,10 @@
       if (norm.includes("quality")) list.unshift("veo 2 (quality)", "veo (quality)", "veo quality");
     } else if (/imagen/i.test(norm)) {
       list.push("imagen", "imagen 3", "imagen-3", "imagen 3.0", "imagen 3 (fast)", "imagen 3 (quality)");
+    } else if (/omni/i.test(norm)) {
+      // Flow's picker has shipped both "Omni Flash" and "Omni 1.1 Flash"
+      // labels for the same model; accept either form in both directions.
+      list.push("omni flash", "omni 1.1 flash");
     } else if (/banana/i.test(norm)) {
       list.push("nano banana", "nano banana 2", "nano banana 2.1");
     }

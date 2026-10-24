@@ -73,7 +73,7 @@
       if (name === "flow.asset.download") {
         const prefix = String(payload.name || "").toLowerCase();
         if (!prefix && !payload.id) throw this.error("FLOW_INVALID_ARGUMENT", "Asset name or media id is required.");
-        const downloadOptions = { signal: command.signal, timeoutMs: command.timeoutMs };
+        const downloadOptions = { signal: command.signal, timeoutMs: command.timeoutMs, watermarkMode: payload.watermarkMode ?? payload.watermark_mode };
         if (payload.id) return menu.triggerFlowDownload(String(payload.name || ""), payload.quality, String(payload.id), downloadOptions);
         const assets = await menu.scanNativeAssets({ signal: command.signal });
         const candidates = assets.filter(a => a.name.toLowerCase().startsWith(prefix));
@@ -232,13 +232,18 @@
         const dialogInputs = renameSurfaces.flatMap(surface => [...surface.querySelectorAll('input:not([type="file"]),[contenteditable="true"]')]).filter(el => root.visible?.(el));
         const tileInputs = [...(tile.querySelectorAll?.('input:not([type="file"]),[contenteditable="true"]') || [])].filter(el => root.visible?.(el));
         const allInputs = [...document.querySelectorAll('input:not([type="file"]),[contenteditable="true"]')].filter(el => root.visible?.(el));
-        const nameMatches = allInputs.filter(el => {
+        // When Flow shows a rename dialog, only its own fields are rename
+        // candidates. A document-wide title match can be the prompt editor
+        // (contenteditable) whose text happens to equal the asset title;
+        // writing the new name there would rewrite the user's prompt.
+        const candidatePool = renameSurfaces.length ? dialogInputs : allInputs;
+        const nameMatches = candidatePool.filter(el => {
           const current = String(el.value ?? el.innerText ?? el.textContent ?? "").replace(/\s+/g, " ").trim();
           const label = String(root.accessibleName?.(el) || el.getAttribute?.("aria-label") || el.getAttribute?.("placeholder") || "").replace(/\s+/g, " ").trim();
           return normalizeTitle(current) === normalizeTitle(title) || /(?:rename|asset name|file name|đổi tên|tên tệp|tên nội dung)/i.test(label);
         });
-        const titleValueInputs = allInputs.filter(el => normalizeTitle(el.value ?? el.innerText ?? el.textContent ?? "") === normalizeTitle(title));
-        const explicitNameLabels = allInputs.filter(el => /(?:rename|new name|asset name|file name|đổi tên|tên mới|tên tệp|tên nội dung)/i.test(String(root.accessibleName?.(el) || el.getAttribute?.("aria-label") || el.getAttribute?.("placeholder") || "")));
+        const titleValueInputs = candidatePool.filter(el => normalizeTitle(el.value ?? el.innerText ?? el.textContent ?? "") === normalizeTitle(title));
+        const explicitNameLabels = candidatePool.filter(el => /(?:rename|new name|asset name|file name|đổi tên|tên mới|tên tệp|tên nội dung)/i.test(String(root.accessibleName?.(el) || el.getAttribute?.("aria-label") || el.getAttribute?.("placeholder") || "")));
         const scopedInputs = titleValueInputs.length ? titleValueInputs
           : explicitNameLabels.length ? explicitNameLabels
             : dialogInputs.length === 1 ? dialogInputs
