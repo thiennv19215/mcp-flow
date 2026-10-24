@@ -1,5 +1,6 @@
 import { validateFlowJobPayloads, preflightError } from "./flow-queue-preflight.js";
 import { validateChatGptJobPayloads, isChatGptOperation } from "./chatgpt-queue-preflight.js";
+import { projectRegenSlots, computeSlotAggregate, stampRegenLineage } from "./flow-regen-projection.js";
 
 const STORAGE_KEY = "flowMcpJobQueueV1";
 const AUTO_RETRY_MAX = 2;
@@ -217,8 +218,23 @@ export class FlowJobQueue {
 
   #snapshot() {
     const jobs = this.jobs.map(job => clone(job));
+    // FEAT-12: the slot projection folds every regen attempt into its
+    // root item's display slot (newest wins) and recomputes the counts
+    // from slot winners. The raw job list above stays authoritative and
+    // byte-identical for existing consumers; the projection is additive.
+    const slots = projectRegenSlots(jobs);
+    const slotAggregate = computeSlotAggregate(slots, { paused: this.paused });
     return {
       jobs,
+      slots,
+      slotStatus: slotAggregate.status,
+      slotCounts: {
+        total: slotAggregate.total,
+        completed: slotAggregate.completed,
+        failed: slotAggregate.failed,
+        cancelled: slotAggregate.cancelled,
+        active: slotAggregate.active,
+      },
       total: jobs.length,
       pending: jobs.filter(job => job.status === "pending").length,
       waitingForUser: jobs.filter(job => job.status === "waiting_for_user").length,
@@ -296,15 +312,73 @@ export class FlowJobQueue {
     if (problems.length > 0) throw preflightError(problems);
   }
 
+  // FEAT-12: a job input may carry metadata.regenOf — the id of the
+  // finished item it regenerates. The pointer is resolved HERE, against
+  // the live queue, into the canonical lineage stamp (root job id, slot
+  // key, attempt number), so a regen attempt can never silently become
+  // an unrelated job: an unknown target refuses the add outright.
+  #stampRegen(job, batchMates = []) {
+    const targetId = job.metadata?.regenOf;
+    if (targetId === undefined || targetId === null || targetId === "") return job;
+    const pool = [...this.jobs, ...batchMates];
+    const target = pool.find(item => item.id === String(targetId));
+    const stamped = stampRegenLineage(job.metadata, target, pool);
+    if (!stamped) {
+      throw Object.assign(
+        new Error(`Cannot regenerate Flow job ${String(targetId)}: it is not in the queue.`),
+        { code: "FLOW_REGEN_TARGET_NOT_FOUND" },
+      );
+    }
+    job.metadata = stamped;
+    return job;
+  }
+
   async add(input) {
     await this.ready;
     const job = this.#makeJob(input);
     if (this.jobs.some(existing => existing.id === job.id)) throw new Error(`Flow job already exists: ${job.id}`);
+    this.#stampRegen(job);
     await this.#preflight([job]);
     this.jobs.push(job);
     await this.#persist();
     this.#emit("added");
     return clone(job);
+  }
+
+  // FEAT-12: regenerate one finished item in place — a NEW attempt job
+  // re-running the item's own inputs, carrying the regen-of lineage to
+  // the slot's root. The original job record is never mutated or
+  // revived; displays fold the attempts through the slot projection.
+  async regenerate(id) {
+    await this.ready;
+    const original = this.jobs.find(item => item.id === String(id));
+    if (!original) {
+      throw Object.assign(
+        new Error(`Cannot regenerate Flow job ${String(id)}: it is not in the queue.`),
+        { code: "FLOW_REGEN_TARGET_NOT_FOUND" },
+      );
+    }
+    if (!["completed", "failed", "cancelled"].includes(original.status)) {
+      throw Object.assign(
+        new Error(`Cannot regenerate Flow job ${original.id} while it is ${original.status}.`),
+        { code: "FLOW_REGEN_TARGET_NOT_TERMINAL" },
+      );
+    }
+    const metadata = original.metadata ? clone(original.metadata) : {};
+    // The new attempt starts clean: prior receipts and dependency holds
+    // describe the OLD attempt's run, not this one.
+    delete metadata.generationResultCheckpoint;
+    delete metadata.generationObservation;
+    delete metadata.generationQuoteFields;
+    delete metadata.regen;
+    delete metadata.dependsOnId;
+    metadata.regenOf = original.id;
+    return this.add({
+      operation: original.operation,
+      payload: clone(original.payload),
+      label: original.label,
+      metadata,
+    });
   }
 
   async addBatch(inputs, { batchId = crypto.randomUUID(), batchLabel = "Flow batch" } = {}) {
@@ -328,6 +402,7 @@ export class FlowJobQueue {
       if (ids.has(job.id)) throw new Error(`Flow job already exists: ${job.id}`);
       ids.add(job.id);
     }
+    for (const job of jobs) this.#stampRegen(job, jobs);
     await this.#preflight(jobs);
     this.jobs.push(...jobs);
     try {
