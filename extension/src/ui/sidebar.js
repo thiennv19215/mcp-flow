@@ -2746,6 +2746,16 @@
       try { mentionResolution = resolveMentionReferences(prompts, refFilesImage); }
       catch (error) { setFeedback(error.message, false); return; }
     }
+    // Review round 3, S2: fail fast on an unresolved mention — before
+    // any upload or enqueue. The old code only warned AFTER the job was
+    // queued, leaving the @name in the prompt for Flow to drop (skewed
+    // fingerprint, or a video missing an ingredient after credits were
+    // spent). Character mentions never land here: the resolver already
+    // excludes them from unresolvedNames.
+    if (mentionResolution?.unresolvedNames?.length) {
+      setFeedback(t("sidebar.multiPromptMentionUnresolved", { names: mentionResolution.unresolvedNames.map(name => `@${name}`).join(", ") }), false);
+      return;
+    }
     if (prompts.length > 1 && referenceMode === "sequential" && refFilesImage.length < prompts.length * referencesPerPrompt) {
       setFeedback(t("sidebar.multiPromptRefsMissing"), false);
       return;
@@ -2910,6 +2920,12 @@
     if (referenceMode === "mention") {
       try { mentionResolution = resolveMentionReferences(prompts, refFilesVideo); }
       catch (error) { setFeedback(error.message, false); return; }
+    }
+    // Review round 3, S2: fail fast on an unresolved mention — before
+    // any upload or enqueue (see the image handler above for why).
+    if (mentionResolution?.unresolvedNames?.length) {
+      setFeedback(t("sidebar.multiPromptMentionUnresolved", { names: mentionResolution.unresolvedNames.map(name => `@${name}`).join(", ") }), false);
+      return;
     }
 
     const commonAttachments = [];
