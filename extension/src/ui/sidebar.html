@@ -834,6 +834,15 @@
               </button>
             </div>
           </div>
+          <!-- FEAT-05: saved multi-task lists (flow-task-lists.js) -->
+          <div id="flowTaskSearchRow" style="display:none;margin:10px 0;">
+            <input type="search" id="flowTaskSearch" placeholder="Tìm tác vụ theo tên hoặc prompt…" style="width:100%;">
+          </div>
+          <div style="display:flex;gap:6px;margin:10px 0;">
+            <button type="button" class="btn btn-secondary btn-sm" id="flowTaskRunSelectedBtn">Chạy đã chọn</button>
+          </div>
+          <div id="flowTaskList" class="flow-history-list" aria-live="polite"></div>
+          <p id="flowTaskEmpty" class="flow-inline-note">Chưa có tác vụ nào được lưu.</p>
         <!-- ========================================== -->
         <!-- TAB 2: WORKFLOW                            -->
         <!-- ========================================== -->

@@ -16,6 +16,7 @@
   let localUiHistory = [];
   let savedPrompts = [];
   let generationHistory = [];
+  let savedFlowTasks = [];
   let flowModelCapabilities = null;
   let flowModelCapabilitiesPromise = null;
   let lastFlowVideoModel = null;
@@ -856,6 +857,138 @@
     }
   }
 
+  // FEAT-05: saved multi-task lists live in the background task store
+  // (flow-task-lists.js); the Tasks tab renders them with search, and
+  // runs (one / selected / all) expand each task into queue jobs tagged
+  // with its id — results write back onto the originating task in the
+  // worker through FEAT-02's receipt fold.
+  const TASK_STATUS_LABELS = { pending: "Chờ chạy", running: "Đang chạy", completed: "Hoàn thành", failed: "Thất bại" };
+
+  function renderFlowTaskLists() {
+    const list = document.querySelector("#flowTaskList");
+    const empty = document.querySelector("#flowTaskEmpty");
+    if (!list || !empty) return;
+    list.replaceChildren();
+    empty.hidden = savedFlowTasks.length > 0;
+    for (const task of savedFlowTasks) {
+      const config = task.config || {};
+      const status = task.status === "completed" && task.partial ? "Hoàn thành một phần" : (TASK_STATUS_LABELS[task.status] || task.status || "");
+      const meta = [
+        status,
+        config.provider === "chatgpt" ? "ChatGPT" : (config.mediaType === "video" ? "Video" : "Ảnh"),
+        config.model || "",
+        config.ratio || "",
+        `${Array.isArray(config.prompts) ? config.prompts.length : 0} prompt`,
+        task.runCount ? `đã chạy ${task.runCount} lần` : "",
+        task.results?.length ? `${task.results.length} kết quả` : "",
+      ].filter(Boolean).join(" · ");
+      const detail = task.status === "failed" && task.error ? `${meta} — ${task.error}` : meta;
+      const row = document.createElement("article");
+      row.className = "flow-history-item";
+      row.innerHTML = `<label class="flow-history-item__check"><input type="checkbox" data-task-select="${escapeHtml(task.id)}"></label><div class="flow-history-item__body"><div class="flow-history-item__title">${escapeHtml(task.name || "")}</div><div class="flow-history-item__detail">${escapeHtml(detail)}</div></div><div class="flow-history-item__actions"><button type="button" class="btn btn-secondary btn-sm" data-task-run="${escapeHtml(task.id)}">Chạy</button><button type="button" class="btn btn-secondary btn-sm" data-task-duplicate="${escapeHtml(task.id)}">Nhân bản</button><button type="button" class="btn btn-secondary btn-sm" data-task-remove="${escapeHtml(task.id)}">Xoá</button></div>`;
+      list.appendChild(row);
+    }
+  }
+
+  async function loadFlowTasks() {
+    try {
+      const query = document.querySelector("#flowTaskSearch")?.value.trim() || "";
+      const res = await chrome.runtime.sendMessage(query ? { type: "flow-tasks:list", query } : { type: "flow-tasks:list" });
+      savedFlowTasks = res?.ok && Array.isArray(res.tasks) ? res.tasks : [];
+    } catch {
+      savedFlowTasks = [];
+    }
+    renderFlowTaskLists();
+  }
+
+  async function runFlowTasks(message) {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-tasks:run", ...message });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể chạy tác vụ đã lưu.");
+      if (Array.isArray(res.tasks)) savedFlowTasks = res.tasks;
+      renderFlowTaskLists();
+      const note = res.sequential ? " (chạy tuần tự bắt buộc)" : "";
+      setFeedback(`✅ Đã đưa tác vụ vào hàng đợi Flow${note}.`, true);
+      addLog("flow.tasks.run", note ? "sequential" : "queued", true);
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.tasks.run.error", err.message, false);
+    }
+  }
+
+  async function duplicateFlowTask(id) {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-tasks:duplicate", id });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể nhân bản tác vụ.");
+      if (Array.isArray(res.tasks)) savedFlowTasks = res.tasks;
+      renderFlowTaskLists();
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+    }
+  }
+
+  async function removeFlowTask(id) {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-tasks:remove", id });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể xoá tác vụ.");
+      if (Array.isArray(res.tasks)) savedFlowTasks = res.tasks;
+      renderFlowTaskLists();
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+    }
+  }
+
+  // "Add" snapshots the current Gen form into a saved task: the same
+  // fields the submit paths read (provider, type, prompts split by the
+  // multi-prompt rule WITHOUT the addon — addons are never baked into
+  // stored configs — ratio, model, picker refs). ChatGPT tasks keep
+  // only payload-carrying refs, mirroring GPT-14's library-drop rule.
+  async function createFlowTaskFromForm() {
+    const provider = document.querySelector("#genProvider")?.value === "chatgpt" ? "chatgpt" : "flow";
+    const mediaType = (document.querySelector("#genType")?.value || "image") === "video" ? "video" : "image";
+    const rawPrompt = document.querySelector("#promptsArea")?.value.trim()
+      || document.querySelector(mediaType === "video" ? "#inputPromptVideo" : "#inputPromptImage")?.value.trim() || "";
+    if (!rawPrompt) {
+      setFeedback("Vui lòng nhập prompt ở tab Tạo trước khi lưu thành tác vụ.", false);
+      return;
+    }
+    const multiEnabled = document.querySelector("#multiPromptCheck")?.checked === true
+      || document.querySelector(mediaType === "video" ? "#multiPromptVideo" : "#multiPromptImage")?.checked === true;
+    const prompts = multiEnabled ? rawPrompt.split(/\n\s*\n/).map(value => value.trim()).filter(Boolean) : [rawPrompt];
+    let refs = [];
+    try { refs = referencePicker.getReferences(mediaType) || []; } catch { refs = []; }
+    // A saved task persists across restarts, so refs carrying a live
+    // File handle can never be part of it; payload records and library
+    // identities are plain data and store verbatim.
+    refs = refs.filter(ref => ref && !ref.file);
+    if (provider === "chatgpt") {
+      refs = refs.filter(ref => typeof ref.base64 === "string" && ref.base64);
+    }
+    try { refs = structuredClone(refs); } catch { refs = []; }
+    const name = window.prompt("Tên tác vụ:", prompts[0].slice(0, 60));
+    if (name === null) return;
+    const config = {
+      provider,
+      mediaType,
+      prompts,
+      ratio: document.querySelector("#aspectRatio")?.value || document.querySelector("#selectRatioImage")?.value || null,
+      model: document.querySelector(mediaType === "video" ? "#selectModelVideo" : "#selectModelImage")?.value || null,
+      quantity: mediaType === "video" ? Number(document.querySelector("#selectCountVideo")?.value || 1) : 1,
+      refs,
+      download: { autoDownload: document.querySelector("#genTabAutoDownload")?.checked === true },
+    };
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-tasks:create", name: name.trim() || undefined, config });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể lưu tác vụ.");
+      if (Array.isArray(res.tasks)) savedFlowTasks = res.tasks;
+      renderFlowTaskLists();
+      setFeedback("✅ Đã lưu tác vụ vào tab Tác vụ.", true);
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+    }
+  }
+
+
   function renderSavedPrompts() {
     const list = document.querySelector("#savedPromptsList");
     const empty = document.querySelector("#savedPromptsEmpty");
@@ -923,6 +1056,7 @@
     renderSavedPrompts();
     void loadGenerationHistory();
     void loadWorkflowTemplates();
+    void loadFlowTasks();
   }
 
   function addLog(name, detail, isOk = true) {
@@ -1310,6 +1444,31 @@
     const deleteId = event.target.closest("[data-wf-template-delete]")?.dataset.wfTemplateDelete;
     if (deleteId) void removeWorkflowTemplate(deleteId);
   });
+
+  // FEAT-05: Tasks tab controls for the saved multi-task lists.
+  document.querySelector("#flowTaskList")?.addEventListener("click", event => {
+    const runId = event.target.closest("[data-task-run]")?.dataset.taskRun;
+    if (runId) { void runFlowTasks({ ids: [runId] }); return; }
+    const duplicateId = event.target.closest("[data-task-duplicate]")?.dataset.taskDuplicate;
+    if (duplicateId) { void duplicateFlowTask(duplicateId); return; }
+    const removeId = event.target.closest("[data-task-remove]")?.dataset.taskRemove;
+    if (removeId) void removeFlowTask(removeId);
+  });
+  document.querySelector("#refreshTasksBtn")?.addEventListener("click", () => { void loadFlowTasks(); });
+  document.querySelector("#runAllTasksBtn")?.addEventListener("click", () => { void runFlowTasks({ all: true }); });
+  document.querySelector("#addTaskBtn")?.addEventListener("click", () => { void createFlowTaskFromForm(); });
+  document.querySelector("#flowTaskRunSelectedBtn")?.addEventListener("click", () => {
+    const ids = [...document.querySelectorAll("[data-task-select]:checked")].map(input => input.dataset.taskSelect).filter(Boolean);
+    if (!ids.length) { setFeedback("Chưa chọn tác vụ nào để chạy.", false); return; }
+    void runFlowTasks({ ids });
+  });
+  document.querySelector("#taskSearchToggle")?.addEventListener("click", () => {
+    const row = document.querySelector("#flowTaskSearchRow");
+    if (!row) return;
+    row.style.display = row.style.display === "none" ? "" : "none";
+    if (row.style.display !== "none") document.querySelector("#flowTaskSearch")?.focus();
+  });
+  document.querySelector("#flowTaskSearch")?.addEventListener("input", () => { void loadFlowTasks(); });
 
   let isGenerating = false;
   let flowQueuePanel = null;
