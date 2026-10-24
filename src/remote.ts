@@ -48,6 +48,9 @@ export class RemoteCore implements Core {
   // generically and LocalCore serves chatgpt_generate, so the relay
   // only needed this forward for the surface to work end to end.
   chatgpt_generate = (a: ChatGptGenerateArgs) => this.request("chatgpt_generate", a);
+  // FEAT-07 follow-up: same generic dispatch — LocalCore serves
+  // run_workflow_graph, so the relay only needed this forward.
+  run_workflow_graph = (a: Parameters<Core["run_workflow_graph"]>[0]) => this.request("run_workflow_graph", a);
   cancel = (a: Parameters<Core["cancel"]>[0]) => this.request("cancel", a);
   retry = (a: Parameters<Core["retry"]>[0]) => this.request("retry", a);
   assets = (a: Parameters<Core["assets"]>[0]) => this.request("assets", a);

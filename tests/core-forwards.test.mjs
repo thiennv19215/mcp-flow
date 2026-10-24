@@ -58,6 +58,34 @@ test('remote.ts source: chatgpt_generate is a one-line request forward, like its
   assert.ok(remoteSource.includes('this.request("chatgpt_generate", a)'), 'the forward posts to the chatgpt_generate API method');
 });
 
+// --- FEAT-07 follow-up: RemoteCore forwards run_workflow_graph ----------------
+
+test('RemoteCore exposes run_workflow_graph (the relay no longer answers not-implemented)', () => {
+  const remote = new RemoteCore('http://127.0.0.1:1');
+  assert.equal(typeof remote.run_workflow_graph, 'function');
+});
+
+test('RemoteCore.run_workflow_graph relays the args to the owner /api/run_workflow_graph endpoint', async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, init });
+    return { ok: true, status: 200, json: async () => ({ run: { id: 'run-1' }, jobs: [] }) };
+  };
+  try {
+    const remote = new RemoteCore('http://127.0.0.1:18899');
+    const args = { project: 'P', graph: { nodes: [], edges: [] } };
+    const out = await remote.run_workflow_graph(args);
+    assert.deepEqual(out, { run: { id: 'run-1' }, jobs: [] }, 'the owner answer is relayed verbatim');
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, 'http://127.0.0.1:18899/api/run_workflow_graph');
+    assert.equal(calls[0].init.method, 'POST');
+    assert.deepEqual(JSON.parse(calls[0].init.body), args, 'the args cross the relay unchanged');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 // --- FEAT-07: LocalCore.run_workflow_graph -----------------------------------
 
 test('LocalCore exposes run_workflow_graph (the MCP tool lookup finds it)', () => {
