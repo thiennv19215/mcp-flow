@@ -133,6 +133,7 @@
     .flow-queue-panel__items{display:flex;flex-direction:column;gap:7px;max-height:42vh;overflow:auto}
     .flow-queue-panel__item{padding:9px;border:1px solid var(--border,rgba(255,255,255,.1));border-radius:7px;background:var(--card,#292929);min-width:0}
     .flow-queue-panel__label{font-weight:600;overflow-wrap:anywhere}
+    .flow-queue-panel__provider-badge{white-space:nowrap}
     .flow-queue-panel__status{white-space:nowrap;color:var(--text-muted,#8b8b92);font-size:11px}
     .flow-queue-panel__detail{margin-top:4px;color:var(--text-muted,#8b8b92);white-space:pre-wrap;overflow-wrap:anywhere}
     .flow-queue-panel__detail--download-error{color:#f87171}
@@ -164,6 +165,14 @@
 
   function taskIdentity(task, index) {
     return String(task?.id ?? task?.taskId ?? task?.task_id ?? task?.requestId ?? `queue-item-${index}`);
+  }
+
+  // GPT-14: the provider badge is driven ONLY by job.metadata.provider.
+  // Absent/blank -> null -> no badge, and the row keeps today's Flow
+  // presentation; the operation or source never imply a provider.
+  function providerBadgeForTask(task) {
+    const provider = task?.metadata?.provider;
+    return typeof provider === "string" && provider.trim() ? provider.trim() : null;
   }
 
   function progressPercent(task) {
@@ -522,7 +531,15 @@
         : "font-size:10px;padding:2px 6px;border-radius:4px;background:rgba(255,255,255,0.08);color:var(--text-muted,#8b8b92);margin-right:6px;border:1px solid rgba(255,255,255,0.15);font-weight:600";
       const labelContainer = makeElement("span", "flow-queue-panel__label-container");
       labelContainer.style.cssText = "display:flex;align-items:center;min-width:0;overflow:hidden";
-      labelContainer.append(sourceBadge, makeElement("span", "flow-queue-panel__label", label));
+      labelContainer.append(sourceBadge);
+      const provider = providerBadgeForTask(task);
+      if (provider) {
+        const providerBadge = makeElement("span", "flow-queue-panel__provider-badge", provider);
+        providerBadge.dataset.provider = provider;
+        providerBadge.style.cssText = "font-size:10px;padding:2px 6px;border-radius:4px;background:rgba(56,189,248,0.15);color:#38bdf8;margin-right:6px;border:1px solid rgba(56,189,248,0.3);font-weight:600";
+        labelContainer.append(providerBadge);
+      }
+      labelContainer.append(makeElement("span", "flow-queue-panel__label", label));
       const attention = this.snapshot?.attention ?? this.snapshot?.state?.attention;
       const isBlockedTask = ["flow-page-blocked", "flow-outcome-unknown", "flow-dependency-blocked"].includes(attention?.type) && String(attention.jobId || "") === id && String(task?.status || "").toLowerCase() === "failed";
       const status = makeElement("span", `flow-queue-panel__status${isBlockedTask ? " flow-queue-panel__status--attention" : ""}`, isBlockedTask ? this._text("needsAttention") : this._status(task));
