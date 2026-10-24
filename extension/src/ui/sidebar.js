@@ -2667,9 +2667,23 @@
     }
   }
 
+  // Review round 1, V1: the upload kind must follow the FILE's media type,
+  // not the reference role. Flow creates a video tile for a video file, so
+  // confirming a local video reference with kind "image" could never match
+  // (flowUploadKindMatches("image", "video") is false) and died with
+  // FLOW_UPLOAD_TIMEOUT even though the tile existed. The MIME type wins;
+  // an empty MIME type falls back to the file extension.
+  function referenceUploadKind(file) {
+    const type = typeof file?.type === "string" ? file.type.toLowerCase() : "";
+    if (type.startsWith("video/")) return "video";
+    const name = typeof file?.name === "string" ? file.name : "";
+    if (/\.(mp4|m4v|mov|webm|avi|mkv|3gp)$/i.test(name)) return "video";
+    return "image";
+  }
+
   async function uploadReferenceImage(file, onProgress, referenceIndex) {
     if (window.FlowUploadClient) {
-      return await uploadWithCancel(file, { onProgress, kind: "image", referenceIndex });
+      return await uploadWithCancel(file, { onProgress, kind: referenceUploadKind(file), referenceIndex });
     }
     throw new Error("Dịch vụ tải ảnh lên Flow chưa được khởi tạo");
   }
