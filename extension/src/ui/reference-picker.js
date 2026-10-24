@@ -200,7 +200,7 @@
       });
       uploadSlot.style.display = list.length >= 3 ? "none" : "flex";
 
-      // Also synchronize TobyFlow preview grid and ratio count
+      // Also synchronize the preview grid and ratio count
       const currentGenType = normalizeType(document.querySelector("#genType")?.value);
       if (type === currentGenType) {
         const previewGrid = document.querySelector("#refImagesPreview");

@@ -1685,10 +1685,10 @@
   });
 
   // Tab views with roving focus for keyboard users.
-  const tabs = [...document.querySelectorAll(".tobyflow-tab")];
+  const tabs = [...document.querySelectorAll(".flowmcp-tab")];
   const activateTab = tab => {
       if (!tab) return;
-      document.querySelectorAll(".tobyflow-tab").forEach(t => t.classList.remove("active"));
+      document.querySelectorAll(".flowmcp-tab").forEach(t => t.classList.remove("active"));
       document.querySelectorAll(".tab-pane").forEach(p => p.classList.remove("active"));
       tab.classList.add("active");
       tabs.forEach(t => {
@@ -3684,7 +3684,7 @@
       if (dropdown && !dropdown.contains(e.target)) closeMenu();
     });
     dropdown?.addEventListener("click", e => {
-      if (e.target.closest?.(".tobyflow-settings-menu-item")) closeMenu();
+      if (e.target.closest?.(".flowmcp-settings-menu-item")) closeMenu();
     });
 
     document.querySelector("#openSettingsBtn")?.addEventListener("click", () => {

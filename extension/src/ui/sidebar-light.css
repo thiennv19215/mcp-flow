@@ -45,16 +45,6 @@ body:has(#flow-auto-sidebar-root.theme-light),
   --source-accent: #7c3aed
 }
 
-body:has(#flow-auto-sidebar-root.theme-light) :is(.ref-btn-capture, .ref-btn-album, .task-card-arrow, .footer-support-btn, .upgrade-price, .tobyflow-queue-progress-text, .tobyflow-referral-section__title svg, .tobyflow-referral-code__value, .usage-stats-provider--grok .usage-stats-provider-name, .usage-stats-provider-logo--grok, .addon-prompt-thumb-placeholder svg, .df-node-zoom-toggle, .df-node-prompt-overlay, .tobyflow-node-picker-port-tag, .result-thumb-original-badge, .node-result-download-btn--original, .pa-title, .pa-pv, .pa-ar, .pa-tg, .pa-fmt, .pa-fmt-tab.sel, .pa-fmt-tabs-menu-item, .pa-adv-toggle, .mention-menu-item) {
-  color: var(--foreground)
-}
-
-body:has(#flow-auto-sidebar-root.theme-light) :is(.tab-btn.active, .psm-tab.active, .upgrade-provider-btn.active, .tobyflow-badge-primary, .user-dropdown-plan, .tobyflow-announcement-version__tag, .flow-task-item .task-status.s-processing, .mention-menu-tab.active) {
-  color: var(--primary);
-  background: var(--primary-light);
-  border-color: var(--primary)
-}
-
 body:has(#flow-auto-sidebar-root.theme-light) :is(.ref-item-name, .mention-tag, .ref-mention-tag) {
   color: var(--muted-foreground);
   background: var(--surface);
@@ -97,29 +87,12 @@ body:has(#flow-auto-sidebar-root.theme-light) .flow-task-item .task-no {
   color: var(--muted-foreground)
 }
 
-body:has(#flow-auto-sidebar-root.theme-light) :is(.project-indicator-btn:hover, .project-create-btn:hover, .project-indicator-item:hover, .project-indicator-item.active, .df-node-rename-btn:hover, .df-hover-btn:hover, .tobyflow-referral-code__copy:hover, .style-modal-item-edit:hover, .pa-close:hover, .pa-fmt-tabs-more:hover, .pa-fmt-tabs-menu-item:hover, .pa-fmt-tabs-menu-item.sel, .cycle-pill:hover, .currency-pill:hover) {
-  color: var(--foreground);
-  background: var(--accent)
-}
-
 body:has(#flow-auto-sidebar-root.theme-light) .provider-tab--active {
   --primary-foreground: #1e1e1e
 }
 
 body:has(#flow-auto-sidebar-root.theme-light) :is(#createWorkflowBtn, #createFirstWorkflowBtn, #addTaskBtn, #addFirstTaskBtn, #addMyPromptBtn, .wf-create-template-btn) {
   color: var(--foreground)
-}
-
-body:has(#flow-auto-sidebar-root.theme-light) :is(.wf-template-use-btn, .wf-detail-use-btn, .btn-save-template, .tobyflow-template-use-btn) {
-  background: linear-gradient(110deg, #4f46e5, #6350df);
-  color: #ffffff;
-  box-shadow: 0 3px 10px rgba(79, 70, 229, 0.16)
-}
-
-body:has(#flow-auto-sidebar-root.theme-light) :is(.wf-template-use-btn:hover, .wf-detail-use-btn:hover, .btn-save-template:hover, .tobyflow-template-use-btn:hover) {
-  background: #4338ca;
-  filter: none;
-  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.22)
 }
 
 body:has(#flow-auto-sidebar-root.theme-light) .gen-api-setting-btn {
@@ -132,12 +105,12 @@ body:has(#flow-auto-sidebar-root.theme-light) .gen-api-setting-btn.is-on {
   border-color: #c8c2f7
 }
 
-body:has(#flow-auto-sidebar-root.theme-light) .tobyflow-user-plan-badge[data-plan=free] {
+body:has(#flow-auto-sidebar-root.theme-light) .flowmcp-user-plan-badge[data-plan=free] {
   background: #8b8b92;
   color: #dedede
 }
 
-body:has(#flow-auto-sidebar-root.theme-light) .tobyflow-user-plan-badge[data-plan=free]:hover {
+body:has(#flow-auto-sidebar-root.theme-light) .flowmcp-user-plan-badge[data-plan=free]:hover {
   background: linear-gradient(90deg, #fbbf24, #f97316);
   color: #1e1e1e
 }
@@ -228,25 +201,9 @@ body:has(#flow-auto-sidebar-root.theme-light) .usage-stats-icon--workflows {
   background: #f3edff
 }
 
-body:has(#flow-auto-sidebar-root.theme-light) :is(.imgpicker-banner--warning, .prompt-source-inline-warning, .pa-sub, .wf-detail-premium-notice, .confirm-run-provider-badge.is-warning, .plan-feature-badge.badge-warning, .announcement-feature-badge.badge-warning, .wmtool-pill.warn, .wf-publish-toggle.unpublished, .tobyflow-template-guide__difficulty--medium, .wf-detail-node-pill--delay, .usage-stats-expiry.expiring-soon) {
-  color: var(--foreground);
-  background: var(--warning-light);
-  border-color: #f3d3a7
-}
-
 body:has(#flow-auto-sidebar-root.theme-light) :is(.task-card-status.running, .workflow-card-status.running) {
   color: var(--primary) !important;
   background: var(--primary-light) !important
-}
-
-body:has(#flow-auto-sidebar-root.theme-light) :is(.tobyflow-exec-tracker__retry-status, .tobyflow-pipeline-footer__retry-status, .tobyflow-pipeline-footer__btn--pause-resume, .tobyflow-queue-job__badge--retrying) {
-  color: var(--primary);
-  background-color: var(--primary-light)
-}
-
-body:has(#flow-auto-sidebar-root.theme-light) :is(.df-node-failure, .wf-media-error, .df-node-char-count.df-over-limit, .df-form-char-count.df-over-limit, .task-prompt-char-count.is-over-limit, .extension-device-limit-error, .tobyflow-template-guide__difficulty--advanced, .wf-preview-delete-btn, .df-hover-btn.danger:hover) {
-  color: var(--destructive);
-  background-color: var(--destructive-light)
 }
 
 body:has(#flow-auto-sidebar-root.theme-light) :is(.task-card-status.completed, .workflow-card-status.completed) {
@@ -265,11 +222,6 @@ body:has(#flow-auto-sidebar-root.theme-light) :is(.mention-chip-v2--voice, .ment
   color: #9d174d;
   background-color: #fcecf3;
   border-color: #e5b2c9
-}
-
-body:has(#flow-auto-sidebar-root.theme-light) :is(.mention-chip-v2--warn, .tobyflow-queue-state--orange) {
-  color: var(--foreground);
-  background-color: var(--warning-light)
 }
 
 body:has(#flow-auto-sidebar-root.theme-light) :is(.pa-generate, .pa-fill) {
@@ -366,11 +318,11 @@ body:has(#flow-auto-sidebar-root.theme-light) .flow-cookie-recovery-loading {
   background: rgba(238, 242, 247, 0.78)
 }
 
-body:has(#flow-auto-sidebar-root.theme-light) :is(.flow-cookie-recovery-loading-title, .flow-cookie-recovery-loading .tobyflow-loading-text) {
+body:has(#flow-auto-sidebar-root.theme-light) :is(.flow-cookie-recovery-loading-title, .flow-cookie-recovery-loading .flowmcp-loading-text) {
   color: var(--foreground)
 }
 
-body:has(#flow-auto-sidebar-root.theme-light) .tobyflow-loading-spinner {
+body:has(#flow-auto-sidebar-root.theme-light) .flowmcp-loading-spinner {
   border-color: var(--border-light);
   border-top-color: var(--primary)
 }
