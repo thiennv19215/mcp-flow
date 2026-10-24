@@ -119,8 +119,17 @@
         const flowAbort = new AbortController();
         const unknownSubmitError = async (code, message, retryable = false) => {
           const error = this.error(code, message, retryable, true);
+          // Videofix M-E: the slate-bridge ambiguity flag is wired here
+          // instead of staying dead metadata on the activation. It records
+          // one real diagnostic fact — the click landed but the bridge's
+          // reply was lost — for every submit error that carries observer
+          // diagnostics. It is NOT a "dispatched, ambiguous" state: no
+          // code treats the submit as dispatched on this flag alone; the
+          // dispatch wait's correlation / DOM signals own the verdict.
+          const submitBridgeAmbiguous = activation?.mainActivationAmbiguous === true;
           error.diagnostics = {
             clickDelivered: true,
+            submitBridgeAmbiguous,
             observerReady: false,
             xhrHookActive: false,
             fetchHookActive: false,
@@ -130,6 +139,7 @@
             const observer = await tiles.readNativeFlowCorrelationHealth?.();
             if (observer) error.diagnostics = {
               clickDelivered: true,
+              submitBridgeAmbiguous,
               observerReady: observer.ready === true,
               xhrHookActive: observer.xhrHookActive === true,
               fetchHookActive: observer.fetchHookActive === true,
@@ -758,6 +768,24 @@
           } catch (_) { /* a transient scan failure is not acceptance */ }
           return false;
         };
+        // Videofix M-E, design decision (fail-as-designed, not observe):
+        // a no-signal dispatch timeout has ZERO positive evidence — no
+        // request (even weak), no Flow error, no button disable, no
+        // editor-empty, no new tile. Moving such a job into observe would
+        // break the invariant every other acceptance path keeps (a
+        // positive signal is required: requestSeen, DOM acceptance, or
+        // the M-G domAccepted fallback) and could claim another job's
+        // tile after burning the full observe budget on a submit Flow
+        // most likely dropped. So the timeout stays a failure with
+        // outcome_unknown=true — which is what blocks queue retry and
+        // auto-retry for this record, correctly, while a possibly-late
+        // Flow dispatch is still possible. The recovery is therefore
+        // spelled out in the error itself: inspect Flow first, and only
+        // recreate the job (a fresh submit in the same tab arms cleanly
+        // since M-D removed the retired-conflict lock) when nothing
+        // appeared. There is no "dispatched, ambiguous" state in code
+        // and no comment below may claim one.
+        const dispatchTimeoutGuidance = " The outcome is unknown: Flow may still dispatch this submit late. Check the Flow project first — if a tile for this prompt appears there, Flow did dispatch it and this job cannot be retried from the queue. Only if nothing appears, create the job again; a fresh submit in the same tab is not blocked.";
         let acknowledged = false;
         let domAccepted = false;
         let lastSubmitProgress = "";
@@ -828,7 +856,7 @@
             // after this timeout is attributed to the retry attempt, the
             // same exposure a reload-and-retry has today.
             tiles.disarmNativeFlowCorrelation(correlationAttemptId, { dispatchOutcome: "none" });
-            throw await unknownSubmitError(error.code, error.message || "Timed out while waiting for Flow request dispatch.", error.retryable === true);
+            throw await unknownSubmitError(error.code, (error.message || "Timed out while waiting for Flow request dispatch.") + dispatchTimeoutGuidance, error.retryable === true);
           }
         }
 
@@ -846,7 +874,7 @@
               if (classified) throw await unknownSubmitError(classified.code, classified.message, classified.retryable);
               throw await unknownSubmitError("FLOW_SUBMIT_REJECTED", `Flow displayed an error before a correlated generation request was observed: ${newError}. Inspect Flow before retrying.`);
             }
-            throw await unknownSubmitError("FLOW_SUBMIT_UNCONFIRMED", `Flow did not emit a correlated generation request within the submit budget (click delivered: ${Boolean(activation.clickDelivered)}). The outcome is unknown; inspect Flow before retrying.`);
+            throw await unknownSubmitError("FLOW_SUBMIT_UNCONFIRMED", `Flow did not emit a correlated generation request within the submit budget (click delivered: ${Boolean(activation.clickDelivered)}).` + dispatchTimeoutGuidance);
           }
         }
 

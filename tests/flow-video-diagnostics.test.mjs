@@ -56,6 +56,7 @@ const HEALTH = {
 
 const EXPECTED_DIAGNOSTICS = {
   clickDelivered: true,
+  submitBridgeAmbiguous: false,
   observerReady: true,
   xhrHookActive: true,
   fetchHookActive: false,
@@ -189,9 +190,9 @@ test('dispatch wait: a boundedWait timeout surfaces with correlation-observer di
   const { submit, disarmCalls } = dispatchHarness({ waitMode: 'throw-timeout' });
   await assert.rejects(submit(), error => {
     assert.equal(error.code, 'FLOW_OPERATION_TIMEOUT', 'the timeout keeps its code');
-    assert.equal(error.message,
-      'Timed out while waiting for Flow request dispatch; no further Flow actions were started.',
-      'the boundedWait message is preserved verbatim');
+    assert.ok(error.message.startsWith(
+      'Timed out while waiting for Flow request dispatch; no further Flow actions were started.'),
+      'the boundedWait message is preserved as the prefix');
     assert.equal(error.retryable, true, 'the boundedWait retryable flag is preserved');
     assert.equal(error.outcome_unknown, true, 'the submit outcome stays unknown');
     assert.deepEqual(plain(error.diagnostics), EXPECTED_DIAGNOSTICS,
@@ -300,6 +301,7 @@ test('dispatch wait: a missing observer health still yields the default diagnost
     assert.equal(error.code, 'FLOW_OPERATION_TIMEOUT');
     assert.deepEqual(plain(error.diagnostics), {
       clickDelivered: true,
+      submitBridgeAmbiguous: false,
       observerReady: false,
       xhrHookActive: false,
       fetchHookActive: false,
@@ -641,7 +643,10 @@ test('frames submit: the selecting-asset stage label uses the stripped asset nam
 // the button (the capture listener fired). TobyFlow treats that case as
 // "dispatched, ambiguous": the activation returns with clickDelivered
 // intact and an ambiguity flag, and no second click is attempted. Only a
-// timeout where NO click ever landed still throws.
+// timeout where NO click ever landed still throws. Note for mcp-flow
+// (videofix M-E): the flag is diagnostic only — mcp-flow keeps NO
+// "dispatched, ambiguous" state, and the dispatch wait's correlation /
+// DOM signals own the verdict; the flag surfaces in timeout diagnostics.
 // ---------------------------------------------------------------------------
 
 function editorHarness({ clickDuringBridge = false } = {}) {
@@ -766,6 +771,52 @@ test('dispatch wait: an editor cleared after activation still resolves as dom_ac
   assert.equal(result.submitted, true, 'an editor that held text pre-click and is empty now resolves the submit');
   assert.equal(result.confirmationSignal, 'dom_acceptance');
   assert.deepEqual(disarmCalls, [], 'the correlation attempt is NOT disarmed on the live-DOM exit');
+});
+
+test('M-E: the dispatch timeout error tells the user to check Flow first and only recreate if nothing appears', async () => {
+  const { submit } = dispatchHarness({ waitMode: 'throw-timeout' });
+  await assert.rejects(submit(), error => {
+    assert.equal(error.code, 'FLOW_OPERATION_TIMEOUT');
+    assert.match(error.message, /Check the Flow project first/);
+    assert.match(error.message, /if a tile for this prompt appears there/);
+    assert.match(error.message, /cannot be retried from the queue/);
+    assert.match(error.message, /Only if nothing appears, create the job again/);
+    assert.match(error.message, /a fresh submit in the same tab is not blocked/);
+    return true;
+  });
+});
+
+test('M-E: the unconfirmed exit carries the same recovery guidance', async () => {
+  const { submit } = dispatchHarness({
+    waitMode: 'advance',
+    requestSeen: false,
+    activation: { clickDelivered: true, controlAccepted: false, strategy: 'fake-click' },
+  });
+  await assert.rejects(submit(), error => {
+    assert.equal(error.code, 'FLOW_SUBMIT_UNCONFIRMED');
+    assert.match(error.message, /Check the Flow project first/);
+    assert.match(error.message, /Only if nothing appears, create the job again/);
+    return true;
+  });
+});
+
+test('M-E: a bridge-ambiguous activation is wired into timeout diagnostics instead of staying dead metadata', async () => {
+  const { submit } = dispatchHarness({
+    waitMode: 'throw-timeout',
+    activation: { clickDelivered: true, controlAccepted: false, mainActivationAmbiguous: true, strategy: 'fake-click' },
+  });
+  await assert.rejects(submit(), error => {
+    assert.equal(error.diagnostics.submitBridgeAmbiguous, true);
+    return true;
+  });
+});
+
+test('M-E pin: a non-ambiguous activation reports submitBridgeAmbiguous false', async () => {
+  const { submit } = dispatchHarness({ waitMode: 'throw-timeout' });
+  await assert.rejects(submit(), error => {
+    assert.equal(error.diagnostics.submitBridgeAmbiguous, false);
+    return true;
+  });
 });
 
 test('M-F: a swapped editor that is empty still resolves as dom_acceptance', async () => {

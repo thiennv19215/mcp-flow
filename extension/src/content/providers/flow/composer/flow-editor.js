@@ -559,11 +559,13 @@
       if (mainActivation?.error === "Bridge timeout") {
         // The click DID land on the button (the capture listener fired)
         // but the bridge's result message never arrived — the main-world
-        // listener ran and its reply was lost. Like TobyFlow, treat this
-        // as a delivered-but-ambiguous activation: do not throw, and do
-        // not click again (a second click could submit twice); the
-        // dispatch wait's correlation / DOM-acceptance signals own the
-        // verdict from here.
+        // listener ran and its reply was lost. Like TobyFlow, do not
+        // throw, and do not click again (a second click could submit
+        // twice); the dispatch wait's correlation / DOM-acceptance
+        // signals own the verdict from here. The flag below is a
+        // diagnostic fact only (videofix M-E wires it into the timeout
+        // errors' diagnostics) — it is NOT a "dispatched, ambiguous"
+        // state, and nothing treats the submit as dispatched on it alone.
         mainActivationAmbiguous = true;
       } else if (!mainListenerInvoked) {
         // The bridge replied but found no page listener. Try one DOM click; the
