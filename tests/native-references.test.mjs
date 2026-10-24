@@ -997,6 +997,131 @@ test('first-frame selection is confirmed by the chosen asset appearing in the St
   assert.deepEqual(context.document.querySelectorAll('[role="listbox"]'), [unrelatedList], 'ambiguous cleanup never treats the unrelated listbox as the frame picker');
 });
 
+function framePickerIdentityHarness(optionSpecs) {
+  let pickerOpen = false;
+  let slotAsset = '';
+  let clock = 0;
+  const clicks = [];
+  const tileIds = new Map();
+  const tiles = [];
+  const options = optionSpecs.map((spec, index) => {
+    const tile = {
+      getAttribute: name => name === 'aria-label' ? spec.label : null,
+      querySelectorAll: () => [],
+    };
+    tiles.push(tile);
+    tileIds.set(tile, spec.id);
+    return {
+      name: spec.label,
+      getAttribute: name => name === 'aria-label' ? spec.label : null,
+      querySelectorAll: selector => selector === 'flow-grid-tile-container' ? [tile] : [],
+      querySelector: () => null,
+      click() { clicks.push(index); slotAsset = spec.id; pickerOpen = false; },
+    };
+  });
+  const list = {
+    isConnected: true,
+    getAttribute: name => name === 'role' ? 'listbox' : null,
+    querySelectorAll: selector => selector === '[role="option"]' ? options
+      : selector === 'flow-grid-tile-container' ? tiles : [],
+    closest: () => null,
+  };
+  const opener = {
+    name: 'Start',
+    getAttribute: name => name === 'aria-label' ? 'Start' : name === 'aria-expanded' ? String(pickerOpen) : null,
+    innerText: 'Start',
+    parentElement: { parentElement: { querySelectorAll: selector => selector === 'img,video' && slotAsset
+      ? [{ currentSrc: `https://flow.google.com/media/${slotAsset}`, getAttribute: () => null }] : [] } },
+    click() { pickerOpen = !pickerOpen; },
+  };
+  const allTab = { name: 'All', getAttribute: name => name === 'aria-selected' ? 'true' : null };
+  const document = {
+    querySelectorAll(selector) {
+      if (selector === '[role="listbox"]') return pickerOpen ? [list] : [];
+      if (selector === '[role="progressbar"],[aria-busy="true"]') return [];
+      if (selector === '[role="tab"]') return [allTab];
+      return [];
+    },
+    getElementById: () => null,
+    dispatchEvent: () => {},
+  };
+  const context = vm.createContext({ document, location: { href: 'https://flow.google.com/project/test', pathname: '/project/test' },
+    Date: class MockDate extends Date { static now() { return clock; } }, setTimeout, clearTimeout,
+    window: { addEventListener() {}, removeEventListener() {}, dispatchEvent() {} },
+    CustomEvent: class CustomEvent { constructor(type) { this.type = type; } },
+    mediaId: value => tileIds.get(value),
+    visible: el => el !== list || pickerOpen,
+    accessibleName: el => el.name || '',
+    flowButton: name => name === 'Start' ? opener : null,
+    flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
+    KeyboardEvent: class KeyboardEvent {},
+    wait: async ms => { clock += ms; },
+  });
+  vm.runInContext(source, context);
+  return { context, clicks };
+}
+
+test('frame picker selects by expected media identity when the option title is unrelated', async () => {
+  const mediaUuid = '22222222-2222-4222-8222-222222222222';
+  const { context, clicks } = framePickerIdentityHarness([
+    { label: 'Request for text translation', id: mediaUuid },
+  ]);
+  const result = await context.chooseNativePickerAsset('ref-01-real-photo-abc123.png', 'start', { expectedId: mediaUuid });
+  assert.equal(result.confirmed, true);
+  assert.equal(result.id, mediaUuid);
+  assert.deepEqual(clicks, [0]);
+  assert.equal(context.FlowNativeFramePicker.inspectDiagnostics().optionIdentityUsed, true);
+});
+
+test('frame picker lets the expected identity decide between options that share a title', async () => {
+  const wrongUuid = '33333333-3333-4333-8333-333333333333';
+  const rightUuid = '44444444-4444-4444-8444-444444444444';
+  const { context, clicks } = framePickerIdentityHarness([
+    { label: 'Shared Title', id: wrongUuid },
+    { label: 'Shared Title', id: rightUuid },
+  ]);
+  const result = await context.chooseNativePickerAsset('Shared Title', 'start', { expectedId: rightUuid });
+  assert.equal(result.confirmed, true);
+  assert.equal(result.id, rightUuid);
+  assert.deepEqual(clicks, [1], 'only the option whose identity matches is clicked; no ambiguity error');
+});
+
+test('frame picker canonicalizes titles: file extension, media prefix and suffix, diacritics', async () => {
+  const uuid = '55555555-5555-4555-8555-555555555555';
+  // No expectedId in this test: the canonical title form alone must match.
+  const byExtension = framePickerIdentityHarness([{ label: 'forest-photo', id: uuid }]);
+  const extResult = await byExtension.context.chooseNativePickerAsset('forest-photo.png', 'start');
+  assert.equal(extResult.id, uuid);
+
+  const byPrefix = framePickerIdentityHarness([{ label: 'Image forest-photo', id: uuid }]);
+  const prefixResult = await byPrefix.context.chooseNativePickerAsset('forest-photo.png', 'start');
+  assert.equal(prefixResult.id, uuid);
+
+  const byVietnameseSuffix = framePickerIdentityHarness([{ label: 'Buc tranh son dau anh', id: uuid }]);
+  const suffixResult = await byVietnameseSuffix.context.chooseNativePickerAsset('Bức tranh sơn dầu', 'start');
+  assert.equal(suffixResult.id, uuid);
+  assert.equal(byVietnameseSuffix.context.FlowNativeFramePicker.inspectDiagnostics().optionIdentityUsed, false,
+    'a canonical title match without an identity hit is not reported as identity-selected');
+});
+
+test('frame picker still rejects an option that is only a prefix of the wanted title', async () => {
+  const uuid = '66666666-6666-4666-8666-666666666666';
+  const { context, clicks } = framePickerIdentityHarness([{ label: 'Request for text', id: uuid }]);
+  await assert.rejects(context.chooseNativePickerAsset('Request for text translation', 'start'),
+    error => error.code === 'FLOW_ASSET_NOT_FOUND');
+  assert.deepEqual(clicks, []);
+});
+
+test('frame picker strips an asset: prefix from the wanted name itself', async () => {
+  const uuid = '77777777-7777-4777-8777-777777777777';
+  const { context, clicks } = framePickerIdentityHarness([{ label: 'ref-01-real-photo-abc123.png', id: uuid }]);
+  const result = await context.chooseNativePickerAsset('asset:ref-01-real-photo-abc123.png', 'start', { expectedId: uuid });
+  assert.equal(result.confirmed, true);
+  assert.equal(result.id, uuid);
+  assert.equal(result.name, 'ref-01-real-photo-abc123.png', 'the returned name carries no asset: prefix');
+  assert.deepEqual(clicks, [0]);
+});
+
 test('an unconfirmed frame choice keeps its primary error when the exact picker state becomes unknown', async () => {
   let clock = 0;
   let pickerOpen = false;
