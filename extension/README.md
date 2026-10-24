@@ -43,9 +43,15 @@ dist/extension/                    # Gói cài được; build chép src/* vào 
 
 ### Cập nhật selector khi Google Flow đổi DOM
 
-Selector mặc định nằm trong `extension/src/content/providers/flow/core/selectors.js`. MCP đọc `flow-selectors.json`; khi file này đổi, backend phát cấu hình mới tới extension, extension lưu vào `chrome.storage.local`, và content script hợp nhất cấu hình mà không cần build lại extension. Có thể cập nhật một phần cây selector theo dot path; regex gửi qua JSON được khôi phục thành `RegExp`. Backend `src/selectors.ts` theo dõi thư mục chứa file để vẫn nhận cập nhật khi editor lưu bằng cách thay file nguyên tử hoặc khi tạo file sau lúc backend đã chạy.
+Selector chỉ có một nguồn thật: `extension/src/content/providers/flow/core/selectors.js`
+(kênh đồng bộ `flow-selectors.json` từ backend đã bị gỡ ngày 2026-10-24 vì trùng
+nguồn thật; xem `ARCHITECTURE.md`).
 
-Khi Flow đổi DOM, trước tiên cập nhật `flow-selectors.json` nếu selector key hiện hữu đã biểu đạt được thay đổi. Nếu cần key mới, thêm key mặc định vào `extension/src/content/providers/flow/core/selectors.js` và cấu hình tương ứng trong `flow-selectors.json`. Nếu Flow đổi trình tự thao tác hoặc điều kiện xác minh, sửa module nghiệp vụ tương ứng; không nhét nghiệp vụ vào selector. Sau thay đổi code, tăng `package.json` và `extension/manifest.json` theo quy ước phát hành của repo.
+Khi Flow đổi DOM, sửa key tương ứng trong `core/selectors.js`, rồi build lại
+extension và reload. Nếu Flow đổi trình tự thao tác hoặc điều kiện xác minh, sửa
+module nghiệp vụ tương ứng; không nhét nghiệp vụ vào selector. Sau thay đổi code,
+tăng `package.json` và `extension/manifest.json` theo quy ước phát hành của repo
+(xem "Quy ước version" trong `README.md`).
 
 ---
 

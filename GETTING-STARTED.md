@@ -1,10 +1,15 @@
 # Getting started with Flow MCP
 
+> **Note on names.** Older revisions of this guide called the control panel
+> "Flow Studio". That web panel was removed with the hosted account build
+> (2026-10-24); the control panel today is the extension side panel. Where
+> this guide still says "Flow Studio", read it as the side panel.
+
 From nothing to your first video, step by step. No coding needed.
 
 **What this is:** a free tool that makes videos and images in Google Flow for you, using Flow's own credits.
 It runs on your computer and works Flow's real buttons in its own Chrome window. You can drive it by
-talking to an AI assistant, or click through it yourself in its control panel, **Flow Studio**.
+talking to an AI assistant, or click through it yourself in its control panel, the extension side panel.
 
 ---
 
@@ -23,7 +28,7 @@ credits, so a free account makes a few clips a day. A paid Google AI plan adds m
 | **Codex** (OpenAI) | A free ChatGPT account gets a small allowance; more with ChatGPT Plus | Yes: follow **Setup A** |
 | **Claude Code** (or the **Code** tab in the Claude app) | Needs a paid Claude plan (Pro or higher) | Yes: follow **Setup A** |
 | **The Claude app's Chat tab** | Free | No: follow **Setup B**, then connect it |
-| **No assistant, just Flow Studio** | Free | No: follow **Setup B** |
+| **No assistant, just the side panel** | Free | No: follow **Setup B** |
 
 Prices and limits change; check each company's own page.
 
@@ -68,7 +73,7 @@ desktop app."* Then quit the Claude app completely and reopen it.
 
 ## Setup B: do it yourself
 
-For the free Claude app (Chat tab), or for using Flow Studio with no assistant at all. You copy and paste
+For the free Claude app (Chat tab), or for using the side panel with no assistant at all. You copy and paste
 a few commands into **Terminal** (Mac) or **PowerShell** (Windows).
 
 ### B1. Install the helpers
@@ -137,7 +142,7 @@ open a Flow project in that Chrome profile.
 
 ### B4. Connect the Claude app (Chat tab)
 
-Skip this if you'll only use Flow Studio.
+Skip this if you'll only use the side panel.
 
 1. In the Claude app: **Settings** → **Developer** → **Edit Config**. It shows you a file called
    `claude_desktop_config.json`. Open it in a text editor.
@@ -166,10 +171,10 @@ Nothing needs to run all the time.
 | | Starts | Stops |
 |---|---|---|
 | **The Flow tools in your assistant** | By themselves, when the assistant app opens | When you quit the app |
-| **Flow Studio, the control panel** | While your assistant is open: go to **http://127.0.0.1:18899** in your browser. Without one: double-click **Flow Studio.command** (Mac) or **Flow Studio.cmd** (Windows) in the `flow-mcp` folder, and it opens the panel for you | When you quit the assistant, or close the Flow Studio window you started |
+| **The side panel** | While your assistant is open: open it from the extension icon in Chrome. | When you quit the assistant, or close the side panel |
 | **The Flow tab in Chrome** | `npm run login`, or open it yourself | Keep the tab open while something is being made |
 
-So Flow Studio is only running while your assistant is open, or while its own window is. If the panel says
+So the side panel is only running while your assistant is open, or while its own window is. If the panel says
 *"Not connected"*, start it again. On a Mac, if double-clicking the launcher says it *"can't be opened"*,
 right-click it → **Open**, or run `npm start` in the `flow-mcp` folder.
 
@@ -189,7 +194,7 @@ asks before spending.
 
 Everything you make is saved in the **flow-mcp-out** folder in your home folder.
 
-**No assistant?** Open Flow Studio and work through its tabs from left to right: Cast, Frames, Shots,
+**No assistant?** Open the side panel and work through its tabs from left to right: Cast, Frames, Shots,
 Voice, Restyle, Cut.
 
 ---

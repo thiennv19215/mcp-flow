@@ -14,7 +14,7 @@ Dưới đây là bảng ma trận tính năng thực tế. Khi gặp lỗi ho�
 | **2. Tải media về máy & Đặt tên file (`.mp4`, `.png`)** | [`extension/src/background/flow-queue-downloads.js`](file:///c:/Users/nguye/Documents/flow-mcp-extension-native/extension/src/background/flow-queue-downloads.js) | Lắng nghe `chrome.downloads`, khớp ID tải về với task, đổi tên file theo quy chuẩn (`safeQueueFilenameStem`), kiểm tra trạng thái tải. |
 | **3. Quản lý hàng đợi tác vụ (Job Queue)** | [`extension/src/background/flow-job-queue.js`](file:///c:/Users/nguye/Documents/flow-mcp-extension-native/extension/src/background/flow-job-queue.js) | Lưu trữ queue vào `chrome.storage.local`, quản lý trạng thái (`pending`, `running`, `completed`, `failed`), độ trễ ngẫu nhiên 5-10s giữa các tác vụ. |
 | **4. Lập kế hoạch workflow nhiều bước (Batch, Continue, Edit)** | [`extension/src/background/flow-workflows.js`](file:///c:/Users/nguye/Documents/flow-mcp-extension-native/extension/src/background/flow-workflows.js) | Chia nhỏ tác vụ phức tạp (như tiếp nối video, sửa ảnh/video, tạo nhiều cảnh liên tiếp) thành các jobs nhỏ chạy tuần tự. |
-| **5. Khi Google Flow đổi giao diện (Đổi nút, đổi class, đổi DOM)** | [`flow-selectors.json`](file:///c:/Users/nguye/Documents/flow-mcp-extension-native/flow-selectors.json)<br>[`extension/src/content/providers/flow/core/selectors.js`](file:///c:/Users/nguye/Documents/flow-mcp-extension-native/extension/src/content/providers/flow/core/selectors.js) | **Chỉ sửa selector tại đây!** File này tập trung toàn bộ CSS Selector / XPath. Backend sẽ tự đồng bộ xuống extension mà không cần hardcode lại logic. |
+| **5. Khi Google Flow đổi giao diện (Đổi nút, đổi class, đổi DOM)** | [`extension/src/content/providers/flow/core/selectors.js`](file:///c:/Users/nguye/Documents/flow-mcp-extension-native/extension/src/content/providers/flow/core/selectors.js) | **Chỉ sửa selector tại đây!** File này là nguồn duy nhất cho CSS Selector / XPath (kênh đồng bộ `flow-selectors.json` từ backend đã bị gỡ ngày 2026-10-24 vì trùng nguồn thật; xem `ARCHITECTURE.md`). Sau khi sửa, build lại extension và reload. |
 | **6. Soạn thảo Prompt & Nút Tạo (Submit Button)** | [`extension/src/content/providers/flow/composer/flow-editor.js`](file:///c:/Users/nguye/Documents/flow-mcp-extension-native/extension/src/content/providers/flow/composer/flow-editor.js) | Điền văn bản prompt vào Slate editor, đọc credit quote, kích hoạt nút Tạo/Submit, xóa text nhưng giữ nguyên các chip tham chiếu. |
 | **7. Gắn / Xóa ảnh tham chiếu & nhân vật (Reference / Ingredients)** | [`extension/src/content/providers/flow/composer/reference-actions.js`](file:///c:/Users/nguye/Documents/flow-mcp-extension-native/extension/src/content/providers/flow/composer/reference-actions.js)<br>[`extension/src/content/providers/flow/composer/reference-operations.js`](file:///c:/Users/nguye/Documents/flow-mcp-extension-native/extension/src/content/providers/flow/composer/reference-operations.js) | Thao tác mở menu "Thêm thành phần", chọn ảnh tham chiếu style/nhân vật, kiểm tra chip đã gắn thành công chưa. |
 | **8. Cấu hình thông số sinh ảnh (Image Mode, Tỷ lệ, Số lượng)** | [`extension/src/content/providers/flow/generation/image-settings.js`](file:///c:/Users/nguye/Documents/flow-mcp-extension-native/extension/src/content/providers/flow/generation/image-settings.js) | Chọn chế độ Tạo ảnh, tỷ lệ khung hình (16:9, 9:16, 1:1), số lượng ảnh tạo trong 1 lượt. |
@@ -34,7 +34,7 @@ Dưới đây là bảng ma trận tính năng thực tế. Khi gặp lỗi ho�
 Khi một lệnh sinh video hoặc thao tác Flow được phát đi:
 
 ```
-[ Backend MCP Server / Local Studio ]
+[ Backend MCP Server (local) ]
                │
                ▼ (WebSocket ws://127.0.0.1:18899 hoặc HTTP Poll)
 [ Background: service-worker.js ]
@@ -108,7 +108,7 @@ extension/src/
 1. **Không Gọi Thẳng DOM Từ Background Hoặc UI Panel:**
    - Background (`service-worker.js`) và Sidebar (`sidebar.js`) **không bao giờ** được truy cập DOM trực tiếp của trang Flow. Mọi thao tác phải gửi thông qua `driver.invoke(operation, payload)` tới Content Script.
 2. **Không Hardcode Selector Trong File Nghiệp Vụ:**
-   - Khi cần tìm một phần tử trên trang Flow, luôn truy xuất thông qua `flowSelectors` (trong `flow-selectors.json` hoặc `core/selectors.js`). Điều này giúp khi Google thay đổi UI, bạn chỉ cần sửa selector mà không làm vỡ logic nghiệp vụ.
+   - Khi cần tìm một phần tử trên trang Flow, luôn truy xuất thông qua `flowSelectors` trong `core/selectors.js` (nguồn duy nhất; không còn file `flow-selectors.json` hay kênh đồng bộ backend). Điều này giúp khi Google thay đổi UI, bạn chỉ cần sửa selector mà không làm vỡ logic nghiệp vụ.
 3. **Tuyệt Đối Không Tự Động Replay Khi Kết Quả Chưa Rõ Ràng:**
    - Nếu nút Submit bấm xong mà mạng bị lag hoặc không rõ Flow đã trừ credit hay chưa, hệ thống **không bao giờ tự ý submit lại**. Cần kiểm tra DOM trước để tránh làm hao hụt credit của người dùng.
 

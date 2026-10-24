@@ -1,4 +1,11 @@
-# Flow Studio: what it is and what it does
+# Flow MCP: what it is and what it does
+
+> **Note on names.** Older revisions of this guide called the control panel
+> "Flow Studio". That web panel was removed with the hosted account build
+> (2026-10-24); the control panel today is the extension side panel. Where
+> this guide still says "Flow Studio" or names a `Flow Studio.command`/`.cmd`
+> launcher, read it as the side panel (open it from the extension icon in
+> Chrome).
 
 *A plain-English guide. Written 20 September 2026.*
 
@@ -110,7 +117,7 @@ This is a limit in Flow itself, not something we can program around. The exact j
 ## The control panel
 
 A web page served by that same program, reachable only from your own computer.
-Start it by double-clicking **Flow Studio.command** (Mac) or **Flow Studio.cmd** (Windows) in the project folder.
+Open it from the extension icon in Chrome (the extension side panel).
 
 Seven tabs, in the order you'd use them:
 
@@ -200,7 +207,7 @@ The same goes for a job that seems to vanish while it is running. What Flow is h
 | The program | `~/flow-mcp` |
 | Finished films and stills | `~/flow-mcp-out/<project name>` |
 | The Chrome connector settings | `chrome://extensions` → Flow MCP Connector → Settings |
-| The control panel | Started by **Flow Studio.command** (Mac) or **Flow Studio.cmd** (Windows), opens on your computer only |
+| The control panel | The extension side panel, opens on your computer only |
 | Sign in to Flow by hand | `npm run login` in the project folder |
 
 Your Google password is never typed by the program; you sign in yourself in Chrome.
