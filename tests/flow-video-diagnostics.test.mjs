@@ -300,6 +300,21 @@ test('S1 reviewfix: the in-submit staged upload passes the submit budget as its 
     'the confirmation extension ceiling is the submit budget itself');
 });
 
+test('S2 reviewfix: a staged transfer lost before upload fails fast with re-attach guidance, not as a retryable error', async () => {
+  // The transferId points at bytes that live only in page memory; when
+  // they are gone (tab reload, expired transfer) no retry of this job
+  // can restore them. The error must say so and must not claim to be
+  // retryable, or the queue burns its auto-retry budget on a failure
+  // that can only be fixed by re-attaching the file.
+  const { submit } = dispatchHarness({ waitMode: 'throw-timeout', stagedFiles: new Map() });
+  await assert.rejects(submit({ firstFrame: { transferId: 't1', name: 'client-photo.png' } }), (error) => {
+    assert.equal(error.code, 'FLOW_TRANSFER_UNKNOWN');
+    assert.equal(error.retryable, false, 'a lost transfer is not retryable');
+    assert.match(error.message, /re-attach/i, 'the message must tell the user to re-attach the file');
+    return true;
+  });
+});
+
 test('dispatch wait: exhausting the submit deadline without acknowledgement also carries diagnostics', async () => {
   const { submit } = dispatchHarness({ waitMode: 'advance' });
   await assert.rejects(submit(), error => {

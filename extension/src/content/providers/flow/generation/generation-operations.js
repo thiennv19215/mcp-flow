@@ -380,7 +380,11 @@
           requireFlowTime("uploading and selecting Flow reference images", expectedVideoReferenceIds.length + expectedMediaReferenceIds.length + expectedCharacterIds.length > 0);
           if (!root.validStagedLocalImage?.(attachment, /(?:start|end|ref[1-3])/)) throw this.error("FLOW_UPLOAD_UNAVAILABLE", "Flow's staged image transfer is unavailable before file selection.", false, false);
           const file = root.stagedNativeFiles.get(attachment.transferId);
-          if (!file) throw this.error("FLOW_TRANSFER_UNKNOWN", "The staged image is no longer available.", true);
+          // Review round 1, S2: staged bytes live only in page memory,
+          // so a lost transfer can never be recovered by retrying this
+          // job — only by re-attaching the file and creating a new job.
+          // Non-retryable, outcome known (nothing was submitted).
+          if (!file) throw this.error("FLOW_TRANSFER_UNKNOWN", "The staged image is no longer available (the tab was reloaded or the transfer expired). Re-attach the file and create a new job — retrying this job cannot restore it.", false, false);
           let uploadReceipt;
           let uploadError;
           try {
