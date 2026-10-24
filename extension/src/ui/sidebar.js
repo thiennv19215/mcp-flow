@@ -2951,7 +2951,7 @@
           const attachment = {
             assetName: reference.assetName,
             expectedId: reference.expectedId,
-            kind: reference.kind || "video",
+            kind: reference.kind || "image",
           };
           referenceAttachments.push(attachment);
           attachmentByReference.set(reference, attachment);
@@ -2962,7 +2962,7 @@
         const uploaded = await uploadReferenceImage(reference.file, undefined, i + 1);
         const attachment = {
           ...uploadedAssetAttachment(uploaded),
-          kind: reference.kind || "video",
+          kind: reference.kind || "image",
         };
         referenceAttachments.push(attachment);
         attachmentByReference.set(reference, attachment);
