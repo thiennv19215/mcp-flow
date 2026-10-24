@@ -154,6 +154,21 @@ export async function startServer(core: Core): Promise<ServerRole> {
         const raw = (await readBody(req, bodyLimit)).toString() || "{}";
         const body = JSON.parse(raw) as Record<string, unknown>;
         if (url.pathname === "/api/extension/connect") {
+          // Connect is the only extension endpoint that mints a session,
+          // so it is the one that must present the per-machine token —
+          // the same token every other API route requires. poll/result/
+          // progress then run off the unguessable session_id the connect
+          // call returns, exactly like a session cookie. Note for the
+          // extension side: the real connector currently connects with
+          // token: "" (see flow-bridge-client.js connect()), so it gets
+          // 401 here until it is taught to send the server's token
+          // (FLOW_MCP_TOKEN, or the TOKEN_FILE the owner process writes);
+          // connectHttp already treats 401 as "not connected" and falls
+          // back to WS, so the extension change must land with this one.
+          const authorization = req.headers.authorization;
+          const bearer = authorization?.toLowerCase().startsWith("bearer ") ? authorization.slice(7).trim() : undefined;
+          const presented = req.headers["x-flow-token"] ?? url.searchParams.get("token") ?? bearer;
+          if (presented !== token) return json(res, 401, { error: "Missing or wrong token." });
           if (typeof body.protocol !== "number" || (body.version !== undefined && typeof body.version !== "string") ||
               (body.capabilities !== undefined && (!Array.isArray(body.capabilities) || body.capabilities.length > 100 || body.capabilities.some((value) => typeof value !== "string" || value.length > 120)))) {
             return json(res, 400, { error: "Invalid connector handshake." });
@@ -273,6 +288,12 @@ export async function startServer(core: Core): Promise<ServerRole> {
   if (listening) {
     mkdirSync(HOME_DIR, { recursive: true });
     writeFileSync(TOKEN_FILE, token, { mode: 0o600 });
+    // The WS credential stays opt-in: forcing one by default would break
+    // the dev flow where the extension connects over WS without a stored
+    // token, and the HTTP connect path (now token-gated above) is the
+    // primary transport. Say so loudly instead of silently skipping the
+    // check, so an unset FLOW_MCP_WS_TOKEN is a visible choice.
+    if (!wsToken) console.warn("[ws] FLOW_MCP_WS_TOKEN is not set: WebSocket upgrades accept any chrome-extension origin on loopback.");
     return "owner";
   }
   // The port is taken. Who has it matters enormously: becoming a second LOCAL core means two processes drive the same

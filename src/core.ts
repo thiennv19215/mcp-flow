@@ -35,8 +35,12 @@ export const jobView = ({ id, status, params, files, attempts, credits, progress
   outcome_unknown: outcomeUnknown ?? false,
   request_dispatched: requestDispatched ?? false,
   server_acceptance_observed: serverAcceptanceObserved ?? false,
-  request_diagnostics: outcomeUnknown ? sanitizeUnknownSubmitDiagnostics(requestDiagnostics) ?? null : null,
-  operation_diagnostics: !outcomeUnknown && !requestDispatched ? sanitizeFlowOperationDiagnostics(operationDiagnostics) ?? null : null,
+  // Both diagnostics are shown whenever present; the view's existing
+  // outcome_unknown / request_dispatched flags already tell the caller
+  // which stage produced them. (Previously a dispatched job's picker
+  // diagnostics were hidden from flow_status / flow_wait.)
+  request_diagnostics: sanitizeUnknownSubmitDiagnostics(requestDiagnostics) ?? null,
+  operation_diagnostics: sanitizeFlowOperationDiagnostics(operationDiagnostics) ?? null,
 });
 
 export const CHATGPT_GENERATION_OPERATION = "chatgpt.generation.submit";
@@ -284,10 +288,16 @@ export async function materializeQueueJob(job: ExtensionQueueJob): Promise<Exten
     }, 20_000).catch(() => null);
     return updated?.job || { ...job, metadata: { ...job.metadata, downloadError: message } };
   }
+  // Mirror the ChatGPT branch above: a failed metadata write must not
+  // bury files that are already on disk, so the call is caught and the
+  // fallback merge below runs. Writing downloadError: null (rather than
+  // omitting the key) clears a stale error the extension side would
+  // otherwise keep, because its updateMetadata spreads the patch over
+  // the stored metadata.
   const updated = await extensionQueueCall<{ job: ExtensionQueueJob }>("flow.queue.metadata", {
-    id: job.id, patch: { files, downloadComplete: true, ...(downloadError ? { downloadError } : {}) },
-  }, 20_000);
-  return updated.job || { ...job, metadata: { ...job.metadata, files, downloadComplete: true, ...(downloadError ? { downloadError } : {}) } };
+    id: job.id, patch: { files, downloadComplete: true, downloadError: null },
+  }, 20_000).catch(() => null);
+  return updated?.job || { ...job, metadata: { ...job.metadata, files, downloadComplete: true, downloadError: null } };
 }
 
 async function waitExtensionJob(id: string, timeoutMs: number): Promise<ExtensionQueueJob> {
@@ -452,10 +462,17 @@ export class LocalCore implements Core {
       const job = await materializeQueueJob(original);
       jobs.push(jobView(extensionJobAsLegacy(job)) as unknown as Job);
     }
+    // Unknown ids are reported instead of silently producing
+    // finished:true with an empty jobs list (Array.prototype.every on an
+    // empty selection is vacuously true). The old shape is kept and one
+    // field is added, so existing callers and tests keep working.
+    const foundIds = new Set(selected.map(job => job.id));
+    const unknown_ids = job_ids ? job_ids.filter(id => !foundIds.has(id)) : [];
     return {
       finished: selected.every(job => !["pending", "running", "waiting_for_user"].includes(job.status)),
       pacing: queue.isPaused ? "paused" : undefined,
       jobs,
+      unknown_ids,
     };
   }
 

@@ -168,7 +168,7 @@ server.registerTool(
     inputSchema: shapes.generate,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },
-  (args) => reply(core.generate(args)),
+  (args) => reply(patient("flow_generate", core.generate(args))),
 );
 
 // The chatgpt_generate and run_workflow_graph input shapes live in
@@ -320,7 +320,7 @@ server.registerTool(
     inputSchema: shapes.agent,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },
-  (args) => reply(core.agent(args)),
+  (args) => reply(patient("flow_agent_images", core.agent(args))),
 );
 
 server.registerTool(
@@ -332,7 +332,7 @@ server.registerTool(
     inputSchema: shapes.edit,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },
-  (args) => reply(core.edit(args)),
+  (args) => reply(patient("flow_edit", core.edit(args))),
 );
 
 server.registerTool(
