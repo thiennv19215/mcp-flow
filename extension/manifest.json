@@ -38,10 +38,11 @@
     "https://*.usercontent.goog/*",
     "http://127.0.0.1:18899/*",
     "http://localhost:18899/*",
-    "http://127.0.0.1:18898/*"
+    "http://127.0.0.1:18898/*",
+    "*://chatgpt.com/*"
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' data: blob: https://flow.google.com https://labs.google https://*.googleusercontent.com https://*.googleapis.com https://storage.googleapis.com https://*.usercontent.goog; connect-src 'self' http://127.0.0.1:18898 http://127.0.0.1:18899 http://localhost:18899 https://flow.google.com https://labs.google https://*.googleusercontent.com https://*.googleapis.com https://storage.googleapis.com https://*.usercontent.goog"
+    "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' data: blob: https://flow.google.com https://labs.google https://*.googleusercontent.com https://*.googleapis.com https://storage.googleapis.com https://*.usercontent.goog https://chatgpt.com; connect-src 'self' http://127.0.0.1:18898 http://127.0.0.1:18899 http://localhost:18899 https://flow.google.com https://labs.google https://*.googleusercontent.com https://*.googleapis.com https://storage.googleapis.com https://*.usercontent.goog https://chatgpt.com"
   },
   "background": {
     "service_worker": "background/service-worker.js",
@@ -103,6 +104,27 @@
         "content/bridge/watermark-config.js",
         "content/dom-actions.js",
         "content/floating-tracker-flow.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "*://chatgpt.com/*"
+      ],
+      "js": [
+        "build-revision.js",
+        "content/shared/i18n.js",
+        "content/shared/dom-utils.js",
+        "content/shared/native-file-transfer.js",
+        "content/providers/base/base-provider-driver.js",
+        "content/providers/base/provider-registry.js",
+        "content/providers/chatgpt/core/ref-resolution.js",
+        "content/providers/chatgpt/core/submit-payload.js",
+        "content/providers/chatgpt/generation/baseline.js",
+        "content/providers/chatgpt/generation/error-detection.js",
+        "content/providers/chatgpt/generation/outcome-classifier.js",
+        "content/providers/chatgpt/generation/result-extraction.js",
+        "content/dom-actions.js"
       ],
       "run_at": "document_idle"
     }
