@@ -66,7 +66,7 @@ const EXPECTED_DIAGNOSTICS = {
 // Part 1 — dispatch wait diagnostics (generation-operations.js)
 // ---------------------------------------------------------------------------
 
-function dispatchHarness({ health = HEALTH, waitMode = 'throw-timeout', activation = null, requestSeen = false, components = null } = {}) {
+function dispatchHarness({ health = HEALTH, waitMode = 'throw-timeout', activation = null, requestSeen = false, components = null, liveButtonDisabledAfterMs = null, liveTilesAfterMs = null, editorClearedAfterMs = null } = {}) {
   const correlationMap = new Map([
     ['attempt-1', { attemptId: 'attempt-1', requestSeen, receipts: [], interfered: false }],
   ]);
@@ -74,9 +74,12 @@ function dispatchHarness({ health = HEALTH, waitMode = 'throw-timeout', activati
   const progressMessages = [];
   let now = 1_000_000;
   const startNow = now;
+  const editorTextAt = () => (editorClearedAfterMs !== null && now - startNow >= editorClearedAfterMs ? '' : 'a lighthouse');
   const fakeTiles = {
     stabilizeFlowResultViewport: async () => {},
-    collectNativeMedia: () => [],
+    collectNativeMedia: () => (liveTilesAfterMs !== null && now - startNow >= liveTilesAfterMs
+      ? [{ id: 'new-tile-1', title: 'Fresh tile' }]
+      : []),
     armNativeFlowCorrelation: () => 'attempt-1',
     nativeFlowCorrelationMap: () => correlationMap,
     disarmNativeFlowCorrelation: id => { disarmCalls.push(id); },
@@ -108,7 +111,13 @@ function dispatchHarness({ health = HEALTH, waitMode = 'throw-timeout', activati
       waitForGenerationSubmitButton: async () => ({ disabled: false, getAttribute: () => null }),
       activateFlowSubmitButton: async () => activation || ({ clickDelivered: true, strategy: 'fake-click' }),
       currentFlowSubmitErrors: () => [],
+      getFlowSubmitButton: () => (liveButtonDisabledAfterMs !== null && now - startNow >= liveButtonDisabledAfterMs
+        ? { disabled: true, getAttribute: () => null }
+        : null),
+      getVisibleFlowPromptEditor: () => ({}),
+      getEditorUserText: () => editorTextAt(),
     },
+    getEditorUserText: () => editorTextAt(),
     FlowSettings: {},
     FlowComponents: components || {},
     FlowTiles: fakeTiles,
@@ -601,4 +610,73 @@ test('editor bridge: a bridge timeout with no delivered click still throws FLOW_
     return true;
   });
   assert.equal(domClickCount(), 0, 'the throw happens before any fallback click');
+});
+
+// ---------------------------------------------------------------------------
+// Part 6 — live DOM acceptance re-check (audit cluster B)
+//
+// The 585a50b DOM acceptance only saw the activation-time snapshot:
+// activateFlowSubmitButton's acceptanceObserver disconnects ~180 ms after
+// activation, so a submit control that Flow disables LATER (async Angular
+// handling), an editor Flow clears later, or a first result tile rendered
+// later all went unseen and the job still burned the full 30 s budget
+// into FLOW_SUBMIT_UNCONFIRMED. The dispatch wait must re-check those
+// three live signals on every iteration; any of them resolves exactly
+// like the snapshot signal (dom_acceptance, observer kept alive).
+// ---------------------------------------------------------------------------
+
+test('dispatch wait: a LATE submit-button disable still resolves as dom_acceptance', async () => {
+  const { submit, disarmCalls, elapsed } = dispatchHarness({
+    waitMode: 'advance',
+    requestSeen: false,
+    activation: { clickDelivered: true, controlAccepted: false, strategy: 'fake-click' },
+    liveButtonDisabledAfterMs: 1000,
+  });
+  const result = await submit();
+  assert.equal(result.submitted, true, 'the submit resolves instead of throwing');
+  assert.equal(result.confirmationSignal, 'dom_acceptance');
+  assert.equal(result.matchKind, 'dom_acceptance');
+  assert.deepEqual(disarmCalls, [], 'the correlation attempt is NOT disarmed on the live-DOM exit');
+  assert.ok(elapsed() < 30_000, `late disable resolves before the full dispatch budget (${elapsed()}ms)`);
+});
+
+test('dispatch wait: a newly rendered result tile still resolves as dom_acceptance', async () => {
+  const { submit, disarmCalls } = dispatchHarness({
+    waitMode: 'advance',
+    requestSeen: false,
+    activation: { clickDelivered: true, controlAccepted: false, strategy: 'fake-click' },
+    liveTilesAfterMs: 1000,
+  });
+  const result = await submit();
+  assert.equal(result.submitted, true, 'a new tile vs the submit baseline resolves the submit');
+  assert.equal(result.confirmationSignal, 'dom_acceptance');
+  assert.deepEqual(disarmCalls, [], 'the correlation attempt is NOT disarmed on the live-DOM exit');
+});
+
+test('dispatch wait: an editor cleared after activation still resolves as dom_acceptance', async () => {
+  const { submit, disarmCalls } = dispatchHarness({
+    waitMode: 'advance',
+    requestSeen: false,
+    activation: { clickDelivered: true, controlAccepted: false, strategy: 'fake-click' },
+    editorClearedAfterMs: 1000,
+  });
+  const result = await submit();
+  assert.equal(result.submitted, true, 'an editor that held text pre-click and is empty now resolves the submit');
+  assert.equal(result.confirmationSignal, 'dom_acceptance');
+  assert.deepEqual(disarmCalls, [], 'the correlation attempt is NOT disarmed on the live-DOM exit');
+});
+
+test('dispatch wait: live signals that never arrive keep the unconfirmed timeout', async () => {
+  const { submit, disarmCalls } = dispatchHarness({
+    waitMode: 'advance',
+    requestSeen: false,
+    activation: { clickDelivered: true, controlAccepted: false, strategy: 'fake-click' },
+    liveButtonDisabledAfterMs: 10_000_000,
+  });
+  await assert.rejects(submit(), error => {
+    assert.equal(error.code, 'FLOW_SUBMIT_UNCONFIRMED');
+    assert.equal(error.outcome_unknown, true, 'a true no-signal timeout keeps outcome_unknown semantics');
+    return true;
+  });
+  assert.deepEqual(disarmCalls, ['attempt-1'], 'a true no-signal timeout still disarms the attempt');
 });

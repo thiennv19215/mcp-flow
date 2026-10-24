@@ -847,17 +847,24 @@
     }
   }
 
-  const retryElementIds = new WeakMap();
-  let nextRetryElementId = 1;
   const retryIdentityForTile = tile => {
     if (!tile) return null;
     const media = root.mediaId?.(tile);
     if (media && !String(media).startsWith("title:")) return `media:${String(media).toLowerCase()}`;
     const runtimeId = tile.getAttribute?.("data-tile-id") || tile.getAttribute?.("data-runtime-id") || tile.id;
     if (runtimeId) return `tile:${runtimeId}`;
-    if (!retryElementIds.has(tile)) retryElementIds.set(tile, nextRetryElementId++);
     const title = String(tile.getAttribute?.("aria-label") || tile.getAttribute?.("title") || "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
-    return `element:${title}:${retryElementIds.get(tile)}`;
+    if (!title) return "element:unknown";
+    // Audit cluster B: a title-only tile used to get a per-element
+    // `element:<title>:<n>` key, while retryIdentity for a title-only
+    // item returns `title:<title>` — the two sides never matched, so a
+    // re-rendered tile (new element object, same title) was silently
+    // skipped by retry. The stable title key makes both sides agree.
+    // Duplicate titles now collide in the retry baseline set, but
+    // targetMatches still requires exactly one match, so a
+    // duplicate-title grid fails closed (null) instead of retrying
+    // the wrong tile.
+    return `title:${title}`;
   };
   const retryIdentity = item => {
     const id = String(item?.id || "");

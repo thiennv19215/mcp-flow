@@ -659,6 +659,49 @@
         const domAcceptanceDeadline = activation.controlAccepted === true
           ? Math.min(Date.now() + 5_000, submitDeadline)
           : null;
+        // Live DOM acceptance (audit cluster B): the activation-time
+        // acceptance observer disconnects ~180 ms after activation, so a
+        // submit control Flow disables LATER (async Angular handling) is
+        // invisible to the snapshot above. The loop below re-checks three
+        // live signals every iteration, using only flow-editor's own
+        // finders — no new selector is invented here: the current submit
+        // button is disabled, the editor that held text at submit time is
+        // now empty, or a tile appeared that was not in the `before`
+        // snapshot. Any signal first resolves exactly like the snapshot
+        // grace exit: the correlation attempt is NOT disarmed, so a late
+        // requestSeen is still recorded. The editor-empty signal is only
+        // armed when the editor held text at submit time, so a blank
+        // prompt never "accepts" itself.
+        const submitEditorElement = typeof editor.getVisibleFlowPromptEditor === 'function'
+          ? editor.getVisibleFlowPromptEditor()
+          : (typeof root.getVisibleFlowPromptEditor === 'function' ? root.getVisibleFlowPromptEditor() : null);
+        const readEditorText = () => {
+          if (!submitEditorElement) return null;
+          if (typeof editor.getEditorUserText === 'function') return String(editor.getEditorUserText(submitEditorElement) || '');
+          if (typeof root.getEditorUserText === 'function') return String(root.getEditorUserText(submitEditorElement) || '');
+          return null;
+        };
+        const editorTextAtSubmit = readEditorText();
+        const editorHadTextAtSubmit = editorTextAtSubmit !== null && editorTextAtSubmit.trim() !== '';
+        const liveTileBaseline = before.slice();
+        const liveDomAccepted = () => {
+          try {
+            const liveButton = typeof editor.getFlowSubmitButton === 'function'
+              ? editor.getFlowSubmitButton()
+              : (typeof root.getFlowSubmitButton === 'function' ? root.getFlowSubmitButton() : null);
+            if (liveButton && (liveButton.disabled || liveButton.getAttribute?.('aria-disabled') === 'true')) return true;
+          } catch (_) { /* a transient finder failure is not acceptance */ }
+          try {
+            const currentText = readEditorText();
+            if (editorHadTextAtSubmit && currentText !== null && currentText.trim() === '') return true;
+          } catch (_) { /* a transient read failure is not acceptance */ }
+          try {
+            const liveTiles = tiles.collectNativeMedia?.() || [];
+            const seen = new Set(liveTileBaseline);
+            if (liveTiles.some((item) => !seen.has(item.id || `title:${item.title}`))) return true;
+          } catch (_) { /* a transient scan failure is not acceptance */ }
+          return false;
+        };
         let acknowledged = false;
         let domAccepted = false;
         let lastSubmitProgress = "";
@@ -685,6 +728,16 @@
             const classified = root.classifyFlowError?.(newError);
             if (classified) throw await unknownSubmitError(classified.code, classified.message, classified.retryable);
             throw await unknownSubmitError("FLOW_SUBMIT_REJECTED", `Flow displayed an error before a correlated generation request was observed: ${newError}. Inspect Flow before retrying.`);
+          }
+
+          // Live DOM acceptance: re-checked every iteration, AFTER the
+          // error check above so a Flow rejection still wins over a
+          // disabled button. Resolves exactly like the snapshot grace
+          // exit and likewise does NOT disarm the correlation attempt.
+          if (liveDomAccepted()) {
+            acknowledged = true;
+            domAccepted = true;
+            break;
           }
 
           if (domAcceptanceDeadline !== null && Date.now() >= domAcceptanceDeadline) {
