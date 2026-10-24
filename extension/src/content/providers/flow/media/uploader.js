@@ -710,6 +710,17 @@
     let lastScan = null;
     let lastScanErrorCode = null;
     const getMediaId = root.mediaId || (el => el.getAttribute("data-media-id") || el.getAttribute("id") || "");
+    // Audit cluster B: confirm with the repo's identity alias system
+    // (UUID case-insensitive, asb: matching with or without the prefix)
+    // instead of a raw ===, so an expectedId in an equivalent form
+    // still confirms its tile. tiles.js loads AFTER this file in the
+    // manifest, so the matcher is resolved at CALL time — long after
+    // all content scripts loaded — and falls back to === when the
+    // tiles bundle is not loaded.
+    const identityMatches = (a, b) => {
+      const matcher = root.FlowTiles?.tileIdentityValuesMatch;
+      return typeof matcher === "function" ? matcher(a, b) : String(a) === String(b);
+    };
 
     while (Date.now() < deadline || (ownerProcessing && deadline < extensionCeiling)) {
       // IMG-09: an explicit cancellation anywhere in the wait exits
@@ -756,7 +767,7 @@
         .filter(item => matchesFlowTile(item, assetName));
       if (exactNameMatches.length) exactTileObserved = true;
       const exactMatches = expectedId && !requireNewOwner
-        ? exactNameMatches.filter(item => String(getMediaId(item)) === expectedId)
+        ? exactNameMatches.filter(item => identityMatches(getMediaId(item), expectedId))
         : exactNameMatches;
       if (exactMatches.length > 1 && !requireNewOwner) {
         throw fn("FLOW_UPLOAD_TILE_AMBIGUOUS", `More than one Flow tile exactly matches uploaded ${kind} "${assetName}". Inspect the library before retrying.`, false, true);
@@ -838,7 +849,7 @@
             },
           });
           const exactAssets = assets.filter(asset => asset?.id && (expectedId
-            ? String(asset.id) === expectedId && flowUploadNameMatches(asset?.name, assetName)
+            ? identityMatches(asset.id, expectedId) && flowUploadNameMatches(asset?.name, assetName)
             : flowUploadNameMatches(asset?.name, assetName)));
           const confirmedAssets = requireNewOwner
             ? exactAssets.filter(asset => asset?.newSinceBaseline === true && !baselineIds.has(String(asset.id)))
@@ -891,6 +902,16 @@
       lastScanErrorCode,
       uploadUi: inspectFlowUploadUiState(),
     };
+    // Review round 1, S6: the wait loop breaks on an aborted signal, so
+    // reaching this point with an aborted signal means the caller
+    // cancelled — not that Flow was slow. Report the cancellation
+    // distinctly (not retryable; outcome unknown because the tile may
+    // still land) instead of mislabeling it a timeout.
+    if (options.signal?.aborted) {
+      const cancelledErr = fn("FLOW_UPLOAD_CANCELLED", `Upload confirmation for "${assetName}" was cancelled before Flow confirmed an exact ${kind} library tile. The tile may still land in the library; inspect Flow before retrying.`, false, true);
+      cancelledErr.diagnostics = diagnostics;
+      throw cancelledErr;
+    }
     const timeoutErr = fn("FLOW_UPLOAD_TIMEOUT", `Flow did not confirm an exact ${kind} library tile for "${assetName}" before the bounded deadline. Picker selection confirmed: ${diagnostics.filePickerSelectionConfirmed}; method: ${diagnostics.pickerMethod}; type: ${diagnostics.pickerType}; full-library scans: ${libraryScans}; last scan: ${lastScan ? `${lastScan.uniqueTiles} tiles, ${lastScan.steps} pages, reached end ${lastScan.reachedEnd}` : "no scan diagnostics"}. Visible rejection: ${diagnostics.uploadUi.visibleUploadRejection}; progress indicators: ${diagnostics.uploadUi.visibleProgressIndicatorCount}. Inspect Flow before retrying.`, false, true);
     timeoutErr.diagnostics = diagnostics;
     throw timeoutErr;
@@ -1308,6 +1329,16 @@
           Date.now() + (kind === "video" ? FLOW_UPLOAD_CONFIRM_HARD_MS.video : FLOW_UPLOAD_CONFIRM_HARD_MS.image),
           externalDeadline,
         );
+      }
+      // Review round 1, S1: an explicit extension ceiling from the caller
+      // (the in-submit path passes its submit budget) forwards into the
+      // confirmation options, capped by the confirmExtendable ceiling
+      // when both are set. waitForNativeMediaTile already honors
+      // extendableTo; it was this wrapper that never forwarded it.
+      if (Number.isFinite(options.extendableTo) && options.extendableTo > 0) {
+        confirmOptions.extendableTo = Number.isFinite(confirmOptions.extendableTo)
+          ? Math.min(confirmOptions.extendableTo, options.extendableTo)
+          : options.extendableTo;
       }
       confirmed = await waitForNativeMediaTile(matchName, command, kind, confirmOptions);
     } catch (error) {

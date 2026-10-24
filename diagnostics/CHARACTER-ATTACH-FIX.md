@@ -20,4 +20,4 @@
 - Smoke test live được lưu thành kết quả tóm tắt tại `character-mcp-smoke.json`.
 - Không submit thêm ảnh/video trong lượt sửa gán này. Chưa xác nhận chất lượng một render mới sử dụng nhân vật.
 
-Có thể chạy lại smoke sau khi prompt không còn chip từ phiên thử trước: `node scripts/check-character-attach.mjs`. Bắt đầu từ prompt trống để kiểm tra cả gán đầu tiên và gán lặp trong cùng một content-script session.
+Có thể chạy lại smoke sau khi prompt không còn chip từ phiên thử trước: `node scripts/manual/check-character-attach.mjs`. Bắt đầu từ prompt trống để kiểm tra cả gán đầu tiên và gán lặp trong cùng một content-script session.

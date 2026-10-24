@@ -1,6 +1,6 @@
 # Native Flow operation runbook
 
-The extension is the Flow page driver and owns its side-panel queue. The optional AI MCP is a separate local stdio process in `src/`; the VPS entry point handles account/device authentication only.
+The extension is the Flow page driver and owns its side-panel queue. The optional AI MCP is a separate local stdio process in `src/`; the local backend handles per-machine token authentication.
 
 ## Operation coverage
 

@@ -90,6 +90,12 @@ export function refPreflightError(missing) {
 // Throws refPreflightError when a ref is missing and cannot be restored.
 // Non-generation operations and jobs without references pass through
 // untouched (the dependencies are never consulted for them).
+// Contract note (review round 2 S4 / round 3 S4): assetExists is the
+// authority — the catalog lookup only supplies provenance. A caller that
+// cannot prove absence (the service worker has no DOM to scan, and the
+// catalog never records library picks) must pass assetExists through as
+// true and let the content-side revalidation at submit decide; failing
+// on a catalog miss would false-fail legitimate library-picked jobs.
 export async function revalidateJobReferences(job, deps = {}) {
   const { catalogLookup, assetExists, reupload } = deps || {};
   if (typeof catalogLookup !== "function" || typeof assetExists !== "function" || typeof reupload !== "function") {

@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { z } from "zod";
 import { shapes, type Core } from "./core.js";
 import { PLAYBOOK } from "./playbook.js";
 
@@ -165,27 +164,17 @@ server.registerTool(
   {
     title: "Queue Flow generations",
     description:
-      "Queue one clip or image per scene in the open Flow project. Runs one at a time with human-like pauses and spends the user's Google AI credits (approx. per video: Omni 1.1 Flash 7-12, Veo 3.1 Lite 10, Fast 20, Quality 100; images usually 0). Video scenes are checked against max_credits using Flow's own quote before anything is spent; image scenes are submitted without a credit quote check. Returns job ids immediately; use flow_wait for results. A scene may set manual_submit=true to prepare its prompt and settings and wait for you to click Create in Flow; then choose Continue on the extension queue. A scene may set submit_only=true to finish after Flow's correlated request is dispatched, without waiting for render/download; flow_wait reports status=\"submitted\" and request_dispatched=true. Dispatch does not prove server acceptance or a finished result; server_acceptance_observed is reported separately.",
+      "Queue one clip or image per scene in the open Flow project. Runs one at a time with human-like pauses and spends the user's Google AI credits. Video scenes are checked against max_credits using Flow's own live quote before anything is spent (never assume a per-model price — Flow's quote is the only authoritative price); image scenes are submitted without a credit quote check. Returns job ids immediately; use flow_wait for results. A scene may set manual_submit=true to prepare its prompt and settings and wait for you to click Create in Flow; then choose Continue on the extension queue. A scene may set submit_only=true to finish after Flow's correlated request is dispatched, without waiting for render/download; flow_wait reports status=\"submitted\" and request_dispatched=true. Dispatch does not prove server acceptance or a finished result; server_acceptance_observed is reported separately.",
     inputSchema: shapes.generate,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },
-  (args) => reply(core.generate(args)),
+  (args) => reply(patient("flow_generate", core.generate(args))),
 );
 
-// The chatgpt_generate input shape lives here, not in schemas.ts: the
-// generic HTTP bridge validates against schemas, and this surface is
-// MCP-only for now (the Core method is an optional interface member —
-// RemoteCore does not forward it yet).
-const chatgptGenerateShape = {
-  project: z.string().min(1).describe("Folder name for the downloaded images, e.g. 'ChatGPTArt'."),
-  prompt: z.string().min(1).describe("Image prompt for ChatGPT. Image generation only; there is no text-task mode."),
-  file_stem: z.string().min(1).optional().describe("Base file name for the downloaded images. Default 'chatgpt-01'; pass a distinct stem per call into the same project so later calls do not reuse the same names."),
-  ratio: z.string().min(1).optional().describe("Aspect ratio spelling or label, e.g. '16:9' or 'square'. Normalized against the ChatGPT capability registry by the extension; unsupported spellings are rejected by the queue preflight."),
-  model: z.string().min(1).optional().describe("ChatGPT image model label. Omitted keeps the provider default."),
-  conversation_id: z.string().min(1).optional().describe("Continue an existing ChatGPT conversation instead of starting a new one."),
-  refs: z.array(z.record(z.string(), z.unknown())).max(10).optional().describe("Reference images as payload records (base64, dataUrl or bytes fields). Uploaded references only: bare library or tile ids carry no payload and are rejected by the queue preflight."),
-  timeout_ms: z.number().int().min(1).max(1_800_000).optional().describe("Generation timeout in milliseconds."),
-};
+// The chatgpt_generate and run_workflow_graph input shapes live in
+// schemas.ts alongside every other Core method shape: the generic HTTP
+// bridge validates /api/<method> bodies against schemas, and RemoteCore
+// forwards both surfaces to the owner like any other method.
 
 server.registerTool(
   "chatgpt_generate",
@@ -193,12 +182,32 @@ server.registerTool(
     title: "Generate an image with ChatGPT",
     description:
       "Queue one ChatGPT image generation in the signed-in ChatGPT tab (a separate provider from Flow: no project, no credits — the job view always reports credits as null). Returns the queued job immediately; use flow_wait or flow_status for the result and the downloaded file paths, and flow_cancel to cancel a job that has not started. Reference images must be payload records (base64/dataUrl/bytes); library or tile ids are not accepted.",
-    inputSchema: chatgptGenerateShape,
+    inputSchema: shapes.chatgpt_generate,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },
   (args) => reply(core.chatgpt_generate
     ? core.chatgpt_generate(args)
-    : Promise.reject(new Error("chatgpt_generate is not available in this process: the relay core (RemoteCore) does not forward it yet. Run chatgpt_generate against the owner process."))),
+    : Promise.reject(new Error("chatgpt_generate is not available in this process: this core does not implement chatgpt_generate."))),
+);
+
+// FEAT-07: run a node-graph workflow. The extension's graph module
+// validates, levels and compiles the graph into the same queue-job
+// shapes the existing planners produce; the core forwards the document
+// to the flow.queue.workflow bridge command. The Core interface declares
+// run_workflow_graph as optional, so an absent method answers a clear
+// error instead of a TypeError.
+server.registerTool(
+  "flow_run_workflow",
+  {
+    title: "Run a workflow graph",
+    description:
+      "Run a node-graph workflow on the generation queue. Nodes (text and image sources, Flow generate, ChatGPT, download, delay) are validated against the port-compatibility matrix, topologically leveled, and compiled into queue jobs with workflow metadata; each level is enqueued as its dependencies complete, and a node whose dependency failed is skipped together with everything downstream of it. Returns the run record and the first level's queued jobs; use flow_status or the run id to follow progress.",
+    inputSchema: shapes.run_workflow_graph,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  },
+  (args) => reply(core.run_workflow_graph
+    ? core.run_workflow_graph(args)
+    : Promise.reject(new Error("run_workflow_graph is not available in this process: this core does not implement run_workflow_graph yet. The extension bridge command flow.queue.workflow is ready for it."))),
 );
 
 server.registerTool(
@@ -311,7 +320,7 @@ server.registerTool(
     inputSchema: shapes.agent,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },
-  (args) => reply(core.agent(args)),
+  (args) => reply(patient("flow_agent_images", core.agent(args))),
 );
 
 server.registerTool(
@@ -319,11 +328,11 @@ server.registerTool(
   {
     title: "Edit an existing video",
     description:
-      "Video-to-video edit of a clip already in the Flow project (relight, change weather/background, remove or restyle objects) using Flow's edit view. Queued like a generation; use flow_wait for the file. Spends credits without a prior quote (about 20 for a 4 s clip), so ask the user before calling. Set submit_only=true to return after the correlated request dispatch without waiting for rendering or download.",
+      "Video-to-video edit of a clip already in the Flow project (relight, change weather/background, remove or restyle objects) using Flow's edit view. Queued like a generation; use flow_wait for the file. Spends credits without a prior quote, so ask the user before calling. Set submit_only=true to return after the correlated request dispatch without waiting for rendering or download.",
     inputSchema: shapes.edit,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },
-  (args) => reply(core.edit(args)),
+  (args) => reply(patient("flow_edit", core.edit(args))),
 );
 
 server.registerTool(

@@ -432,30 +432,6 @@
     return { x, y, prompt: promptBox ? normalizeFlowPrompt(promptBox.innerText || promptBox.textContent) : wanted };
   }
 
-  function pressFlowEditorSubmit(editor) {
-    if (!editor || !(editor instanceof HTMLElement) || !editor.isConnected) return false;
-    try {
-      editor.focus({ preventScroll: true });
-      const selection = window.getSelection?.();
-      const range = document.createRange?.();
-      range?.selectNodeContents(editor);
-      range?.collapse(false);
-      selection?.removeAllRanges?.();
-      if (range) selection?.addRange?.(range);
-
-      const baseOptions = { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true, composed: true };
-
-      // Keep this as a single, plain Enter fallback after Flow's click path.
-      editor.dispatchEvent(new KeyboardEvent("keydown", baseOptions));
-      editor.dispatchEvent(new KeyboardEvent("keypress", baseOptions));
-      editor.dispatchEvent(new KeyboardEvent("keyup", baseOptions));
-      return true;
-    } catch (err) {
-      console.warn("[FlowEditor] editor Enter press failed:", err);
-      return false;
-    }
-  }
-
   async function activateFlowSubmitButton(button, expectedPrompt) {
     const targetButton = button || (expectedPrompt ? getFlowSubmitButton(expectedPrompt) : null);
     if (!targetButton || !targetButton.isConnected) {
@@ -506,6 +482,7 @@
     } catch (_) {}
 
     let mainActivation = null;
+    let mainActivationAmbiguous = false;
     try {
       // 1. Gesture sequence with exact 120ms hold delay (TobyFlow pattern)
       targetButton.dispatchEvent(new PointerEvent("pointerdown", eventOptions));
@@ -574,12 +551,25 @@
       }
 
       const mainListenerInvoked = mainActivation?.success === true && Number(mainActivation?.invoked) > 0;
-      if (mainActivation?.error === "Bridge timeout") {
+      if (mainActivation?.error === "Bridge timeout" && !clickDelivered) {
+        // No click ever landed on the button, so nothing was dispatched:
+        // this timeout is a genuine bridge failure, not an ambiguous one.
         throw root.flowError("FLOW_SUBMIT_BRIDGE_TIMEOUT", "Flow's submit bridge timed out. The request outcome is unknown; inspect the project before retrying.", false, true);
       }
-      if (!mainListenerInvoked) {
+      if (mainActivation?.error === "Bridge timeout") {
+        // The click DID land on the button (the capture listener fired)
+        // but the bridge's result message never arrived — the main-world
+        // listener ran and its reply was lost. Like TobyFlow, do not
+        // throw, and do not click again (a second click could submit
+        // twice); the dispatch wait's correlation / DOM-acceptance
+        // signals own the verdict from here. The flag below is a
+        // diagnostic fact only (videofix M-E wires it into the timeout
+        // errors' diagnostics) — it is NOT a "dispatched, ambiguous"
+        // state, and nothing treats the submit as dispatched on it alone.
+        mainActivationAmbiguous = true;
+      } else if (!mainListenerInvoked) {
         // The bridge replied but found no page listener. Try one DOM click; the
-        // generation observer owns the later single Enter fallback if needed.
+        // dispatch wait's DOM-acceptance signals own the verdict from here.
         targetButton.click();
       }
 
@@ -597,6 +587,7 @@
       clickDelivered: clickDelivered || mainListenerInvoked,
       controlAccepted,
       mainListenerInvoked,
+      mainActivationAmbiguous,
       strategy: mainListenerInvoked ? "angular_main_proxy" : "native_click_fallback",
     };
   }
@@ -784,7 +775,6 @@
     getFlowSubmitButton,
     waitForGenerationSubmitButton,
     inspectFlowSubmitTarget,
-    pressFlowEditorSubmit,
     activateFlowSubmitButton,
     currentFlowSubmitErrors,
     readGenerationCreditQuote,
@@ -803,7 +793,6 @@
   root.waitForGenerationSubmitButton = waitForGenerationSubmitButton;
   root.activateFlowSubmitButton = activateFlowSubmitButton;
   root.inspectFlowSubmitTarget = inspectFlowSubmitTarget;
-  root.pressFlowEditorSubmit = pressFlowEditorSubmit;
   root.currentFlowSubmitErrors = currentFlowSubmitErrors;
   root.waitForGenerationCreditQuote = waitForGenerationCreditQuote;
   root.normalizeFlowPrompt = normalizeFlowPrompt;

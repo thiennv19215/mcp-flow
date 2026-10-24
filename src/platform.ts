@@ -87,13 +87,3 @@ export function extractZip(zip: string, dest: string): string[] {
   return files;
 }
 
-// Opens a page in the default browser.
-export function openUrl(url: string): void {
-  try {
-    if (IS_MAC) execFileSync("open", [url], { stdio: "ignore" });
-    else if (IS_WIN) execFileSync("cmd", ["/c", "start", "", url], { stdio: "ignore", windowsHide: true });
-    else execFileSync("xdg-open", [url], { stdio: "ignore" });
-  } catch {
-    // Opening the browser is a convenience; the address is printed either way.
-  }
-}

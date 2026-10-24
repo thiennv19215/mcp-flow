@@ -154,6 +154,19 @@ export async function startServer(core: Core): Promise<ServerRole> {
         const raw = (await readBody(req, bodyLimit)).toString() || "{}";
         const body = JSON.parse(raw) as Record<string, unknown>;
         if (url.pathname === "/api/extension/connect") {
+          // Connect is the only extension endpoint that mints a session,
+          // so it is the one that must present the per-machine token —
+          // the same token every other API route requires. poll/result/
+          // progress then run off the unguessable session_id the connect
+          // call returns, exactly like a session cookie. The extension
+          // sends the token the user saved once on its options page
+          // (chrome.storage.local key "serverToken"); with nothing saved
+          // it connects with token "" and gets 401 here, and connectHttp
+          // already treats 401 as "not connected" and falls back to WS.
+          const authorization = req.headers.authorization;
+          const bearer = authorization?.toLowerCase().startsWith("bearer ") ? authorization.slice(7).trim() : undefined;
+          const presented = req.headers["x-flow-token"] ?? url.searchParams.get("token") ?? bearer;
+          if (presented !== token) return json(res, 401, { error: "Missing or wrong token." });
           if (typeof body.protocol !== "number" || (body.version !== undefined && typeof body.version !== "string") ||
               (body.capabilities !== undefined && (!Array.isArray(body.capabilities) || body.capabilities.length > 100 || body.capabilities.some((value) => typeof value !== "string" || value.length > 120)))) {
             return json(res, 400, { error: "Invalid connector handshake." });
@@ -189,11 +202,15 @@ export async function startServer(core: Core): Promise<ServerRole> {
 
       const given = req.headers["x-flow-token"] ?? url.searchParams.get("token");
       const apiMethod = url.pathname.match(/^\/api\/(\w+)$/)?.[1] as keyof Core | undefined;
-      if (req.method === "POST" && apiMethod && typeof core[apiMethod] === "function") {
+      // Dispatch is allowlisted to methods with a schemas.ts shape: every
+      // Core interface method has one, so an unknown name (including
+      // private/prototype members) falls through to 404 instead of being
+      // invoked with unvalidated args.
+      const shape = apiMethod ? (shapes as Record<string, z.ZodRawShape>)[apiMethod] : undefined;
+      if (req.method === "POST" && apiMethod && shape && typeof core[apiMethod] === "function") {
         if (given !== token) return json(res, 401, { error: "Missing or wrong token." });
         const raw = (await readBody(req, 1024 * 1024)).toString() || "{}";
-        const shape = (shapes as Record<string, z.ZodRawShape>)[apiMethod];
-        const args = shape ? z.object(shape).parse(JSON.parse(raw)) : undefined;
+        const args = z.object(shape).parse(JSON.parse(raw));
         return json(res, 200, await (core[apiMethod] as (a: unknown) => Promise<unknown>)(args));
       }
 
@@ -269,6 +286,12 @@ export async function startServer(core: Core): Promise<ServerRole> {
   if (listening) {
     mkdirSync(HOME_DIR, { recursive: true });
     writeFileSync(TOKEN_FILE, token, { mode: 0o600 });
+    // The WS credential stays opt-in: forcing one by default would break
+    // the dev flow where the extension connects over WS without a stored
+    // token, and the HTTP connect path (now token-gated above) is the
+    // primary transport. Say so loudly instead of silently skipping the
+    // check, so an unset FLOW_MCP_WS_TOKEN is a visible choice.
+    if (!wsToken) console.warn("[ws] FLOW_MCP_WS_TOKEN is not set: WebSocket upgrades accept any chrome-extension origin on loopback.");
     return "owner";
   }
   // The port is taken. Who has it matters enormously: becoming a second LOCAL core means two processes drive the same

@@ -15,6 +15,8 @@
   let flowPhotosScanned = false;
   let localUiHistory = [];
   let savedPrompts = [];
+  let generationHistory = [];
+  let savedFlowTasks = [];
   let flowModelCapabilities = null;
   let flowModelCapabilitiesPromise = null;
   let lastFlowVideoModel = null;
@@ -24,6 +26,29 @@
 
   const UI_HISTORY_KEY = "flowMcpUiHistory";
   const SAVED_PROMPTS_KEY = "flowMcpSavedPrompts";
+
+  // FEAT-04: saved prompts are snippets, persisted through
+  // FlowSnippets.FlowSnippetStore over the SAME storage key — the
+  // store upgrades legacy flat entries in place on first read.
+  let snippetStoreInstance = null;
+  let selectedAddonSnippetId = "";
+
+  function snippetStore() {
+    if (!window.FlowSnippets || typeof chrome === "undefined" || !chrome.storage?.local) return null;
+    if (!snippetStoreInstance) {
+      snippetStoreInstance = new window.FlowSnippets.FlowSnippetStore({ storage: chrome.storage.local, key: SAVED_PROMPTS_KEY });
+    }
+    return snippetStoreInstance;
+  }
+
+  async function loadSavedSnippets() {
+    const store = snippetStore();
+    if (store) {
+      try { return await store.list(); } catch { /* fall through to the raw read */ }
+    }
+    const prompts = await readUiStorage(SAVED_PROMPTS_KEY, []);
+    return Array.isArray(prompts) ? prompts : [];
+  }
 
   async function dispatchFlowOperation(operation, payload = {}) {
     const response = await chrome.runtime.sendMessage({ type: "flow-mcp:dispatch", operation, payload });
@@ -671,6 +696,700 @@
     renderHistory();
   }
 
+  // FEAT-01: structured generation records live in the background history
+  // store (flow-history.js); the History tab renders them under the
+  // activity log, each with a Re-run action that rebuilds the exact job
+  // from the record's stored settings snapshot.
+  const GEN_HISTORY_STATUS_LABELS = { success: "Thành công", partial: "Một phần", failed: "Thất bại", stopped: "Đã dừng" };
+
+  function renderGenerationHistory() {
+    const list = document.querySelector("#flowGenHistoryList");
+    const empty = document.querySelector("#flowGenHistoryEmpty");
+    if (!list || !empty) return;
+    list.replaceChildren();
+    empty.hidden = generationHistory.length > 0;
+    for (const record of generationHistory.slice(0, 80)) {
+      const title = record.prompt || record.label || "Flow job";
+      const meta = [
+        GEN_HISTORY_STATUS_LABELS[record.status] || record.status,
+        record.mediaType || "",
+        record.model || "",
+        record.ratio || "",
+        record.provider === "chatgpt" ? "ChatGPT" : "",
+      ].filter(Boolean).join(" · ");
+      const detail = record.status === "failed" && record.error ? `${meta} — ${record.error}` : meta;
+      const time = record.finishedAt ? new Date(record.finishedAt).toLocaleString() : "";
+      const row = document.createElement("article");
+      row.className = "flow-history-item";
+      row.innerHTML = `<div class="flow-history-item__body"><div class="flow-history-item__title">${escapeHtml(title)}</div><div class="flow-history-item__detail">${escapeHtml(detail)}</div></div><div class="flow-history-item__actions"><button type="button" class="btn btn-secondary btn-sm" data-history-rerun="${escapeHtml(record.id)}">Chạy lại</button></div><time class="flow-history-item__time">${escapeHtml(time)}</time>`;
+      list.appendChild(row);
+    }
+  }
+
+  async function loadGenerationHistory() {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-history:list" });
+      generationHistory = res?.ok && Array.isArray(res.records) ? res.records : [];
+    } catch {
+      generationHistory = [];
+    }
+    renderGenerationHistory();
+  }
+
+  async function rerunGenerationRecord(id) {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-history:rerun", id });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể chạy lại bản ghi này.");
+      setFeedback("✅ Đã đưa bản ghi vào hàng đợi Flow.", true);
+      addLog("flow.history.rerun", res.record?.label || id, true);
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.history.rerun.error", err.message, false);
+    }
+  }
+
+  // FEAT-08: local workflow templates. The store lives in the
+  // background (flow-workflow-templates.js); this surface talks to it
+  // over the same message convention as the generation history and
+  // degrades to an empty list until the handlers are wired.
+  let workflowTemplates = [];
+
+  function downloadJsonFile(filename, value) {
+    const blob = new Blob([JSON.stringify(value, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function renderWorkflowTemplates() {
+    const list = document.querySelector("#workflowTemplateList");
+    const empty = document.querySelector("#workflowTemplateEmpty");
+    if (!list || !empty) return;
+    list.replaceChildren();
+    empty.hidden = workflowTemplates.length > 0;
+    for (const template of workflowTemplates) {
+      const detail = [template.category, template.description].filter(Boolean).join(" · ");
+      const row = document.createElement("article");
+      row.className = "flow-history-item";
+      row.innerHTML = `<div class="flow-history-item__body"><div class="flow-history-item__title">${escapeHtml(template.name || "")}</div><div class="flow-history-item__detail">${escapeHtml(detail)}</div></div><div class="flow-history-item__actions"><button type="button" class="btn btn-secondary btn-sm" data-wf-template-instantiate="${escapeHtml(template.id)}">Tạo workflow</button><button type="button" class="btn btn-secondary btn-sm" data-wf-template-export="${escapeHtml(template.id)}">Xuất file</button><button type="button" class="btn btn-secondary btn-sm" data-wf-template-delete="${escapeHtml(template.id)}">Xoá</button></div>`;
+      list.appendChild(row);
+    }
+  }
+
+  async function loadWorkflowTemplates() {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-workflow-templates:list" });
+      workflowTemplates = res?.ok && Array.isArray(res.templates) ? res.templates : [];
+    } catch {
+      workflowTemplates = [];
+    }
+    renderWorkflowTemplates();
+  }
+
+  async function saveWorkflowTemplateFromForm() {
+    const name = document.querySelector("#wfTemplateName")?.value.trim() || "";
+    const category = document.querySelector("#wfTemplateCategory")?.value.trim() || "";
+    const description = document.querySelector("#wfTemplateDescription")?.value.trim() || "";
+    const raw = document.querySelector("#wfTemplateGraph")?.value.trim() || "";
+    try {
+      const graph = JSON.parse(raw);
+      const res = await chrome.runtime.sendMessage({ type: "flow-workflow-templates:save", graph, name, description, category });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể lưu mẫu workflow này.");
+      setFeedback("✅ Đã lưu mẫu workflow.", true);
+      addLog("flow.workflowTemplate.save", res.template?.name || name, true);
+      await loadWorkflowTemplates();
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.workflowTemplate.save.error", err.message, false);
+    }
+  }
+
+  async function instantiateWorkflowTemplate(id) {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-workflow-templates:instantiate", id });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể tạo workflow từ mẫu này.");
+      downloadJsonFile(`${(res.graph?.name || "workflow").replace(/[^\w-]+/g, "-")}.workflow.json`, res.graph);
+      setFeedback("✅ Đã tạo workflow mới từ mẫu (tải xuống dạng JSON).", true);
+      addLog("flow.workflowTemplate.instantiate", res.graph?.name || id, true);
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.workflowTemplate.instantiate.error", err.message, false);
+    }
+  }
+
+  async function exportWorkflowTemplate(id) {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-workflow-templates:export", id });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể xuất mẫu workflow này.");
+      downloadJsonFile(`${(res.document?.name || "workflow-template").replace(/[^\w-]+/g, "-")}.template.json`, res.document);
+      addLog("flow.workflowTemplate.export", res.document?.name || id, true);
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.workflowTemplate.export.error", err.message, false);
+    }
+  }
+
+  async function importWorkflowTemplateFile(file) {
+    try {
+      const document_ = JSON.parse(await file.text());
+      const res = await chrome.runtime.sendMessage({ type: "flow-workflow-templates:import", document: document_ });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể nhập mẫu workflow này.");
+      setFeedback("✅ Đã nhập mẫu workflow.", true);
+      addLog("flow.workflowTemplate.import", res.template?.name || file.name, true);
+      await loadWorkflowTemplates();
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.workflowTemplate.import.error", err.message, false);
+    }
+  }
+
+  async function removeWorkflowTemplate(id) {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-workflow-templates:remove", id });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể xoá mẫu workflow này.");
+      await loadWorkflowTemplates();
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.workflowTemplate.remove.error", err.message, false);
+    }
+  }
+
+  // FEAT-05: saved multi-task lists live in the background task store
+  // (flow-task-lists.js); the Tasks tab renders them with search, and
+  // runs (one / selected / all) expand each task into queue jobs tagged
+  // with its id — results write back onto the originating task in the
+  // worker through FEAT-02's receipt fold.
+  const TASK_STATUS_LABELS = { pending: "Chờ chạy", running: "Đang chạy", completed: "Hoàn thành", failed: "Thất bại" };
+
+  function renderFlowTaskLists() {
+    const list = document.querySelector("#flowTaskList");
+    const empty = document.querySelector("#flowTaskEmpty");
+    if (!list || !empty) return;
+    list.replaceChildren();
+    empty.hidden = savedFlowTasks.length > 0;
+    for (const task of savedFlowTasks) {
+      const config = task.config || {};
+      const status = task.status === "completed" && task.partial ? "Hoàn thành một phần" : (TASK_STATUS_LABELS[task.status] || task.status || "");
+      const meta = [
+        status,
+        config.provider === "chatgpt" ? "ChatGPT" : (config.mediaType === "video" ? "Video" : "Ảnh"),
+        config.model || "",
+        config.ratio || "",
+        `${Array.isArray(config.prompts) ? config.prompts.length : 0} prompt`,
+        task.runCount ? `đã chạy ${task.runCount} lần` : "",
+        task.results?.length ? `${task.results.length} kết quả` : "",
+      ].filter(Boolean).join(" · ");
+      const detail = task.status === "failed" && task.error ? `${meta} — ${task.error}` : meta;
+      const row = document.createElement("article");
+      row.className = "flow-history-item";
+      row.innerHTML = `<label class="flow-history-item__check"><input type="checkbox" data-task-select="${escapeHtml(task.id)}"></label><div class="flow-history-item__body"><div class="flow-history-item__title">${escapeHtml(task.name || "")}</div><div class="flow-history-item__detail">${escapeHtml(detail)}</div></div><div class="flow-history-item__actions"><button type="button" class="btn btn-secondary btn-sm" data-task-run="${escapeHtml(task.id)}">Chạy</button><button type="button" class="btn btn-secondary btn-sm" data-task-duplicate="${escapeHtml(task.id)}">Nhân bản</button><button type="button" class="btn btn-secondary btn-sm" data-task-remove="${escapeHtml(task.id)}">Xoá</button></div>`;
+      list.appendChild(row);
+    }
+  }
+
+  async function loadFlowTasks() {
+    try {
+      const query = document.querySelector("#flowTaskSearch")?.value.trim() || "";
+      const res = await chrome.runtime.sendMessage(query ? { type: "flow-tasks:list", query } : { type: "flow-tasks:list" });
+      savedFlowTasks = res?.ok && Array.isArray(res.tasks) ? res.tasks : [];
+    } catch {
+      savedFlowTasks = [];
+    }
+    renderFlowTaskLists();
+  }
+
+  async function runFlowTasks(message) {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-tasks:run", ...message });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể chạy tác vụ đã lưu.");
+      if (Array.isArray(res.tasks)) savedFlowTasks = res.tasks;
+      renderFlowTaskLists();
+      const note = res.sequential ? " (chạy tuần tự bắt buộc)" : "";
+      setFeedback(`✅ Đã đưa tác vụ vào hàng đợi Flow${note}.`, true);
+      addLog("flow.tasks.run", note ? "sequential" : "queued", true);
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.tasks.run.error", err.message, false);
+    }
+  }
+
+  async function duplicateFlowTask(id) {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-tasks:duplicate", id });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể nhân bản tác vụ.");
+      if (Array.isArray(res.tasks)) savedFlowTasks = res.tasks;
+      renderFlowTaskLists();
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+    }
+  }
+
+  async function removeFlowTask(id) {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-tasks:remove", id });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể xoá tác vụ.");
+      if (Array.isArray(res.tasks)) savedFlowTasks = res.tasks;
+      renderFlowTaskLists();
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+    }
+  }
+
+  // "Add" snapshots the current Gen form into a saved task: the same
+  // fields the submit paths read (provider, type, prompts split by the
+  // multi-prompt rule WITHOUT the addon — addons are never baked into
+  // stored configs — ratio, model, picker refs). ChatGPT tasks keep
+  // only payload-carrying refs, mirroring GPT-14's library-drop rule.
+  async function createFlowTaskFromForm() {
+    const provider = document.querySelector("#genProvider")?.value === "chatgpt" ? "chatgpt" : "flow";
+    const mediaType = (document.querySelector("#genType")?.value || "image") === "video" ? "video" : "image";
+    const rawPrompt = document.querySelector("#promptsArea")?.value.trim()
+      || document.querySelector(mediaType === "video" ? "#inputPromptVideo" : "#inputPromptImage")?.value.trim() || "";
+    if (!rawPrompt) {
+      setFeedback("Vui lòng nhập prompt ở tab Tạo trước khi lưu thành tác vụ.", false);
+      return;
+    }
+    const multiEnabled = document.querySelector("#multiPromptCheck")?.checked === true
+      || document.querySelector(mediaType === "video" ? "#multiPromptVideo" : "#multiPromptImage")?.checked === true;
+    const prompts = multiEnabled ? rawPrompt.split(/\n\s*\n/).map(value => value.trim()).filter(Boolean) : [rawPrompt];
+    let refs = [];
+    try { refs = referencePicker.getReferences(mediaType) || []; } catch { refs = []; }
+    // A saved task persists across restarts, so refs carrying a live
+    // File handle can never be part of it; payload records and library
+    // identities are plain data and store verbatim.
+    refs = refs.filter(ref => ref && !ref.file);
+    if (provider === "chatgpt") {
+      refs = refs.filter(ref => typeof ref.base64 === "string" && ref.base64);
+    }
+    try { refs = structuredClone(refs); } catch { refs = []; }
+    const name = window.prompt("Tên tác vụ:", prompts[0].slice(0, 60));
+    if (name === null) return;
+    const config = {
+      provider,
+      mediaType,
+      prompts,
+      ratio: document.querySelector("#aspectRatio")?.value || document.querySelector("#selectRatioImage")?.value || null,
+      model: document.querySelector(mediaType === "video" ? "#selectModelVideo" : "#selectModelImage")?.value || null,
+      quantity: mediaType === "video" ? Number(document.querySelector("#selectCountVideo")?.value || 1) : 1,
+      refs,
+      download: { autoDownload: document.querySelector("#genTabAutoDownload")?.checked === true },
+    };
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-tasks:create", name: name.trim() || undefined, config });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể lưu tác vụ.");
+      if (Array.isArray(res.tasks)) savedFlowTasks = res.tasks;
+      renderFlowTaskLists();
+      setFeedback("✅ Đã lưu tác vụ vào tab Tác vụ.", true);
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+    }
+  }
+
+
+  // FEAT-09: local generation-config templates. The store lives in
+  // the background (flow-gen-templates.js); this surface talks to it
+  // over the same message convention as the workflow templates and
+  // degrades to an empty list until the handlers are wired. Saving
+  // captures the CURRENT composer state; applying rebuilds the queue
+  // job payload in the background and loads its prompt + settings
+  // back into the Gen composer fields.
+  let genTemplates = [];
+
+  function currentGenComposerState() {
+    const type = document.querySelector("#genType")?.value === "video" ? "video" : "image";
+    const autoDownload = document.querySelector("#genTabAutoDownload")?.checked === true;
+    // Only Flow-sourced references persist into a template: they
+    // resolve by identity at submit time. Local files are uploaded on
+    // submit and cannot be carried by a stored template.
+    const attachments = (referencePicker.getReferences(type) || [])
+      .filter(reference => reference?.source === "flow")
+      .map(reference => ({
+        assetName: reference.assetName,
+        ...(reference.expectedId ? { expectedId: reference.expectedId } : {}),
+        kind: reference.kind || type,
+      }));
+    if (type === "video") {
+      const model = document.querySelector("#selectModelVideo")?.value || "";
+      const duration = Number(document.querySelector("#flowVideoDuration")?.value ?? document.querySelector("#selectDurationVideo")?.value) || undefined;
+      const resolution = document.querySelector("#flowVideoResolution")?.value ?? document.querySelector("#selectResolutionVideo")?.value ?? undefined;
+      const voice = document.querySelector("#genVideoVoiceSelect")?.value || "";
+      return {
+        prompt: document.querySelector("#inputPromptVideo")?.value.trim() || "",
+        type,
+        aspectRatio: document.querySelector("#selectRatioVideo")?.value || "",
+        count: Number(document.querySelector("#selectCountVideo")?.value) || 1,
+        autoDownload,
+        settings: {
+          mode: document.querySelector("#selectModeVideo")?.value || "ingredients",
+          ...(model ? { model } : {}),
+          ...(duration != null ? { duration } : {}),
+          ...(resolution ? { resolution } : {}),
+          ...(voice ? { voice } : {}),
+        },
+        attachments,
+      };
+    }
+    return {
+      prompt: document.querySelector("#inputPromptImage")?.value.trim() || "",
+      type,
+      model: document.querySelector("#selectModelImage")?.value || "",
+      aspectRatio: document.querySelector("#selectRatioImage")?.value || "",
+      count: Number(document.querySelector("#selectQtyImage")?.value) || 1,
+      autoDownload,
+      settings: {},
+      attachments,
+    };
+  }
+
+  function applyGenTemplateToComposer(job) {
+    const payload = job?.payload || {};
+    const type = payload.type === "video" ? "video" : "image";
+    setGenType(type);
+    const genTypeEl = document.querySelector("#genType");
+    if (genTypeEl) genTypeEl.value = type;
+    const autoDownloadEl = document.querySelector("#genTabAutoDownload");
+    if (autoDownloadEl) autoDownloadEl.checked = payload.autoDownload === true;
+    const setValue = (selector, value) => {
+      const el = document.querySelector(selector);
+      if (el && value != null && value !== "") el.value = String(value);
+    };
+    // Audit cluster E: a restore writes BOTH trees. The old code wrote
+    // only the hidden selects (plus visible duration/resolution), so
+    // the visible ratio/model/quantity/mode controls — and the image
+    // builder, which reads #aspectRatio first — kept the pre-restore
+    // values. Voice goes through updateVoiceUiState so the label and
+    // the hidden voice select stay with the hidden voice input.
+    if (type === "video") {
+      setValue("#inputPromptVideo", payload.prompt);
+      setValue("#aspectRatio", payload.aspectRatio);
+      setValue("#selectRatioVideo", payload.aspectRatio);
+      setValue("#quantitySelect", payload.count);
+      setValue("#selectCountVideo", payload.count);
+      setValue("#videoInputType", payload.mode);
+      setValue("#selectModeVideo", payload.mode);
+      setValue("#videoModel", payload.model);
+      setValue("#selectModelVideo", payload.model);
+      setValue("#flowVideoDuration", payload.duration);
+      setValue("#selectDurationVideo", payload.duration);
+      setValue("#flowVideoResolution", payload.resolution);
+      setValue("#selectResolutionVideo", payload.resolution);
+      if (payload.voice != null && payload.voice !== "") updateVoiceUiState(payload.voice);
+    } else {
+      setValue("#inputPromptImage", payload.prompt);
+      setValue("#aspectRatio", payload.aspectRatio);
+      setValue("#selectRatioImage", payload.aspectRatio);
+      setValue("#quantitySelect", payload.count);
+      setValue("#selectQtyImage", payload.count);
+      setValue("#imageModel", payload.model);
+      setValue("#selectModelImage", payload.model);
+    }
+    const refCount = Array.isArray(payload.attachments) ? payload.attachments.length : 0;
+    setFeedback(`✅ Đã nạp mẫu cấu hình vào khung tạo${refCount ? ` (mẫu mang ${refCount} ảnh tham chiếu nguồn Flow)` : ""}.`, true);
+  }
+
+  function setGenType(type = "image") {
+      const normalizedType = String(type).toLowerCase() === "video" ? "video" : "image";
+      const compactBar = document.querySelector("#genCompactBar");
+      if (compactBar) compactBar.dataset.genMode = normalizedType;
+      document.querySelectorAll("#genTypeToggle .gen-type-btn").forEach(btn => {
+        const buttonType = String(btn.dataset.value || "").toLowerCase();
+        const active = buttonType === normalizedType;
+        const locale = typeof I18n !== "undefined" ? I18n.getLocale() : "vi";
+        btn.classList.toggle("active", active);
+        btn.setAttribute("aria-pressed", String(active));
+        btn.setAttribute("aria-label", locale === "en"
+          ? buttonType === "video" ? "Create video" : "Create image"
+          : buttonType === "video" ? "Tạo video" : "Tạo ảnh");
+      });
+      const hiddenGenType = document.querySelector("#genType");
+      if (hiddenGenType && hiddenGenType.value !== normalizedType) hiddenGenType.value = normalizedType;
+
+      const isImage = normalizedType === "image";
+      document.querySelector("#imageModelContainer")?.classList.toggle("hidden", !isImage);
+      document.querySelector("#videoModelContainer")?.classList.toggle("hidden", isImage);
+      document.querySelector("#videoInputTypeContainer")?.classList.toggle("hidden", isImage);
+      document.querySelector("#flowVideoDurationContainer")?.classList.toggle("hidden", isImage);
+      document.querySelector("#flowVideoResolutionContainer")?.classList.toggle("hidden", isImage);
+      document.querySelector("#genVideoVoiceContainer")?.classList.toggle("hidden", isImage);
+
+      const isFrames = String(document.querySelector("#videoInputType")?.value || "").toLowerCase() === "frames";
+      document.querySelector("#videoFramesSection")?.classList.toggle("hidden", isImage || !isFrames);
+
+      const submitText = document.querySelector("#genSubmitBtnText");
+      if (submitText) submitText.textContent = isImage ? t("sidebar.btnGenerateImage", "Tạo ảnh") : t("sidebar.btnGenerateVideo", "Tạo video");
+
+      referencePicker.renderReferenceCards?.(normalizedType);
+    }
+  function renderGenTemplates() {
+    const list = document.querySelector("#genTemplateList");
+    const empty = document.querySelector("#genTemplateEmpty");
+    if (!list || !empty) return;
+    list.replaceChildren();
+    empty.hidden = genTemplates.length > 0;
+    for (const template of genTemplates) {
+      const state = template.state || {};
+      const detail = [state.type === "video" ? "Video" : "Ảnh", state.model || state.settings?.model, state.aspectRatio].filter(Boolean).join(" · ");
+      const row = document.createElement("article");
+      row.className = "flow-history-item";
+      row.innerHTML = `<div class="flow-history-item__body"><div class="flow-history-item__title">${escapeHtml(template.name || "")}</div><div class="flow-history-item__detail">${escapeHtml(detail)}</div><div class="flow-history-item__detail">${escapeHtml(state.prompt || "")}</div></div><div class="flow-history-item__actions"><button type="button" class="btn btn-secondary btn-sm" data-gen-template-apply="${escapeHtml(template.id)}">Dùng mẫu</button><button type="button" class="btn btn-secondary btn-sm" data-gen-template-delete="${escapeHtml(template.id)}">Xoá</button></div>`;
+      list.appendChild(row);
+    }
+  }
+
+  async function loadGenTemplates() {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-gen-templates:list" });
+      genTemplates = res?.ok && Array.isArray(res.templates) ? res.templates : [];
+    } catch {
+      genTemplates = [];
+    }
+    renderGenTemplates();
+  }
+
+  async function saveGenTemplateFromForm() {
+    const name = document.querySelector("#genTemplateName")?.value.trim() || "";
+    try {
+      const state = currentGenComposerState();
+      const res = await chrome.runtime.sendMessage({ type: "flow-gen-templates:save", state, name });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể lưu mẫu cấu hình này.");
+      setFeedback("✅ Đã lưu mẫu cấu hình.", true);
+      addLog("flow.genTemplate.save", res.template?.name || name, true);
+      await loadGenTemplates();
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.genTemplate.save.error", err.message, false);
+    }
+  }
+
+  async function applyGenTemplate(id) {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-gen-templates:apply", id });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể dùng mẫu cấu hình này.");
+      applyGenTemplateToComposer(res.job);
+      addLog("flow.genTemplate.apply", res.job?.label || id, true);
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.genTemplate.apply.error", err.message, false);
+    }
+  }
+
+  async function removeGenTemplate(id) {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-gen-templates:remove", id });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể xoá mẫu cấu hình này.");
+      await loadGenTemplates();
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.genTemplate.remove.error", err.message, false);
+    }
+  }
+
+
+  // FEAT-13: visual workflow editor surface. The state machine lives in
+  // workflow-editor.js (loaded as a module script and bridged onto
+  // window.FlowWorkflowEditor); this surface keeps one editor instance,
+  // autosaves its serialized state to local storage after every change,
+  // and renders a text summary of the graph — a canvas view would draw
+  // from the same getState() snapshot (nodes carry x/y positions).
+  const WORKFLOW_EDITOR_AUTOSAVE_KEY = "flowMcpWorkflowEditorState";
+  let workflowEditorInstance = null;
+
+  function ensureWorkflowEditor() {
+    const api = window.FlowWorkflowEditor;
+    if (!api?.createWorkflowEditor) return null;
+    if (!workflowEditorInstance) {
+      workflowEditorInstance = api.createWorkflowEditor();
+      try {
+        const saved = window.localStorage?.getItem(WORKFLOW_EDITOR_AUTOSAVE_KEY);
+        if (saved) workflowEditorInstance.restore(saved);
+      } catch { /* autosave is best-effort; a corrupt draft just starts empty */ }
+      const nameInput = document.querySelector("#wfEditorName");
+      if (nameInput && workflowEditorInstance.getState().name) nameInput.value = workflowEditorInstance.getState().name;
+    }
+    return workflowEditorInstance;
+  }
+
+  function persistWorkflowEditor() {
+    if (!workflowEditorInstance) return;
+    try {
+      window.localStorage?.setItem(WORKFLOW_EDITOR_AUTOSAVE_KEY, workflowEditorInstance.serialize());
+    } catch { /* storage full/blocked: the in-memory editor keeps working */ }
+    renderWorkflowEditorSummary();
+  }
+
+  function renderWorkflowEditorSummary() {
+    const summary = document.querySelector("#wfEditorSummary");
+    if (!summary) return;
+    const editor = ensureWorkflowEditor();
+    if (!editor) {
+      summary.textContent = "Trình soạn workflow chưa sẵn sàng.";
+      return;
+    }
+    const state = editor.getState();
+    const detail = state.nodes.map(node => `${node.id} (${node.type})`).join(", ");
+    summary.textContent = state.nodes.length
+      ? `${state.nodes.length} node, ${state.edges.length} cạnh${state.name ? ` — ${state.name}` : ""}: ${detail}`
+      : "Chưa có node nào. Chọn loại node rồi bấm Thêm node.";
+    const undoBtn = document.querySelector("#wfEditorUndoBtn");
+    const redoBtn = document.querySelector("#wfEditorRedoBtn");
+    if (undoBtn) undoBtn.disabled = !editor.canUndo();
+    if (redoBtn) redoBtn.disabled = !editor.canRedo();
+  }
+
+  function addWorkflowEditorNode() {
+    const editor = ensureWorkflowEditor();
+    if (!editor) return;
+    const type = document.querySelector("#wfEditorNodeType")?.value || "text";
+    try {
+      const config = {};
+      if (type === "text") config.text = window.prompt("Nội dung text:", "") || "";
+      if (type === "generate" || type === "chatgpt") config.prompt = window.prompt("Prompt:", "") || "";
+      if (type === "generate") config.type = "image";
+      if (type === "delay") config.seconds = 5;
+      const node = editor.addNode(type, { config });
+      persistWorkflowEditor();
+      addLog("flow.workflowEditor.addNode", `${node.id} (${type})`, true);
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.workflowEditor.addNode.error", err.message, false);
+    }
+  }
+
+  function openWorkflowEditorJson() {
+    const editor = ensureWorkflowEditor();
+    if (!editor) return;
+    const raw = document.querySelector("#wfEditorJson")?.value.trim() || "";
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed?.kind === "flow.workflow-graph") editor.openDocument(parsed);
+      else editor.restore(parsed);
+      const nameInput = document.querySelector("#wfEditorName");
+      if (nameInput) nameInput.value = editor.getState().name || "";
+      persistWorkflowEditor();
+      setFeedback("✅ Đã mở workflow vào trình soạn.", true);
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.workflowEditor.open.error", err.message, false);
+    }
+  }
+
+  function exportWorkflowEditorJson() {
+    const editor = ensureWorkflowEditor();
+    if (!editor) return;
+    try {
+      const doc = editor.exportDocument();
+      const textarea = document.querySelector("#wfEditorJson");
+      if (textarea) textarea.value = JSON.stringify(doc, null, 2);
+      setFeedback("✅ Đã xuất JSON workflow (chỉ field trong whitelist).", true);
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.workflowEditor.export.error", err.message, false);
+    }
+  }
+
+  // FEAT-14: Prompt Assistant surface. The pure logic (local format
+  // set, request assembly, reply parsing, image-to-prompt structured
+  // parse) lives in the background (flow-prompt-assistant.js); this
+  // panel talks to it over the flow-prompt-assistant:* message
+  // contract and reports plainly until the handlers are wired. The
+  // assembled request is copied to the chat provider by hand for now —
+  // the live send path waits on the ChatGPT live-DOM phase (GPT-B1).
+  let promptAssistantPrompts = [];
+  let promptAssistantI2p = null;
+
+  function insertPromptIntoComposer(text) {
+    const editor = document.querySelector("#promptsArea");
+    if (!editor || !text) return;
+    editor.value = editor.value.trim() ? `${editor.value.trim()}\n\n${text}` : text;
+    editor.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  function renderPromptAssistantResults() {
+    const list = document.querySelector("#paPromptList");
+    if (list) {
+      list.replaceChildren();
+      for (const [index, prompt] of promptAssistantPrompts.entries()) {
+        const row = document.createElement("article");
+        row.className = "flow-history-item";
+        row.innerHTML = `<div class="flow-history-item__body"><div class="flow-history-item__detail">${escapeHtml(prompt)}</div></div><div class="flow-history-item__actions"><button type="button" class="btn btn-secondary btn-sm" data-pa-insert="${index}">Chèn</button></div>`;
+        list.append(row);
+      }
+    }
+    const result = document.querySelector("#paI2pResult");
+    if (!result) return;
+    result.replaceChildren();
+    if (!promptAssistantI2p) return;
+    const { subject, promptEn, promptVi, complete } = promptAssistantI2p;
+    const lines = [
+      subject ? `Chủ đề: ${subject}` : null,
+      promptEn ? `EN: ${promptEn}` : null,
+      promptVi ? `VI: ${promptVi}` : null,
+      complete ? null : "(Thiếu trường — xem nguyên văn ở ô dán phía trên.)",
+    ].filter(Boolean);
+    for (const line of lines) {
+      const div = document.createElement("div");
+      div.textContent = line;
+      result.append(div);
+    }
+    for (const [lang, value] of [["EN", promptEn], ["VI", promptVi]]) {
+      if (!value) continue;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "btn btn-secondary btn-sm";
+      button.setAttribute("data-pa-insert-i2p", lang);
+      button.textContent = `Chèn ${lang}`;
+      result.append(button);
+    }
+  }
+
+  async function buildPromptAssistantRequest() {
+    const idea = document.querySelector("#paIdea")?.value.trim() || "";
+    const format = document.querySelector("#paFormat")?.value || "single-en";
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-prompt-assistant:build", format, idea });
+      if (!res?.ok) throw new Error(res?.error?.message || "Chưa tạo được yêu cầu.");
+      const out = document.querySelector("#paRequest");
+      if (out) out.value = res.text || "";
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.promptAssistant.build.error", err.message, false);
+    }
+  }
+
+  async function parsePromptAssistantReply() {
+    const text = document.querySelector("#paReply")?.value || "";
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-prompt-assistant:parse", text });
+      if (!res?.ok) throw new Error(res?.error?.message || "Chưa tách được prompt.");
+      promptAssistantPrompts = Array.isArray(res.prompts) ? res.prompts : [];
+      renderPromptAssistantResults();
+      if (!promptAssistantPrompts.length) {
+        setFeedback("Không tách được prompt nào — câu trả lời thiếu khối PROMPTS.", false);
+      }
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.promptAssistant.parse.error", err.message, false);
+    }
+  }
+
+  async function parsePromptAssistantI2p() {
+    const text = document.querySelector("#paI2pReply")?.value || "";
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-prompt-assistant:parse-i2p", text });
+      if (!res?.ok) throw new Error(res?.error?.message || "Chưa tách được I2P.");
+      promptAssistantI2p = res.result || null;
+      renderPromptAssistantResults();
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.promptAssistant.parseI2p.error", err.message, false);
+    }
+  }
+
+
   function renderSavedPrompts() {
     const list = document.querySelector("#savedPromptsList");
     const empty = document.querySelector("#savedPromptsEmpty");
@@ -678,20 +1397,69 @@
     list.replaceChildren();
     empty.hidden = savedPrompts.length > 0;
     for (const item of savedPrompts) {
+      const title = typeof item.title === "string" ? item.title : (item.name || "");
+      const content = typeof item.content === "string" ? item.content : (item.prompt || "");
+      const variables = Array.isArray(item.variables) ? item.variables
+        : (window.FlowSnippets ? window.FlowSnippets.extractSnippetVariables(content) : []);
+      const meta = [
+        typeof item.category === "string" ? item.category : "",
+        ...(Array.isArray(item.tags) ? item.tags.map(tag => `#${tag}`) : []),
+        ...variables.map(name => `{{${name}}}`),
+      ].filter(Boolean).join(" · ");
       const row = document.createElement("article");
       row.className = "flow-saved-prompt";
-      row.innerHTML = `<div class="flow-saved-prompt__body"><div class="flow-saved-prompt__title">${escapeHtml(item.name)}</div><div class="flow-saved-prompt__text">${escapeHtml(item.prompt)}</div></div><div class="flow-saved-prompt__actions"><button type="button" class="btn btn-secondary" data-prompt-use="${escapeHtml(item.id)}">${escapeHtml(t("sidebar.promptUse"))}</button><button type="button" class="btn btn-secondary" data-prompt-delete="${escapeHtml(item.id)}">${escapeHtml(t("sidebar.promptDelete"))}</button></div>`;
+      row.innerHTML = `<div class="flow-saved-prompt__body"><div class="flow-saved-prompt__title">${escapeHtml(title)}</div><div class="flow-saved-prompt__text">${escapeHtml(content)}</div>${meta ? `<div class="flow-saved-prompt__text">${escapeHtml(meta)}</div>` : ""}</div><div class="flow-saved-prompt__actions"><button type="button" class="btn btn-secondary" data-prompt-use="${escapeHtml(item.id)}">${escapeHtml(t("sidebar.promptUse"))}</button><button type="button" class="btn btn-secondary" data-prompt-delete="${escapeHtml(item.id)}">${escapeHtml(t("sidebar.promptDelete"))}</button></div>`;
       list.appendChild(row);
     }
+    renderAddonOptions();
+  }
+
+  function renderAddonOptions() {
+    const select = document.querySelector("#promptAddonSelect");
+    if (!select) return;
+    const eligible = savedPrompts.filter(item => {
+      const content = typeof item.content === "string" ? item.content : (item.prompt || "");
+      if (!content.trim()) return false;
+      // An addon is static style text: snippets with {{variables}} are
+      // excluded because batch-build time never collects values.
+      return !(window.FlowSnippets && window.FlowSnippets.extractSnippetVariables(content).length);
+    });
+    if (selectedAddonSnippetId && !eligible.some(item => item.id === selectedAddonSnippetId)) selectedAddonSnippetId = "";
+    select.replaceChildren();
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = "Không dùng addon";
+    select.appendChild(none);
+    for (const item of eligible) {
+      const option = document.createElement("option");
+      option.value = item.id;
+      option.textContent = typeof item.title === "string" ? item.title : (item.name || "");
+      select.appendChild(option);
+    }
+    select.value = selectedAddonSnippetId;
+  }
+
+  function selectedAddonText() {
+    if (!selectedAddonSnippetId) return "";
+    const item = savedPrompts.find(snippet => snippet.id === selectedAddonSnippetId);
+    if (!item) return "";
+    const content = typeof item.content === "string" ? item.content : (item.prompt || "");
+    if (!content.trim()) return "";
+    if (window.FlowSnippets && window.FlowSnippets.extractSnippetVariables(content).length) return "";
+    return content;
   }
 
   async function loadLocalUiState() {
     const history = await readUiStorage(UI_HISTORY_KEY, []);
-    const prompts = await readUiStorage(SAVED_PROMPTS_KEY, []);
     localUiHistory = Array.isArray(history) ? history : [];
-    savedPrompts = Array.isArray(prompts) ? prompts : [];
+    savedPrompts = await loadSavedSnippets();
     renderHistory();
     renderSavedPrompts();
+    void loadGenerationHistory();
+    void loadWorkflowTemplates();
+    void loadGenTemplates();
+    void loadFlowTasks();
+    renderWorkflowEditorSummary();
   }
 
   function addLog(name, detail, isOk = true) {
@@ -909,6 +1677,20 @@
       }
     }
     if (!name || (sel.tagName !== "INPUT" && !sel.value)) return null;
+    // FEAT-06: resolve the DOM-extracted identity against the cached
+    // character list through the shared normalization layer
+    // (content/shared/selection-normalize.js) when it is loaded, so the
+    // sidebar modal, queue payloads and workflow planners all resolve a
+    // selection the same way. Without the layer, the extraction above
+    // stands as-is.
+    if (window.FlowSelectionNormalize && Array.isArray(currentCharacters) && currentCharacters.length) {
+      const [entry] = window.FlowSelectionNormalize.normalizeCharacterSelection(
+        { name, ...(uuid ? { uuid } : {}) }, currentCharacters);
+      if (entry) {
+        if (entry.name) name = entry.name;
+        if (entry.uuid && characterUuidPattern.test(entry.uuid)) uuid = entry.uuid.toLowerCase();
+      }
+    }
     return {
       name,
       identityAvailable: Boolean(uuid),
@@ -936,10 +1718,10 @@
   });
 
   // Tab views with roving focus for keyboard users.
-  const tabs = [...document.querySelectorAll(".tobyflow-tab")];
+  const tabs = [...document.querySelectorAll(".flowmcp-tab")];
   const activateTab = tab => {
       if (!tab) return;
-      document.querySelectorAll(".tobyflow-tab").forEach(t => t.classList.remove("active"));
+      document.querySelectorAll(".flowmcp-tab").forEach(t => t.classList.remove("active"));
       document.querySelectorAll(".tab-pane").forEach(p => p.classList.remove("active"));
       tab.classList.add("active");
       tabs.forEach(t => {
@@ -951,6 +1733,9 @@
       document.getElementById(targetId)?.classList.add("active");
       if ((targetId === "tab-library" || targetId === "tab-photos") && !flowPhotosScanned) {
         void runLibraryAction(null, refreshFlowPhotos);
+      }
+      if (targetId === "tab-photos" && !albumsLoaded) {
+        void loadAlbums();
       }
   };
   tabs.forEach((tab, index) => {
@@ -969,14 +1754,27 @@
     const name = document.querySelector("#promptName")?.value.trim();
     const prompt = document.querySelector("#promptDraft")?.value.trim();
     if (!prompt) { setFeedback(t("sidebar.promptSaveError"), false); return; }
-    const item = { id: crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`, name: name || prompt.slice(0, 36), prompt, createdAt: Date.now() };
-    savedPrompts = [item, ...savedPrompts.filter(existing => existing.prompt !== prompt)].slice(0, 100);
-    await writeUiStorage(SAVED_PROMPTS_KEY, savedPrompts);
+    const category = document.querySelector("#promptCategory")?.value.trim() || "";
+    const tags = document.querySelector("#promptTags")?.value || "";
+    const store = snippetStore();
+    let item;
+    if (store) {
+      item = await store.add({ title: name, content: prompt, category, tags });
+      savedPrompts = await store.list();
+    } else {
+      item = { id: crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`, name: name || prompt.slice(0, 36), prompt, createdAt: Date.now() };
+      savedPrompts = [item, ...savedPrompts.filter(existing => existing.prompt !== prompt)].slice(0, 100);
+      await writeUiStorage(SAVED_PROMPTS_KEY, savedPrompts);
+    }
     renderSavedPrompts();
     setFeedback(t("sidebar.promptSaved"), true);
-    addLog("flow.prompt.save", item.name, true);
+    addLog("flow.prompt.save", item.title || item.name, true);
     document.querySelector("#promptName").value = "";
     document.querySelector("#promptDraft").value = "";
+    const categoryInput = document.querySelector("#promptCategory");
+    if (categoryInput) categoryInput.value = "";
+    const tagsInput = document.querySelector("#promptTags");
+    if (tagsInput) tagsInput.value = "";
   });
 
   document.querySelector("#savedPromptsList")?.addEventListener("click", async event => {
@@ -985,9 +1783,25 @@
     if (useId) {
       const item = savedPrompts.find(prompt => prompt.id === useId);
       if (item) {
+        // FEAT-04 insert path: when the snippet has {{variables}},
+        // collect a value for each and fill every occurrence; a
+        // variable-free snippet inserts verbatim, as before.
+        let text = typeof item.content === "string" ? item.content : (item.prompt || "");
+        const variables = window.FlowSnippets ? window.FlowSnippets.extractSnippetVariables(text) : [];
+        if (variables.length && window.FlowSnippets) {
+          const values = {};
+          let cancelled = false;
+          for (const variableName of variables) {
+            const answer = window.prompt(variableName, "");
+            if (answer === null) { cancelled = true; break; }
+            values[variableName] = answer;
+          }
+          if (cancelled) return;
+          text = window.FlowSnippets.fillSnippetContent(text, values);
+        }
         const editor = document.querySelector("#promptsArea");
         if (editor) {
-          editor.value = item.prompt;
+          editor.value = text;
           editor.dispatchEvent(new Event("input", { bubbles: true }));
         }
         document.querySelector("#navGen")?.click();
@@ -996,14 +1810,196 @@
       return;
     }
     if (deleteId) {
-      savedPrompts = savedPrompts.filter(prompt => prompt.id !== deleteId);
-      await writeUiStorage(SAVED_PROMPTS_KEY, savedPrompts);
+      const store = snippetStore();
+      if (store) {
+        await store.remove(deleteId);
+        savedPrompts = await store.list();
+      } else {
+        savedPrompts = savedPrompts.filter(prompt => prompt.id !== deleteId);
+        await writeUiStorage(SAVED_PROMPTS_KEY, savedPrompts);
+      }
       renderSavedPrompts();
     }
   });
 
+  document.querySelector("#promptAddonSelect")?.addEventListener("change", event => {
+    selectedAddonSnippetId = event.target.value || "";
+  });
+
   document.querySelector("#btnRefreshHistory")?.addEventListener("click", () => { renderHistory(); void loadLocalUiState(); });
   document.querySelector("#btnClearHistory")?.addEventListener("click", async () => { localUiHistory = []; await writeUiStorage(UI_HISTORY_KEY, []); renderHistory(); });
+  document.querySelector("#flowGenHistoryList")?.addEventListener("click", event => {
+    const rerunId = event.target.closest("[data-history-rerun]")?.dataset.historyRerun;
+    if (rerunId) void rerunGenerationRecord(rerunId);
+  });
+
+  document.querySelector("#saveWorkflowTemplateBtn")?.addEventListener("click", () => { void saveWorkflowTemplateFromForm(); });
+  document.querySelector("#importWorkflowTemplateBtn")?.addEventListener("click", () => {
+    document.querySelector("#wfTemplateImportFile")?.click();
+  });
+  document.querySelector("#wfTemplateImportFile")?.addEventListener("change", event => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (file) void importWorkflowTemplateFile(file);
+  });
+  document.querySelector("#workflowTemplateList")?.addEventListener("click", event => {
+    const instantiateId = event.target.closest("[data-wf-template-instantiate]")?.dataset.wfTemplateInstantiate;
+    if (instantiateId) { void instantiateWorkflowTemplate(instantiateId); return; }
+    const exportId = event.target.closest("[data-wf-template-export]")?.dataset.wfTemplateExport;
+    if (exportId) { void exportWorkflowTemplate(exportId); return; }
+    const deleteId = event.target.closest("[data-wf-template-delete]")?.dataset.wfTemplateDelete;
+    if (deleteId) void removeWorkflowTemplate(deleteId);
+  });
+
+  // FEAT-05: Tasks tab controls for the saved multi-task lists.
+  document.querySelector("#flowTaskList")?.addEventListener("click", event => {
+    const runId = event.target.closest("[data-task-run]")?.dataset.taskRun;
+    if (runId) { void runFlowTasks({ ids: [runId] }); return; }
+    const duplicateId = event.target.closest("[data-task-duplicate]")?.dataset.taskDuplicate;
+    if (duplicateId) { void duplicateFlowTask(duplicateId); return; }
+    const removeId = event.target.closest("[data-task-remove]")?.dataset.taskRemove;
+    if (removeId) void removeFlowTask(removeId);
+  });
+  document.querySelector("#refreshTasksBtn")?.addEventListener("click", () => { void loadFlowTasks(); });
+  document.querySelector("#runAllTasksBtn")?.addEventListener("click", () => { void runFlowTasks({ all: true }); });
+  document.querySelector("#addTaskBtn")?.addEventListener("click", () => { void createFlowTaskFromForm(); });
+  document.querySelector("#flowTaskRunSelectedBtn")?.addEventListener("click", () => {
+    const ids = [...document.querySelectorAll("[data-task-select]:checked")].map(input => input.dataset.taskSelect).filter(Boolean);
+    if (!ids.length) { setFeedback("Chưa chọn tác vụ nào để chạy.", false); return; }
+    void runFlowTasks({ ids });
+  });
+  document.querySelector("#taskSearchToggle")?.addEventListener("click", () => {
+    const row = document.querySelector("#flowTaskSearchRow");
+    if (!row) return;
+    row.style.display = row.style.display === "none" ? "" : "none";
+    if (row.style.display !== "none") document.querySelector("#flowTaskSearch")?.focus();
+  });
+  document.querySelector("#flowTaskSearch")?.addEventListener("input", () => { void loadFlowTasks(); });
+
+  // FEAT-10: Photos ▸ Album controls for the generation albums.
+  async function createAlbumFromPrompt() {
+    const name = window.prompt("Tên album mới:");
+    if (!name?.trim()) return;
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-albums:create", name });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể tạo album.");
+      if (Array.isArray(res.albums)) albums = res.albums;
+      albumsLoaded = true;
+      renderAlbums();
+      setFeedback("✅ Đã tạo album.", true);
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.albums.create.error", err.message, false);
+    }
+  }
+
+  async function renameAlbum(id) {
+    const album = albums.find(entry => entry.id === id);
+    if (!album) return;
+    const name = window.prompt("Đổi tên album:", album.name || "");
+    if (!name?.trim() || name.trim() === album.name) return;
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-albums:rename", id, name });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể đổi tên album.");
+      if (Array.isArray(res.albums)) albums = res.albums;
+      renderAlbums();
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.albums.rename.error", err.message, false);
+    }
+  }
+
+  async function removeAlbum(id) {
+    const album = albums.find(entry => entry.id === id);
+    if (!album || !window.confirm(`Xoá album "${album.name}"? Ảnh gốc trong thư viện Flow không bị xoá.`)) return;
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-albums:remove", id });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể xoá album.");
+      if (Array.isArray(res.albums)) albums = res.albums;
+      renderAlbums();
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.albums.remove.error", err.message, false);
+    }
+  }
+
+  async function removeAlbumImage(albumId, imageId) {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-albums:remove-image", albumId, imageId });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể xoá ảnh khỏi album.");
+      if (Array.isArray(res.albums)) albums = res.albums;
+      renderAlbums();
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.albums.removeImage.error", err.message, false);
+    }
+  }
+
+  document.querySelector("#createAlbumBtn")?.addEventListener("click", () => { void createAlbumFromPrompt(); });
+  document.querySelector("#albumListContainer")?.addEventListener("click", event => {
+    const renameId = event.target.closest("[data-album-rename]")?.dataset.albumRename;
+    if (renameId) { void renameAlbum(renameId); return; }
+    const removeId = event.target.closest("[data-album-remove]")?.dataset.albumRemove;
+    if (removeId) { void removeAlbum(removeId); return; }
+    const refButton = event.target.closest("[data-album-ref-album]");
+    if (refButton) {
+      const album = albums.find(entry => entry.id === refButton.dataset.albumRefAlbum);
+      const image = album?.images?.find(entry => entry.id === refButton.dataset.albumRefImage);
+      if (image) {
+        void runLibraryAction(event.target, async () => {
+          await assertQueueIdleForDirectAction();
+          return dispatchFlowOperation("flow.references.attach", { references: [`asset:${image.name}`] });
+        });
+      }
+      return;
+    }
+    const imageRemoveButton = event.target.closest("[data-album-image-remove-album]");
+    if (imageRemoveButton) {
+      void removeAlbumImage(imageRemoveButton.dataset.albumImageRemoveAlbum, imageRemoveButton.dataset.albumImageRemoveImage);
+    }
+  });
+
+
+  document.querySelector("#saveGenTemplateBtn")?.addEventListener("click", () => { void saveGenTemplateFromForm(); });
+  document.querySelector("#genTemplateList")?.addEventListener("click", event => {
+    const applyId = event.target.closest("[data-gen-template-apply]")?.dataset.genTemplateApply;
+    if (applyId) { void applyGenTemplate(applyId); return; }
+    const deleteId = event.target.closest("[data-gen-template-delete]")?.dataset.genTemplateDelete;
+    if (deleteId) void removeGenTemplate(deleteId);
+  });
+
+
+  // FEAT-13: workflow editor controls.
+  document.querySelector("#wfEditorAddNodeBtn")?.addEventListener("click", () => { addWorkflowEditorNode(); });
+  document.querySelector("#wfEditorUndoBtn")?.addEventListener("click", () => { if (ensureWorkflowEditor()?.undo()) persistWorkflowEditor(); });
+  document.querySelector("#wfEditorRedoBtn")?.addEventListener("click", () => { if (ensureWorkflowEditor()?.redo()) persistWorkflowEditor(); });
+  document.querySelector("#wfEditorOpenBtn")?.addEventListener("click", () => { openWorkflowEditorJson(); });
+  document.querySelector("#wfEditorExportBtn")?.addEventListener("click", () => { exportWorkflowEditorJson(); });
+  document.querySelector("#wfEditorName")?.addEventListener("change", event => {
+    const editor = ensureWorkflowEditor();
+    if (!editor) return;
+    editor.setName(event.target.value);
+    persistWorkflowEditor();
+  });
+
+  document.querySelector("#chatAIBtn")?.addEventListener("click", () => {
+    document.querySelector("#promptAssistantPanel")?.classList.toggle("hidden");
+  });
+  document.querySelector("#paBuildBtn")?.addEventListener("click", () => { void buildPromptAssistantRequest(); });
+  document.querySelector("#paParseBtn")?.addEventListener("click", () => { void parsePromptAssistantReply(); });
+  document.querySelector("#paI2pParseBtn")?.addEventListener("click", () => { void parsePromptAssistantI2p(); });
+  document.querySelector("#paPromptList")?.addEventListener("click", event => {
+    const insert = event.target.closest("[data-pa-insert]")?.dataset.paInsert;
+    if (insert === undefined) return;
+    const prompt = promptAssistantPrompts[Number(insert)];
+    if (prompt) insertPromptIntoComposer(prompt);
+  });
+  document.querySelector("#paI2pResult")?.addEventListener("click", event => {
+    const lang = event.target.closest("[data-pa-insert-i2p]")?.dataset.paInsertI2p;
+    if (!lang || !promptAssistantI2p) return;
+    insertPromptIntoComposer(lang === "VI" ? promptAssistantI2p.promptVi : promptAssistantI2p.promptEn);
+  });
+
 
   let isGenerating = false;
   let flowQueuePanel = null;
@@ -1494,6 +2490,12 @@
   function promptsForGeneration(prompt, enabled) {
     const prompts = enabled ? prompt.split(/\n\s*\n/).map(value => value.trim()).filter(Boolean) : [prompt];
     if (prompts.length > 100) throw new Error(t("sidebar.multiPromptLimit"));
+    // FEAT-04: the selected addon/style snippet is appended here — at
+    // batch-build time, the one chokepoint every submit path (Flow
+    // image/video, ChatGPT) passes through — so stored prompts never
+    // carry addon text.
+    const addon = selectedAddonText();
+    if (addon && window.FlowSnippets) return prompts.map(item => window.FlowSnippets.applySnippetAddon(item, addon));
     return prompts;
   }
 
@@ -1665,11 +2667,46 @@
     }
   }
 
+  // Review round 1, V1: the upload kind must follow the FILE's media type,
+  // not the reference role. Flow creates a video tile for a video file, so
+  // confirming a local video reference with kind "image" could never match
+  // (flowUploadKindMatches("image", "video") is false) and died with
+  // FLOW_UPLOAD_TIMEOUT even though the tile existed. The MIME type wins;
+  // an empty MIME type falls back to the file extension.
+  function referenceUploadKind(file) {
+    const type = typeof file?.type === "string" ? file.type.toLowerCase() : "";
+    if (type.startsWith("video/")) return "video";
+    const name = typeof file?.name === "string" ? file.name : "";
+    if (/\.(mp4|m4v|mov|webm|avi|mkv|3gp)$/i.test(name)) return "video";
+    return "image";
+  }
+
   async function uploadReferenceImage(file, onProgress, referenceIndex) {
     if (window.FlowUploadClient) {
-      return await uploadWithCancel(file, { onProgress, kind: "image", referenceIndex });
+      return await uploadWithCancel(file, { onProgress, kind: referenceUploadKind(file), referenceIndex });
     }
     throw new Error("Dịch vụ tải ảnh lên Flow chưa được khởi tạo");
+  }
+
+  // One builder for every attachment that comes out of an upload result
+  // (image submit, video references, video frames). The Flow tile carries
+  // the uploader's digest-derived uploadName — not the client's safeName —
+  // so the attachment must name uploadName when the receipt provided one.
+  // Review round 1, S7 (corrected): expectedId prefers the receipt's
+  // mediaUuid when upload enrichment resolved one — a UUID tile id, or
+  // an asb: id resolved via the media catalog / identities probe — but
+  // mediaUuid is NOT always present: when enrichment cannot resolve an
+  // asb: id it stays absent, and then the receipt id itself (possibly
+  // asb:) is still a real identity that attach-time resolution can
+  // resolve, so it stays as the fallback. Missing fields fall back to
+  // the pre-identity behaviour exactly.
+  function uploadedAssetAttachment(uploaded) {
+    const tileName = typeof uploaded === "string" ? uploaded : (uploaded?.uploadName || uploaded?.name || uploaded?.title || String(uploaded));
+    const expectedId = uploaded && typeof uploaded === "object" ? (uploaded.mediaUuid || uploaded.id || uploaded.mediaId) : undefined;
+    return {
+      assetName: `asset:${tileName}`,
+      ...(expectedId ? { expectedId } : {}),
+    };
   }
 
   async function assertQueueIdleForReferenceUpload() {
@@ -1708,6 +2745,16 @@
     if (referenceMode === "mention") {
       try { mentionResolution = resolveMentionReferences(prompts, refFilesImage); }
       catch (error) { setFeedback(error.message, false); return; }
+    }
+    // Review round 3, S2: fail fast on an unresolved mention — before
+    // any upload or enqueue. The old code only warned AFTER the job was
+    // queued, leaving the @name in the prompt for Flow to drop (skewed
+    // fingerprint, or a video missing an ingredient after credits were
+    // spent). Character mentions never land here: the resolver already
+    // excludes them from unresolvedNames.
+    if (mentionResolution?.unresolvedNames?.length) {
+      setFeedback(t("sidebar.multiPromptMentionUnresolved", { names: mentionResolution.unresolvedNames.map(name => `@${name}`).join(", ") }), false);
+      return;
     }
     if (prompts.length > 1 && referenceMode === "sequential" && refFilesImage.length < prompts.length * referencesPerPrompt) {
       setFeedback(t("sidebar.multiPromptRefsMissing"), false);
@@ -1749,11 +2796,8 @@
         uploadedImageCount++;
         setFeedback(`Đang tải ảnh tham chiếu ${uploadedImageCount}/${localImageReferences.length} lên Flow...`, true);
         const uploaded = await uploadReferenceImage(reference.file, undefined, i + 1);
-        const uploadedName = typeof uploaded === "string" ? uploaded : (uploaded?.name || uploaded?.title || String(uploaded));
-        const uploadedId = typeof uploaded === "object" ? (uploaded?.id || uploaded?.mediaId) : undefined;
         const attachment = {
-          assetName: `asset:${uploadedName}`,
-          ...(uploadedId ? { expectedId: uploadedId } : {}),
+          ...uploadedAssetAttachment(uploaded),
           kind: reference.kind || "image",
         };
         referenceAttachments.push(attachment);
@@ -1877,6 +2921,12 @@
       try { mentionResolution = resolveMentionReferences(prompts, refFilesVideo); }
       catch (error) { setFeedback(error.message, false); return; }
     }
+    // Review round 3, S2: fail fast on an unresolved mention — before
+    // any upload or enqueue (see the image handler above for why).
+    if (mentionResolution?.unresolvedNames?.length) {
+      setFeedback(t("sidebar.multiPromptMentionUnresolved", { names: mentionResolution.unresolvedNames.map(name => `@${name}`).join(", ") }), false);
+      return;
+    }
 
     const commonAttachments = [];
     const referenceAttachments = [];
@@ -1901,7 +2951,7 @@
           const attachment = {
             assetName: reference.assetName,
             expectedId: reference.expectedId,
-            kind: reference.kind || "video",
+            kind: reference.kind || "image",
           };
           referenceAttachments.push(attachment);
           attachmentByReference.set(reference, attachment);
@@ -1910,12 +2960,9 @@
         uploadedVideoCount++;
         setFeedback(`Đang tải media tham chiếu ${uploadedVideoCount}/${localVideoReferences.length} lên Flow...`, true);
         const uploaded = await uploadReferenceImage(reference.file, undefined, i + 1);
-        const uploadedName = typeof uploaded === "string" ? uploaded : (uploaded?.name || uploaded?.title || String(uploaded));
-        const uploadedId = typeof uploaded === "object" ? (uploaded?.id || uploaded?.mediaId) : undefined;
         const attachment = {
-          assetName: `asset:${uploadedName}`,
-          ...(uploadedId ? { expectedId: uploadedId } : {}),
-          kind: reference.kind || "video",
+          ...uploadedAssetAttachment(uploaded),
+          kind: reference.kind || "image",
         };
         referenceAttachments.push(attachment);
         attachmentByReference.set(reference, attachment);
@@ -1942,9 +2989,7 @@
           uploadedFrameCount++;
           setFeedback(t("sidebar.frameUploading", { n: uploadedFrameCount, total: localFrameSources.length, name: source.name || source.file?.name || "" }), true);
           const uploaded = await uploadReferenceImage(source.file, undefined, uploadedFrameCount);
-          const uploadedName = typeof uploaded === "string" ? uploaded : (uploaded?.name || uploaded?.title || String(uploaded));
-          const uploadedId = typeof uploaded === "object" ? (uploaded?.id || uploaded?.mediaId) : undefined;
-          attachmentByReference.set(source, { assetName: `asset:${uploadedName}`, ...(uploadedId ? { expectedId: uploadedId } : {}) });
+          attachmentByReference.set(source, uploadedAssetAttachment(uploaded));
         }
         for (let index = 0; index < selectedFrameAssignments.length; index++) {
           const assignment = selectedFrameAssignments[index];
@@ -2146,6 +3191,7 @@
         await assertQueueIdleForDirectAction();
         return dispatchFlowOperation("flow.asset.download", { name: asset.name, id: asset.id, quality: "original" });
       });
+      addAction("Lưu vào Album", "Lưu vào Album", async () => saveAssetToAlbum(asset));
       card.append(preview, label, kindLabel, actions);
       grid.appendChild(card);
     }
@@ -2170,6 +3216,127 @@
     renderFlowPhotos();
     return { assets: flowAssets.length };
   }
+
+  // FEAT-10: generation albums live in the background album store
+  // (flow-albums.js); the Photos ▸ Album subtab renders them here, and
+  // Flow photo cards can save an asset into an album. An album holds
+  // image IDENTITIES only — the media stays in the Flow library.
+  let albums = [];
+  let albumsLoaded = false;
+
+  async function loadAlbums() {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-albums:list" });
+      albums = res?.ok && Array.isArray(res.albums) ? res.albums : [];
+    } catch {
+      albums = [];
+    }
+    albumsLoaded = true;
+    renderAlbums();
+  }
+
+  function renderAlbums() {
+    const container = document.querySelector("#albumListContainer");
+    if (!container) return;
+    container.replaceChildren();
+    if (!albums.length) {
+      const empty = document.createElement("p");
+      empty.style.cssText = "color:var(--text-muted);font-size:12px;text-align:center;padding:24px;";
+      empty.textContent = "Chưa có album nào.";
+      container.appendChild(empty);
+      return;
+    }
+    for (const album of albums) {
+      const card = document.createElement("article");
+      card.className = "album-card";
+      const cover = album.cover || null;
+      const header = document.createElement("div");
+      header.className = "album-card__header";
+      header.innerHTML = `<div class="flow-history-item__body"><div class="flow-history-item__title">${escapeHtml(album.name || "")}</div><div class="flow-history-item__detail">${escapeHtml(`${album.imageCount || 0} ảnh`)}</div></div><div class="flow-history-item__actions"><button type="button" class="btn btn-secondary btn-sm" data-album-rename="${escapeHtml(album.id)}">Đổi tên</button><button type="button" class="btn btn-secondary btn-sm" data-album-remove="${escapeHtml(album.id)}">Xoá album</button></div>`;
+      card.appendChild(header);
+      if (cover?.thumbnailUrl) {
+        const coverImage = document.createElement("img");
+        coverImage.className = "album-card__cover";
+        coverImage.src = cover.thumbnailUrl;
+        coverImage.alt = cover.name || "";
+        coverImage.loading = "lazy";
+        coverImage.onerror = () => coverImage.remove();
+        card.appendChild(coverImage);
+      }
+      const grid = document.createElement("div");
+      grid.className = "album-card__grid";
+      for (const image of album.images || []) {
+        const item = document.createElement("div");
+        item.className = "album-image-item";
+        if (image.thumbnailUrl) {
+          const thumb = document.createElement("img");
+          thumb.src = image.thumbnailUrl;
+          thumb.alt = "";
+          thumb.loading = "lazy";
+          thumb.onerror = () => thumb.remove();
+          item.appendChild(thumb);
+        }
+        const label = document.createElement("span");
+        label.className = "album-image-item__name";
+        label.textContent = image.name || "";
+        label.title = image.name || "";
+        item.appendChild(label);
+        const useRef = document.createElement("button");
+        useRef.type = "button";
+        useRef.className = "btn btn-secondary btn-sm";
+        useRef.textContent = t("sidebar.photosUseReference");
+        useRef.dataset.albumRefAlbum = album.id;
+        useRef.dataset.albumRefImage = image.id;
+        item.appendChild(useRef);
+        const removeImage = document.createElement("button");
+        removeImage.type = "button";
+        removeImage.className = "btn btn-secondary btn-sm";
+        removeImage.textContent = "Xoá";
+        removeImage.dataset.albumImageRemoveAlbum = album.id;
+        removeImage.dataset.albumImageRemoveImage = image.id;
+        item.appendChild(removeImage);
+        grid.appendChild(item);
+      }
+      card.appendChild(grid);
+      container.appendChild(card);
+    }
+  }
+
+  async function saveAssetToAlbum(asset) {
+    if (!albumsLoaded) await loadAlbums();
+    let albumId = null;
+    if (!albums.length) {
+      const name = window.prompt("Chưa có album nào. Nhập tên album mới:");
+      if (!name?.trim()) return;
+      const created = await chrome.runtime.sendMessage({ type: "flow-albums:create", name });
+      if (!created?.ok) throw new Error(created?.error?.message || "Không thể tạo album.");
+      if (Array.isArray(created.albums)) albums = created.albums;
+      albumId = created.album?.id || null;
+    } else {
+      const listing = albums.map((album, index) => `${index + 1}. ${album.name}`).join("\n");
+      const choice = window.prompt(`Lưu vào album nào?\n${listing}`, "1");
+      if (!choice) return;
+      const picked = albums[Number(choice) - 1]
+        || albums.find(album => String(album.name || "").toLowerCase() === choice.trim().toLowerCase());
+      if (!picked) throw new Error("Không tìm thấy album đã chọn.");
+      albumId = picked.id;
+    }
+    const res = await chrome.runtime.sendMessage({
+      type: "flow-albums:add-image",
+      albumId,
+      image: {
+        id: asset.id,
+        name: asset.name,
+        kind: asset.kind === "scene" ? "video" : asset.kind,
+        projectId: asset.projectId || null,
+        thumbnailUrl: asset.thumbnailUrl || null,
+      },
+    });
+    if (!res?.ok) throw new Error(res?.error?.message || "Không thể lưu vào album.");
+    if (Array.isArray(res.albums)) albums = res.albums;
+    renderAlbums();
+  }
+
 
   const triggerPhotosRefresh = event => runLibraryAction(event.currentTarget, refreshFlowPhotos);
   const btnRefPhotos = document.querySelector("#btnRefreshPhotos");
@@ -2263,6 +3430,119 @@
     finally { button.disabled = false; }
   };
 
+  // FEAT-11 — Angles / Effects transform panel. ONE shared engine
+  // (window.FlowTransforms) serves both families: the panel picks a
+  // preset, chooses one anchored value per parameter, and shows the
+  // built prompt live. The source image is the FIRST reference the
+  // reference picker currently holds (its own UI picks/uploads it);
+  // applying enqueues exactly one image job whose only attachment is
+  // that source, through the regular flow-queue:add path.
+  const transformPanel = document.querySelector("#flowTransformPanel");
+  const transformState = { family: "angles", values: {} };
+
+  function currentTransformPreset() {
+    if (!window.FlowTransforms) return null;
+    const select = document.querySelector("#flowTransformPreset");
+    return window.FlowTransforms.getTransformPreset(select?.value || "")
+      || window.FlowTransforms.listTransformPresets(transformState.family)[0] || null;
+  }
+
+  function renderTransformPreview() {
+    const preview = document.querySelector("#flowTransformPreview");
+    const preset = currentTransformPreset();
+    if (!preview || !preset || !window.FlowTransforms) return;
+    preview.textContent = window.FlowTransforms.buildTransformPrompt(preset, transformState.values);
+  }
+
+  function renderTransformParams() {
+    const container = document.querySelector("#flowTransformParams");
+    const preset = currentTransformPreset();
+    if (!container || !preset) return;
+    container.replaceChildren();
+    transformState.values = {};
+    for (const [name, param] of Object.entries(preset.params)) {
+      const anchors = Object.keys(param.anchors).map(Number).sort((a, b) => a - b);
+      const row = document.createElement("label");
+      row.className = "flow-transform-field";
+      const caption = document.createElement("span");
+      caption.textContent = param.label || name;
+      const select = document.createElement("select");
+      for (const anchor of anchors) {
+        const option = document.createElement("option");
+        option.value = String(anchor);
+        option.textContent = param.anchors[String(anchor)] || String(anchor);
+        select.appendChild(option);
+      }
+      const initial = anchors.includes(Number(param.default)) ? Number(param.default) : anchors[0];
+      select.value = String(initial);
+      transformState.values[name] = initial;
+      select.addEventListener("change", () => {
+        transformState.values[name] = Number(select.value);
+        renderTransformPreview();
+      });
+      row.append(caption, select);
+      container.appendChild(row);
+    }
+    renderTransformPreview();
+  }
+
+  function renderTransformSource() {
+    const label = document.querySelector("#flowTransformSourceLabel");
+    if (!label) return;
+    const source = referencePicker.getReferences("image")[0];
+    label.textContent = source
+      ? (source.assetName || source.name || source.title || "Ảnh đã chọn")
+      : "Chưa có — bấm Chọn ảnh nguồn để chọn hoặc tải ảnh lên.";
+  }
+
+  function openTransformPanel(family) {
+    if (!transformPanel || !window.FlowTransforms) {
+      setFeedback("Công cụ biến đổi chưa sẵn sàng.", false);
+      return;
+    }
+    transformState.family = family;
+    document.querySelector("#flowTransformTitle").textContent = family === "effects" ? "Hiệu ứng ảnh (Effects)" : "Đa góc nhìn (Angles)";
+    const select = document.querySelector("#flowTransformPreset");
+    select.replaceChildren();
+    for (const preset of window.FlowTransforms.listTransformPresets(family)) {
+      const option = document.createElement("option");
+      option.value = preset.id;
+      option.textContent = preset.name;
+      select.appendChild(option);
+    }
+    transformPanel.classList.remove("hidden");
+    renderTransformParams();
+    renderTransformSource();
+    transformPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  document.querySelector("#anglesToolbarBtn")?.addEventListener("click", () => openTransformPanel("angles"));
+  document.querySelector("#effectsToolbarBtn")?.addEventListener("click", () => openTransformPanel("effects"));
+  document.querySelector("#flowTransformPreset")?.addEventListener("change", renderTransformParams);
+  document.querySelector("#btnCloseTransformPanel")?.addEventListener("click", () => transformPanel?.classList.add("hidden"));
+  document.querySelector("#btnPickTransformSource")?.addEventListener("click", () => referencePicker.open("image"));
+  transformPanel?.addEventListener("click", renderTransformSource);
+  document.querySelector("#btnApplyTransform")?.addEventListener("click", async event => {
+    const button = event.currentTarget;
+    if (!window.FlowTransforms) { setFeedback("Công cụ biến đổi chưa sẵn sàng.", false); return; }
+    const preset = currentTransformPreset();
+    const source = referencePicker.getReferences("image")[0];
+    if (!preset) { setFeedback("Chưa chọn preset.", false); return; }
+    if (!source) { setFeedback("Hãy chọn một ảnh nguồn trước.", false); referencePicker.open("image"); return; }
+    button.disabled = true;
+    try {
+      const job = window.FlowTransforms.buildTransformJob({ presetId: preset.id, values: transformState.values, source });
+      const response = await chrome.runtime.sendMessage({ type: "flow-queue:add", job });
+      if (!response?.ok) throw new Error(response?.error?.message || "Không thể thêm tác vụ vào hàng đợi Flow.");
+      rememberSubmittedQueueJob(response);
+      setFeedback("✅ Đã đưa biến đổi ảnh vào hàng đợi Flow.", true);
+      addLog("flow.transform.add", job.label, true);
+    } catch (error) {
+      setFeedback(`❌ ${error.message}`, false);
+      addLog("flow.transform.error", error.message, false);
+    } finally { button.disabled = false; }
+  });
+
   const attachReferencesButton = document.querySelector("#btnAttachReferences");
   const referenceInput = document.querySelector("#flowReferenceInput");
   if (attachReferencesButton && referenceInput) {
@@ -2303,7 +3583,7 @@
     fillSelect(document.querySelector("#flowVoiceSelect"), voices,
       voice => typeof voice === "string" ? voice : voice.name,
       voice => typeof voice === "string" ? voice : voice.name,
-      "Không dùng giọng nói");
+      t("sidebar.libraryNoVoice"));
     return result;
   }));
 
@@ -2473,7 +3753,7 @@
       if (dropdown && !dropdown.contains(e.target)) closeMenu();
     });
     dropdown?.addEventListener("click", e => {
-      if (e.target.closest?.(".tobyflow-settings-menu-item")) closeMenu();
+      if (e.target.closest?.(".flowmcp-settings-menu-item")) closeMenu();
     });
 
     document.querySelector("#openSettingsBtn")?.addEventListener("click", () => {
@@ -2544,11 +3824,125 @@
         if (subtab === "photos-flow-images" && !flowPhotosScanned) {
           void runLibraryAction(null, refreshFlowPhotos);
         }
+        if (subtab === "photos-album" && !albumsLoaded) {
+          void loadAlbums();
+        }
       });
     });
   }
 
   // 5. Gen Tab Controls
+  // Audit cluster E: the visible/hidden generation-control pairs,
+  // bound in one place so the wiring stays testable (see
+  // tests/flow-audit-e-sidebar-sync.test.mjs). Visible controls are
+  // what the user touches; hidden selects are what most builders read.
+  // Every pair is wired in BOTH directions: forward listeners copy
+  // visible -> hidden (dispatching change where the hidden side has
+  // rule listeners), reverse listeners copy hidden -> visible for the
+  // active type only, without dispatching back.
+  function bindGenerationControlSync() {
+    // Model selects synchronization
+    document.querySelector("#imageModel")?.addEventListener("change", function () {
+      const sel = document.querySelector("#selectModelImage");
+      if (sel && sel.value !== this.value) {
+        sel.value = this.value;
+        sel.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    });
+
+    document.querySelector("#videoModel")?.addEventListener("change", function () {
+      const sel = document.querySelector("#selectModelVideo");
+      if (sel && sel.value !== this.value) {
+        sel.value = this.value;
+        sel.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    });
+
+    for (const [visibleSelector, nativeSelector] of [
+      ["#flowVideoDuration", "#selectDurationVideo"],
+      ["#flowVideoResolution", "#selectResolutionVideo"],
+    ]) {
+      const visibleSelect = document.querySelector(visibleSelector);
+      const nativeSelect = document.querySelector(nativeSelector);
+      visibleSelect?.addEventListener("change", () => {
+        if (nativeSelect && nativeSelect.value !== visibleSelect.value) {
+          nativeSelect.value = visibleSelect.value;
+          nativeSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      });
+      nativeSelect?.addEventListener("change", () => {
+        if (visibleSelect && visibleSelect.value !== nativeSelect.value) visibleSelect.value = nativeSelect.value;
+      });
+    }
+
+    // Aspect ratio synchronization
+    document.querySelector("#aspectRatio")?.addEventListener("change", function () {
+      const val = this.value;
+      const ratioImage = document.querySelector("#selectRatioImage");
+      const ratioVideo = document.querySelector("#selectRatioVideo");
+      if (ratioImage) ratioImage.value = val;
+      if (ratioVideo) ratioVideo.value = val;
+    });
+
+    // Reverse direction (audit cluster E): writers that set the hidden
+    // selects directly (template restores, rule applications) must also
+    // move the visible control — otherwise the builder that reads the
+    // visible side first (image ratio reads #aspectRatio) submits the
+    // stale value. Reverse listeners never dispatch back, and the
+    // forward listeners never dispatch into them, so there is no loop;
+    // per-type pairs only follow the active type, because the two hidden
+    // selects hold independent per-type values.
+    for (const [nativeSelector, type] of [["#selectRatioImage", "image"], ["#selectRatioVideo", "video"]]) {
+      document.querySelector(nativeSelector)?.addEventListener("change", function () {
+        if ((document.querySelector("#genType")?.value || "image") !== type) return;
+        const visible = document.querySelector("#aspectRatio");
+        if (visible) visible.value = this.value;
+      });
+    }
+    for (const [nativeSelector, type] of [["#selectQtyImage", "image"], ["#selectCountVideo", "video"]]) {
+      document.querySelector(nativeSelector)?.addEventListener("change", function () {
+        if ((document.querySelector("#genType")?.value || "image") !== type) return;
+        const visible = document.querySelector("#quantitySelect");
+        if (visible) visible.value = this.value;
+      });
+    }
+    document.querySelector("#selectModeVideo")?.addEventListener("change", function () {
+      const visible = document.querySelector("#videoInputType");
+      if (visible) visible.value = this.value;
+    });
+
+    // Quantity controls
+    const quantityInput = document.querySelector("#quantitySelect");
+    const qtyMinus = document.querySelector("#genQtyMinus");
+    const qtyPlus = document.querySelector("#genQtyPlus");
+
+    function setQuantity(val) {
+      const clamped = Math.max(1, Math.min(4, Number(val) || 1));
+      if (quantityInput) quantityInput.value = String(clamped);
+      const selectQtyImage = document.querySelector("#selectQtyImage");
+      const selectCountVideo = document.querySelector("#selectCountVideo");
+      if (selectQtyImage) selectQtyImage.value = String(clamped);
+      if (selectCountVideo) selectCountVideo.value = String(clamped);
+    }
+
+    qtyMinus?.addEventListener("click", () => setQuantity((Number(quantityInput?.value) || 1) - 1));
+    qtyPlus?.addEventListener("click", () => setQuantity((Number(quantityInput?.value) || 1) + 1));
+    quantityInput?.addEventListener("change", e => setQuantity(e.target.value));
+
+    // Video frames and inputs
+    document.querySelector("#videoInputType")?.addEventListener("change", function () {
+      const mode = String(this.value || "ingredients").toLowerCase();
+      const selectModeVideo = document.querySelector("#selectModeVideo");
+      if (selectModeVideo) {
+        selectModeVideo.value = mode;
+        selectModeVideo.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      const framesSection = document.querySelector("#videoFramesSection");
+      if (framesSection) framesSection.classList.toggle("hidden", mode !== "frames");
+      document.querySelector("#genVideoVoiceContainer")?.classList.toggle("hidden", mode === "frames");
+    });
+  }
+
   function initGenerationControls() {
     const promptsArea = document.querySelector("#promptsArea");
     const multiPromptCheck = document.querySelector("#multiPromptCheck");
@@ -2695,47 +4089,14 @@
         const refSection = document.querySelector("#refImagesSection");
         if (refSection) refSection.dataset.maxRefImages = "3";
         const refHint = document.querySelector("#refPickerLimitHint");
-        if (refHint) refHint.textContent = "Tối đa 3 ảnh tham chiếu";
+        if (refHint) refHint.textContent = t("sidebar.referencePickerLimit");
         setGenType(document.querySelector("#genType")?.value || "image");
         void loadFlowModelCapabilities().then(() => applyFlowModelControls());
       }
     }
 
     // Gen Type Toggle
-    function setGenType(type = "image") {
-      const normalizedType = String(type).toLowerCase() === "video" ? "video" : "image";
-      const compactBar = document.querySelector("#genCompactBar");
-      if (compactBar) compactBar.dataset.genMode = normalizedType;
-      document.querySelectorAll("#genTypeToggle .gen-type-btn").forEach(btn => {
-        const buttonType = String(btn.dataset.value || "").toLowerCase();
-        const active = buttonType === normalizedType;
-        const locale = typeof I18n !== "undefined" ? I18n.getLocale() : "vi";
-        btn.classList.toggle("active", active);
-        btn.setAttribute("aria-pressed", String(active));
-        btn.setAttribute("aria-label", locale === "en"
-          ? buttonType === "video" ? "Create video" : "Create image"
-          : buttonType === "video" ? "Tạo video" : "Tạo ảnh");
-      });
-      const hiddenGenType = document.querySelector("#genType");
-      if (hiddenGenType && hiddenGenType.value !== normalizedType) hiddenGenType.value = normalizedType;
-
-      const isImage = normalizedType === "image";
-      document.querySelector("#imageModelContainer")?.classList.toggle("hidden", !isImage);
-      document.querySelector("#videoModelContainer")?.classList.toggle("hidden", isImage);
-      document.querySelector("#videoInputTypeContainer")?.classList.toggle("hidden", isImage);
-      document.querySelector("#flowVideoDurationContainer")?.classList.toggle("hidden", isImage);
-      document.querySelector("#flowVideoResolutionContainer")?.classList.toggle("hidden", isImage);
-      document.querySelector("#genVideoVoiceContainer")?.classList.toggle("hidden", isImage);
-
-      const isFrames = String(document.querySelector("#videoInputType")?.value || "").toLowerCase() === "frames";
-      document.querySelector("#videoFramesSection")?.classList.toggle("hidden", isImage || !isFrames);
-
-      const submitText = document.querySelector("#genSubmitBtnText");
-      if (submitText) submitText.textContent = isImage ? t("sidebar.btnGenerateImage", "Tạo ảnh") : t("sidebar.btnGenerateVideo", "Tạo video");
-
-      referencePicker.renderReferenceCards?.(normalizedType);
-    }
-
+    
     document.querySelectorAll("#genTypeToggle .gen-type-btn").forEach(btn => {
       btn.addEventListener("click", () => setGenType(btn.dataset.value || "image"));
     });
@@ -2743,79 +4104,7 @@
     hiddenGenType?.addEventListener("change", () => setGenType(hiddenGenType.value));
     setGenType(hiddenGenType?.value || document.querySelector("#genTypeToggle .gen-type-btn.active")?.dataset.value || "image");
 
-    // Model selects synchronization
-    document.querySelector("#imageModel")?.addEventListener("change", function () {
-      const sel = document.querySelector("#selectModelImage");
-      if (sel && sel.value !== this.value) {
-        sel.value = this.value;
-        sel.dispatchEvent(new Event("change", { bubbles: true }));
-      }
-    });
-
-    document.querySelector("#videoModel")?.addEventListener("change", function () {
-      const sel = document.querySelector("#selectModelVideo");
-      if (sel && sel.value !== this.value) {
-        sel.value = this.value;
-        sel.dispatchEvent(new Event("change", { bubbles: true }));
-      }
-    });
-
-    for (const [visibleSelector, nativeSelector] of [
-      ["#flowVideoDuration", "#selectDurationVideo"],
-      ["#flowVideoResolution", "#selectResolutionVideo"],
-    ]) {
-      const visibleSelect = document.querySelector(visibleSelector);
-      const nativeSelect = document.querySelector(nativeSelector);
-      visibleSelect?.addEventListener("change", () => {
-        if (nativeSelect && nativeSelect.value !== visibleSelect.value) {
-          nativeSelect.value = visibleSelect.value;
-          nativeSelect.dispatchEvent(new Event("change", { bubbles: true }));
-        }
-      });
-      nativeSelect?.addEventListener("change", () => {
-        if (visibleSelect && visibleSelect.value !== nativeSelect.value) visibleSelect.value = nativeSelect.value;
-      });
-    }
-
-    // Aspect ratio synchronization
-    document.querySelector("#aspectRatio")?.addEventListener("change", function () {
-      const val = this.value;
-      const ratioImage = document.querySelector("#selectRatioImage");
-      const ratioVideo = document.querySelector("#selectRatioVideo");
-      if (ratioImage) ratioImage.value = val;
-      if (ratioVideo) ratioVideo.value = val;
-    });
-
-    // Quantity controls
-    const quantityInput = document.querySelector("#quantitySelect");
-    const qtyMinus = document.querySelector("#genQtyMinus");
-    const qtyPlus = document.querySelector("#genQtyPlus");
-
-    function setQuantity(val) {
-      const clamped = Math.max(1, Math.min(4, Number(val) || 1));
-      if (quantityInput) quantityInput.value = String(clamped);
-      const selectQtyImage = document.querySelector("#selectQtyImage");
-      const selectCountVideo = document.querySelector("#selectCountVideo");
-      if (selectQtyImage) selectQtyImage.value = String(clamped);
-      if (selectCountVideo) selectCountVideo.value = String(clamped);
-    }
-
-    qtyMinus?.addEventListener("click", () => setQuantity((Number(quantityInput?.value) || 1) - 1));
-    qtyPlus?.addEventListener("click", () => setQuantity((Number(quantityInput?.value) || 1) + 1));
-    quantityInput?.addEventListener("change", e => setQuantity(e.target.value));
-
-    // Video frames and inputs
-    document.querySelector("#videoInputType")?.addEventListener("change", function () {
-      const mode = String(this.value || "ingredients").toLowerCase();
-      const selectModeVideo = document.querySelector("#selectModeVideo");
-      if (selectModeVideo) {
-        selectModeVideo.value = mode;
-        selectModeVideo.dispatchEvent(new Event("change", { bubbles: true }));
-      }
-      const framesSection = document.querySelector("#videoFramesSection");
-      if (framesSection) framesSection.classList.toggle("hidden", mode !== "frames");
-      document.querySelector("#genVideoVoiceContainer")?.classList.toggle("hidden", mode === "frames");
-    });
+    bindGenerationControlSync();
 
     document.querySelector("#genTabFrame1Slot")?.addEventListener("click", () => {
       referencePicker.openFrames(sources => {

@@ -420,7 +420,7 @@
         const editorBox = root.getVisibleFlowPromptEditor?.() || (typeof root.flowQuery === "function" ? root.flowQuery("editor", document) : null);
         if (!editorBox) throw flowError("NATIVE_CAPABILITY_UNSUPPORTED", "Flow's image composer is unavailable for description-based character creation.", true);
         await root.FlowTiles?.stabilizeFlowResultViewport?.({ deadline: Date.now() + 5_000, signal: command.signal });
-        const before = collectNativeMedia().map(item => item.id || `title:${item.title}`);
+        const before = collectNativeMedia().map(item => globalThis.tileSnapshotKey?.(item) || item.id || `title:${item.title}`);
         const variants = Math.max(1, Math.min(4, Number(c.variants || 1)));
         const clear = flowButton("Clear prompt"); if (clear) clear.click();
         await globalThis.FlowImageActions.prepareCharacterPortrait(c, variants);

@@ -6,48 +6,48 @@
   <title>Flow MCP</title>
   <link rel="stylesheet" href="sidebar.css">
   <link rel="stylesheet" href="sidebar-light.css">
-  <link rel="stylesheet" href="tobyflow-ui.css">
+  <link rel="stylesheet" href="flowmcp-ui.css">
 </head>
 <body data-tf-rev="b7f3a91c">
   <!-- Loading Overlay -->
-  <div id="tobyflow-loading-overlay" class="tobyflow-loading-overlay hidden">
-    <div class="tobyflow-loading-content">
-      <div class="tobyflow-loading-spinner"></div>
-      <p class="tobyflow-loading-text" id="tobyflow-loading-text">Loading...</p>
+  <div id="flowmcp-loading-overlay" class="flowmcp-loading-overlay hidden">
+    <div class="flowmcp-loading-content">
+      <div class="flowmcp-loading-spinner"></div>
+      <p class="flowmcp-loading-text" id="flowmcp-loading-text">Loading...</p>
     </div>
   </div>
 
   <!-- Connecting Overlay -->
-  <div id="tobyflow-connecting-overlay" class="tobyflow-connecting-overlay hidden">
-    <div class="tobyflow-connecting-content">
-      <div class="tobyflow-connecting-spinner"></div>
-      <p class="tobyflow-connecting-text">Connecting to Flow...</p>
+  <div id="flowmcp-connecting-overlay" class="flowmcp-connecting-overlay hidden">
+    <div class="flowmcp-connecting-content">
+      <div class="flowmcp-connecting-spinner"></div>
+      <p class="flowmcp-connecting-text">Connecting to Flow...</p>
     </div>
   </div>
 
   <div id="flow-auto-sidebar-root">
     <div class="flow-app">
       <!-- ============================================== -->
-      <!-- HEADER (.tobyflow-header)                      -->
+      <!-- HEADER (.flowmcp-header)                      -->
       <!-- ============================================== -->
-      <header class="tobyflow-header">
-        <div class="tobyflow-header-brand">
-          <div class="tobyflow-header-logo">
+      <header class="flowmcp-header">
+        <div class="flowmcp-header-brand">
+          <div class="flowmcp-header-logo">
             <img src="../icons/icon-32.png" alt="Flow MCP" />
           </div>
-          <span class="tobyflow-header-title">Flow MCP</span>
-          <span class="tobyflow-user-plan-badge" id="userPlanBadge" data-plan="free" data-i18n-title="settings.planBadgeTooltip" title="Plan &amp; quota">Free</span>
+          <span class="flowmcp-header-title">Flow MCP</span>
+          <span class="flowmcp-user-plan-badge" id="userPlanBadge" data-plan="free" data-i18n-title="settings.planBadgeTooltip" title="Plan &amp; quota">Free</span>
         </div>
-        <div class="tobyflow-header-actions">
+        <div class="flowmcp-header-actions">
           <!-- Screen capture (prominent yellow) -->
-          <button class="tobyflow-header-btn tobyflow-header-capture" id="headerCaptureBtn" type="button" data-i18n-tooltip="header.capture" data-tooltip-pos="bottom" title="Chụp màn hình">
+          <button class="flowmcp-header-btn flowmcp-header-capture" id="headerCaptureBtn" type="button" data-i18n-tooltip="header.capture" data-tooltip-pos="bottom" title="Chụp màn hình">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
               <circle cx="12" cy="12" r="4" stroke="currentColor" fill="currentColor" stroke-width="1.5"></circle>
               <path d="M22 12C22 16.714 22 19.0711 20.5355 20.5355C19.0711 22 16.714 22 12 22C7.28595 22 4.92893 22 3.46447 20.5355C2 19.0711 2 16.714 2 12C2 7.28595 2 4.92893 3.46447 3.46447C4.92893 2 7.28595 2 12 2C16.714 2 19.0711 2 20.5355 3.46447C21.5093 4.43821 21.8356 5.80655 21.9449 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
             </svg>
           </button>
           <!-- Changelog -->
-          <button class="tobyflow-header-btn tobyflow-announcement-badge-wrap" id="changelogBtn" type="button" data-i18n-tooltip="header.changelog" data-tooltip-pos="bottom" title="Nhật ký cập nhật">
+          <button class="flowmcp-header-btn flowmcp-announcement-badge-wrap" id="changelogBtn" type="button" data-i18n-tooltip="header.changelog" data-tooltip-pos="bottom" title="Nhật ký cập nhật">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
               <polyline points="14 2 14 8 20 8" />
@@ -55,10 +55,10 @@
               <line x1="16" y1="17" x2="8" y2="17" />
               <line x1="10" y1="9" x2="8" y2="9" />
             </svg>
-            <span class="tobyflow-announcement-badge hidden" id="changelogBadge"></span>
+            <span class="flowmcp-announcement-badge hidden" id="changelogBadge"></span>
           </button>
           <!-- Tip Coffee -->
-          <button class="tobyflow-header-btn tobyflow-tip-coffee-btn" id="tipCoffeeBtn" type="button" data-i18n-tooltip="header.tipCoffee" data-tooltip-pos="bottom" title="Mời cà phê tác giả">
+          <button class="flowmcp-header-btn flowmcp-tip-coffee-btn" id="tipCoffeeBtn" type="button" data-i18n-tooltip="header.tipCoffee" data-tooltip-pos="bottom" title="Mời cà phê tác giả">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M10 2v2"></path>
               <path d="M14 2v2"></path>
@@ -67,7 +67,7 @@
             </svg>
           </button>
           <!-- Language selector -->
-          <button class="tobyflow-header-btn" id="languageBtn" type="button" data-i18n-tooltip="header.language" data-tooltip-pos="bottom" title="Chuyển ngôn ngữ / Switch Language">
+          <button class="flowmcp-header-btn" id="languageBtn" type="button" data-i18n-tooltip="header.language" data-tooltip-pos="bottom" title="Chuyển ngôn ngữ / Switch Language">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="12" cy="12" r="10" />
               <line x1="2" y1="12" x2="22" y2="12" />
@@ -76,22 +76,22 @@
           </button>
           <span id="langSwitchLabel" class="hidden">VI</span>
           <!-- Settings Dropdown -->
-          <div class="tobyflow-settings-dropdown" id="settingsDropdown">
-            <button class="tobyflow-header-btn" id="settingsDropdownBtn" type="button" data-i18n-tooltip="header.settings" data-tooltip-pos="bottom" title="Cài đặt">
+          <div class="flowmcp-settings-dropdown" id="settingsDropdown">
+            <button class="flowmcp-header-btn" id="settingsDropdownBtn" type="button" data-i18n-tooltip="header.settings" data-tooltip-pos="bottom" title="Cài đặt">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
                 <circle cx="12" cy="12" r="3" />
               </svg>
             </button>
-            <div class="tobyflow-settings-menu" id="settingsMenu">
-              <button class="tobyflow-settings-menu-item" id="openSettingsBtn" type="button">
+            <div class="flowmcp-settings-menu" id="settingsMenu">
+              <button class="flowmcp-settings-menu-item" id="openSettingsBtn" type="button">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
                   <circle cx="12" cy="12" r="3" />
                 </svg>
                 <span data-i18n="header.settings">Settings</span>
               </button>
-              <button class="tobyflow-settings-menu-item" id="themeToggleBtn" type="button">
+              <button class="flowmcp-settings-menu-item" id="themeToggleBtn" type="button">
                 <svg id="themeIconSun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="hidden">
                   <circle cx="12" cy="12" r="5" />
                   <line x1="12" y1="1" x2="12" y2="3" />
@@ -108,7 +108,7 @@
                 </svg>
                 <span id="themeToggleLabel" data-i18n="header.darkMode">Dark Mode</span>
               </button>
-              <button class="tobyflow-settings-menu-item" id="extensionLinkBtn" type="button">
+              <button class="flowmcp-settings-menu-item" id="extensionLinkBtn" type="button">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="23 4 23 10 17 10"></polyline>
                   <polyline points="1 20 1 14 7 14"></polyline>
@@ -119,13 +119,13 @@
             </div>
           </div>
                     <!-- User avatar / status -->
-          <div class="tobyflow-header-user" id="headerAuth">
-            <button class="tobyflow-header-btn tobyflow-user-avatar" id="loginBtn" type="button" data-i18n-tooltip="header.login" data-tooltip-pos="bottom">
+          <div class="flowmcp-header-user" id="headerAuth">
+            <button class="flowmcp-header-btn flowmcp-user-avatar" id="loginBtn" type="button" data-i18n-tooltip="header.login" data-tooltip-pos="bottom">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
                 <circle cx="12" cy="7" r="4" />
               </svg>
-              <span class="tobyflow-premium-crown hidden" id="headerPremiumCrown" data-tooltip="Premium">
+              <span class="flowmcp-premium-crown hidden" id="headerPremiumCrown" data-tooltip="Premium">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M5 16L3 5L8.5 10L12 4L15.5 10L21 5L19 16H5ZM19 19C19 19.6 18.6 20 18 20H6C5.4 20 5 19.6 5 19V18H19V19Z" />
                 </svg>
@@ -140,11 +140,11 @@
       </header>
 
       <!-- ============================================== -->
-      <!-- NAVIGATION TABS (.tobyflow-tabs-nav)          -->
+      <!-- NAVIGATION TABS (.flowmcp-tabs-nav)          -->
       <!-- ============================================== -->
-      <nav class="tobyflow-tabs tobyflow-tabs-nav" role="tablist" aria-label="Flow MCP Navigation">
+      <nav class="flowmcp-tabs flowmcp-tabs-nav" role="tablist" aria-label="Flow MCP Navigation">
         <!-- 1. Gen (Active) -->
-        <button class="tobyflow-tab tab-btn active" data-tab="tab-gen" id="navGen" data-i18n-title="tab.gen" role="tab" aria-selected="true" tabindex="0">
+        <button class="flowmcp-tab tab-btn active" data-tab="tab-gen" id="navGen" data-i18n-title="tab.gen" role="tab" aria-selected="true" tabindex="0">
           <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor">
             <path d="M11.8525 4.21651L11.7221 3.2387C11.6906 3.00226 11.4889 2.82568 11.2504 2.82568C11.0118 2.82568 10.8102 3.00226 10.7786 3.23869L10.6483 4.21651C10.2658 7.0847 8.00939 9.34115 5.14119 9.72358L4.16338 9.85396C3.92694 9.88549 3.75037 10.0872 3.75037 10.3257C3.75037 10.5642 3.92694 10.7659 4.16338 10.7974L5.14119 10.9278C8.00938 11.3102 10.2658 13.5667 10.6483 16.4349L10.7786 17.4127C10.8102 17.6491 11.0118 17.8257 11.2504 17.8257C11.4889 17.8257 11.6906 17.6491 11.7221 17.4127L11.8525 16.4349C12.2349 13.5667 14.4913 11.3102 17.3595 10.9278L18.3374 10.7974C18.5738 10.7659 18.7504 10.5642 18.7504 10.3257C18.7504 10.0872 18.5738 9.88549 18.3374 9.85396L17.3595 9.72358C14.4913 9.34115 12.2349 7.0847 11.8525 4.21651Z"></path>
             <path d="M4.6519 14.7568L4.82063 14.2084C4.84491 14.1295 4.91781 14.0757 5.00037 14.0757C5.08292 14.0757 5.15582 14.1295 5.1801 14.2084L5.34883 14.7568C5.56525 15.4602 6.11587 16.0108 6.81925 16.2272L7.36762 16.3959C7.44652 16.4202 7.50037 16.4931 7.50037 16.5757C7.50037 16.6582 7.44652 16.7311 7.36762 16.7554L6.81926 16.9241C6.11587 17.1406 5.56525 17.6912 5.34883 18.3946L5.1801 18.9429C5.15582 19.0218 5.08292 19.0757 5.00037 19.0757C4.91781 19.0757 4.84491 19.0218 4.82063 18.9429L4.65191 18.3946C4.43548 17.6912 3.88486 17.1406 3.18147 16.9241L2.63311 16.7554C2.55421 16.7311 2.50037 16.6582 2.50037 16.5757C2.50037 16.4931 2.55421 16.4202 2.63311 16.3959L3.18148 16.2272C3.88486 16.0108 4.43548 15.4602 4.6519 14.7568Z"></path>
@@ -152,7 +152,7 @@
           <span data-i18n="tab.gen">Gen</span>
         </button>
                 <!-- 2. Workflow -->
-        <button class="tobyflow-tab tab-btn" data-tab="tab-workflow" id="navWorkflow" data-i18n-title="tab.workflow" role="tab" aria-selected="false" tabindex="-1">
+        <button class="flowmcp-tab tab-btn" data-tab="tab-workflow" id="navWorkflow" data-i18n-title="tab.workflow" role="tab" aria-selected="false" tabindex="-1">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <g fill="currentColor">
               <path fill-rule="evenodd" d="M12.123 15.292c-.587-1.927 1.198-3.775 3.158-3.155l5.955 1.848.003.001c2.33.733 2.35 4.024.04 4.801v.001l-1.63.55h-.004a.5.5 0 0 0-.325.322l-.003.01-.55 1.63c-.782 2.339-4.067 2.273-4.792-.052l-1.85-5.95zm2.555-1.248a.52.52 0 0 0-.642.665l1.849 5.943.034.087a.516.516 0 0 0 .952-.075l.001-.003.55-1.63c.237-.718.78-1.27 1.454-1.539l.138-.05 1.626-.55h.002c.487-.163.467-.85-.002-.997l-5.956-1.85z" clip-rule="evenodd"></path>
@@ -162,35 +162,35 @@
           <span data-i18n="tab.workflow">Workflow</span>
         </button>
         <!-- 3. Templates & My Prompts -->
-        <button class="tobyflow-tab tab-btn" data-tab="tab-templates" id="tabTemplatesBtn" data-i18n-title="tab.prompts" role="tab" aria-selected="false" tabindex="-1">
+        <button class="flowmcp-tab tab-btn" data-tab="tab-templates" id="tabTemplatesBtn" data-i18n-title="tab.prompts" role="tab" aria-selected="false" tabindex="-1">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path fill="currentColor" d="M9.767 4.045a3.767 3.767 0 0 1 4.63-2.67v.001l4.438 1.189a3.765 3.765 0 0 1 2.669 4.627l-2.29 8.558.002.001a3.767 3.767 0 0 1-4.632 2.672l-.264-.071v1.508a2.87 2.87 0 0 1-2.718 2.87 1 1 0 0 1-.162.02h-5.5a3.784 3.784 0 0 1-3.78-3.78V10.1a3.785 3.785 0 0 1 3.78-3.78h3.215zM5.94 7.82a2.285 2.285 0 0 0-2.28 2.28v8.87a2.284 2.284 0 0 0 2.28 2.28h5.386a1 1 0 0 1 .114-.01c.766 0 1.38-.615 1.38-1.38V10.1a2.285 2.285 0 0 0-2.28-2.28zm8.064-4.997a2.267 2.267 0 0 0-2.788 1.609l-.001.002-.508 1.89A3.785 3.785 0 0 1 14.32 10.1v6.7l.653.173.004.002a2.267 2.267 0 0 0 2.789-1.61l2.29-8.561v-.002a2.267 2.267 0 0 0-1.608-2.789h-.002l-4.44-1.19z"></path>
           </svg>
           <span data-i18n="tab.prompts">Prompts</span>
         </button>
         <!-- 4. Tasks (Multi-task) -->
-        <button class="tobyflow-tab tab-btn" data-tab="tab-tasks" id="navTasks" data-i18n-title="tab.tasks" role="tab" aria-selected="false" tabindex="-1">
+        <button class="flowmcp-tab tab-btn" data-tab="tab-tasks" id="navTasks" data-i18n-title="tab.tasks" role="tab" aria-selected="false" tabindex="-1">
           <svg width="17" height="17" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path fill="currentColor" d="M13.5 6.188h-9c-1.813 0-2.812.999-2.812 2.812v5.25c0 1.814.999 2.813 2.812 2.813h9c1.813 0 2.813-1 2.813-2.813V9c0-1.814-1-2.812-2.813-2.812m1.688 8.062c0 1.183-.505 1.688-1.688 1.688h-9c-1.183 0-1.687-.505-1.687-1.688V9c0-1.183.504-1.687 1.687-1.687h9c1.183 0 1.688.504 1.688 1.687zM3.938 4.5c0-.31.251-.562.562-.562h9a.563.563 0 0 1 0 1.124h-9a.563.563 0 0 1-.562-.562m1.5-2.25c0-.31.252-.562.562-.562h6a.563.563 0 0 1 0 1.125H6a.563.563 0 0 1-.562-.563m5.792 8.336L8.869 9.141a1.27 1.27 0 0 0-1.93 1.08v2.809c0 .464.24.877.647 1.104a1.27 1.27 0 0 0 1.283-.025l2.36-1.444a1.21 1.21 0 0 0 .584-1.04 1.21 1.21 0 0 0-.583-1.039m-.588 1.118L8.28 13.15a.14.14 0 0 1-.146.003.14.14 0 0 1-.072-.123v-2.81c0-.067.04-.104.072-.123a.14.14 0 0 1 .072-.02q.033 0 .074.023l2.361 1.446h.001q.045.028.045.078a.09.09 0 0 1-.046.08"></path>
           </svg>
           <span data-i18n="tab.tasks">Tasks</span>
         </button>
-        <div class="tobyflow-tab-divider"></div>
+        <div class="flowmcp-tab-divider"></div>
         <!-- 5. Photos -->
-        <button class="tobyflow-tab tab-btn tobyflow-tab--icon-only" data-tab="tab-photos" id="navPhotos" data-i18n-tooltip="tab.photos" aria-label="Photos" role="tab" aria-selected="false" tabindex="-1">
+        <button class="flowmcp-tab tab-btn flowmcp-tab--icon-only" data-tab="tab-photos" id="navPhotos" data-i18n-tooltip="tab.photos" aria-label="Photos" role="tab" aria-selected="false" tabindex="-1">
           <svg width="18" height="18" viewBox="0 0 20 20" fill="currentColor">
             <path d="M8.958 8.501a1.5 1.5 0 1 1 0 2.999 1.5 1.5 0 0 1 0-2.999"></path>
             <path fill-rule="evenodd" d="M6.974 3.95a3.065 3.065 0 0 1 3.461-2.608l5.975.84a3.065 3.065 0 0 1 2.608 3.462l-.84 5.975a3.064 3.064 0 0 1-3.46 2.607l-.938-.132.03.206a3.065 3.065 0 0 1-2.608 3.462l-5.975.839a3.065 3.065 0 0 1-3.461-2.607l-.84-5.975a3.065 3.065 0 0 1 2.608-3.462l3.134-.441zm-.517 9.528a1.337 1.337 0 0 0-1.871.263l-1.513 2.007.009.06a1.736 1.736 0 0 0 1.96 1.477l5.45-.767zm3.237-6.443-5.974.838a1.736 1.736 0 0 0-1.477 1.96l.568 4.051.713-.944a2.666 2.666 0 0 1 3.733-.524l4.72 3.557a1.73 1.73 0 0 0 .516-1.487l-.84-5.975a1.735 1.735 0 0 0-1.959-1.476m.557-4.375a1.735 1.735 0 0 0-1.96 1.476l-.252 1.787 1.47-.206a3.066 3.066 0 0 1 3.462 2.61l.617 4.397 1.314.186a1.735 1.735 0 0 0 1.96-1.477l.84-5.975a1.736 1.736 0 0 0-1.478-1.96z" clip-rule="evenodd"></path>
           </svg>
         </button>
                 <!-- 6. Tools -->
-        <button class="tobyflow-tab tab-btn tobyflow-tab--icon-only" data-tab="tab-tools" id="navTools" data-i18n-tooltip="tab.tools" aria-label="Tools" role="tab" aria-selected="false" tabindex="-1">
+        <button class="flowmcp-tab tab-btn flowmcp-tab--icon-only" data-tab="tab-tools" id="navTools" data-i18n-tooltip="tab.tools" aria-label="Tools" role="tab" aria-selected="false" tabindex="-1">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path fill="currentColor" fill-rule="evenodd" d="M5.933 2.754c1.29-2.339 4.661-2.339 5.951 0l2.19 3.97.002.001.718 1.308Q15.144 8 15.5 8a7.5 7.5 0 1 1-7.483 7.996H4.4c-2.577 0-4.224-2.762-2.976-5.03l4.51-8.21zm10.473 8.211c.504.916.535 1.913.225 2.776l-.025.064A3.37 3.37 0 0 1 13.43 16h-3.406a5.5 5.5 0 1 0 5.86-5.986zM10.134 3.72c-.53-.96-1.92-.96-2.45 0l-4.508 8.208a1.396 1.396 0 0 0 1.223 2.068h9.03a1.395 1.395 0 0 0 1.307-1.887l-.083-.177-1.28-2.33-.003-.007-1.047-1.906z" clip-rule="evenodd"></path>
           </svg>
         </button>
         <!-- 7. History -->
-        <button class="tobyflow-tab tab-btn tobyflow-tab--icon-only" data-tab="tab-history" id="navHistory" data-i18n-tooltip="tab.history" aria-label="History" role="tab" aria-selected="false" tabindex="-1">
+        <button class="flowmcp-tab tab-btn flowmcp-tab--icon-only" data-tab="tab-history" id="navHistory" data-i18n-tooltip="tab.history" aria-label="History" role="tab" aria-selected="false" tabindex="-1">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
             <g fill="currentColor">
               <path d="M9.624 2.34a10.5 10.5 0 0 1 7.195.518A10.46 10.46 0 0 1 21.982 7.9a10.5 10.5 0 0 1 .697 7.172c-.62 2.402-2.08 4.5-4.1 5.935a10.48 10.48 0 0 1-6.963 1.891 10.52 10.52 0 0 1-6.533-3.039 1 1 0 0 1 1.414-1.414 8.52 8.52 0 0 0 5.288 2.46 8.48 8.48 0 0 0 5.636-1.528 8.52 8.52 0 0 0 3.321-4.805 8.5 8.5 0 0 0-.564-5.807v-.002A8.46 8.46 0 0 0 16 4.684a8.5 8.5 0 0 0-5.825-.422A8.53 8.53 0 0 0 5.45 7.699h-.001a8.6 8.6 0 0 0-1.377 3.66l.51-.61a1 1 0 0 1 1.535 1.282l-2.18 2.61a1 1 0 0 1-1.536-.001l-2.17-2.61a1 1 0 0 1 1.537-1.28l.318.383a10.6 10.6 0 0 1 1.703-4.548v-.002A10.53 10.53 0 0 1 9.625 2.34"></path>
@@ -199,7 +199,7 @@
           </svg>
         </button>
         <!-- 8. Queue & Logs -->
-        <button class="tobyflow-tab tab-btn tobyflow-tab--icon-only" data-tab="tab-logs" id="navLogs" data-i18n-tooltip="logs.queue" aria-label="Queue" role="tab" aria-selected="false" tabindex="-1">
+        <button class="flowmcp-tab tab-btn flowmcp-tab--icon-only" data-tab="tab-logs" id="navLogs" data-i18n-tooltip="logs.queue" aria-label="Queue" role="tab" aria-selected="false" tabindex="-1">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="5" cy="6" r="1" />
             <circle cx="5" cy="12" r="1" />
@@ -288,6 +288,24 @@
                   </svg>
                   <span data-i18n="gen.multiPromptHint">Separate each prompt with a blank line</span>
                 </div>
+              </div>
+              <div class="prompt-assistant-panel hidden" id="promptAssistantPanel">
+                <div class="prompt-assistant-controls">
+                  <select id="paFormat">
+                    <option value="single-en">Single prompt (EN)</option>
+                    <option value="single-vi">Một prompt (VI)</option>
+                    <option value="scenes">Scene breakdown</option>
+                  </select>
+                </div>
+                <textarea id="paIdea" rows="2" placeholder="Ý tưởng của bạn..."></textarea>
+                <button class="btn btn-secondary btn-xs" id="paBuildBtn" type="button">Tạo yêu cầu</button>
+                <textarea id="paRequest" rows="5" readonly placeholder="Yêu cầu gửi cho nhà cung cấp chat sẽ hiện ở đây — sao chép và gửi thủ công."></textarea>
+                <textarea id="paReply" rows="4" placeholder="Dán câu trả lời của nhà cung cấp chat vào đây..."></textarea>
+                <button class="btn btn-secondary btn-xs" id="paParseBtn" type="button">Tách prompt</button>
+                <div id="paPromptList"></div>
+                <textarea id="paI2pReply" rows="4" placeholder="Dán câu trả lời image-to-prompt (khối I2P) vào đây..."></textarea>
+                <button class="btn btn-secondary btn-xs" id="paI2pParseBtn" type="button">Tách I2P</button>
+                <div id="paI2pResult"></div>
               </div>
               <!-- Hidden backward compatibility prompt inputs -->
               <textarea id="inputPromptImage" class="hidden"></textarea>
@@ -781,9 +799,13 @@
           </div>
           <!-- Subtab: Templates -->
           <div id="subtab-templates" class="prompts-subtab-pane active">
-            <div class="template-empty-state">
-              <p style="color:var(--text-muted);font-size:12px;text-align:center;padding:24px;">Chọn mẫu prompt từ thư viện hoặc tạo prompt của riêng bạn.</p>
-            </div>
+            <section class="section-card">
+              <div class="form-group"><label class="form-label" for="genTemplateName">Tên mẫu cấu hình</label><input class="form-input" id="genTemplateName" placeholder="Ví dụ: Hero sản phẩm 16:9" /></div>
+              <button type="button" class="btn btn-primary" id="saveGenTemplateBtn">Lưu cấu hình hiện tại</button>
+              <p class="flow-inline-note" style="margin-top:8px;">Lưu prompt + tuỳ chọn + ảnh tham chiếu (nguồn Flow) đang có trong khung tạo thành mẫu để dùng lại. Thư viện mẫu nằm trên máy này, không đồng bộ lên server.</p>
+            </section>
+            <div id="genTemplateList" style="margin-top:10px;"></div>
+            <p id="genTemplateEmpty" class="flow-inline-note">Chưa có mẫu cấu hình nào được lưu.</p>
           </div>
           <!-- Subtab: My Prompts -->
           <div id="subtab-myprompts" class="prompts-subtab-pane">
@@ -795,9 +817,12 @@
               </div>
               <section class="section-card" style="margin-top:10px;">
                 <div class="form-group"><label class="form-label" for="promptName" id="lblPromptName">Tên prompt</label><input class="form-input" id="promptName" placeholder="Ví dụ: Product hero"></div>
-                <div class="form-group"><label class="form-label" for="promptDraft" id="lblPromptDraft">Nội dung prompt</label><textarea class="form-textarea" id="promptDraft" placeholder="Nhập prompt cần lưu"></textarea></div>
+                <div class="form-group"><label class="form-label" for="promptDraft" id="lblPromptDraft">Nội dung prompt</label><textarea class="form-textarea" id="promptDraft" placeholder="Nhập prompt cần lưu. Dùng {{tên_biến}} để tạo biến cần điền khi chèn."></textarea></div>
+                <div class="form-group"><label class="form-label" for="promptCategory">Danh mục</label><input class="form-input" id="promptCategory" placeholder="Ví dụ: Sản phẩm"></div>
+                <div class="form-group"><label class="form-label" for="promptTags">Thẻ (cách nhau bằng dấu phẩy)</label><input class="form-input" id="promptTags" placeholder="Ví dụ: hero, studio"></div>
                 <button type="button" class="btn btn-primary" id="btnSavePrompt"><span id="txtSavePrompt">Lưu prompt</span></button>
               </section>
+              <div class="form-group" style="margin-top:10px;"><label class="form-label" for="promptAddonSelect">Addon/style gắn khi tạo ảnh/video (chỉ áp dụng lúc tạo, không lưu vào prompt)</label><select class="form-input" id="promptAddonSelect"><option value="">Không dùng addon</option></select></div>
               <div class="myprompts-list" id="myPromptsList" style="margin-top:10px;"></div>
               <div id="savedPromptsList" class="flow-saved-prompts" style="margin-top:10px;"></div>
               <p id="savedPromptsEmpty" class="flow-inline-note">Chưa có prompt nào được lưu.</p>
@@ -831,6 +856,15 @@
               </button>
             </div>
           </div>
+          <!-- FEAT-05: saved multi-task lists (flow-task-lists.js) -->
+          <div id="flowTaskSearchRow" style="display:none;margin:10px 0;">
+            <input type="search" id="flowTaskSearch" placeholder="Tìm tác vụ theo tên hoặc prompt…" style="width:100%;">
+          </div>
+          <div style="display:flex;gap:6px;margin:10px 0;">
+            <button type="button" class="btn btn-secondary btn-sm" id="flowTaskRunSelectedBtn">Chạy đã chọn</button>
+          </div>
+          <div id="flowTaskList" class="flow-history-list" aria-live="polite"></div>
+          <p id="flowTaskEmpty" class="flow-inline-note">Chưa có tác vụ nào được lưu.</p>
         <!-- ========================================== -->
         <!-- TAB 2: WORKFLOW                            -->
         <!-- ========================================== -->
@@ -912,6 +946,66 @@
             </div>
             <div id="workflowList" class="workflow-list"></div>
           </section>
+          <section class="section" id="workflowTemplatesSection">
+            <h3>Mẫu workflow</h3>
+            <p class="section-hint">Lưu một workflow (dán JSON đồ thị) thành mẫu có tên để tạo lại workflow mới, xuất/nhập file. Mẫu chỉ giữ các field trong whitelist của đồ thị — trạng thái chạy không được lưu.</p>
+            <div class="form-group">
+              <label for="wfTemplateName">Tên mẫu</label>
+              <input type="text" id="wfTemplateName" placeholder="VD: Drama gia đình" />
+            </div>
+            <div class="form-group">
+              <label for="wfTemplateCategory">Danh mục</label>
+              <input type="text" id="wfTemplateCategory" placeholder="VD: drama" />
+            </div>
+            <div class="form-group">
+              <label for="wfTemplateDescription">Mô tả</label>
+              <input type="text" id="wfTemplateDescription" placeholder="Mô tả ngắn (tuỳ chọn)" />
+            </div>
+            <div class="form-group">
+              <label for="wfTemplateGraph">JSON workflow</label>
+              <textarea id="wfTemplateGraph" rows="5" placeholder='{"name":"...","nodes":[...],"edges":[...]}'></textarea>
+            </div>
+            <div class="btn-row">
+              <button class="btn btn-primary btn-sm" id="saveWorkflowTemplateBtn" type="button">Lưu mẫu</button>
+              <button class="btn btn-secondary btn-sm" id="importWorkflowTemplateBtn" type="button">Nhập mẫu từ file</button>
+              <input type="file" id="wfTemplateImportFile" accept="application/json,.json" class="hidden" />
+            </div>
+            <div id="workflowTemplateEmpty" class="empty-state">Chưa có mẫu workflow nào.</div>
+            <div id="workflowTemplateList"></div>
+          </section>
+          <section class="section" id="workflowEditorSection">
+            <h3>Trình soạn workflow</h3>
+            <p class="section-hint">Soạn đồ thị node trên đúng định dạng workflow (FEAT-07): thêm node, nối cạnh bằng thao tác trên bản tóm tắt, hoàn tác/làm lại tối đa 40 bước (bản nháp tự lưu). Xuất JSON cho ra đúng document mà đường FEAT-07 thuần tạo ra — chỉ giữ field trong whitelist, không mang trạng thái chạy.</p>
+            <div class="form-group">
+              <label for="wfEditorName">Tên workflow</label>
+              <input type="text" id="wfEditorName" placeholder="VD: Drama tập 1" />
+            </div>
+            <div class="form-group">
+              <label for="wfEditorNodeType">Loại node</label>
+              <select id="wfEditorNodeType">
+                <option value="text">Text</option>
+                <option value="image">Image</option>
+                <option value="generate">Generate Image/Video</option>
+                <option value="chatgpt">ChatGPT</option>
+                <option value="download">Download</option>
+                <option value="delay">Wait</option>
+              </select>
+            </div>
+            <div class="btn-row">
+              <button class="btn btn-primary btn-sm" id="wfEditorAddNodeBtn" type="button">Thêm node</button>
+              <button class="btn btn-secondary btn-sm" id="wfEditorUndoBtn" type="button">Hoàn tác</button>
+              <button class="btn btn-secondary btn-sm" id="wfEditorRedoBtn" type="button">Làm lại</button>
+            </div>
+            <div id="wfEditorSummary" class="empty-state">Chưa có node nào.</div>
+            <div class="form-group">
+              <label for="wfEditorJson">JSON workflow</label>
+              <textarea id="wfEditorJson" rows="5" placeholder='{"kind":"flow.workflow-graph","version":1,"nodes":[...],"edges":[...]}'></textarea>
+            </div>
+            <div class="btn-row">
+              <button class="btn btn-secondary btn-sm" id="wfEditorOpenBtn" type="button">Mở JSON</button>
+              <button class="btn btn-secondary btn-sm" id="wfEditorExportBtn" type="button">Xuất JSON</button>
+            </div>
+          </section>
         </div>
 
           <div id="queuePage" style="margin-top:12px;"></div>
@@ -938,6 +1032,9 @@
 
           <!-- Subtab: Album -->
           <div class="photos-subtab-pane active" id="photos-album">
+            <div class="photos-albums-header" style="display:flex;justify-content:flex-end;margin-bottom:10px;">
+              <button type="button" class="btn btn-primary btn-sm" id="createAlbumBtn">+ Tạo album</button>
+            </div>
             <div class="album-list-container" id="albumListContainer">
               <p style="color:var(--text-muted);font-size:12px;text-align:center;padding:24px;">Chưa có album nào.</p>
             </div>
@@ -1102,6 +1199,22 @@
             </button>
           </div>
           <div class="wmtool-inline hidden" id="watermarkToolPanel"></div>
+          <div class="wmtool-inline hidden" id="flowTransformPanel">
+            <div class="section-title" id="flowTransformTitle">Đa góc nhìn (Angles)</div>
+            <label class="flow-transform-field"><span>Preset</span>
+              <select id="flowTransformPreset"></select>
+            </label>
+            <div id="flowTransformParams"></div>
+            <div class="flow-transform-source" style="display:flex;gap:6px;align-items:center;margin:8px 0;">
+              <span>Ảnh nguồn: <span id="flowTransformSourceLabel">Chưa có</span></span>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnPickTransformSource">Chọn ảnh nguồn</button>
+            </div>
+            <p id="flowTransformPreview" class="flow-inline-note"></p>
+            <div style="display:flex;gap:6px;margin-top:8px;">
+              <button type="button" class="btn btn-primary" id="btnApplyTransform">Áp dụng — đưa vào hàng đợi</button>
+              <button type="button" class="btn btn-secondary" id="btnCloseTransformPanel">Đóng</button>
+            </div>
+          </div>
         </div>
         <!-- TAB 5: HISTORY                             -->
         <!-- ========================================== -->
@@ -1115,13 +1228,18 @@
           </div>
           <div id="flowHistoryList" class="flow-history-list" aria-live="polite"></div>
           <p id="flowHistoryEmpty" class="flow-inline-note">Chưa có lịch sử cục bộ.</p>
+          <div class="flow-history-toolbar" style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 12px;">
+            <span class="section-title">Lịch sử tạo — chạy lại được</span>
+          </div>
+          <div id="flowGenHistoryList" class="flow-history-list" aria-live="polite"></div>
+          <p id="flowGenHistoryEmpty" class="flow-inline-note">Chưa có bản ghi tạo nào.</p>
         </div>
 
         <!-- ========================================== -->
         <!-- TAB 6: QUEUE & LOGS                        -->
         <!-- ========================================== -->
         <div id="tab-logs" class="tab-pane" role="tabpanel">
-          <div class="tobyflow-queue-monitor" id="queueMonitorContent">
+          <div class="flowmcp-queue-monitor" id="queueMonitorContent">
             <!-- FlowQueuePanel mount container -->
             <div id="flowQueuePanel" aria-label="Hàng đợi Flow"></div>
           </div>
@@ -1141,7 +1259,7 @@
       <!-- ============================================== -->
       <!-- QUEUE PANEL WRAPPER                            -->
       <!-- ============================================== -->
-      <div class="tobyflow-queue-panel-wrapper" id="queuePanelContainer"></div>
+      <div class="flowmcp-queue-panel-wrapper" id="queuePanelContainer"></div>
 
       <!-- ============================================== -->
       <!-- MODALS & OVERLAYS CONTAINERS                   -->
@@ -1176,6 +1294,14 @@
             <div class="ref-picker-grid" id="refPickerFlowGrid"></div>
             <button type="button" class="ref-picker-more" id="refPickerMore" hidden></button>
             <div class="ref-picker-message" id="refPickerFlowMessage">Đang tìm ảnh trong thư viện Flow...</div>
+            <div class="ref-picker-albums" id="refPickerAlbums">
+              <div class="ref-picker-toolbar">
+                <span style="font-size:12px;font-weight:600;">Album</span>
+                <select class="form-select" id="refPickerAlbumSelect" style="width:auto;margin:0;" aria-label="Chọn album"></select>
+              </div>
+              <div class="ref-picker-grid" id="refPickerAlbumGrid"></div>
+              <div class="ref-picker-message" id="refPickerAlbumMessage" hidden></div>
+            </div>
           </div>
           <div class="ref-picker-content" id="refPickerUploadPanel" hidden>
             <div class="ref-picker-drop" id="refPickerDrop">
@@ -1265,6 +1391,10 @@
   <script src="flow-upload-client.js"></script>
   <script src="flow-queue-panel.js"></script>
   <script src="reference-picker.js"></script>
+  <script src="flow-snippets.js"></script>
+  <script src="../content/shared/selection-normalize.js"></script>
+  <script src="../content/shared/flow-transforms.js"></script>
+  <script type="module" src="workflow-editor.js"></script>
   <script src="sidebar.js"></script>
 </body>
 </html>

@@ -328,7 +328,11 @@ test('IMG-05b: an aborted signal stops the extension instead of extending to the
     });
   } catch (error) { caught = error; }
   assert.ok(caught, 'confirmation must fail once the caller aborts');
-  assert.equal(caught.code, 'FLOW_UPLOAD_TIMEOUT', String(caught?.stack || caught));
+  // Reviewfix S6: an abort during confirmation reports CANCELLED, not
+  // TIMEOUT — the wait still stops at the abort (see the elapsed bounds
+  // below); only the code changed, from a mislabeled timeout to the
+  // distinct cancellation the queue and panel now handle.
+  assert.equal(caught.code, 'FLOW_UPLOAD_CANCELLED', String(caught?.stack || caught));
   const elapsed = now - startedAt;
   assert.ok(elapsed >= 55_000, `the extension ran past the 30 s working deadline before the abort (elapsed ${elapsed} ms)`);
   assert.ok(elapsed <= 90_000, `the wait stopped at the abort instead of riding the extension to 240 s (elapsed ${elapsed} ms)`);

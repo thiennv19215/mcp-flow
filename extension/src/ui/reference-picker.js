@@ -11,6 +11,8 @@
     let onFrameSourcesChanged = null;
     let onFramesConfirmed = null;
     let pickerFlowAssets = [];
+    let pickerAlbums = [];
+    let pickerAlbumId = null;
     let pickerFlowSelection = new Map();
     let pickerLocalFiles = [];
     let pickerSelectionOrder = [];
@@ -39,6 +41,23 @@
     const fileInput = document.querySelector("#refPickerFileInput");
     if (!modal || !flowGrid || !flowPanel || !uploadPanel || !searchInput || !localList || !fileInput) {
       throw new Error("Flow reference picker UI is incomplete.");
+    }
+
+    // One builder for every Flow-identity pick — the library grid and
+    // the Albums source alike — so an album "use as ref" returns exactly
+    // the shape a library pick produces and the two cannot drift apart.
+    function flowReferenceFor(asset, thumbnailUrl) {
+      const assetId = String(asset.id || "");
+      return {
+        source: "flow",
+        projectId: pickerProjectId,
+        id: assetId,
+        name: asset.name,
+        kind: asset.kind || "image",
+        assetName: `asset:${asset.name}`,
+        expectedId: assetId,
+        thumbnailUrl
+      };
     }
 
     const supportedReferenceId = value => typeof value === "string" && (
@@ -181,7 +200,7 @@
       });
       uploadSlot.style.display = list.length >= 3 ? "none" : "flex";
 
-      // Also synchronize TobyFlow preview grid and ratio count
+      // Also synchronize the preview grid and ratio count
       const currentGenType = normalizeType(document.querySelector("#genType")?.value);
       if (type === currentGenType) {
         const previewGrid = document.querySelector("#refImagesPreview");
@@ -324,16 +343,7 @@
             pickerFlowSelection.delete(assetId);
             pickerSelectionOrder = pickerSelectionOrder.filter(item => item !== selectedReference);
           } else if (selectedCount() < selectionLimit()) {
-            const selectedReference = {
-              source: "flow",
-              projectId: pickerProjectId,
-              id: assetId,
-              name: asset.name,
-              kind: asset.kind || (isVideo ? "video" : "image"),
-              assetName: `asset:${asset.name}`,
-              expectedId: assetId,
-              thumbnailUrl
-            };
+            const selectedReference = flowReferenceFor(asset, thumbnailUrl);
             pickerFlowSelection.set(assetId, selectedReference);
             pickerSelectionOrder.push(selectedReference);
           }
@@ -352,6 +362,106 @@
         if (pickerFlowLoading) flowMessage.textContent = `Đang quét thư viện ${allowVideo ? "media" : "ảnh"} Flow...`;
         else if (!pickerProjectId) flowMessage.textContent = "Đang chờ xác định dự án Flow...";
         else if (!list.length) flowMessage.textContent = query ? `Không tìm thấy ${allowVideo ? "media" : "ảnh"} khớp.` : `Không tìm thấy ${allowVideo ? "media" : "ảnh"} sẵn sàng trong thư viện Flow. Hãy mở dự án Flow rồi quét lại.`;
+      }
+    }
+
+    // FEAT-10: the Albums source. Album membership lives in the
+    // background album store (flow-albums.js); the picker only reads it
+    // and turns a chosen album image into a reference through the same
+    // builder the library grid uses, so the attach path downstream
+    // cannot tell where the identity came from.
+    const albumSelect = document.querySelector("#refPickerAlbumSelect");
+    const albumGrid = document.querySelector("#refPickerAlbumGrid");
+    const albumMessage = document.querySelector("#refPickerAlbumMessage");
+
+    async function loadPickerAlbums() {
+      if (!albumSelect || !albumGrid) return;
+      try {
+        const res = await chrome.runtime.sendMessage({ type: "flow-albums:list" });
+        pickerAlbums = res?.ok && Array.isArray(res.albums) ? res.albums : [];
+      } catch {
+        pickerAlbums = [];
+      }
+      if (!pickerAlbums.some(album => album.id === pickerAlbumId)) {
+        pickerAlbumId = pickerAlbums[0]?.id || null;
+      }
+      albumSelect.replaceChildren();
+      for (const album of pickerAlbums) {
+        const option = document.createElement("option");
+        option.value = album.id;
+        option.textContent = `${album.name} (${Array.isArray(album.images) ? album.images.length : 0})`;
+        albumSelect.appendChild(option);
+      }
+      albumSelect.value = pickerAlbumId || "";
+      renderPickerAlbumAssets();
+    }
+
+    function renderPickerAlbumAssets() {
+      if (!albumGrid) return;
+      albumGrid.replaceChildren();
+      const album = pickerAlbums.find(entry => entry.id === pickerAlbumId) || null;
+      const allowVideo = pickerType === "video" && pickerPurpose !== "frames";
+      const images = (Array.isArray(album?.images) ? album.images : [])
+        .filter(image => image && (image.kind === "image" || (allowVideo && image.kind === "video")));
+      if (albumMessage) {
+        albumMessage.hidden = images.length > 0;
+        albumMessage.textContent = !pickerAlbums.length
+          ? "Chưa có album nào. Hãy tạo album trong tab Ảnh."
+          : album && !images.length ? "Album này chưa có ảnh phù hợp." : "";
+      }
+      const selectedReferences = pickerPurpose === "frames" ? frameSources : referencesFor(pickerType);
+      const existingIds = new Set(selectedReferences.filter(item => item.source === "flow").map(item => normalizeReferenceId(item.id)));
+      for (const image of images) {
+        const assetId = String(image.id || "");
+        const isExisting = existingIds.has(normalizeReferenceId(assetId));
+        const isPicked = pickerFlowSelection.has(assetId);
+        const canIdentifySafely = supportedReferenceId(assetId);
+        const isVideo = image.kind === "video";
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `ref-picker-asset${isExisting || isPicked ? " selected" : ""}`;
+        button.title = isExisting ? "Đã có trong danh sách tham chiếu" : !canIdentifySafely ? "Flow không cung cấp media ID ổn định cho ảnh này" : image.name || "Ảnh trong album";
+        button.disabled = isExisting || (!canIdentifySafely && !isPicked) || (!isPicked && selectedCount() >= selectionLimit());
+        if (image.thumbnailUrl) {
+          const thumbnailElement = document.createElement("img");
+          thumbnailElement.alt = "";
+          thumbnailElement.loading = "lazy";
+          thumbnailElement.src = image.thumbnailUrl;
+          thumbnailElement.onerror = () => thumbnailElement.remove();
+          button.appendChild(thumbnailElement);
+        } else {
+          const placeholder = document.createElement("div");
+          placeholder.className = "ref-picker-asset-placeholder";
+          placeholder.textContent = isVideo ? "▶" : "▧";
+          button.appendChild(placeholder);
+        }
+        if (isExisting || isPicked) {
+          const check = document.createElement("span");
+          check.className = "ref-picker-check";
+          check.textContent = isExisting
+            ? String(selectedReferences.findIndex(item => item.source === "flow" && normalizeReferenceId(item.id) === normalizeReferenceId(assetId)) + 1)
+            : String(pickerSelectionOrder.indexOf(pickerFlowSelection.get(assetId)) + 1);
+          button.appendChild(check);
+        }
+        const name = document.createElement("span");
+        name.className = "ref-picker-asset-name";
+        name.textContent = image.name || "Ảnh không tên";
+        button.appendChild(name);
+        button.onclick = () => {
+          if (!canIdentifySafely || isExisting) return;
+          if (pickerFlowSelection.has(assetId)) {
+            const selectedReference = pickerFlowSelection.get(assetId);
+            pickerFlowSelection.delete(assetId);
+            pickerSelectionOrder = pickerSelectionOrder.filter(item => item !== selectedReference);
+          } else if (selectedCount() < selectionLimit()) {
+            const selectedReference = flowReferenceFor(image, image.thumbnailUrl || null);
+            pickerFlowSelection.set(assetId, selectedReference);
+            pickerSelectionOrder.push(selectedReference);
+          }
+          updatePickerCount();
+          renderPickerAlbumAssets();
+        };
+        albumGrid.appendChild(button);
       }
     }
 
@@ -552,6 +662,7 @@
       fileInput.accept = "image/*";
       modal.hidden = false;
       document.body.style.overflow = "hidden";
+      void loadPickerAlbums();
       // Show the cached same-project gallery immediately, or scan it when the
       // user visits the Flow tab if project-entry warm-up has not finished.
       setPickerTab("upload");
@@ -577,6 +688,7 @@
     document.querySelector("#refPickerClose").onclick = () => close();
     document.querySelector("#refPickerCancel").onclick = () => close();
     document.querySelector("#refPickerRefresh").onclick = () => loadFlowPickerAssets();
+    if (albumSelect) albumSelect.onchange = () => { pickerAlbumId = albumSelect.value || null; renderPickerAlbumAssets(); };
     searchInput.oninput = () => { pickerVisibleLimit = 20; renderFlowPickerAssets(); };
     document.querySelector("#refPickerMore").onclick = () => {
       if (pickerVisibleLimit < pickerFlowAssets.length) {

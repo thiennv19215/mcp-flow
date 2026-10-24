@@ -1,6 +1,6 @@
 # Repository notes
 
-This project exposes Google Flow workflows through MCP and a local Studio panel. The backend owns schemas, job queues, credit limits, retry behavior, filesystem access, downloads, and media assembly. The Chrome extension is the only component that interacts with the Flow page.
+This project exposes Google Flow workflows through MCP and the extension side panel. The backend owns schemas, job queues, credit limits, retry behavior, filesystem access, downloads, and media assembly. The Chrome extension is the only component that interacts with the Flow page.
 
 ## Runtime path
 

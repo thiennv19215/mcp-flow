@@ -6,7 +6,7 @@ import { nativeDownloadIds, waitForNativeDownload, downloadNativeResults, extens
 import type { FlowState, FlowAsset, FlowProject, FlowCharacter, DownloadQuality, MediaKind, NativeMedia, CharacterParams } from "./types.js";
 
 export type { FlowState, FlowAsset, FlowProject, FlowCharacter, DownloadQuality, MediaKind, NativeMedia, CharacterParams };
-export { characterLook, rememberCharacter, createCharacter, editCharacter } from "./characters.js";
+export { characterLook, rememberCharacter } from "./characters.js";
 export { uploadFlowMediaToProject } from "./flow-transfer.js";
 
 const IMAGE_TIMEOUT_MS = 3 * 60_000;

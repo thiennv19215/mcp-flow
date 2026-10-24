@@ -6,6 +6,7 @@ import {
   buildFlowDownloadPlan,
   normalizePlanFolderPath,
   normalizePlannedDownloadPath,
+  sanitizePlanFilenameStem,
   serializeFilenameTicket,
   restoreFilenameTicket,
   FlowDownloadFilenameRecords,
@@ -120,13 +121,15 @@ export function flowDownloadBasename(value) {
   return String(value || "").split(/[\\/]/).pop().trim();
 }
 
+// Audit cluster E: the filename-safety pass now has ONE source —
+// sanitizePlanFilenameStem in flow-download-plan.js (illegal chars to
+// "_", trailing dots/spaces stripped, Windows reserved names prefixed,
+// capped at FLOW_PLAN_STEM_MAX = 120). This used to duplicate the pass
+// WITHOUT the cap, so a queue-derived stem over 120 chars could never
+// match its capped planned stem. The basename strip stays here: the
+// plan pass operates on bare stems, not paths.
 export function safeQueueFilenameStem(value) {
-  let stem = flowDownloadBasename(value)
-    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
-    .replace(/[. ]+$/g, "");
-  if (!stem || stem === "." || stem === "..") return "";
-  if (/^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(stem)) stem = `_${stem}`;
-  return stem;
+  return sanitizePlanFilenameStem(flowDownloadBasename(value));
 }
 
 export function queueDownloadExtension(downloadItem) {
@@ -712,14 +715,15 @@ export async function waitForExistingQueueFlowDownload(downloadId, flowMediaId, 
 // (by mode, by config, or because no watermark was found), "failed" when
 // a cleaning attempt ran and failed, and "unknown" when an armed clean
 // produced no attributable outcome — never an invented success.
-// DL-02 (W11): video watermark cleaning NEVER runs in this service
-// worker. The frame pipeline lives in a page context
-// (content/bridge/video-watermark-cleaner.js); the background's job is
-// only to route the request there and record the outcome the page
-// reports (queueWatermarkResult below). Callers treat the delegation
-// as a routing signal, not as a failure of the media.
-export const FLOW_VIDEO_WATERMARK_MAX_INPUT_BYTES = 300 * 1024 * 1024;
-
+// DL-02 (cluster A3): video watermark cleaning is UNSUPPORTED. The
+// page-context frame pipeline (video-watermark-cleaner.js) was REMOVED:
+// it was never in the manifest's content_scripts, no download path ever
+// called it, and its only codec adapter failed closed (no demuxer or
+// WebCodecs surface exists in the extension), so it could never have
+// produced a working video clean. The route below therefore reports
+// video+clean as unsupported instead of delegating to a pipeline that
+// does not exist; a video download with mode=clean saves the original.
+// (The image path keeps its real page-context interceptor.)
 export function queueVideoWatermarkRoute({ kind, mode } = {}) {
   const normalizedKind = String(kind || "").toLowerCase() === "scene" ? "video" : String(kind || "").toLowerCase();
   const normalizedMode = typeof mode === "string" && mode ? mode : "original";
@@ -727,14 +731,15 @@ export function queueVideoWatermarkRoute({ kind, mode } = {}) {
     return { route: "none", context: "page", serviceWorker: false, delegated: false, kind: normalizedKind || null, mode: normalizedMode, reason: "clean_not_requested" };
   }
   if (normalizedKind === "video") {
-    return { route: "video-frame-pipeline", context: "page", serviceWorker: false, delegated: true, kind: "video", mode: "clean", reason: "video_cleaning_page_context_only", maxInputBytes: FLOW_VIDEO_WATERMARK_MAX_INPUT_BYTES };
+    return { route: "none", context: "page", serviceWorker: false, delegated: false, kind: "video", mode: "clean", reason: "video_cleaning_unsupported" };
   }
   return { route: "media-interceptor", context: "page", serviceWorker: false, delegated: true, kind: normalizedKind || null, mode: "clean", reason: "image_cleaning_page_context_only" };
 }
 
 // DL-02: the video fields that may ride an op watermark outcome into
-// the recorded job result — the page cleaner's output bookkeeping
+// the recorded job result — op-supplied video outcome bookkeeping
 // (frames, re-detections, untouched audio packets, source duration).
+// These fields are recorded, not produced: no video cleaner runs.
 // Only finite numbers (and the warning string) are recorded; anything
 // else the page sent is dropped rather than persisted verbatim.
 const QUEUE_VIDEO_WATERMARK_FIELDS = ["framesProcessed", "framesCleaned", "framesWithoutWatermark", "verificationFailures", "redetections", "redetectionRatio", "audioPacketsCopied", "durationMs", "sampleCount"];

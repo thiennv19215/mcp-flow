@@ -165,7 +165,8 @@
       display: flex;
     }
 
-    input[type="text"] {
+    input[type="text"],
+    input[type="password"] {
       width: 100%;
       background: #181818;
       border: 1px solid var(--card-border);
@@ -178,7 +179,8 @@
       transition: all 0.2s ease;
     }
 
-    input[type="text"]:focus {
+    input[type="text"]:focus,
+    input[type="password"]:focus {
       border-color: var(--primary);
       box-shadow: 0 0 0 3px rgba(204, 255, 0, 0.15);
     }
@@ -325,7 +327,7 @@
       font-weight: 600;
     }
   </style>
-  <link rel="stylesheet" href="tobyflow-ui.css">
+  <link rel="stylesheet" href="flow-mcp-ui.css">
 </head>
 <body class="flow-mcp-options">
   <div class="container">
@@ -357,6 +359,18 @@
         </svg>
         <span id="txtCardTitle">Thông số kết nối</span>
       </div>
+
+      <div class="form-group">
+        <label for="serverToken" id="txtTokenLabel">Token của MCP local</label>
+        <div class="input-wrap">
+          <input type="password" id="serverToken" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="help-text" id="txtTokenHint">Token nằm trong file ~/.flow-mcp/token trên máy chạy Flow MCP (hoặc FLOW_MCP_TOKEN nếu bạn tự đặt). Nhập một lần để extension kết nối qua HTTP.</div>
+      </div>
+
+      <button class="btn-save" id="saveToken" type="button">
+        <span id="txtSaveToken">Lưu token và kết nối lại</span>
+      </button>
 
       <button class="btn-save btn-local" id="useLocal" type="button">
         <span id="txtUseLocal">Dùng MCP local (127.0.0.1:18899)</span>

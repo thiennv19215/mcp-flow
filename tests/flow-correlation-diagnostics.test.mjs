@@ -359,3 +359,44 @@ test('sanitizes persisted diagnostic entries before reuse and clears incompatibl
   const incompatible = observerHarness({ priorStore: { version: 2, events: [validLegacyEvent] } });
   assert.equal(incompatible.window.__tobyFlowCorrelationObserver.health().requestDiagnostics.count, 0);
 });
+
+// ---------------------------------------------------------------------------
+// Audit cluster B — video decoder must not silently drop references:
+//
+// Branch A used to read row[0] only when it was a [null, UUID] pair; when
+// row[0] was a LIST of references it fell into the else branch and the
+// row[0] refs were never read. And a list slot with one non-UUID entry
+// dropped the WHOLE list while still reporting shape=true. The decoder
+// now reads a row[0] reference list as an extra slot, skips only the
+// invalid entries, and reports how many it dropped so the panel can show
+// it (as a dropped_references:<n> reason on the request event).
+// ---------------------------------------------------------------------------
+
+test('video rows: a row[0] reference list keeps valid refs and reports dropped entries', async () => {
+  const { window } = observerHarness();
+  const frameId = '11111111-2222-4333-8444-555555555555';
+  const prompt = 'A lighthouse beside a stormy sea';
+  arm(window, { prompt, model: 'omni-test', expectedReferenceIds: [frameId] });
+  // Branch A (model at row[2]): row[0] is a reference list whose second
+  // entry is not a UUID, and whose third entry carries the prompt nodes
+  // (row[0][2][0] is the canonical nodes location).
+  const row = [
+    [[null, frameId], [null, 'not-a-uuid'], [[[prompt]]]],
+    null,
+    'omni-test',
+    1,
+  ];
+  const payload = [[row]];
+  const fReq = JSON.stringify([[['rpc.videoListRefs', JSON.stringify(payload), null]]]);
+  await window.fetch('https://labs.google/u/0/_/AiSandboxAngularFrontend/data/batchexecute', {
+    method: 'POST',
+    body: new URLSearchParams({ 'f.req': fReq }).toString(),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const [entry] = window.__tobyFlowCorrelationObserver.health().requestDiagnostics.events;
+  assert.equal(entry.payloadVersion, 'video_inputs_v1');
+  assert.equal(entry.payloadMatched, true, JSON.stringify(entry));
+  assert.equal(entry.fields.referenceIds, true, 'the valid frame ref survives the invalid list entry');
+  assert.ok(entry.reasons.includes('dropped_references:1'),
+    `the dropped entry must be visible in the panel reasons, saw: ${JSON.stringify(entry.reasons)}`);
+});

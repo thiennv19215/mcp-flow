@@ -2,7 +2,10 @@ import { z } from "zod";
 
 const frameAssetSchema = z.object({
   asset: z.string().trim().min(1).describe("Exact image title in the open Flow project."),
-  id: z.string().uuid().describe("Stable Flow media UUID from the upload or asset receipt; must match the selected tile."),
+  // The extension's reference picker accepts a UUID or an asb: id, and
+  // the generation validator accepts both; the backend schema must not
+  // be stricter than the picker it feeds.
+  id: z.union([z.string().uuid(), z.string().regex(/^asb:/)]).describe("Stable Flow media UUID from the upload or asset receipt, or its asb: id; must match the selected tile."),
 }).strict();
 const frameInputSchema = z.union([z.string(), frameAssetSchema]);
 
@@ -13,7 +16,7 @@ export const sceneSchema = z.object({
     .string()
     .optional()
     .describe("Model label as shown in Flow, e.g. 'Omni 1.1 Flash', 'Veo 3.1 - Fast', 'Veo 3.1 - Quality', 'Nano Banana Pro'. Images default to the newest Nano Banana (2.1 today); video omitted keeps Flow's current model."),
-  aspect_ratio: z.enum(["16:9", "9:16", "1:1", "4:3", "3:4"]).optional().describe("Video supports 16:9 and 9:16 only."),
+  aspect_ratio: z.enum(["16:9", "9:16", "1:1", "4:3", "3:4"]).optional().describe("Video scenes support 16:9 and 9:16 only; image scenes support all five ratios (enforced per type in superRefine below)."),
   duration: z.union([z.literal(4), z.literal(6), z.literal(8), z.literal(10)]).optional().describe("Video length in seconds. Omni models only; Veo 3.1 clips are fixed at 8s."),
   resolution: z.enum(["360p", "720p"]).optional().describe("Video resolution. Omni models only."),
   max_credits: z.number().int().min(0).default(25).describe("Video safety cap: the scene is skipped (nothing spent) if Flow quotes more credits than this. Image generation does not check a credit quote."),
@@ -55,6 +58,12 @@ export const sceneSchema = z.object({
   if (scene.voice && scene.type !== "video") {
     context.addIssue({ code: "custom", path: ["voice"], message: "Flow voice chips are available for video generation only." });
   }
+  // The extension queue preflight enforces video 16:9/9:16 only; rejecting
+  // here keeps a video 1:1 scene from passing MCP validation only to fail
+  // later in the queue. Image scenes keep all five ratios.
+  if (scene.type === "video" && scene.aspect_ratio && !["16:9", "9:16"].includes(scene.aspect_ratio)) {
+    context.addIssue({ code: "custom", path: ["aspect_ratio"], message: "Video scenes support 16:9 and 9:16 only." });
+  }
   if (scene.voice && (scene.first_frame || scene.last_frame)) {
     context.addIssue({ code: "custom", path: ["voice"], message: "Flow voice chips are not available in first/last frame mode." });
   }
@@ -83,6 +92,33 @@ export const shapes = {
   generate: {
     project: z.string().min(1).describe("Folder name for the downloaded clips, e.g. 'HotelPromo'."),
     scenes: z.array(sceneSchema).min(1).max(100),
+  },
+  // These two shapes live here (not only in mcp-tools.ts) because the
+  // generic HTTP bridge validates /api/<method> bodies against schemas:
+  // a Core method without a shape entry used to reach the core as
+  // `undefined` args. Every Core interface method must have a shape.
+  chatgpt_generate: {
+    project: z.string().min(1).describe("Folder name for the downloaded images, e.g. 'ChatGPTArt'."),
+    prompt: z.string().min(1).describe("Image prompt for ChatGPT. Image generation only; there is no text-task mode."),
+    file_stem: z.string().min(1).optional().describe("Base file name for the downloaded images. Default 'chatgpt-01'; pass a distinct stem per call into the same project so later calls do not reuse the same names."),
+    ratio: z.string().min(1).optional().describe("Aspect ratio spelling or label, e.g. '16:9' or 'square'. Normalized against the ChatGPT capability registry by the extension; unsupported spellings are rejected by the queue preflight."),
+    model: z.string().min(1).optional().describe("ChatGPT image model label. Omitted keeps the provider default."),
+    conversation_id: z.string().min(1).optional().describe("Continue an existing ChatGPT conversation instead of starting a new one."),
+    refs: z.array(z.record(z.string(), z.unknown())).max(10).optional().describe("Reference images as payload records (base64, dataUrl or bytes fields). Uploaded references only: bare library or tile ids carry no payload and are rejected by the queue preflight."),
+    timeout_ms: z.number().int().min(1).max(1_800_000).optional().describe("Generation timeout in milliseconds."),
+  },
+  // FEAT-07: nodes stay permissive at the MCP boundary (the graph module
+  // validates types, ports and config); only the envelope the runner
+  // needs is pinned here.
+  run_workflow_graph: {
+    project: z.string().min(1),
+    graph: z.object({
+      name: z.string().optional(),
+      nodes: z.array(z.object({ id: z.string().min(1), type: z.string().min(1) }).passthrough()).min(1),
+      edges: z.array(z.object({}).passthrough()).optional(),
+    }).passthrough(),
+    output_dir: z.string().optional(),
+    auto_start: z.boolean().optional(),
   },
   wait: {
     job_ids: z.array(z.string()).optional().describe("Job ids from a queued call, or the task_id of a call that answered still_working. Default: every queued job."),

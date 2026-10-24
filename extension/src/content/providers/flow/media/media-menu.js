@@ -1093,8 +1093,6 @@
       const video = (typeof root.flowQuery === "function" ? root.flowQuery("tiles.video", tile, { checkVisible: false }) : tile.querySelector("flow-video-tile"));
       const image = (typeof root.flowQuery === "function" ? root.flowQuery("tiles.image", tile, { checkVisible: false }) : tile.querySelector("flow-image-tile"));
       const kind = scene ? "scene" : video ? "video" : image ? "image" : null;
-      const name = (tile.getAttribute("aria-label") || tile.getAttribute("title") || tile.getAttribute("data-tile-name") ||
-        tile.querySelector("img")?.getAttribute("alt") || tile.querySelector("img")?.getAttribute("aria-label") || "").trim();
       const queriedMedia = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.mediaElements", tile, { checkVisible: false }) : null) || [];
       const mediaElements = [...new Set([...queriedMedia, ...tile.querySelectorAll("img,video")])];
       const imageCandidates = mediaElements.flatMap(element => {
@@ -1130,7 +1128,24 @@
       const videoUrl = videoElement ? (videoElement.currentSrc || videoElement.getAttribute("src") || "") : "";
       const fileName = tile.getAttribute("data-file-name") || tile.getAttribute("data-filename") ||
         mediaElement?.getAttribute?.("data-file-name") || mediaElement?.getAttribute?.("data-filename") || "";
-      const displayName = tile.getAttribute("data-display-name") || tile.getAttribute("data-title") || name;
+      const explicitDisplayName = tile.getAttribute("data-display-name") || tile.getAttribute("data-title") || "";
+      // Name priority: a tile's aria-label can be a UI action string
+      // (e.g. "Request for text translation") rather than the asset's
+      // name, so the dedicated name attributes win and the accessible
+      // label is only a last resort — otherwise every downstream
+      // exact-title lookup searches for the action string.
+      // M-A: record WHICH side produced the name. A name from a
+      // dedicated attribute is a file name; a name that only exists
+      // because of title/aria-label/img-alt may be a UI action string,
+      // and downstream gates must not trust it as an asset identity
+      // without an id. The name value itself is computed exactly as
+      // before — only the provenance annotation is new.
+      const dedicatedName = tile.getAttribute("data-tile-name") || explicitDisplayName || fileName || "";
+      const fallbackName = tile.getAttribute("title") || tile.getAttribute("aria-label") ||
+        tile.querySelector("img")?.getAttribute("alt") || "";
+      const name = (dedicatedName || fallbackName).trim();
+      const nameSource = dedicatedName ? "dedicated" : (fallbackName ? "fallback" : "none");
+      const displayName = explicitDisplayName || name;
       const persistentMediaId = tile.getAttribute("data-persistent-media-id") || tile.getAttribute("data-media-id") ||
         mediaElement?.getAttribute?.("data-media-id") || undefined;
       const rawId = root.mediaId?.(tile);
@@ -1147,6 +1162,7 @@
         ...(id ? { id } : {}),
         ...(persistentMediaId ? { persistentMediaId } : {}),
         name,
+        nameSource,
         displayName,
         fileName: fileName || undefined,
         kind,

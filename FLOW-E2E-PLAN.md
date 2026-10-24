@@ -1,5 +1,12 @@
 # Flow end-to-end rollout
 
+> **Historical record (Oct 2026).** The live route below describes the retired
+> VPS deployment: MCP client → remote device session → VPS queue → browser
+> extension. The current architecture is local-only — MCP client → local
+> backend → extension → Flow tab (see `ARCHITECTURE.md`). The VPS steps in
+> this file are history, not instructions. The gates, checkpoints, and
+> retry rules remain valid.
+
 This plan follows the live route used by this repository: MCP client → local forwarding owner → authenticated remote device session → VPS queue → browser extension → Flow tab → Chrome download → MCP-visible file. TobyFlow is a reference for Flow-specific driver isolation, preflight gates, positive submit evidence, operation checkpoints, normalized errors, and retrying only when an operation is known to be safe. Its page selectors and internal API paths are not copied as dependencies.
 
 Automation locale policy: Flow navigation preserves the active locale and tab preparation does not rewrite the URL. `flow_open_project` optionally accepts a locale tag such as `vi` or `en`; when omitted it inherits the rendered document locale, then the existing `hl` URL parameter. DOM recognition must remain locale tolerant, with semantic controls and attributes preferred over translated visible text. This policy is source verified, not a live locale-runtime check.

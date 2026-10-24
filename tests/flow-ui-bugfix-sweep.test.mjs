@@ -7,8 +7,6 @@ const read = path => readFileSync(new URL(path, import.meta.url), 'utf8');
 const sidebarHtml = read('../extension/src/ui/sidebar.html');
 const sidebarJs = read('../extension/src/ui/sidebar.js');
 const panelJs = read('../extension/src/ui/flow-queue-panel.js');
-const popupHtml = read('../extension/src/ui/popup.html');
-const popupJs = read('../extension/src/ui/popup.js');
 const optionsJs = read('../extension/src/ui/options.js');
 const trackerJs = read('../extension/src/content/floating-tracker-flow.js');
 const i18nSource = read('../extension/src/content/shared/i18n.js');
@@ -101,23 +99,6 @@ test('previously raw i18n keys resolve in both locales', () => {
       assert.ok(value.length > 0, `${locale} has text for ${key}`);
     }
   }
-});
-
-test('popup no longer advertises the removed Studio', () => {
-  assert.doesNotMatch(popupHtml, /Mở Studio/);
-  assert.match(popupHtml, /id="txtOpenStudio">Mở thanh bên \(Tạo Ảnh \/ Video \/ Nhân Vật\)</);
-  runInThisContext(i18nSource);
-  const { I18n } = globalThis;
-  I18n._currentLocale = 'vi';
-  assert.equal(I18n.t('popup.btnStudio'), 'Mở thanh bên (Tạo Ảnh / Video / Nhân Vật)');
-  I18n._currentLocale = 'en';
-  assert.equal(I18n.t('popup.btnStudio'), 'Open Side Panel (Image / Video / Character)');
-});
-
-test('popup localizes the real options button instead of a missing label span', () => {
-  assert.doesNotMatch(popupJs, /#txtOptions/);
-  assert.match(popupJs, /document\.querySelector\("#options"\)/);
-  assert.match(popupJs, /optionsBtn\.title = t\("btnOptions"\)/);
 });
 
 test('options guide step 1 renders its <code> markup like steps 2 and 3', () => {

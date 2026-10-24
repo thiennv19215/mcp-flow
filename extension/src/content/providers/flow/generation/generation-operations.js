@@ -9,16 +9,29 @@
     error(...args) {
       return this.driver.error(...args);
     }
+    // Review round 1, S3: classifies WHY an object frame value is
+    // unusable, so execute can fail fast with a specific message instead
+    // of collapsing every bad frame into null and then into the generic
+    // retryable NATIVE_CAPABILITY_UNSUPPORTED. Returns null when the
+    // value has no identifiable problem (the generic path still owns it).
+    // Shared with frameValue so the two can never drift apart.
+    frameInputProblem(value) {
+      if (!value || typeof value !== "object" || typeof value.assetName !== "string" || !value.assetName.trim()) return null;
+      const kind = String(value.kind || "image").trim().toLowerCase();
+      if (kind !== "image") return `has kind "${value.kind}" — frames accept images only`;
+      const expectedId = value.expectedId;
+      const isUuid = typeof expectedId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(expectedId);
+      const isAsb = typeof expectedId === "string" && expectedId.startsWith("asb:");
+      if (expectedId !== undefined && !isUuid && !isAsb) return `has expectedId "${expectedId}" which is not a Flow media id (expected a UUID or asb: id)`;
+      return null;
+    }
     frameValue(value) {
       if (typeof value === "string" && value.trim()) return { assetName: value.replace(/^asset:/i, "").trim() };
       if (!value || typeof value !== "object") return undefined;
       if (typeof value.assetName === "string" && value.assetName.trim()) {
-        const kind = String(value.kind || "image").trim().toLowerCase();
-        if (kind !== "image") return null;
+        if (this.frameInputProblem(value)) return null;
         const expectedId = value.expectedId;
         const isUuid = typeof expectedId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(expectedId);
-        const isAsb = typeof expectedId === "string" && expectedId.startsWith("asb:");
-        if (expectedId !== undefined && !isUuid && !isAsb) return null;
         return { assetName: value.assetName.trim(), ...(value.kind ? { kind: value.kind } : {}), ...(expectedId ? { expectedId: isUuid ? String(expectedId).toLowerCase() : String(expectedId) } : {}) };
       }
       if (root.validStagedLocalImage?.(value, /(?:start|end)/)) return value;
@@ -119,8 +132,17 @@
         const flowAbort = new AbortController();
         const unknownSubmitError = async (code, message, retryable = false) => {
           const error = this.error(code, message, retryable, true);
+          // Videofix M-E: the slate-bridge ambiguity flag is wired here
+          // instead of staying dead metadata on the activation. It records
+          // one real diagnostic fact — the click landed but the bridge's
+          // reply was lost — for every submit error that carries observer
+          // diagnostics. It is NOT a "dispatched, ambiguous" state: no
+          // code treats the submit as dispatched on this flag alone; the
+          // dispatch wait's correlation / DOM signals own the verdict.
+          const submitBridgeAmbiguous = activation?.mainActivationAmbiguous === true;
           error.diagnostics = {
             clickDelivered: true,
+            submitBridgeAmbiguous,
             observerReady: false,
             xhrHookActive: false,
             fetchHookActive: false,
@@ -130,6 +152,7 @@
             const observer = await tiles.readNativeFlowCorrelationHealth?.();
             if (observer) error.diagnostics = {
               clickDelivered: true,
+              submitBridgeAmbiguous,
               observerReady: observer.ready === true,
               xhrHookActive: observer.xhrHookActive === true,
               fetchHookActive: observer.fetchHookActive === true,
@@ -207,6 +230,16 @@
         const attachments = Array.isArray(payload.attachments) ? payload.attachments : [];
         const variants = Math.max(1, Math.min(4, Number(payload.variants || payload.count || 1)));
         const firstFrame = this.frameValue(payload.firstFrame), lastFrame = this.frameValue(payload.lastFrame);
+        // Review round 1, S3: a frame whose id/kind is identifiably bad
+        // fails here, fast and non-retryable, naming the frame and the
+        // offending value — retrying could never fix it, and the old
+        // generic retryable error hid which frame was at fault.
+        for (const [slot, raw, value] of [["firstFrame", payload.firstFrame, firstFrame], ["lastFrame", payload.lastFrame, lastFrame]]) {
+          if (value === null) {
+            const problem = this.frameInputProblem(raw);
+            if (problem) throw this.error("FLOW_FRAME_INPUT_INVALID", `Invalid ${slot}: ${problem}. Nothing was submitted.`, false, false);
+          }
+        }
         const requestedVideoMode = String(payload.video_settings?.mode || payload.mode || "").trim().toLowerCase();
         const framesMode = payload.type === "video" && (requestedVideoMode === "frames" || Boolean(firstFrame || lastFrame));
         if (framesMode && !firstFrame && !lastFrame) {
@@ -274,18 +307,37 @@
               return response?.ok ? response.entry || null : null;
             } catch { return null; }
           };
-          const refAssetExists = (ref, entry) => {
-            // Absence must be provable: when the asset scan is unavailable
-            // or fails, the ref cannot be declared missing — the attach
-            // stages below remain the authority, exactly as before this
-            // pass existed (same degrade discipline as the catalog lookup).
-            if (typeof menu.collectAssets !== "function") return true;
+          // M-A: provenance-graded reference trust. A name-only match
+          // used to pass whenever ANY tile's computed name equalled the
+          // ref name — including a tile whose name exists only because
+          // its aria-label is a UI action string ("Request for text
+          // translation"). That let a poisoned action label pass
+          // revalidation and reach the frame picker as a real asset.
+          // Now a name match only counts when the tile's name came from
+          // a dedicated attribute (see collectAssets nameSource); a
+          // fallback-only name without an id is untrusted and fails
+          // here, before anything is submitted. "unknown" keeps the old
+          // degrade discipline: an unavailable scan cannot prove
+          // absence, so the attach stages below remain the authority.
+          const refNameTrust = (ref, entry) => {
+            if (typeof menu.collectAssets !== "function") return "unknown";
             let assets;
-            try { assets = menu.collectAssets({ includeIncomplete: true }); } catch { return true; }
+            try { assets = menu.collectAssets({ includeIncomplete: true }); } catch { return "unknown"; }
             const ids = new Set([ref.expectedId, entry?.mediaId, entry?.uuid].filter(value => typeof value === "string" && value));
-            return assets.some(asset => (ids.size > 0 && (ids.has(asset?.id) || ids.has(asset?.persistentMediaId))) ||
-              String(asset?.name || "").trim() === ref.assetName);
+            if (ids.size > 0 && assets.some(asset => ids.has(asset?.id) || ids.has(asset?.persistentMediaId))) return "id";
+            const named = assets.filter(asset => String(asset?.name || "").trim() === ref.assetName);
+            if (named.some(asset => asset?.nameSource === "dedicated")) return "dedicated";
+            if (named.length > 0) return "fallback-only";
+            // Review round 3 MUST: collectAssets reads only MOUNTED
+            // tiles while the grid is virtualized, so "absent" here
+            // means "no mounted tile" — not "not in the project". The
+            // loop below disambiguates identity-bearing absent refs
+            // with one scroll-scan before failing them; see there.
+            return "absent";
           };
+          // (No separate refAssetExists helper: the loop below reads the
+          // trust grade directly so it can report the fallback-only
+          // cause distinctly instead of a generic "missing".)
           const retainedRefFile = entry => {
             const wanted = [entry?.originalName, entry?.uploadName].filter(value => typeof value === "string" && value);
             if (!wanted.length || !root.stagedNativeFiles) return null;
@@ -294,16 +346,58 @@
             // bytes belong to this asset — treat it as not retained.
             return matches.length === 1 ? matches[0] : null;
           };
+          // Review round 3 MUST (disambiguation cache): one scroll-scan
+          // per submit, shared by every absent identity-bearing ref.
+          // null = not attempted yet; a Set of scanned ids, or the
+          // string "incomplete" when the scan could not prove it
+          // reached the end of the grid (or failed outright).
+          let libraryScanIds = null;
+          const disambiguateAbsentRef = async (ref, entry) => {
+            if (libraryScanIds === null) {
+              try {
+                let reachedEnd = false;
+                const scanned = await menu.scanNativeAssets({
+                  deadline: flowDeadline, maxDurationMs: 10_000, includeIncomplete: true,
+                  onDiagnostics: diagnostics => { reachedEnd = diagnostics?.reachedEnd === true; },
+                });
+                libraryScanIds = reachedEnd
+                  ? new Set((Array.isArray(scanned) ? scanned : []).flatMap(asset => [asset?.id, asset?.persistentMediaId]).filter(value => typeof value === "string" && value))
+                  : "incomplete";
+              } catch { libraryScanIds = "incomplete"; }
+            }
+            if (libraryScanIds === "incomplete") return "unknown";
+            const ids = [ref.expectedId, entry?.mediaId, entry?.uuid].filter(value => typeof value === "string" && value);
+            return ids.some(id => libraryScanIds.has(id)) ? "id" : "absent";
+          };
           await runFlowStage("revalidating queued references", async ({ signal }) => {
             const missing = [];
+            const missingFallback = [];
             for (const ref of refChecks) {
               const entry = await lookupRefCatalog(ref);
-              if (refAssetExists(ref, entry)) continue;
+              let trust = refNameTrust(ref, entry);
+              // Review round 3 MUST: a mounted-only "absent" grade for
+              // an identity-bearing ref is ambiguous — the tile may sit
+              // outside the virtualized viewport (off-screen library
+              // pick) or be genuinely gone (removed ref). Disambiguate
+              // with the scroll-scan when one is available: found by id
+              // passes, a complete scan without the id keeps "absent"
+              // (and the restore attempt below still runs first for
+              // uploaded refs), an incomplete/failed scan degrades to
+              // "unknown" so attach-time ID verification decides. When
+              // no scan is available the old "absent" behavior stands,
+              // so the gate still fails fast for removed refs.
+              if (trust === "absent" && (ref.expectedId || entry?.mediaId || entry?.uuid) && typeof menu.scanNativeAssets === "function") {
+                trust = await disambiguateAbsentRef(ref, entry);
+              }
+              if (trust === "unknown" || trust === "id" || trust === "dedicated") continue;
               let restoredId = null;
               if (entry?.uploadName) {
                 const file = retainedRefFile(entry);
                 if (file) {
-                  const receipt = await components.uploadStagedFlowMedia(file, ref.kind === "video" ? "video" : "image", command, { deadline: flowDeadline, signal });
+                  // Review round 1, S1: the confirmation may extend up to
+                  // the submit budget itself while the owner tile
+                  // processes (see the uploadAndResolve call below).
+                  const receipt = await components.uploadStagedFlowMedia(file, ref.kind === "video" ? "video" : "image", command, { deadline: flowDeadline, extendableTo: flowDeadline, signal });
                   if (typeof receipt?.id === "string" && receipt.id) restoredId = receipt.id;
                 }
               }
@@ -311,12 +405,17 @@
                 ref.applyId?.(restoredId);
                 continue;
               }
-              missing.push(ref.assetName);
+              if (trust === "fallback-only") missingFallback.push(ref.assetName);
+              else missing.push(ref.assetName);
             }
-            if (missing.length) {
+            if (missing.length || missingFallback.length) {
               throw this.error(
                 "FLOW_QUEUE_PREFLIGHT_REFERENCE_MISSING",
-                `Flow reference${missing.length === 1 ? "" : "s"} missing before generation: ${missing.join(", ")}. The referenced asset is no longer in the Flow project library, and no retained upload bytes are available to restore it. Re-attach the reference or remove it from the job; nothing was submitted.`,
+                [
+                  ...(missing.length ? [`Flow reference${missing.length === 1 ? "" : "s"} missing before generation: ${missing.join(", ")}. The referenced asset is no longer in the Flow project library, and no retained upload bytes are available to restore it.`] : []),
+                  ...(missingFallback.length ? [`The following reference name${missingFallback.length === 1 ? "" : "s"} ${missingFallback.length === 1 ? "was" : "were"} found only as a UI label (such as a tile aria-label), not as an asset file name, so ${missingFallback.length === 1 ? "it" : "they"} cannot be trusted as asset titles: ${missingFallback.join(", ")}. Re-attach ${missingFallback.length === 1 ? "it" : "them"} from the Flow library so ${missingFallback.length === 1 ? "it carries" : "they carry"} an asset ID, or remove ${missingFallback.length === 1 ? "it" : "them"} from the job.`] : []),
+                  "Nothing was submitted.",
+                ].join(" "),
                 false,
                 false,
               );
@@ -329,7 +428,7 @@
         let confirmedAttachmentCount = 0;
         await runFlowStage("stabilizing the Flow results grid before the generation baseline", ({ deadline, signal }) =>
           tiles.stabilizeFlowResultViewport?.({ deadline, signal }));
-        const before = tiles.collectNativeMedia().map(item => item.id || `title:${item.title}`);
+        const before = tiles.collectNativeMedia().map(item => tiles.tileSnapshotKey?.(item) || item.id || `title:${item.title}`);
         const activeAgent = root.flowButton?.("Agent");
         if (activeAgent?.getAttribute("aria-pressed") === "true") await runFlowStage("switching Agent mode off", ({ signal }) => agent.setNativeAgentMode(false, { signal, deadline: flowDeadline }));
         const clearReferenceChips = typeof root.clearExistingIngredientChips === "function"
@@ -346,11 +445,19 @@
           requireFlowTime("uploading and selecting Flow reference images", expectedVideoReferenceIds.length + expectedMediaReferenceIds.length + expectedCharacterIds.length > 0);
           if (!root.validStagedLocalImage?.(attachment, /(?:start|end|ref[1-3])/)) throw this.error("FLOW_UPLOAD_UNAVAILABLE", "Flow's staged image transfer is unavailable before file selection.", false, false);
           const file = root.stagedNativeFiles.get(attachment.transferId);
-          if (!file) throw this.error("FLOW_TRANSFER_UNKNOWN", "The staged image is no longer available.", true);
+          // Review round 1, S2: staged bytes live only in page memory,
+          // so a lost transfer can never be recovered by retrying this
+          // job — only by re-attaching the file and creating a new job.
+          // Non-retryable, outcome known (nothing was submitted).
+          if (!file) throw this.error("FLOW_TRANSFER_UNKNOWN", "The staged image is no longer available (the tab was reloaded or the transfer expired). Re-attach the file and create a new job — retrying this job cannot restore it.", false, false);
           let uploadReceipt;
           let uploadError;
           try {
-            uploadReceipt = await runFlowStage(`uploading ${attachment.name}`, ({ signal }) => components.uploadStagedFlowMedia(file, "image", command, { deadline: flowDeadline, signal }), true);
+            // Review round 1, S1: pass the submit budget as the
+            // confirmation extension ceiling — a tile finishing past the
+            // 90 s base cap but inside the budget confirms instead of
+            // timing out, while the budget itself is never exceeded.
+            uploadReceipt = await runFlowStage(`uploading ${attachment.name}`, ({ signal }) => components.uploadStagedFlowMedia(file, "image", command, { deadline: flowDeadline, extendableTo: flowDeadline, signal }), true);
           } catch (error) {
             uploadError = error;
           }
@@ -388,7 +495,12 @@
             throw uploadError;
           }
           if (popupCleanupError) throw popupCleanupError;
-          return await runFlowStage(`selecting uploaded image ${attachment.name}`, ({ signal }) => components.chooseNativePickerAsset(attachment.name, slot, { deadline: flowDeadline, signal, command, expectedId: uploadReceipt?.id }), true);
+          // M-B: the dispatched tile bears the uploader's digest-derived
+          // uploadName, not the client's safeName — pass uploadName (the
+          // same precedence the sidebar's uploadedAssetAttachment uses)
+          // so the picker's title leg can match the tile it just made.
+          const pickerTitle = uploadReceipt?.uploadName || uploadReceipt?.name || attachment.name;
+          return await runFlowStage(`selecting uploaded image ${attachment.name}`, ({ signal }) => components.chooseNativePickerAsset(pickerTitle, slot, { deadline: flowDeadline, signal, command, expectedId: uploadReceipt?.id }), true);
         };
 
         const resolveValue = async (value, slot) => {
@@ -408,7 +520,7 @@
               }
               throw this.error("FLOW_REFERENCE_ATTACH_UNAVAILABLE", "Flow's video reference picker is unavailable; no generation was submitted.", false, false);
             }
-            return runFlowStage(`selecting asset ${value.assetName}`, ({ signal }) => this.selectFrameAsset(components, value, slot, { deadline: flowDeadline, signal, command }), true);
+            return runFlowStage(`selecting asset ${assetName}`, ({ signal }) => this.selectFrameAsset(components, value, slot, { deadline: flowDeadline, signal, command }), true);
           }
           return uploadAndResolve(value, slot);
         };
@@ -597,9 +709,16 @@
           ...(expectedImageModelKey !== undefined ? { expectedImageModelKey } : {}),
         }));
         if (!correlationAttemptId || !tiles.nativeFlowCorrelationMap().has(correlationAttemptId)) {
+          // M-D: when the arm failed on a retired conflict, say so and
+          // say how to clear it (tab reload clears the hold immediately;
+          // the hold also expires after the observer TTL). The generic
+          // message hid this remedy and made the failure look permanent.
+          const armReason = root.__flowNativeCorrelationArmDiagnostics?.receipt?.reason;
           throw this.error(
             "FLOW_SUBMIT_CORRELATION_UNAVAILABLE",
-            "Flow's request observer could not be armed, so the submit cannot be safely confirmed. No generation request was sent.",
+            armReason === "ambiguous_retired_request"
+              ? "Flow's request observer refused a new attempt because a previous identical submit ended without a confirmed dispatch, so retrying now could double-generate. Reload the Flow tab (which clears the hold) or wait up to 15 minutes, then retry. No generation request was sent."
+              : "Flow's request observer could not be armed, so the submit cannot be safely confirmed. No generation request was sent.",
             false,
             false
           );
@@ -620,7 +739,8 @@
         }
         try { requireFlowTime("activating the Flow submit button"); }
         catch (error) {
-          if (correlationAttemptId) tiles.disarmNativeFlowCorrelation(correlationAttemptId);
+          // M-D: no click was attempted yet, so nothing can be in flight.
+          if (correlationAttemptId) tiles.disarmNativeFlowCorrelation(correlationAttemptId, { dispatchOutcome: "none" });
           throw error;
         }
 
@@ -634,7 +754,9 @@
             : await unknownSubmitError(error?.code || "FLOW_SUBMIT_ACTIVATION_UNKNOWN", error?.message || "Flow submit activation outcome is unknown; inspect Flow before retrying.", error?.retryable === true);
         }
         if (!activation.clickDelivered) {
-          if (correlationAttemptId) tiles.disarmNativeFlowCorrelation(correlationAttemptId);
+          // M-D: the button never received the click, so nothing can be
+          // in flight and the identical retry must not be retired.
+          if (correlationAttemptId) tiles.disarmNativeFlowCorrelation(correlationAttemptId, { dispatchOutcome: "none" });
           throw this.error(
             "FLOW_SUBMIT_CLICK_NOT_DELIVERED",
             "Flow did not receive a submit click; the button changed state before activation completed.",
@@ -644,7 +766,104 @@
         }
 
         const submitDeadline = Math.min(Date.now() + 30000, flowDeadline);
+        // DOM acceptance downgrade (TobyFlow semantics): when Flow's own
+        // submit control accepted the click — activateFlowSubmitButton saw
+        // it disable — the submit counts as acknowledged after a short
+        // grace window even if the correlation observer never matches a
+        // request payload. A payload layout the observer cannot decode yet
+        // (e.g. a new video model's reference rows) must not kill a submit
+        // Flow itself accepted. The 5 s grace stays well under the 30 s
+        // dispatch budget, so a genuinely correlated request still wins
+        // whenever it is observable, and this exit deliberately does NOT
+        // disarm the correlation attempt: the observe phase keeps reading
+        // the live entry, so a late requestSeen is still recorded and
+        // ownership tracking continues exactly as on the requestSeen path.
+        const domAcceptanceDeadline = activation.controlAccepted === true
+          ? Math.min(Date.now() + 5_000, submitDeadline)
+          : null;
+        // Live DOM acceptance (audit cluster B): the activation-time
+        // acceptance observer disconnects ~180 ms after activation, so a
+        // submit control Flow disables LATER (async Angular handling) is
+        // invisible to the snapshot above. The loop below re-checks three
+        // live signals every iteration, using only flow-editor's own
+        // finders — no new selector is invented here: the current submit
+        // button is disabled, the editor that held text at submit time is
+        // now empty, or a tile appeared that was not in the `before`
+        // snapshot. Any signal first resolves exactly like the snapshot
+        // grace exit: the correlation attempt is NOT disarmed, so a late
+        // requestSeen is still recorded. The editor-empty signal is only
+        // armed when the editor held text at submit time, so a blank
+        // prompt never "accepts" itself.
+        const submitEditorElement = typeof editor.getVisibleFlowPromptEditor === 'function'
+          ? editor.getVisibleFlowPromptEditor()
+          : (typeof root.getVisibleFlowPromptEditor === 'function' ? root.getVisibleFlowPromptEditor() : null);
+        // Videofix M-F: Flow may re-render the composer mid-wait, which
+        // detaches the submit-time element while it still holds the old
+        // prompt text. Reading that stale element forever would miss the
+        // acceptance and time out. Resolve the live editor on every read
+        // instead: the module's own current-editor finder keeps the
+        // submit-time element while it is still connected and falls back
+        // to the live visible editor once it detaches; a detached element
+        // is never read at all.
+        const resolveLiveEditor = () => {
+          try {
+            if (typeof editor.currentFlowPromptEditor === 'function') {
+              const current = editor.currentFlowPromptEditor(submitEditorElement);
+              if (current) return current;
+            }
+          } catch (_) { /* fall through to the plain finder */ }
+          return typeof editor.getVisibleFlowPromptEditor === 'function'
+            ? editor.getVisibleFlowPromptEditor()
+            : (typeof root.getVisibleFlowPromptEditor === 'function' ? root.getVisibleFlowPromptEditor() : null);
+        };
+        const readEditorText = (element) => {
+          const target = element === undefined ? resolveLiveEditor() : element;
+          if (!target || target.isConnected === false) return null;
+          if (typeof editor.getEditorUserText === 'function') return String(editor.getEditorUserText(target) || '');
+          if (typeof root.getEditorUserText === 'function') return String(root.getEditorUserText(target) || '');
+          return null;
+        };
+        const editorTextAtSubmit = readEditorText(submitEditorElement);
+        const editorHadTextAtSubmit = editorTextAtSubmit !== null && editorTextAtSubmit.trim() !== '';
+        const liveTileBaseline = before.slice();
+        const liveDomAccepted = () => {
+          try {
+            const liveButton = typeof editor.getFlowSubmitButton === 'function'
+              ? editor.getFlowSubmitButton()
+              : (typeof root.getFlowSubmitButton === 'function' ? root.getFlowSubmitButton() : null);
+            if (liveButton && (liveButton.disabled || liveButton.getAttribute?.('aria-disabled') === 'true')) return true;
+          } catch (_) { /* a transient finder failure is not acceptance */ }
+          try {
+            const currentText = readEditorText();
+            if (editorHadTextAtSubmit && currentText !== null && currentText.trim() === '') return true;
+          } catch (_) { /* a transient read failure is not acceptance */ }
+          try {
+            const liveTiles = tiles.collectNativeMedia?.() || [];
+            const seen = new Set(liveTileBaseline);
+            if (liveTiles.some((item) => !seen.has(tiles.tileSnapshotKey?.(item) || item.id || `title:${item.title}`))) return true;
+          } catch (_) { /* a transient scan failure is not acceptance */ }
+          return false;
+        };
+        // Videofix M-E, design decision (fail-as-designed, not observe):
+        // a no-signal dispatch timeout has ZERO positive evidence — no
+        // request (even weak), no Flow error, no button disable, no
+        // editor-empty, no new tile. Moving such a job into observe would
+        // break the invariant every other acceptance path keeps (a
+        // positive signal is required: requestSeen, DOM acceptance, or
+        // the M-G domAccepted fallback) and could claim another job's
+        // tile after burning the full observe budget on a submit Flow
+        // most likely dropped. So the timeout stays a failure with
+        // outcome_unknown=true — which is what blocks queue retry and
+        // auto-retry for this record, correctly, while a possibly-late
+        // Flow dispatch is still possible. The recovery is therefore
+        // spelled out in the error itself: inspect Flow first, and only
+        // recreate the job (a fresh submit in the same tab arms cleanly
+        // since M-D removed the retired-conflict lock) when nothing
+        // appeared. There is no "dispatched, ambiguous" state in code
+        // and no comment below may claim one.
+        const dispatchTimeoutGuidance = " The outcome is unknown: Flow may still dispatch this submit late. Check the Flow project first — if a tile for this prompt appears there, Flow did dispatch it and this job cannot be retried from the queue. Only if nothing appears, create the job again; a fresh submit in the same tab is not blocked.";
         let acknowledged = false;
+        let domAccepted = false;
         let lastSubmitProgress = "";
 
         while (Date.now() < submitDeadline) {
@@ -665,10 +884,28 @@
 
           const newError = editor.currentFlowSubmitErrors().find(msg => !errorsBeforeSubmit.has(msg));
           if (newError) {
-            tiles.disarmNativeFlowCorrelation(correlationAttemptId);
+            // M-D: Flow displayed an error, so the submit was rejected
+            // and nothing is in flight; the retry must not be retired.
+            tiles.disarmNativeFlowCorrelation(correlationAttemptId, { dispatchOutcome: "rejected" });
             const classified = root.classifyFlowError?.(newError);
             if (classified) throw await unknownSubmitError(classified.code, classified.message, classified.retryable);
             throw await unknownSubmitError("FLOW_SUBMIT_REJECTED", `Flow displayed an error before a correlated generation request was observed: ${newError}. Inspect Flow before retrying.`);
+          }
+
+          // Live DOM acceptance: re-checked every iteration, AFTER the
+          // error check above so a Flow rejection still wins over a
+          // disabled button. Resolves exactly like the snapshot grace
+          // exit and likewise does NOT disarm the correlation attempt.
+          if (liveDomAccepted()) {
+            acknowledged = true;
+            domAccepted = true;
+            break;
+          }
+
+          if (domAcceptanceDeadline !== null && Date.now() >= domAcceptanceDeadline) {
+            acknowledged = true;
+            domAccepted = true;
+            break;
           }
 
           const progress = "Waiting for Flow to dispatch the generation request";
@@ -676,22 +913,44 @@
             tiles.emitFlowProgress(command, progress);
             lastSubmitProgress = progress;
           }
-          if (root.FlowUiDeadline?.boundedWait) await root.FlowUiDeadline.boundedWait(250, submitDeadline, "waiting for Flow request dispatch", true, command.signal);
-          else await root.wait?.(250);
+          try {
+            if (root.FlowUiDeadline?.boundedWait) await root.FlowUiDeadline.boundedWait(250, submitDeadline, "waiting for Flow request dispatch", true, command.signal);
+            else await root.wait?.(250);
+          } catch (error) {
+            // The boundedWait timeout is the live "Timed out while waiting
+            // for Flow request dispatch" failure: the click was delivered
+            // but no generation request was ever observed. Convert it
+            // through unknownSubmitError so it carries the same observer
+            // diagnostics as every sibling submit exit instead of dying
+            // unexplained; code, message and retryable are preserved.
+            if (error?.code !== "FLOW_OPERATION_TIMEOUT") throw error;
+            // M-D: at this point the iteration already checked requestSeen
+            // (false), a new Flow error (none) and live DOM acceptance
+            // (false) — the click produced zero signal, so nothing is
+            // known to be in flight and the retry must not be retired.
+            // Exposure accepted deliberately: a request that arrives late
+            // after this timeout is attributed to the retry attempt, the
+            // same exposure a reload-and-retry has today.
+            tiles.disarmNativeFlowCorrelation(correlationAttemptId, { dispatchOutcome: "none" });
+            throw await unknownSubmitError(error.code, (error.message || "Timed out while waiting for Flow request dispatch.") + dispatchTimeoutGuidance, error.retryable === true);
+          }
         }
 
         if (!acknowledged) {
           const latestEntry = tiles.nativeFlowCorrelationMap().get(correlationAttemptId);
           if (latestEntry?.requestSeen) acknowledged = true;
           else {
-            tiles.disarmNativeFlowCorrelation(correlationAttemptId);
+            // M-D: check the rejection first so the disarm can carry the
+            // observed outcome (rejected vs no-signal) instead of the
+            // legacy ambiguous disarm. Throw behavior below is unchanged.
             const newError = editor.currentFlowSubmitErrors().find(msg => !errorsBeforeSubmit.has(msg));
+            tiles.disarmNativeFlowCorrelation(correlationAttemptId, { dispatchOutcome: newError ? "rejected" : "none" });
             if (newError) {
               const classified = root.classifyFlowError?.(newError);
               if (classified) throw await unknownSubmitError(classified.code, classified.message, classified.retryable);
               throw await unknownSubmitError("FLOW_SUBMIT_REJECTED", `Flow displayed an error before a correlated generation request was observed: ${newError}. Inspect Flow before retrying.`);
             }
-            throw await unknownSubmitError("FLOW_SUBMIT_UNCONFIRMED", `Flow did not emit a correlated generation request within the submit budget (click delivered: ${Boolean(activation.clickDelivered)}). The outcome is unknown; inspect Flow before retrying.`);
+            throw await unknownSubmitError("FLOW_SUBMIT_UNCONFIRMED", `Flow did not emit a correlated generation request within the submit budget (click delivered: ${Boolean(activation.clickDelivered)}).` + dispatchTimeoutGuidance);
           }
         }
 
@@ -721,6 +980,9 @@
             credits: Number.isFinite(credits) ? credits : null,
             timeoutMs: payload.type === "video" ? 600_000 : 300_000,
             submitOnly: payload.submitOnly === true || payload.submit_only === true,
+            // M-G: carry the DOM-accept flag through the checkpoint so a
+            // service-worker restart resumes observe with the fallback.
+            ...(domAccepted ? { domAccepted: true } : {}),
           },
         });
         return {
@@ -733,6 +995,7 @@
           dispatchedAt,
           activation: activation.strategy || "dom-click",
           requestDispatched: acknowledged,
+          ...(domAccepted ? { confirmationSignal: "dom_acceptance", matchKind: "dom_acceptance" } : {}),
           serverAcceptanceObserved,
           ...(dispatchReceipt ? { correlationReceipt: dispatchReceipt } : {}),
         };
@@ -926,7 +1189,7 @@
               lastMediaScanAt = Date.now();
             }
             let fresh = allMedia.filter(item =>
-              !before.includes(item.id || `title:${item.title}`) &&
+              !before.includes(tiles.tileSnapshotKey?.(item) || item.id || `title:${item.title}`) &&
               !item.title.startsWith("fm-") &&
               (!kind || item.kind === kind || (kind === "video" && item.kind === "scene") || item.failed) &&
               item.id && correlatedIds.has(item.id.toLowerCase())
@@ -946,6 +1209,26 @@
                 if (!(current.mediaReady || current.failed) && (recovered.mediaReady || recovered.failed)) fresh[index] = recovered;
               }
             }
+            // M-G: DOM-accepted fallback candidates. When the submit was
+            // accepted by Flow's own controls but the observer never
+            // correlated a request, the correlated set is empty forever
+            // and the loop below would wait out the full deadline despite
+            // a rendered tile. Only when NO correlation exists at all
+            // (empty set, no request ever seen) may new, ready,
+            // kind-matched tiles outside `before` stand in — and only
+            // when their count is EXACTLY the expected count, so an extra
+            // stray tile keeps the loop waiting instead of misattributing
+            // a result. The verdict itself is rendered below, next to the
+            // normal ready path, under the same isEarly guard.
+            const domFallbackActive = payload.domAccepted === true && correlatedIds.size === 0 && !evidence.requestSeen;
+            const domFallbackCandidates = domFallbackActive ? allMedia.filter(item =>
+              !before.includes(tiles.tileSnapshotKey?.(item) || item.id || `title:${item.title}`) &&
+              !item.title.startsWith("fm-") &&
+              (!kind || item.kind === kind || (kind === "video" && item.kind === "scene") || item.failed) &&
+              item.id
+            ) : [];
+            const domFallbackReady = domFallbackCandidates.filter(item => item.mediaReady && !item.busy && !item.failed);
+            const domFallbackSettled = domFallbackCandidates.filter(item => (item.mediaReady && !item.busy) || item.failed);
             // VID-08: progress, for quiet-window purposes, is the receipt
             // stage or correlated id set moving, or the fresh set's
             // observable state changing (including a busy tile's render
@@ -1069,6 +1352,32 @@
             const ready = fresh.filter(item => item.mediaReady && !item.busy && !item.failed);
             const isEarly = Date.now() - observeStartedAt < 2000 && !renderObservedInFlight;
 
+            // M-G fallback verdict: an exact-count ready set is accepted
+            // as this job's media (marked, so the queue can tell it apart
+            // from a correlated success); an exact-count settled set that
+            // is not all ready fails fast with a diagnosis instead of
+            // idling to the deadline. Any other count keeps waiting.
+            if (domFallbackActive && !isEarly) {
+              if (domFallbackReady.length === expected) {
+                const media = domFallbackReady.map(({ id, title, kind: mediaKind }) => ({
+                  id,
+                  title,
+                  kind: mediaKind === "scene" ? "video" : mediaKind,
+                }));
+                await tiles.emitFlowProgress(command, kind === "video" ? "Tạo video hoàn tất 100%" : "Tạo ảnh hoàn tất 100%", {
+                  generationResult: { media },
+                });
+                return { media, domAcceptedFallback: true };
+              }
+              if (domFallbackSettled.length === expected && domFallbackReady.length < expected) {
+                evidence.readyCount = domFallbackReady.length;
+                evidence.failedCount = domFallbackCandidates.filter(item => item.failed).length;
+                evidence.busyCount = domFallbackCandidates.filter(item => item.busy && !item.failed).length;
+                const failedDetails = domFallbackCandidates.filter(item => item.failed).map(item => `${item.title}${item.failureReason ? `: ${item.failureReason}` : ""}`).join("; ");
+                throw observeError("FLOW_GENERATION_FAILED", `Flow báo cáo ${domFallbackCandidates.filter(item => item.failed).length} tile render thất bại: ${failedDetails}. Chưa bị trừ tín dụng cho render lỗi này.`, false, false);
+              }
+            }
+
             if (!isEarly && ready.length >= expected) {
               const picked = [...correlatedIds].map(id => ready.find(item => item.id?.toLowerCase() === id)).filter(Boolean);
               if (picked.length < expected) {
@@ -1076,7 +1385,7 @@
                 continue;
               }
               const titleOnly = picked.some(item => !item.id || item.id.startsWith("title:"));
-              const signature = picked.map(item => item.id || `title:${item.title}`).join("|");
+              const signature = picked.map(item => tiles.tileSnapshotKey?.(item) || item.id || `title:${item.title}`).join("|");
               if (!titleOnly || signature === lastTitleOnlyResult) {
                 const media = picked.map(({ id, title, kind: mediaKind }) => ({
                   id,
