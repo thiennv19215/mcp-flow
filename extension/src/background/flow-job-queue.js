@@ -1185,7 +1185,14 @@ export class FlowJobQueue {
           pageBlocked = !unknown && PAGE_BLOCKER_ERROR_CODES.has(String(error?.code || ""));
           job.status = "failed";
           job.outcomeUnknown = unknown;
-          const explicitlyRetryable = error.retryable === true && error.noRetry !== true && error.noReplay !== true;
+          // Review round 1, S2: a lost staged transfer can never be
+          // recovered by re-running the same job — its bytes lived only
+          // in page memory — so the queue refuses this code outright
+          // even when the throwing site still claims retryable. This
+          // covers every FLOW_TRANSFER_UNKNOWN site (generation,
+          // character attach, upload-operations), not just one call site.
+          const transferUnknown = String(error?.code || "") === "FLOW_TRANSFER_UNKNOWN";
+          const explicitlyRetryable = error.retryable === true && error.noRetry !== true && error.noReplay !== true && !transferUnknown;
           job.retrySafe = pageBlocked || (!unknown && !downloadFailure && explicitlyRetryable);
           if (error?.requestDispatched === true || error?.request_dispatched === true) job.requestDispatched = true;
           if (error?.serverAcceptanceObserved === true) job.serverAcceptanceObserved = true;

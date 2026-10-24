@@ -198,7 +198,8 @@ test('IMG-09: cancelling one in-flight upload by request id aborts it promptly a
 
   assert.equal(cancelReturn, true, 'cancelUpload found and aborted the registered upload');
   assert.ok(a.error, 'the cancelled upload must fail instead of confirming');
-  assert.equal(a.error.code, 'FLOW_UPLOAD_TIMEOUT', String(a.error?.stack || a.error));
+  // Reviewfix S6: an abort during confirmation reports CANCELLED, not TIMEOUT.
+  assert.equal(a.error.code, 'FLOW_UPLOAD_CANCELLED', String(a.error?.stack || a.error));
   assert.ok(a.elapsed < 25_000, `the cancelled upload stopped at the cancel, not its 120 s deadline (elapsed ${a.elapsed} ms)`);
   assert.ok(b.receipt, `the concurrent upload must be unaffected (got error ${b.error?.code || 'none'})`);
   assert.equal(b.receipt.uploaded, true);

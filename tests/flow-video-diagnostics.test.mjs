@@ -67,7 +67,7 @@ const EXPECTED_DIAGNOSTICS = {
 // Part 1 — dispatch wait diagnostics (generation-operations.js)
 // ---------------------------------------------------------------------------
 
-function dispatchHarness({ health = HEALTH, waitMode = 'throw-timeout', activation = null, requestSeen = false, components = null, liveButtonDisabledAfterMs = null, liveTilesAfterMs = null, editorClearedAfterMs = null, editorSwapAfterMs = null, editorSwapNewText = '', menuAssets = null, stagedFiles = null } = {}) {
+function dispatchHarness({ health = HEALTH, waitMode = 'throw-timeout', activation = null, requestSeen = false, components = null, liveButtonDisabledAfterMs = null, liveTilesAfterMs = null, editorClearedAfterMs = null, editorSwapAfterMs = null, editorSwapNewText = '', menuAssets = null, stagedFiles = null, scanAssets = null, scanComplete = true } = {}) {
   const correlationMap = new Map([
     ['attempt-1', { attemptId: 'attempt-1', requestSeen, receipts: [], interfered: false }],
   ]);
@@ -151,7 +151,8 @@ function dispatchHarness({ health = HEALTH, waitMode = 'throw-timeout', activati
     validStagedLocalImage: (value) => Boolean(value && value.transferId),
     stagedNativeFiles: stagedFiles || new Map(),
     FlowTiles: fakeTiles,
-    FlowMediaMenu: { nativeRead: () => ({ signedIn: true, inProject: true }), ...(menuAssets !== null ? { collectAssets: () => menuAssets } : {}) },
+    FlowMediaMenu: { nativeRead: () => ({ signedIn: true, inProject: true }), ...(menuAssets !== null ? { collectAssets: () => menuAssets } : {}),
+      ...(scanAssets !== null ? { scanNativeAssets: async (options) => { options?.onDiagnostics?.({ reachedEnd: scanComplete, uniqueTiles: scanAssets.length }); return scanAssets; } } : {}) },
     FlowAgent: { closeNativeAgentSession: async () => {} },
     FlowScreenState: { inspect: () => ({ state: 'ready' }), assertGenerationReady: () => {} },
     FlowImageActions: { prepare: async () => ({}) },
@@ -273,6 +274,124 @@ test('M-B: in-submit frame upload passes the tile uploadName to the picker, not 
     'the dispatched tile bears the digest-derived uploadName, not the client safeName');
   assert.equal(picked[0].slot, 'start');
   assert.equal(picked[0].expectedId, 'receipt-id');
+});
+
+test('S1 reviewfix: the in-submit staged upload passes the submit budget as its confirmation extension ceiling', async () => {
+  // Before the fix the in-submit upload passed only { deadline }, so
+  // waitForNativeMediaTile capped confirmation at min(budget, base cap)
+  // and a tile finishing past the 90 s base cap — still inside the submit
+  // budget — died with FLOW_UPLOAD_TIMEOUT. After the fix the call also
+  // carries extendableTo equal to the submit deadline, so confirmation
+  // may extend (while the owner tile processes) up to the budget itself.
+  const captured = [];
+  const staged = new Map([['t1', { name: 'client-photo.png' }]]);
+  const components = {
+    clearExistingIngredientChips: async () => {},
+    uploadStagedFlowMedia: async (file, kind, command, options) => {
+      captured.push(options);
+      return { id: 'receipt-id', uploadName: 'a1b2c3d4-upload.png', name: 'client-photo.png' };
+    },
+    chooseNativePickerAsset: async () => ({ id: '11111111-2222-4333-8444-555555555555' }),
+  };
+  const { submit } = dispatchHarness({ waitMode: 'throw-timeout', components, stagedFiles: staged });
+  await assert.rejects(submit({ firstFrame: { transferId: 't1', name: 'client-photo.png' } }), (error) => error.code === 'FLOW_OPERATION_TIMEOUT');
+  assert.equal(captured.length, 1, 'the in-submit staged upload ran exactly once');
+  assert.ok(Number.isFinite(captured[0].deadline), 'the upload call carries a deadline');
+  assert.equal(captured[0].extendableTo, captured[0].deadline,
+    'the confirmation extension ceiling is the submit budget itself');
+});
+
+test('S2 reviewfix: a staged transfer lost before upload fails fast with re-attach guidance, not as a retryable error', async () => {
+  // The transferId points at bytes that live only in page memory; when
+  // they are gone (tab reload, expired transfer) no retry of this job
+  // can restore them. The error must say so and must not claim to be
+  // retryable, or the queue burns its auto-retry budget on a failure
+  // that can only be fixed by re-attaching the file.
+  const { submit } = dispatchHarness({ waitMode: 'throw-timeout', stagedFiles: new Map() });
+  await assert.rejects(submit({ firstFrame: { transferId: 't1', name: 'client-photo.png' } }), (error) => {
+    assert.equal(error.code, 'FLOW_TRANSFER_UNKNOWN');
+    assert.equal(error.retryable, false, 'a lost transfer is not retryable');
+    assert.match(error.message, /re-attach/i, 'the message must tell the user to re-attach the file');
+    return true;
+  });
+});
+
+test('S3 reviewfix: a frame with an unrecognizable id fails fast, non-retryable, naming the frame and the id', async () => {
+  // Before the fix frameValue collapsed a bad expectedId into null and
+  // execute threw the generic retryable NATIVE_CAPABILITY_UNSUPPORTED
+  // for the whole job — so the queue retried a job that could never
+  // succeed, with a message that never said which frame or id was bad.
+  const { submit } = dispatchHarness({ waitMode: 'throw-timeout' });
+  await assert.rejects(submit({ firstFrame: { assetName: 'still.png', expectedId: 'bad-id' } }), (error) => {
+    assert.equal(error.code, 'FLOW_FRAME_INPUT_INVALID');
+    assert.equal(error.retryable, false, 'an invalid frame id is not fixed by retrying');
+    assert.match(error.message, /firstFrame/, 'the message names the offending frame');
+    assert.match(error.message, /bad-id/, 'the message names the offending id');
+    return true;
+  });
+});
+
+test('S3 reviewfix control: a malformed frame with no identifiable problem keeps the old generic error', async () => {
+  const { submit } = dispatchHarness({ waitMode: 'throw-timeout' });
+  await assert.rejects(submit({ firstFrame: {} }), (error) => {
+    assert.equal(error.code, 'NATIVE_CAPABILITY_UNSUPPORTED');
+    assert.equal(error.retryable, true);
+    return true;
+  });
+});
+
+test('reviewfix M-A off-screen: an identity-bearing ref with no mounted tile passes the gate when the scroll-scan finds its id', async () => {
+  // Before the fix refNameTrust graded only against MOUNTED assets, so
+  // a valid library/album ref whose tile sat outside the virtualized
+  // grid viewport graded "absent" and failed before submit. The gate
+  // now disambiguates with one scroll-scan: the id found in the full
+  // grid passes, so the job gets PAST revalidation (it dies later in
+  // this harness, which stubs no picker).
+  const { submit } = dispatchHarness({
+    waitMode: 'throw-timeout',
+    menuAssets: [],
+    scanAssets: [{ id: '11111111-2222-4333-8444-555555555555', name: 'Off-screen photo.png' }],
+  });
+  await assert.rejects(submit({ firstFrame: { assetName: 'Off-screen photo.png', kind: 'image', expectedId: '11111111-2222-4333-8444-555555555555' } }), (error) => {
+    assert.notEqual(error.code, 'FLOW_QUEUE_PREFLIGHT_REFERENCE_MISSING');
+    return true;
+  });
+});
+
+test('reviewfix M-A off-screen: a complete scroll-scan without the id still fails the removed ref at the gate', async () => {
+  const { submit } = dispatchHarness({
+    waitMode: 'throw-timeout',
+    menuAssets: [],
+    scanAssets: [],
+  });
+  await assert.rejects(submit({ firstFrame: { assetName: 'Removed photo.png', kind: 'image', expectedId: '11111111-2222-4333-8444-555555555555' } }), (error) => {
+    assert.equal(error.code, 'FLOW_QUEUE_PREFLIGHT_REFERENCE_MISSING');
+    return true;
+  });
+});
+
+test('reviewfix M-A off-screen: an incomplete scroll-scan degrades to unknown instead of failing the ref', async () => {
+  const { submit } = dispatchHarness({
+    waitMode: 'throw-timeout',
+    menuAssets: [],
+    scanAssets: [],
+    scanComplete: false,
+  });
+  await assert.rejects(submit({ firstFrame: { assetName: 'Maybe photo.png', kind: 'image', expectedId: '11111111-2222-4333-8444-555555555555' } }), (error) => {
+    assert.notEqual(error.code, 'FLOW_QUEUE_PREFLIGHT_REFERENCE_MISSING');
+    return true;
+  });
+});
+
+test('reviewfix M-A off-screen control: a name-only ref with no mounted tile still fails at the gate', async () => {
+  const { submit } = dispatchHarness({
+    waitMode: 'throw-timeout',
+    menuAssets: [],
+  });
+  await assert.rejects(submit({ firstFrame: { assetName: 'Gone.png', kind: 'image' } }), (error) => {
+    assert.equal(error.code, 'FLOW_QUEUE_PREFLIGHT_REFERENCE_MISSING');
+    return true;
+  });
 });
 
 test('dispatch wait: exhausting the submit deadline without acknowledgement also carries diagnostics', async () => {

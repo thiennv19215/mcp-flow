@@ -2667,9 +2667,23 @@
     }
   }
 
+  // Review round 1, V1: the upload kind must follow the FILE's media type,
+  // not the reference role. Flow creates a video tile for a video file, so
+  // confirming a local video reference with kind "image" could never match
+  // (flowUploadKindMatches("image", "video") is false) and died with
+  // FLOW_UPLOAD_TIMEOUT even though the tile existed. The MIME type wins;
+  // an empty MIME type falls back to the file extension.
+  function referenceUploadKind(file) {
+    const type = typeof file?.type === "string" ? file.type.toLowerCase() : "";
+    if (type.startsWith("video/")) return "video";
+    const name = typeof file?.name === "string" ? file.name : "";
+    if (/\.(mp4|m4v|mov|webm|avi|mkv|3gp)$/i.test(name)) return "video";
+    return "image";
+  }
+
   async function uploadReferenceImage(file, onProgress, referenceIndex) {
     if (window.FlowUploadClient) {
-      return await uploadWithCancel(file, { onProgress, kind: "image", referenceIndex });
+      return await uploadWithCancel(file, { onProgress, kind: referenceUploadKind(file), referenceIndex });
     }
     throw new Error("Dịch vụ tải ảnh lên Flow chưa được khởi tạo");
   }
@@ -2677,9 +2691,15 @@
   // One builder for every attachment that comes out of an upload result
   // (image submit, video references, video frames). The Flow tile carries
   // the uploader's digest-derived uploadName — not the client's safeName —
-  // so the attachment must name uploadName when the receipt provided one,
-  // and expectedId prefers the canonical mediaUuid over an asb: receipt
-  // id. Missing fields fall back to the pre-identity behaviour exactly.
+  // so the attachment must name uploadName when the receipt provided one.
+  // Review round 1, S7 (corrected): expectedId prefers the receipt's
+  // mediaUuid when upload enrichment resolved one — a UUID tile id, or
+  // an asb: id resolved via the media catalog / identities probe — but
+  // mediaUuid is NOT always present: when enrichment cannot resolve an
+  // asb: id it stays absent, and then the receipt id itself (possibly
+  // asb:) is still a real identity that attach-time resolution can
+  // resolve, so it stays as the fallback. Missing fields fall back to
+  // the pre-identity behaviour exactly.
   function uploadedAssetAttachment(uploaded) {
     const tileName = typeof uploaded === "string" ? uploaded : (uploaded?.uploadName || uploaded?.name || uploaded?.title || String(uploaded));
     const expectedId = uploaded && typeof uploaded === "object" ? (uploaded.mediaUuid || uploaded.id || uploaded.mediaId) : undefined;
@@ -2725,6 +2745,16 @@
     if (referenceMode === "mention") {
       try { mentionResolution = resolveMentionReferences(prompts, refFilesImage); }
       catch (error) { setFeedback(error.message, false); return; }
+    }
+    // Review round 3, S2: fail fast on an unresolved mention — before
+    // any upload or enqueue. The old code only warned AFTER the job was
+    // queued, leaving the @name in the prompt for Flow to drop (skewed
+    // fingerprint, or a video missing an ingredient after credits were
+    // spent). Character mentions never land here: the resolver already
+    // excludes them from unresolvedNames.
+    if (mentionResolution?.unresolvedNames?.length) {
+      setFeedback(t("sidebar.multiPromptMentionUnresolved", { names: mentionResolution.unresolvedNames.map(name => `@${name}`).join(", ") }), false);
+      return;
     }
     if (prompts.length > 1 && referenceMode === "sequential" && refFilesImage.length < prompts.length * referencesPerPrompt) {
       setFeedback(t("sidebar.multiPromptRefsMissing"), false);
@@ -2891,6 +2921,12 @@
       try { mentionResolution = resolveMentionReferences(prompts, refFilesVideo); }
       catch (error) { setFeedback(error.message, false); return; }
     }
+    // Review round 3, S2: fail fast on an unresolved mention — before
+    // any upload or enqueue (see the image handler above for why).
+    if (mentionResolution?.unresolvedNames?.length) {
+      setFeedback(t("sidebar.multiPromptMentionUnresolved", { names: mentionResolution.unresolvedNames.map(name => `@${name}`).join(", ") }), false);
+      return;
+    }
 
     const commonAttachments = [];
     const referenceAttachments = [];
@@ -2915,7 +2951,7 @@
           const attachment = {
             assetName: reference.assetName,
             expectedId: reference.expectedId,
-            kind: reference.kind || "video",
+            kind: reference.kind || "image",
           };
           referenceAttachments.push(attachment);
           attachmentByReference.set(reference, attachment);
@@ -2926,7 +2962,7 @@
         const uploaded = await uploadReferenceImage(reference.file, undefined, i + 1);
         const attachment = {
           ...uploadedAssetAttachment(uploaded),
-          kind: reference.kind || "video",
+          kind: reference.kind || "image",
         };
         referenceAttachments.push(attachment);
         attachmentByReference.set(reference, attachment);

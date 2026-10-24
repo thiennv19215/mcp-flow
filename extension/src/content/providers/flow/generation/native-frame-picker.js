@@ -325,59 +325,80 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
       await boundedWait(650, `searching for "${assetName}" in Flow's ${slot} picker`);
       await pickerSettled(listGetter);
     }
-    for (const category of categories) {
-      requireTime(`searching Flow's ${slot} picker`);
-      const tab = findTab(category);
-      if (tab && tab.getAttribute("aria-selected") !== "true") {
-        tab.click();
-        const tabDeadline = Math.min(Date.now() + 5000, deadline);
-        while (Date.now() < tabDeadline) {
-          const current = findTab(category);
-          if (current?.getAttribute("aria-selected") === "true") break;
-          await boundedWait(100, `selecting ${category} in Flow's ${slot} picker`);
-        }
-        if (findTab(category)?.getAttribute("aria-selected") !== "true") throw flowError("FLOW_ASSET_CATEGORY_UNCONFIRMED", `Flow did not select the ${category} picker category. Nothing was submitted.`, true, false);
-        await pickerSettled(listGetter);
-      }
-      list = listGetter();
-      if (!list) continue;
-      search = findSearchInput();
-      if (search && String(search.value ?? "") !== assetName) {
-        setEditable(search, assetName);
-        await boundedWait(650, `searching for "${assetName}" in Flow's ${slot} picker`);
-        await pickerSettled(listGetter);
-      }
-      list = listGetter();
-      scroller = list && [list, ...deepQueryAll(list, "*")].find(el => el.clientHeight > 0 && el.scrollHeight > el.clientHeight + 5);
-      if (scroller) scroller.scrollTop = 0;
-      matches = new Map();
-      identityMatches = new Map();
-      for (pageIndex = 0; pageIndex < (scroller ? 150 : 1) && Date.now() < deadline; pageIndex++) {
-        list = await pickerSettled(listGetter, 15_000);
-        if (!list) break;
-        const visibleOptions = listOptions(list);
-        for (const [itemIndex, option] of visibleOptions.entries()) {
-          const key = optionIdentity(option, pageIndex, itemIndex, scroller);
-          if (expectedUuid) {
-            const backendId = await optionBackendIdentity(option);
-            if (backendId) {
-              // A resolved identity is decisive: equal means this option
-              // IS the wanted asset whatever title Flow renders for it;
-              // different means it can never be, title match or not.
-              if (backendId === expectedUuid) identityMatches.set(key, option);
-              continue;
-            }
+    // Review round 2, S5: the picker scans only the opened listbox,
+    // so an asset that exists in the project but has not been loaded
+    // into it used to die with NOT_FOUND. When the first full
+    // category pass finds nothing, run ONE bounded library scan
+    // (the virtualized grid loader; same idea as the TobyFlow
+    // ensureFlowTilesLoaded step) and then repeat the category scan
+    // exactly once before giving up. The scan call omits exactName,
+    // so a scan miss cannot itself throw; a missing FlowMediaMenu
+    // or a scan failure just proceeds to the second pass / NOT_FOUND.
+    // The overall deadline still bounds all of it.
+    for (let pass = 0; pass < 2; pass++) {
+      for (const category of categories) {
+        requireTime(`searching Flow's ${slot} picker`);
+        const tab = findTab(category);
+        if (tab && tab.getAttribute("aria-selected") !== "true") {
+          tab.click();
+          const tabDeadline = Math.min(Date.now() + 5000, deadline);
+          while (Date.now() < tabDeadline) {
+            const current = findTab(category);
+            if (current?.getAttribute("aria-selected") === "true") break;
+            await boundedWait(100, `selecting ${category} in Flow's ${slot} picker`);
           }
-          if (isExactOption(option)) matches.set(key, option);
+          if (findTab(category)?.getAttribute("aria-selected") !== "true") throw flowError("FLOW_ASSET_CATEGORY_UNCONFIRMED", `Flow did not select the ${category} picker category. Nothing was submitted.`, true, false);
+          await pickerSettled(listGetter);
         }
-        if (identityMatches.size || matches.size > 1) break;
-        if (!scroller || scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 2) break;
-        const previous = scroller.scrollTop;
-        scroller.scrollTop = Math.min(scroller.scrollHeight - scroller.clientHeight, previous + Math.max(120, scroller.clientHeight * 0.75));
-        await boundedWait(250, `scanning Flow's ${slot} picker`);
-        if (scroller.scrollTop === previous) break;
+        list = listGetter();
+        if (!list) continue;
+        search = findSearchInput();
+        if (search && String(search.value ?? "") !== assetName) {
+          setEditable(search, assetName);
+          await boundedWait(650, `searching for "${assetName}" in Flow's ${slot} picker`);
+          await pickerSettled(listGetter);
+        }
+        list = listGetter();
+        scroller = list && [list, ...deepQueryAll(list, "*")].find(el => el.clientHeight > 0 && el.scrollHeight > el.clientHeight + 5);
+        if (scroller) scroller.scrollTop = 0;
+        matches = new Map();
+        identityMatches = new Map();
+        for (pageIndex = 0; pageIndex < (scroller ? 150 : 1) && Date.now() < deadline; pageIndex++) {
+          list = await pickerSettled(listGetter, 15_000);
+          if (!list) break;
+          const visibleOptions = listOptions(list);
+          for (const [itemIndex, option] of visibleOptions.entries()) {
+            const key = optionIdentity(option, pageIndex, itemIndex, scroller);
+            if (expectedUuid) {
+              const backendId = await optionBackendIdentity(option);
+              if (backendId) {
+                // A resolved identity is decisive: equal means this option
+                // IS the wanted asset whatever title Flow renders for it;
+                // different means it can never be, title match or not.
+                if (backendId === expectedUuid) identityMatches.set(key, option);
+                continue;
+              }
+            }
+            if (isExactOption(option)) matches.set(key, option);
+          }
+          if (identityMatches.size || matches.size > 1) break;
+          if (!scroller || scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 2) break;
+          const previous = scroller.scrollTop;
+          scroller.scrollTop = Math.min(scroller.scrollHeight - scroller.clientHeight, previous + Math.max(120, scroller.clientHeight * 0.75));
+          await boundedWait(250, `scanning Flow's ${slot} picker`);
+          if (scroller.scrollTop === previous) break;
+        }
+        if (identityMatches.size || matches.size) break;
       }
       if (identityMatches.size || matches.size) break;
+      if (pass === 0) {
+        try {
+          if (typeof root.FlowMediaMenu?.scanNativeAssets === "function") {
+            await root.FlowMediaMenu.scanNativeAssets({ maxDurationMs: 10_000, deadline: Math.min(Date.now() + 10_000, deadline), kind: "image", includeIncomplete: true });
+            recordFramePickerDiagnostics("library_scan_retry", list, { scanAttempted: true });
+          }
+        } catch { /* the second pass / NOT_FOUND below owns the outcome */ }
+      }
     }
     // Identity beats title: a single identity match is the wanted asset
     // even when its displayed title drifted, and it resolves what would
@@ -411,7 +432,12 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
     const expectedId = await globalThis.resolveNativeMediaUuid?.(config.expectedId, "image") || config.expectedId;
     if (!uuidPattern.test(String(selectedId || ""))) {
       if (expectedId && uuidPattern.test(String(expectedId))) {
-        selectedId = expectedId;
+        // Review round 1 S4 / round 2 S1: never stamp the expected id
+        // onto a selection that did not expose one. The mismatch check
+        // below would then compare the value with itself and pass
+        // vacuously, mis-reporting identity and breaking correlation.
+        // Fail closed like the Ingredients picker does.
+        throw flowError("FLOW_ASSET_ID_MISMATCH", `Flow's exact frame option for "${assetName}" did not expose a verifiable media ID, so it cannot be proven to be the expected asset (${expectedId}). No frame was selected.`, false, false);
       } else {
         throw flowError("FLOW_ASSET_ID_UNAVAILABLE", `Flow's exact frame option for "${assetName}" did not expose a uniquely verifiable backend UUID. No frame was selected.`, false, false);
       }
@@ -428,12 +454,30 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
       const currentList = listGetter();
       const selected = currentList && deepQueryAll(currentList, '[role="option"]').find(item => isExactOption(item) &&
         (item.getAttribute("aria-selected") === "true" || item.getAttribute("aria-checked") === "true" || item.getAttribute("data-state") === "checked"));
+      // Review round 2, S2: an option selected by identity whose title
+      // drifted never matches the exact-title check above, so without
+      // this it waited the full 5 s and threw UNCONFIRMED despite a
+      // successful attach. A selected-state option whose backend
+      // identity equals the verified selectedId confirms by identity.
+      // Only selected-state options are probed, failures resolve to null
+      // (never break the loop), and the deadline still bounds the work.
+      let identityConfirmed = false;
+      if (!selected && currentList) {
+        const selectedStateOptions = deepQueryAll(currentList, '[role="option"]').filter(item =>
+          item.getAttribute("aria-selected") === "true" || item.getAttribute("aria-checked") === "true" || item.getAttribute("data-state") === "checked");
+        for (const candidate of selectedStateOptions) {
+          if (Date.now() >= selectionDeadline) break;
+          let candidateId = null;
+          try { candidateId = await optionBackendIdentity(candidate); } catch { candidateId = null; }
+          if (candidateId && candidateId === selectedId.toLowerCase()) { identityConfirmed = true; break; }
+        }
+      }
       const slotChanged = slotSignature() !== beforeSlot;
-      if (selected || (slotChanged && !currentList)) {
+      if (selected || identityConfirmed || (slotChanged && !currentList)) {
         attached = true;
         recordFramePickerDiagnostics("selection_confirmed", currentList, {
           selectedMediaId: selectedId.toLowerCase(),
-          confirmation: selected ? "exact_option_selected_state" : "slot_signature_changed_and_exact_list_disappeared",
+          confirmation: selected ? "exact_option_selected_state" : identityConfirmed ? "identity_selected_state" : "slot_signature_changed_and_exact_list_disappeared",
           slotChanged,
         });
         break;

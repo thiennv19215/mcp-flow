@@ -1422,6 +1422,17 @@ async function queueJobProjectId(job) {
 function createQueueRefPreflight(environment) {
   const catalog = environment && environment.catalog ? environment.catalog : null;
   const projectIdForJob = environment && typeof environment.projectIdForJob === "function" ? environment.projectIdForJob : async () => null;
+  // Review round 2 S4 / round 3 S4: the existence leg is deliberately a
+  // pass-through, and that is the correct contract — NOT a stub to be
+  // "completed" by failing on a catalog miss. The worker has no DOM to
+  // scan, and the catalog only records entries from upload enrichment:
+  // a library/album-picked reference is NEVER recorded, and the catalog
+  // tracks no deletions — so a catalog miss proves nothing about whether
+  // the asset exists in the project, and failing on it would false-fail
+  // legitimate library-picked jobs. The catalog leg still runs (its hit
+  // carries upload provenance for the reupload leg), but the content-side
+  // revalidation at submit — refNameTrust grading plus attach-time ID
+  // verification — is the authoritative gate that decides existence.
   return job => revalidateJobReferences(job, {
     catalogLookup: async ref => {
       if (!catalog) return null;

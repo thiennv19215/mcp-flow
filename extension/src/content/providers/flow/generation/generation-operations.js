@@ -9,16 +9,29 @@
     error(...args) {
       return this.driver.error(...args);
     }
+    // Review round 1, S3: classifies WHY an object frame value is
+    // unusable, so execute can fail fast with a specific message instead
+    // of collapsing every bad frame into null and then into the generic
+    // retryable NATIVE_CAPABILITY_UNSUPPORTED. Returns null when the
+    // value has no identifiable problem (the generic path still owns it).
+    // Shared with frameValue so the two can never drift apart.
+    frameInputProblem(value) {
+      if (!value || typeof value !== "object" || typeof value.assetName !== "string" || !value.assetName.trim()) return null;
+      const kind = String(value.kind || "image").trim().toLowerCase();
+      if (kind !== "image") return `has kind "${value.kind}" — frames accept images only`;
+      const expectedId = value.expectedId;
+      const isUuid = typeof expectedId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(expectedId);
+      const isAsb = typeof expectedId === "string" && expectedId.startsWith("asb:");
+      if (expectedId !== undefined && !isUuid && !isAsb) return `has expectedId "${expectedId}" which is not a Flow media id (expected a UUID or asb: id)`;
+      return null;
+    }
     frameValue(value) {
       if (typeof value === "string" && value.trim()) return { assetName: value.replace(/^asset:/i, "").trim() };
       if (!value || typeof value !== "object") return undefined;
       if (typeof value.assetName === "string" && value.assetName.trim()) {
-        const kind = String(value.kind || "image").trim().toLowerCase();
-        if (kind !== "image") return null;
+        if (this.frameInputProblem(value)) return null;
         const expectedId = value.expectedId;
         const isUuid = typeof expectedId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(expectedId);
-        const isAsb = typeof expectedId === "string" && expectedId.startsWith("asb:");
-        if (expectedId !== undefined && !isUuid && !isAsb) return null;
         return { assetName: value.assetName.trim(), ...(value.kind ? { kind: value.kind } : {}), ...(expectedId ? { expectedId: isUuid ? String(expectedId).toLowerCase() : String(expectedId) } : {}) };
       }
       if (root.validStagedLocalImage?.(value, /(?:start|end)/)) return value;
@@ -217,6 +230,16 @@
         const attachments = Array.isArray(payload.attachments) ? payload.attachments : [];
         const variants = Math.max(1, Math.min(4, Number(payload.variants || payload.count || 1)));
         const firstFrame = this.frameValue(payload.firstFrame), lastFrame = this.frameValue(payload.lastFrame);
+        // Review round 1, S3: a frame whose id/kind is identifiably bad
+        // fails here, fast and non-retryable, naming the frame and the
+        // offending value — retrying could never fix it, and the old
+        // generic retryable error hid which frame was at fault.
+        for (const [slot, raw, value] of [["firstFrame", payload.firstFrame, firstFrame], ["lastFrame", payload.lastFrame, lastFrame]]) {
+          if (value === null) {
+            const problem = this.frameInputProblem(raw);
+            if (problem) throw this.error("FLOW_FRAME_INPUT_INVALID", `Invalid ${slot}: ${problem}. Nothing was submitted.`, false, false);
+          }
+        }
         const requestedVideoMode = String(payload.video_settings?.mode || payload.mode || "").trim().toLowerCase();
         const framesMode = payload.type === "video" && (requestedVideoMode === "frames" || Boolean(firstFrame || lastFrame));
         if (framesMode && !firstFrame && !lastFrame) {
@@ -305,6 +328,11 @@
             const named = assets.filter(asset => String(asset?.name || "").trim() === ref.assetName);
             if (named.some(asset => asset?.nameSource === "dedicated")) return "dedicated";
             if (named.length > 0) return "fallback-only";
+            // Review round 3 MUST: collectAssets reads only MOUNTED
+            // tiles while the grid is virtualized, so "absent" here
+            // means "no mounted tile" — not "not in the project". The
+            // loop below disambiguates identity-bearing absent refs
+            // with one scroll-scan before failing them; see there.
             return "absent";
           };
           // (No separate refAssetExists helper: the loop below reads the
@@ -318,18 +346,58 @@
             // bytes belong to this asset — treat it as not retained.
             return matches.length === 1 ? matches[0] : null;
           };
+          // Review round 3 MUST (disambiguation cache): one scroll-scan
+          // per submit, shared by every absent identity-bearing ref.
+          // null = not attempted yet; a Set of scanned ids, or the
+          // string "incomplete" when the scan could not prove it
+          // reached the end of the grid (or failed outright).
+          let libraryScanIds = null;
+          const disambiguateAbsentRef = async (ref, entry) => {
+            if (libraryScanIds === null) {
+              try {
+                let reachedEnd = false;
+                const scanned = await menu.scanNativeAssets({
+                  deadline: flowDeadline, maxDurationMs: 10_000, includeIncomplete: true,
+                  onDiagnostics: diagnostics => { reachedEnd = diagnostics?.reachedEnd === true; },
+                });
+                libraryScanIds = reachedEnd
+                  ? new Set((Array.isArray(scanned) ? scanned : []).flatMap(asset => [asset?.id, asset?.persistentMediaId]).filter(value => typeof value === "string" && value))
+                  : "incomplete";
+              } catch { libraryScanIds = "incomplete"; }
+            }
+            if (libraryScanIds === "incomplete") return "unknown";
+            const ids = [ref.expectedId, entry?.mediaId, entry?.uuid].filter(value => typeof value === "string" && value);
+            return ids.some(id => libraryScanIds.has(id)) ? "id" : "absent";
+          };
           await runFlowStage("revalidating queued references", async ({ signal }) => {
             const missing = [];
             const missingFallback = [];
             for (const ref of refChecks) {
               const entry = await lookupRefCatalog(ref);
-              const trust = refNameTrust(ref, entry);
+              let trust = refNameTrust(ref, entry);
+              // Review round 3 MUST: a mounted-only "absent" grade for
+              // an identity-bearing ref is ambiguous — the tile may sit
+              // outside the virtualized viewport (off-screen library
+              // pick) or be genuinely gone (removed ref). Disambiguate
+              // with the scroll-scan when one is available: found by id
+              // passes, a complete scan without the id keeps "absent"
+              // (and the restore attempt below still runs first for
+              // uploaded refs), an incomplete/failed scan degrades to
+              // "unknown" so attach-time ID verification decides. When
+              // no scan is available the old "absent" behavior stands,
+              // so the gate still fails fast for removed refs.
+              if (trust === "absent" && (ref.expectedId || entry?.mediaId || entry?.uuid) && typeof menu.scanNativeAssets === "function") {
+                trust = await disambiguateAbsentRef(ref, entry);
+              }
               if (trust === "unknown" || trust === "id" || trust === "dedicated") continue;
               let restoredId = null;
               if (entry?.uploadName) {
                 const file = retainedRefFile(entry);
                 if (file) {
-                  const receipt = await components.uploadStagedFlowMedia(file, ref.kind === "video" ? "video" : "image", command, { deadline: flowDeadline, signal });
+                  // Review round 1, S1: the confirmation may extend up to
+                  // the submit budget itself while the owner tile
+                  // processes (see the uploadAndResolve call below).
+                  const receipt = await components.uploadStagedFlowMedia(file, ref.kind === "video" ? "video" : "image", command, { deadline: flowDeadline, extendableTo: flowDeadline, signal });
                   if (typeof receipt?.id === "string" && receipt.id) restoredId = receipt.id;
                 }
               }
@@ -377,11 +445,19 @@
           requireFlowTime("uploading and selecting Flow reference images", expectedVideoReferenceIds.length + expectedMediaReferenceIds.length + expectedCharacterIds.length > 0);
           if (!root.validStagedLocalImage?.(attachment, /(?:start|end|ref[1-3])/)) throw this.error("FLOW_UPLOAD_UNAVAILABLE", "Flow's staged image transfer is unavailable before file selection.", false, false);
           const file = root.stagedNativeFiles.get(attachment.transferId);
-          if (!file) throw this.error("FLOW_TRANSFER_UNKNOWN", "The staged image is no longer available.", true);
+          // Review round 1, S2: staged bytes live only in page memory,
+          // so a lost transfer can never be recovered by retrying this
+          // job — only by re-attaching the file and creating a new job.
+          // Non-retryable, outcome known (nothing was submitted).
+          if (!file) throw this.error("FLOW_TRANSFER_UNKNOWN", "The staged image is no longer available (the tab was reloaded or the transfer expired). Re-attach the file and create a new job — retrying this job cannot restore it.", false, false);
           let uploadReceipt;
           let uploadError;
           try {
-            uploadReceipt = await runFlowStage(`uploading ${attachment.name}`, ({ signal }) => components.uploadStagedFlowMedia(file, "image", command, { deadline: flowDeadline, signal }), true);
+            // Review round 1, S1: pass the submit budget as the
+            // confirmation extension ceiling — a tile finishing past the
+            // 90 s base cap but inside the budget confirms instead of
+            // timing out, while the budget itself is never exceeded.
+            uploadReceipt = await runFlowStage(`uploading ${attachment.name}`, ({ signal }) => components.uploadStagedFlowMedia(file, "image", command, { deadline: flowDeadline, extendableTo: flowDeadline, signal }), true);
           } catch (error) {
             uploadError = error;
           }

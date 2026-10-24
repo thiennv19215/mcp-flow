@@ -167,7 +167,8 @@ test('IMG-09: an abort signal mid-wait exits promptly even outside the extension
     });
   } catch (error) { caught = error; }
   assert.ok(caught, 'confirmation must fail once the caller aborts');
-  assert.equal(caught.code, 'FLOW_UPLOAD_TIMEOUT', String(caught?.stack || caught));
+  // Reviewfix S6: an abort during confirmation reports CANCELLED, not TIMEOUT.
+  assert.equal(caught.code, 'FLOW_UPLOAD_CANCELLED', String(caught?.stack || caught));
   assert.ok(harness.elapsed() >= 4_000, `the wait ran until the abort (elapsed ${harness.elapsed()} ms)`);
   assert.ok(harness.elapsed() < 15_000, `the wait stopped at the abort instead of burning the 90 s budget (elapsed ${harness.elapsed()} ms)`);
 });

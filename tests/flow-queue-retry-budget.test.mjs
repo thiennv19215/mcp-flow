@@ -78,3 +78,25 @@ test('a dispatched failure is never auto-retried even with budget left', async (
   assert.equal(job.outcomeUnknown, true);
   assert.equal(runs, 1);
 });
+
+test('S2 reviewfix: FLOW_TRANSFER_UNKNOWN is never auto-retried, even when the error still claims retryable', async () => {
+  // Staged-transfer bytes live only in page memory; a tab reload loses
+  // them, so re-running the same job with the same transferId can never
+  // succeed — it just burns the retry budget and delays the real fix
+  // (re-attaching the file). The queue therefore refuses this code
+  // outright, covering every site that throws it (generation, character
+  // attach, upload-operations), not just the one the error came from.
+  let runs = 0;
+  const queue = new FlowJobQueue(async () => {
+    runs++;
+    throw Object.assign(new Error('The staged image is no longer available.'), { code: 'FLOW_TRANSFER_UNKNOWN', retryable: true });
+  }, { storage: memoryStorage(), minDelayMs: 0, maxDelayMs: 0 });
+  const { job } = await runToSettled(queue, {
+    operation: 'flow.generation.submit',
+    payload: { prompt: 'scene' },
+    label: 'lost-transfer scene',
+  });
+  assert.equal(job.status, 'failed');
+  assert.equal(job.retrySafe, false, 'a lost transfer is not retry-safe: manual retry would fail identically');
+  assert.equal(runs, 1, 'the job must fail on the first attempt, not loop through the auto-retry budget');
+});
