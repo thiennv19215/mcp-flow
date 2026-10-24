@@ -9,10 +9,14 @@ export const PLAYBOOK = {
     "No call blocks for more than about 45 s. A reply with still_working and a task_id means Flow is still busy with it: pass the task_id to flow_wait, and never repeat the call.",
   ],
   models: {
-    "Omni 1.1 Flash": "7 credits at 4s, 12 at 8s (720p). Supports duration 4/6/8/10 and 360p/720p. Best default for drafts and frame-to-frame transitions.",
-    "Veo 3.1 - Lite": "10 credits, fixed 8s.",
-    "Veo 3.1 - Fast": "20 credits, fixed 8s.",
-    "Veo 3.1 - Quality": "100 credits, fixed 8s. Needs max_credits raised explicitly.",
+    // No per-model credit prices here on purpose: Flow's live quote (shown
+    // before submit and enforced by max_credits) is the only authoritative
+    // price, and hardcoded prices drift. Capability facts stay; costs come
+    // from the quote.
+    "Omni 1.1 Flash": "Supports duration 4/6/8/10 and 360p/720p. Best default for drafts and frame-to-frame transitions. Price: Flow's live quote.",
+    "Veo 3.1 - Lite": "Fixed 8s. Price: Flow's live quote.",
+    "Veo 3.1 - Fast": "Fixed 8s. Price: Flow's live quote.",
+    "Veo 3.1 - Quality": "Fixed 8s. Needs max_credits raised explicitly. Price: Flow's live quote.",
     "Nano Banana (newest, 2.1 today)": "Images, 0 credits; picked automatically for images. Use it to make keyframes and product stills before spending on video. Pro and 2 Lite are also 0 credits, when named.",
   },
   prompt_order: "subject and action -> shot size and camera move -> location -> visual style -> lighting -> sound/dialogue",
