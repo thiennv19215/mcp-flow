@@ -2447,6 +2447,119 @@
     finally { button.disabled = false; }
   };
 
+  // FEAT-11 — Angles / Effects transform panel. ONE shared engine
+  // (window.FlowTransforms) serves both families: the panel picks a
+  // preset, chooses one anchored value per parameter, and shows the
+  // built prompt live. The source image is the FIRST reference the
+  // reference picker currently holds (its own UI picks/uploads it);
+  // applying enqueues exactly one image job whose only attachment is
+  // that source, through the regular flow-queue:add path.
+  const transformPanel = document.querySelector("#flowTransformPanel");
+  const transformState = { family: "angles", values: {} };
+
+  function currentTransformPreset() {
+    if (!window.FlowTransforms) return null;
+    const select = document.querySelector("#flowTransformPreset");
+    return window.FlowTransforms.getTransformPreset(select?.value || "")
+      || window.FlowTransforms.listTransformPresets(transformState.family)[0] || null;
+  }
+
+  function renderTransformPreview() {
+    const preview = document.querySelector("#flowTransformPreview");
+    const preset = currentTransformPreset();
+    if (!preview || !preset || !window.FlowTransforms) return;
+    preview.textContent = window.FlowTransforms.buildTransformPrompt(preset, transformState.values);
+  }
+
+  function renderTransformParams() {
+    const container = document.querySelector("#flowTransformParams");
+    const preset = currentTransformPreset();
+    if (!container || !preset) return;
+    container.replaceChildren();
+    transformState.values = {};
+    for (const [name, param] of Object.entries(preset.params)) {
+      const anchors = Object.keys(param.anchors).map(Number).sort((a, b) => a - b);
+      const row = document.createElement("label");
+      row.className = "flow-transform-field";
+      const caption = document.createElement("span");
+      caption.textContent = param.label || name;
+      const select = document.createElement("select");
+      for (const anchor of anchors) {
+        const option = document.createElement("option");
+        option.value = String(anchor);
+        option.textContent = param.anchors[String(anchor)] || String(anchor);
+        select.appendChild(option);
+      }
+      const initial = anchors.includes(Number(param.default)) ? Number(param.default) : anchors[0];
+      select.value = String(initial);
+      transformState.values[name] = initial;
+      select.addEventListener("change", () => {
+        transformState.values[name] = Number(select.value);
+        renderTransformPreview();
+      });
+      row.append(caption, select);
+      container.appendChild(row);
+    }
+    renderTransformPreview();
+  }
+
+  function renderTransformSource() {
+    const label = document.querySelector("#flowTransformSourceLabel");
+    if (!label) return;
+    const source = referencePicker.getReferences("image")[0];
+    label.textContent = source
+      ? (source.assetName || source.name || source.title || "Ảnh đã chọn")
+      : "Chưa có — bấm Chọn ảnh nguồn để chọn hoặc tải ảnh lên.";
+  }
+
+  function openTransformPanel(family) {
+    if (!transformPanel || !window.FlowTransforms) {
+      setFeedback("Công cụ biến đổi chưa sẵn sàng.", false);
+      return;
+    }
+    transformState.family = family;
+    document.querySelector("#flowTransformTitle").textContent = family === "effects" ? "Hiệu ứng ảnh (Effects)" : "Đa góc nhìn (Angles)";
+    const select = document.querySelector("#flowTransformPreset");
+    select.replaceChildren();
+    for (const preset of window.FlowTransforms.listTransformPresets(family)) {
+      const option = document.createElement("option");
+      option.value = preset.id;
+      option.textContent = preset.name;
+      select.appendChild(option);
+    }
+    transformPanel.classList.remove("hidden");
+    renderTransformParams();
+    renderTransformSource();
+    transformPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  document.querySelector("#anglesToolbarBtn")?.addEventListener("click", () => openTransformPanel("angles"));
+  document.querySelector("#effectsToolbarBtn")?.addEventListener("click", () => openTransformPanel("effects"));
+  document.querySelector("#flowTransformPreset")?.addEventListener("change", renderTransformParams);
+  document.querySelector("#btnCloseTransformPanel")?.addEventListener("click", () => transformPanel?.classList.add("hidden"));
+  document.querySelector("#btnPickTransformSource")?.addEventListener("click", () => referencePicker.open("image"));
+  transformPanel?.addEventListener("click", renderTransformSource);
+  document.querySelector("#btnApplyTransform")?.addEventListener("click", async event => {
+    const button = event.currentTarget;
+    if (!window.FlowTransforms) { setFeedback("Công cụ biến đổi chưa sẵn sàng.", false); return; }
+    const preset = currentTransformPreset();
+    const source = referencePicker.getReferences("image")[0];
+    if (!preset) { setFeedback("Chưa chọn preset.", false); return; }
+    if (!source) { setFeedback("Hãy chọn một ảnh nguồn trước.", false); referencePicker.open("image"); return; }
+    button.disabled = true;
+    try {
+      const job = window.FlowTransforms.buildTransformJob({ presetId: preset.id, values: transformState.values, source });
+      const response = await chrome.runtime.sendMessage({ type: "flow-queue:add", job });
+      if (!response?.ok) throw new Error(response?.error?.message || "Không thể thêm tác vụ vào hàng đợi Flow.");
+      rememberSubmittedQueueJob(response);
+      setFeedback("✅ Đã đưa biến đổi ảnh vào hàng đợi Flow.", true);
+      addLog("flow.transform.add", job.label, true);
+    } catch (error) {
+      setFeedback(`❌ ${error.message}`, false);
+      addLog("flow.transform.error", error.message, false);
+    } finally { button.disabled = false; }
+  });
+
   const attachReferencesButton = document.querySelector("#btnAttachReferences");
   const referenceInput = document.querySelector("#flowReferenceInput");
   if (attachReferencesButton && referenceInput) {
