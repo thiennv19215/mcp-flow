@@ -1237,6 +1237,9 @@ async function runExtensionFlowJob(job, hooks) {
         // below; without it a resumed observe gets a fresh render window
         // instead of the time remaining from the original dispatch.
         ...(savedObservation.dispatchedAt ? { dispatchedAt: savedObservation.dispatchedAt } : {}),
+        // M-G: carry the restored checkpoint's DOM-accept flag through
+        // the rebuilt receipt so it can reach the observe payload below.
+        ...(savedObservation.domAccepted === true ? { domAccepted: true } : {}),
         requestDispatched: true,
       };
     } else if (job.metadata?.manualSubmitPhase === "confirm") {
@@ -1306,6 +1309,12 @@ async function runExtensionFlowJob(job, hooks) {
     correlationAttemptId: String(submitted?.correlationAttemptId || ""),
     credits: Number.isFinite(submitted?.credits) ? submitted.credits : null,
     ...(submitted?.dispatchedAt ? { dispatchedAt: submitted.dispatchedAt } : {}),
+    // M-G: forward the DOM-accept flag to observe so a submit Flow itself
+    // accepted but the observer never correlated can still resolve from
+    // its rendered tile instead of waiting out the render deadline. The
+    // submit return marks DOM acceptance as confirmationSignal/matchKind;
+    // the SW-restart rebuild carries domAccepted directly.
+    ...(submitted?.domAccepted === true || submitted?.confirmationSignal === "dom_acceptance" || submitted?.matchKind === "dom_acceptance" ? { domAccepted: true } : {}),
     timeoutMs: isVideo ? 600_000 : 300_000,
   };
   if (observation.correlationAttemptId) {
@@ -1329,6 +1338,8 @@ async function runExtensionFlowJob(job, hooks) {
       // its deadline at dispatch. Absent on legacy paths, where this
       // payload stays exactly as it was before.
       ...(observation.dispatchedAt ? { dispatchedAt: observation.dispatchedAt } : {}),
+      // M-G: forward the DOM-accept flag to observe (see above).
+      ...(observation.domAccepted ? { domAccepted: true } : {}),
     });
   } catch (error) {
     throw Object.assign(error, {

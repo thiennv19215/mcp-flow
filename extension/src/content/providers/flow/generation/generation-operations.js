@@ -830,6 +830,9 @@
             credits: Number.isFinite(credits) ? credits : null,
             timeoutMs: payload.type === "video" ? 600_000 : 300_000,
             submitOnly: payload.submitOnly === true || payload.submit_only === true,
+            // M-G: carry the DOM-accept flag through the checkpoint so a
+            // service-worker restart resumes observe with the fallback.
+            ...(domAccepted ? { domAccepted: true } : {}),
           },
         });
         return {
@@ -1056,6 +1059,26 @@
                 if (!(current.mediaReady || current.failed) && (recovered.mediaReady || recovered.failed)) fresh[index] = recovered;
               }
             }
+            // M-G: DOM-accepted fallback candidates. When the submit was
+            // accepted by Flow's own controls but the observer never
+            // correlated a request, the correlated set is empty forever
+            // and the loop below would wait out the full deadline despite
+            // a rendered tile. Only when NO correlation exists at all
+            // (empty set, no request ever seen) may new, ready,
+            // kind-matched tiles outside `before` stand in — and only
+            // when their count is EXACTLY the expected count, so an extra
+            // stray tile keeps the loop waiting instead of misattributing
+            // a result. The verdict itself is rendered below, next to the
+            // normal ready path, under the same isEarly guard.
+            const domFallbackActive = payload.domAccepted === true && correlatedIds.size === 0 && !evidence.requestSeen;
+            const domFallbackCandidates = domFallbackActive ? allMedia.filter(item =>
+              !before.includes(tiles.tileSnapshotKey?.(item) || item.id || `title:${item.title}`) &&
+              !item.title.startsWith("fm-") &&
+              (!kind || item.kind === kind || (kind === "video" && item.kind === "scene") || item.failed) &&
+              item.id
+            ) : [];
+            const domFallbackReady = domFallbackCandidates.filter(item => item.mediaReady && !item.busy && !item.failed);
+            const domFallbackSettled = domFallbackCandidates.filter(item => (item.mediaReady && !item.busy) || item.failed);
             // VID-08: progress, for quiet-window purposes, is the receipt
             // stage or correlated id set moving, or the fresh set's
             // observable state changing (including a busy tile's render
@@ -1178,6 +1201,32 @@
             // A tile is ready ONLY if !item.busy AND item.mediaReady (loaded image or video!)
             const ready = fresh.filter(item => item.mediaReady && !item.busy && !item.failed);
             const isEarly = Date.now() - observeStartedAt < 2000 && !renderObservedInFlight;
+
+            // M-G fallback verdict: an exact-count ready set is accepted
+            // as this job's media (marked, so the queue can tell it apart
+            // from a correlated success); an exact-count settled set that
+            // is not all ready fails fast with a diagnosis instead of
+            // idling to the deadline. Any other count keeps waiting.
+            if (domFallbackActive && !isEarly) {
+              if (domFallbackReady.length === expected) {
+                const media = domFallbackReady.map(({ id, title, kind: mediaKind }) => ({
+                  id,
+                  title,
+                  kind: mediaKind === "scene" ? "video" : mediaKind,
+                }));
+                await tiles.emitFlowProgress(command, kind === "video" ? "Tạo video hoàn tất 100%" : "Tạo ảnh hoàn tất 100%", {
+                  generationResult: { media },
+                });
+                return { media, domAcceptedFallback: true };
+              }
+              if (domFallbackSettled.length === expected && domFallbackReady.length < expected) {
+                evidence.readyCount = domFallbackReady.length;
+                evidence.failedCount = domFallbackCandidates.filter(item => item.failed).length;
+                evidence.busyCount = domFallbackCandidates.filter(item => item.busy && !item.failed).length;
+                const failedDetails = domFallbackCandidates.filter(item => item.failed).map(item => `${item.title}${item.failureReason ? `: ${item.failureReason}` : ""}`).join("; ");
+                throw observeError("FLOW_GENERATION_FAILED", `Flow báo cáo ${domFallbackCandidates.filter(item => item.failed).length} tile render thất bại: ${failedDetails}. Chưa bị trừ tín dụng cho render lỗi này.`, false, false);
+              }
+            }
 
             if (!isEarly && ready.length >= expected) {
               const picked = [...correlatedIds].map(id => ready.find(item => item.id?.toLowerCase() === id)).filter(Boolean);

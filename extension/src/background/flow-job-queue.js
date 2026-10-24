@@ -573,6 +573,9 @@ export class FlowJobQueue {
         timeoutMs: Math.max(1000, Math.min(15 * 60_000, Number(checkpoint?.timeoutMs) || 5 * 60_000)),
         ...(dispatchedAt ? { dispatchedAt } : {}),
         ...(typeof checkpoint?.credits === "number" && Number.isFinite(checkpoint.credits) ? { credits: checkpoint.credits } : {}),
+        // M-G: preserve the DOM-accept flag so a resumed observe can use
+        // the uncorrelated-tile fallback after a worker restart.
+        ...(checkpoint?.domAccepted === true ? { domAccepted: true } : {}),
         submitOnly: checkpoint?.submitOnly === true,
         recordedAt: Date.now(),
       },
