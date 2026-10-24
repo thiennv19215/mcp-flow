@@ -1142,6 +1142,109 @@
   }
 
 
+  // FEAT-13: visual workflow editor surface. The state machine lives in
+  // workflow-editor.js (loaded as a module script and bridged onto
+  // window.FlowWorkflowEditor); this surface keeps one editor instance,
+  // autosaves its serialized state to local storage after every change,
+  // and renders a text summary of the graph — a canvas view would draw
+  // from the same getState() snapshot (nodes carry x/y positions).
+  const WORKFLOW_EDITOR_AUTOSAVE_KEY = "flowMcpWorkflowEditorState";
+  let workflowEditorInstance = null;
+
+  function ensureWorkflowEditor() {
+    const api = window.FlowWorkflowEditor;
+    if (!api?.createWorkflowEditor) return null;
+    if (!workflowEditorInstance) {
+      workflowEditorInstance = api.createWorkflowEditor();
+      try {
+        const saved = window.localStorage?.getItem(WORKFLOW_EDITOR_AUTOSAVE_KEY);
+        if (saved) workflowEditorInstance.restore(saved);
+      } catch { /* autosave is best-effort; a corrupt draft just starts empty */ }
+      const nameInput = document.querySelector("#wfEditorName");
+      if (nameInput && workflowEditorInstance.getState().name) nameInput.value = workflowEditorInstance.getState().name;
+    }
+    return workflowEditorInstance;
+  }
+
+  function persistWorkflowEditor() {
+    if (!workflowEditorInstance) return;
+    try {
+      window.localStorage?.setItem(WORKFLOW_EDITOR_AUTOSAVE_KEY, workflowEditorInstance.serialize());
+    } catch { /* storage full/blocked: the in-memory editor keeps working */ }
+    renderWorkflowEditorSummary();
+  }
+
+  function renderWorkflowEditorSummary() {
+    const summary = document.querySelector("#wfEditorSummary");
+    if (!summary) return;
+    const editor = ensureWorkflowEditor();
+    if (!editor) {
+      summary.textContent = "Trình soạn workflow chưa sẵn sàng.";
+      return;
+    }
+    const state = editor.getState();
+    const detail = state.nodes.map(node => `${node.id} (${node.type})`).join(", ");
+    summary.textContent = state.nodes.length
+      ? `${state.nodes.length} node, ${state.edges.length} cạnh${state.name ? ` — ${state.name}` : ""}: ${detail}`
+      : "Chưa có node nào. Chọn loại node rồi bấm Thêm node.";
+    const undoBtn = document.querySelector("#wfEditorUndoBtn");
+    const redoBtn = document.querySelector("#wfEditorRedoBtn");
+    if (undoBtn) undoBtn.disabled = !editor.canUndo();
+    if (redoBtn) redoBtn.disabled = !editor.canRedo();
+  }
+
+  function addWorkflowEditorNode() {
+    const editor = ensureWorkflowEditor();
+    if (!editor) return;
+    const type = document.querySelector("#wfEditorNodeType")?.value || "text";
+    try {
+      const config = {};
+      if (type === "text") config.text = window.prompt("Nội dung text:", "") || "";
+      if (type === "generate" || type === "chatgpt") config.prompt = window.prompt("Prompt:", "") || "";
+      if (type === "generate") config.type = "image";
+      if (type === "delay") config.seconds = 5;
+      const node = editor.addNode(type, { config });
+      persistWorkflowEditor();
+      addLog("flow.workflowEditor.addNode", `${node.id} (${type})`, true);
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.workflowEditor.addNode.error", err.message, false);
+    }
+  }
+
+  function openWorkflowEditorJson() {
+    const editor = ensureWorkflowEditor();
+    if (!editor) return;
+    const raw = document.querySelector("#wfEditorJson")?.value.trim() || "";
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed?.kind === "flow.workflow-graph") editor.openDocument(parsed);
+      else editor.restore(parsed);
+      const nameInput = document.querySelector("#wfEditorName");
+      if (nameInput) nameInput.value = editor.getState().name || "";
+      persistWorkflowEditor();
+      setFeedback("✅ Đã mở workflow vào trình soạn.", true);
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.workflowEditor.open.error", err.message, false);
+    }
+  }
+
+  function exportWorkflowEditorJson() {
+    const editor = ensureWorkflowEditor();
+    if (!editor) return;
+    try {
+      const doc = editor.exportDocument();
+      const textarea = document.querySelector("#wfEditorJson");
+      if (textarea) textarea.value = JSON.stringify(doc, null, 2);
+      setFeedback("✅ Đã xuất JSON workflow (chỉ field trong whitelist).", true);
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.workflowEditor.export.error", err.message, false);
+    }
+  }
+
   function renderSavedPrompts() {
     const list = document.querySelector("#savedPromptsList");
     const empty = document.querySelector("#savedPromptsEmpty");
@@ -1211,6 +1314,7 @@
     void loadWorkflowTemplates();
     void loadGenTemplates();
     void loadFlowTasks();
+    renderWorkflowEditorSummary();
   }
 
   function addLog(name, detail, isOk = true) {
@@ -1632,6 +1736,19 @@
     if (deleteId) void removeGenTemplate(deleteId);
   });
 
+
+  // FEAT-13: workflow editor controls.
+  document.querySelector("#wfEditorAddNodeBtn")?.addEventListener("click", () => { addWorkflowEditorNode(); });
+  document.querySelector("#wfEditorUndoBtn")?.addEventListener("click", () => { if (ensureWorkflowEditor()?.undo()) persistWorkflowEditor(); });
+  document.querySelector("#wfEditorRedoBtn")?.addEventListener("click", () => { if (ensureWorkflowEditor()?.redo()) persistWorkflowEditor(); });
+  document.querySelector("#wfEditorOpenBtn")?.addEventListener("click", () => { openWorkflowEditorJson(); });
+  document.querySelector("#wfEditorExportBtn")?.addEventListener("click", () => { exportWorkflowEditorJson(); });
+  document.querySelector("#wfEditorName")?.addEventListener("change", event => {
+    const editor = ensureWorkflowEditor();
+    if (!editor) return;
+    editor.setName(event.target.value);
+    persistWorkflowEditor();
+  });
 
   let isGenerating = false;
   let flowQueuePanel = null;

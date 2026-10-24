@@ -955,6 +955,39 @@
             <div id="workflowTemplateEmpty" class="empty-state">Chưa có mẫu workflow nào.</div>
             <div id="workflowTemplateList"></div>
           </section>
+          <section class="section" id="workflowEditorSection">
+            <h3>Trình soạn workflow</h3>
+            <p class="section-hint">Soạn đồ thị node trên đúng định dạng workflow (FEAT-07): thêm node, nối cạnh bằng thao tác trên bản tóm tắt, hoàn tác/làm lại tối đa 40 bước (bản nháp tự lưu). Xuất JSON cho ra đúng document mà đường FEAT-07 thuần tạo ra — chỉ giữ field trong whitelist, không mang trạng thái chạy.</p>
+            <div class="form-group">
+              <label for="wfEditorName">Tên workflow</label>
+              <input type="text" id="wfEditorName" placeholder="VD: Drama tập 1" />
+            </div>
+            <div class="form-group">
+              <label for="wfEditorNodeType">Loại node</label>
+              <select id="wfEditorNodeType">
+                <option value="text">Text</option>
+                <option value="image">Image</option>
+                <option value="generate">Generate Image/Video</option>
+                <option value="chatgpt">ChatGPT</option>
+                <option value="download">Download</option>
+                <option value="delay">Wait</option>
+              </select>
+            </div>
+            <div class="btn-row">
+              <button class="btn btn-primary btn-sm" id="wfEditorAddNodeBtn" type="button">Thêm node</button>
+              <button class="btn btn-secondary btn-sm" id="wfEditorUndoBtn" type="button">Hoàn tác</button>
+              <button class="btn btn-secondary btn-sm" id="wfEditorRedoBtn" type="button">Làm lại</button>
+            </div>
+            <div id="wfEditorSummary" class="empty-state">Chưa có node nào.</div>
+            <div class="form-group">
+              <label for="wfEditorJson">JSON workflow</label>
+              <textarea id="wfEditorJson" rows="5" placeholder='{"kind":"flow.workflow-graph","version":1,"nodes":[...],"edges":[...]}'></textarea>
+            </div>
+            <div class="btn-row">
+              <button class="btn btn-secondary btn-sm" id="wfEditorOpenBtn" type="button">Mở JSON</button>
+              <button class="btn btn-secondary btn-sm" id="wfEditorExportBtn" type="button">Xuất JSON</button>
+            </div>
+          </section>
         </div>
 
           <div id="queuePage" style="margin-top:12px;"></div>
@@ -1332,6 +1365,7 @@
   <script src="flow-snippets.js"></script>
   <script src="../content/shared/selection-normalize.js"></script>
   <script src="../content/shared/flow-transforms.js"></script>
+  <script type="module" src="workflow-editor.js"></script>
   <script src="sidebar.js"></script>
 </body>
 </html>
