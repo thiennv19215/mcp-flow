@@ -158,13 +158,11 @@ export async function startServer(core: Core): Promise<ServerRole> {
           // so it is the one that must present the per-machine token —
           // the same token every other API route requires. poll/result/
           // progress then run off the unguessable session_id the connect
-          // call returns, exactly like a session cookie. Note for the
-          // extension side: the real connector currently connects with
-          // token: "" (see flow-bridge-client.js connect()), so it gets
-          // 401 here until it is taught to send the server's token
-          // (FLOW_MCP_TOKEN, or the TOKEN_FILE the owner process writes);
-          // connectHttp already treats 401 as "not connected" and falls
-          // back to WS, so the extension change must land with this one.
+          // call returns, exactly like a session cookie. The extension
+          // sends the token the user saved once on its options page
+          // (chrome.storage.local key "serverToken"); with nothing saved
+          // it connects with token "" and gets 401 here, and connectHttp
+          // already treats 401 as "not connected" and falls back to WS.
           const authorization = req.headers.authorization;
           const bearer = authorization?.toLowerCase().startsWith("bearer ") ? authorization.slice(7).trim() : undefined;
           const presented = req.headers["x-flow-token"] ?? url.searchParams.get("token") ?? bearer;

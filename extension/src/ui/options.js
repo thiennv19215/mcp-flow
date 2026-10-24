@@ -12,6 +12,11 @@ const I18N = {
     step3: "MCP cho AI chạy riêng trên máy này; nghiệp vụ Flow của extension không đi qua backend.",
     useLocal: "Kết nối MCP local (127.0.0.1:18899)",
     localConnected: "Đã kết nối extension với MCP local.",
+    tokenLabel: "Token của MCP local",
+    tokenHint: "Token nằm trong file ~/.flow-mcp/token trên máy chạy Flow MCP (hoặc FLOW_MCP_TOKEN nếu bạn tự đặt). Nhập một lần để extension kết nối qua HTTP.",
+    tokenPlaceholder: "Dán token của MCP local vào đây",
+    saveToken: "Lưu token và kết nối lại",
+    tokenSaved: "Đã lưu token và kết nối lại với MCP local.",
     saving: "Đang kết nối…",
     connectFailed: "Chưa kết nối được MCP cục bộ. Hãy khởi động Flow MCP trên máy này.",
   },
@@ -26,6 +31,11 @@ const I18N = {
     step3: "The AI MCP runs separately on this computer; extension Flow work does not pass through the backend.",
     useLocal: "Connect local MCP (127.0.0.1:18899)",
     localConnected: "The extension is connected to the local MCP.",
+    tokenLabel: "Local MCP token",
+    tokenHint: "Find it in ~/.flow-mcp/token on the machine running Flow MCP (or FLOW_MCP_TOKEN if you set one). Enter once so the extension can connect over HTTP.",
+    tokenPlaceholder: "Paste the local MCP token here",
+    saveToken: "Save token and reconnect",
+    tokenSaved: "Token saved and reconnected to the local MCP.",
     saving: "Connecting…",
     connectFailed: "Could not connect to the local MCP. Start Flow MCP on this computer.",
   },
@@ -45,6 +55,10 @@ function applyLanguage() {
   document.querySelector("#txtSubtitle").textContent = t("subtitle");
   document.querySelector("#txtCardTitle").textContent = t("cardTitle");
   document.querySelector("#txtUseLocal").textContent = t("useLocal");
+  document.querySelector("#txtTokenLabel").textContent = t("tokenLabel");
+  document.querySelector("#txtTokenHint").textContent = t("tokenHint");
+  document.querySelector("#serverToken").placeholder = t("tokenPlaceholder");
+  document.querySelector("#txtSaveToken").textContent = t("saveToken");
   document.querySelector("#txtGuideTitle").textContent = t("guideTitle");
   document.querySelector("#step1").innerHTML = t("step1");
   document.querySelector("#step2").innerHTML = t("step2");
@@ -71,6 +85,25 @@ document.querySelector("#langEn").onclick = () => {
   applyLanguage();
 };
 
+// Pre-fill the saved server token (if any) so the user only pastes it once.
+chrome.storage.local.get({ serverToken: "" }).then((stored) => {
+  document.querySelector("#serverToken").value = stored.serverToken || "";
+});
+
+// Ask the service worker to reconnect, then wait until it reports connected
+// (shared by the "use local" and "save token" buttons).
+async function requestReconnect() {
+  await chrome.runtime.sendMessage({ type: "flow-mcp:connect" });
+  let connectionStatus;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    connectionStatus = await chrome.runtime.sendMessage({ type: "flow-mcp:status" });
+    if (connectionStatus?.connected) break;
+    if (connectionStatus?.error && attempt >= 3) throw new Error(connectionStatus.error);
+  }
+  if (!connectionStatus?.connected) throw new Error(connectionStatus?.error || t("connectFailed"));
+}
+
 document.querySelector("#useLocal").addEventListener("click", async () => {
   const button = document.querySelector("#useLocal");
   button.disabled = true;
@@ -79,19 +112,33 @@ document.querySelector("#useLocal").addEventListener("click", async () => {
 
   try {
     await chrome.storage.local.set({ backendMode: "local", bridge: LOCAL_MCP_ORIGIN });
-    await chrome.runtime.sendMessage({ type: "flow-mcp:connect" });
-
-    let connectionStatus;
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      connectionStatus = await chrome.runtime.sendMessage({ type: "flow-mcp:status" });
-      if (connectionStatus?.connected) break;
-      if (connectionStatus?.error && attempt >= 3) throw new Error(connectionStatus.error);
-    }
-    if (!connectionStatus?.connected) throw new Error(connectionStatus?.error || t("connectFailed"));
+    await requestReconnect();
 
     statusMsg.className = "status-msg success show";
     statusMsg.textContent = t("localConnected");
+  } catch (error) {
+    statusMsg.className = "status-msg error show";
+    statusMsg.textContent = error?.message || String(error);
+  } finally {
+    button.disabled = false;
+    setTimeout(() => statusMsg.classList.remove("show"), 8000);
+  }
+});
+
+document.querySelector("#saveToken").addEventListener("click", async () => {
+  const button = document.querySelector("#saveToken");
+  button.disabled = true;
+  statusMsg.className = "status-msg show";
+  statusMsg.textContent = t("saving");
+
+  try {
+    // The service worker only reconnects on bridge-URL changes, not on token
+    // saves, so the reconnect request below is what picks the new token up.
+    await chrome.storage.local.set({ serverToken: document.querySelector("#serverToken").value.trim() });
+    await requestReconnect();
+
+    statusMsg.className = "status-msg success show";
+    statusMsg.textContent = t("tokenSaved");
   } catch (error) {
     statusMsg.className = "status-msg error show";
     statusMsg.textContent = error?.message || String(error);
