@@ -12,6 +12,9 @@ import { RemoteCore } from '../dist/remote.js';
 import { createFlowMcpServer } from '../dist/mcp-tools.js';
 
 const source = readFileSync(new URL('../extension/src/content/providers/flow/composer/prompt-operations.js', import.meta.url), 'utf8');
+// The fake extension handshake reports the real manifest version (not a
+// hardcoded literal) so a manifest bump cannot silently desync this fixture.
+const manifestVersion = JSON.parse(readFileSync(new URL('../extension/manifest.json', import.meta.url), 'utf8')).version;
 const projectId = '00000000-0000-4000-8000-000000000000';
 
 function harness({ prompt = 'known test prompt', controls = [{}], projectMatches = true, referenceStates = null, chipStates = null } = {}) {
@@ -103,7 +106,7 @@ test('queue busy guard prevents the local API from issuing a prompt clear', asyn
   }
   const connector = new Connector();
   extensionSetWebSocket(connector);
-  connector.emit('message', JSON.stringify({ type: 'event', method: 'extension.initialized', params: [{ protocol: 2, version: '0.2.45', capabilities: ['flow.native.queue.get'] }] }));
+  connector.emit('message', JSON.stringify({ type: 'event', method: 'extension.initialized', params: [{ protocol: 2, version: manifestVersion, capabilities: ['flow.native.queue.get'] }] }));
   try {
     const core = new LocalCore(`clear-prompt-busy-${randomUUID()}`);
     await assert.rejects(core.clear_prompt({ expected_prompt: 'known test prompt' }), /generation is running/i);
