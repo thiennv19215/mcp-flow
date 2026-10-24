@@ -747,6 +747,115 @@
     }
   }
 
+  // FEAT-08: local workflow templates. The store lives in the
+  // background (flow-workflow-templates.js); this surface talks to it
+  // over the same message convention as the generation history and
+  // degrades to an empty list until the handlers are wired.
+  let workflowTemplates = [];
+
+  function downloadJsonFile(filename, value) {
+    const blob = new Blob([JSON.stringify(value, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function renderWorkflowTemplates() {
+    const list = document.querySelector("#workflowTemplateList");
+    const empty = document.querySelector("#workflowTemplateEmpty");
+    if (!list || !empty) return;
+    list.replaceChildren();
+    empty.hidden = workflowTemplates.length > 0;
+    for (const template of workflowTemplates) {
+      const detail = [template.category, template.description].filter(Boolean).join(" · ");
+      const row = document.createElement("article");
+      row.className = "flow-history-item";
+      row.innerHTML = `<div class="flow-history-item__body"><div class="flow-history-item__title">${escapeHtml(template.name || "")}</div><div class="flow-history-item__detail">${escapeHtml(detail)}</div></div><div class="flow-history-item__actions"><button type="button" class="btn btn-secondary btn-sm" data-wf-template-instantiate="${escapeHtml(template.id)}">Tạo workflow</button><button type="button" class="btn btn-secondary btn-sm" data-wf-template-export="${escapeHtml(template.id)}">Xuất file</button><button type="button" class="btn btn-secondary btn-sm" data-wf-template-delete="${escapeHtml(template.id)}">Xoá</button></div>`;
+      list.appendChild(row);
+    }
+  }
+
+  async function loadWorkflowTemplates() {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-workflow-templates:list" });
+      workflowTemplates = res?.ok && Array.isArray(res.templates) ? res.templates : [];
+    } catch {
+      workflowTemplates = [];
+    }
+    renderWorkflowTemplates();
+  }
+
+  async function saveWorkflowTemplateFromForm() {
+    const name = document.querySelector("#wfTemplateName")?.value.trim() || "";
+    const category = document.querySelector("#wfTemplateCategory")?.value.trim() || "";
+    const description = document.querySelector("#wfTemplateDescription")?.value.trim() || "";
+    const raw = document.querySelector("#wfTemplateGraph")?.value.trim() || "";
+    try {
+      const graph = JSON.parse(raw);
+      const res = await chrome.runtime.sendMessage({ type: "flow-workflow-templates:save", graph, name, description, category });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể lưu mẫu workflow này.");
+      setFeedback("✅ Đã lưu mẫu workflow.", true);
+      addLog("flow.workflowTemplate.save", res.template?.name || name, true);
+      await loadWorkflowTemplates();
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.workflowTemplate.save.error", err.message, false);
+    }
+  }
+
+  async function instantiateWorkflowTemplate(id) {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-workflow-templates:instantiate", id });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể tạo workflow từ mẫu này.");
+      downloadJsonFile(`${(res.graph?.name || "workflow").replace(/[^\w-]+/g, "-")}.workflow.json`, res.graph);
+      setFeedback("✅ Đã tạo workflow mới từ mẫu (tải xuống dạng JSON).", true);
+      addLog("flow.workflowTemplate.instantiate", res.graph?.name || id, true);
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.workflowTemplate.instantiate.error", err.message, false);
+    }
+  }
+
+  async function exportWorkflowTemplate(id) {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-workflow-templates:export", id });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể xuất mẫu workflow này.");
+      downloadJsonFile(`${(res.document?.name || "workflow-template").replace(/[^\w-]+/g, "-")}.template.json`, res.document);
+      addLog("flow.workflowTemplate.export", res.document?.name || id, true);
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.workflowTemplate.export.error", err.message, false);
+    }
+  }
+
+  async function importWorkflowTemplateFile(file) {
+    try {
+      const document_ = JSON.parse(await file.text());
+      const res = await chrome.runtime.sendMessage({ type: "flow-workflow-templates:import", document: document_ });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể nhập mẫu workflow này.");
+      setFeedback("✅ Đã nhập mẫu workflow.", true);
+      addLog("flow.workflowTemplate.import", res.template?.name || file.name, true);
+      await loadWorkflowTemplates();
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.workflowTemplate.import.error", err.message, false);
+    }
+  }
+
+  async function removeWorkflowTemplate(id) {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-workflow-templates:remove", id });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể xoá mẫu workflow này.");
+      await loadWorkflowTemplates();
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.workflowTemplate.remove.error", err.message, false);
+    }
+  }
+
   function renderSavedPrompts() {
     const list = document.querySelector("#savedPromptsList");
     const empty = document.querySelector("#savedPromptsEmpty");
@@ -813,6 +922,7 @@
     renderHistory();
     renderSavedPrompts();
     void loadGenerationHistory();
+    void loadWorkflowTemplates();
   }
 
   function addLog(name, detail, isOk = true) {
@@ -1181,6 +1291,24 @@
   document.querySelector("#flowGenHistoryList")?.addEventListener("click", event => {
     const rerunId = event.target.closest("[data-history-rerun]")?.dataset.historyRerun;
     if (rerunId) void rerunGenerationRecord(rerunId);
+  });
+
+  document.querySelector("#saveWorkflowTemplateBtn")?.addEventListener("click", () => { void saveWorkflowTemplateFromForm(); });
+  document.querySelector("#importWorkflowTemplateBtn")?.addEventListener("click", () => {
+    document.querySelector("#wfTemplateImportFile")?.click();
+  });
+  document.querySelector("#wfTemplateImportFile")?.addEventListener("change", event => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (file) void importWorkflowTemplateFile(file);
+  });
+  document.querySelector("#workflowTemplateList")?.addEventListener("click", event => {
+    const instantiateId = event.target.closest("[data-wf-template-instantiate]")?.dataset.wfTemplateInstantiate;
+    if (instantiateId) { void instantiateWorkflowTemplate(instantiateId); return; }
+    const exportId = event.target.closest("[data-wf-template-export]")?.dataset.wfTemplateExport;
+    if (exportId) { void exportWorkflowTemplate(exportId); return; }
+    const deleteId = event.target.closest("[data-wf-template-delete]")?.dataset.wfTemplateDelete;
+    if (deleteId) void removeWorkflowTemplate(deleteId);
   });
 
   let isGenerating = false;
