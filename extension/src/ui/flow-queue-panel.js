@@ -20,6 +20,8 @@
     draftSave: "flow-batch:save",
     draftRun: "flow-batch:run",
     draftRemove: "flow-batch:remove",
+    runList: "flow-batch-runs:list",
+    runResume: "flow-batch-runs:resume",
   });
 
   const RETRYABLE_OPERATIONS = new Set([
@@ -70,6 +72,9 @@
       retryBatch: "Thử lại {n} tác vụ lỗi an toàn",
       saveDraft: "Lưu nháp", draftsTitle: "Batch nháp", draftEmpty: "Chưa có batch nháp nào.",
       draftMeta: "{n} tác vụ · đã chạy {runs} lần", runDraft: "Chạy", deleteDraft: "Xóa",
+      runActive: "Batch đang chạy", runCompleted: "Lần chạy gần nhất: hoàn tất",
+      runFailed: "Lần chạy gần nhất: thất bại", runNeedsReview: "Lần chạy gần nhất: cần xem lại",
+      resumeUnfinished: "Chạy tiếp phần chưa xong ({n})",
     },
     en: {
       aria: "Flow task queue", title: "Flow queue", loading: "Loading…",
@@ -108,6 +113,9 @@
       retryBatch: "Retry {n} safe failed tasks",
       saveDraft: "Save draft", draftsTitle: "Batch drafts", draftEmpty: "No batch drafts yet.",
       draftMeta: "{n} tasks · ran {runs} time(s)", runDraft: "Run", deleteDraft: "Delete",
+      runActive: "Batch running", runCompleted: "Last run: completed",
+      runFailed: "Last run: failed", runNeedsReview: "Last run: needs review",
+      resumeUnfinished: "Resume unfinished ({n})",
     },
   });
 
@@ -757,12 +765,22 @@
       if (response?.ok !== false && !response?.error && input) input.value = "";
     }
 
+    async _loadRuns() {
+      if (!this.runtime?.sendMessage) return;
+      try {
+        const response = await this.runtime.sendMessage({ type: MESSAGE.runList });
+        if (response?.ok === false || response?.error) return;
+        this.runs = Array.isArray(response?.runs) ? response.runs : [];
+      } catch { /* run state is an enhancement; drafts keep working without it */ }
+    }
+
     async _loadDrafts() {
       if (!this.draftsElement || !this.runtime?.sendMessage) return;
       try {
         const response = await this.runtime.sendMessage({ type: MESSAGE.draftList });
         if (response?.ok === false || response?.error) return;
         this.drafts = Array.isArray(response?.drafts) ? response.drafts : [];
+        await this._loadRuns();
         this._renderDrafts();
       } catch { /* drafts are an enhancement; the queue itself must keep working */ }
     }
@@ -783,12 +801,28 @@
         item.append(head);
         item.append(makeElement("div", "flow-queue-panel__detail",
           this._text("draftMeta", { n: Array.isArray(draft.jobs) ? draft.jobs.length : 0, runs: draft.runCount || 0 })));
+        // FEAT-02: the draft's latest batch run contributes its state,
+        // and a run that ended partial offers to resume only the
+        // unfinished items.
+        const batchRun = (Array.isArray(this.runs) ? this.runs : []).find(candidate => candidate?.draftId === draft.id) || null;
+        if (batchRun) {
+          const stateKey = batchRun.state === "active" ? "runActive"
+            : batchRun.finalizeState === "completed" ? "runCompleted"
+            : batchRun.finalizeState === "failed" ? "runFailed" : "runNeedsReview";
+          item.append(makeElement("div", "flow-queue-panel__detail", this._text(stateKey)));
+        }
         const actions = makeElement("div", "flow-queue-panel__item-actions");
         const run = this._button(this._text("runDraft"), "draft-run");
         run.dataset.draftId = String(draft.id);
         const remove = this._button(this._text("deleteDraft"), "draft-remove");
         remove.dataset.draftId = String(draft.id);
         actions.append(run, remove);
+        if (batchRun?.state === "finalized" && batchRun.finalizeState === "needs_review" &&
+            Array.isArray(batchRun.resumeIndexes) && batchRun.resumeIndexes.length) {
+          const resumeRun = this._button(this._text("resumeUnfinished", { n: batchRun.resumeIndexes.length }), "run-resume");
+          resumeRun.dataset.runId = String(batchRun.id);
+          actions.append(resumeRun);
+        }
         item.append(actions);
         fragment.append(item);
       }
@@ -847,6 +881,11 @@
       }
       if (action === "draft-remove") {
         const response = await this._send(MESSAGE.draftRemove, { id: button.dataset.draftId });
+        await this._loadDrafts();
+        return response;
+      }
+      if (action === "run-resume") {
+        const response = await this._send(MESSAGE.runResume, { id: button.dataset.runId });
         await this._loadDrafts();
         return response;
       }

@@ -9,6 +9,7 @@ import { runChatGptQueueJob } from "./chatgpt-queue-runner.js";
 import { loadChatGptCapabilityRegistry } from "./chatgpt-capabilities.js";
 import { FlowBatchDrafts, materializeDraftJobs } from "./flow-batch-drafts.js";
 import { FlowHistory, buildJobFromRecord } from "./flow-history.js";
+import { FlowBatchRuns } from "./flow-batch-runs.js";
 import { FlowMediaCatalog } from "./flow-media-catalog.js";
 import { revalidateJobReferences } from "./flow-ref-preflight.js";
 import { FlowBridgeClient, readBridgeConfig, postHttpMessage } from "./flow-bridge-client.js";
@@ -1417,6 +1418,7 @@ const flowJobQueue = new FlowJobQueue(runExtensionFlowJob, {
 });
 const flowBatchDrafts = new FlowBatchDrafts();
 const flowHistory = new FlowHistory();
+const flowBatchRuns = new FlowBatchRuns();
 flowJobQueue.subscribe((snapshot, reason) => {
   broadcastFlowQueue(snapshot, reason);
   // FEAT-01: every finished generation lands in the structured history
@@ -1424,6 +1426,13 @@ flowJobQueue.subscribe((snapshot, reason) => {
   // and must never disturb the queue path, so failures stay silent here.
   void flowHistory.observeSnapshot(snapshot).catch(error => {
     console.warn("[FlowHistory] Could not record finished queue jobs:", error?.message || error);
+  });
+  // FEAT-02: the same snapshots fold into the active batch run's
+  // receipts, so a run record always reflects what the queue actually
+  // did. Folding is serialized inside the store and, like history
+  // recording, must never disturb the queue path.
+  void flowBatchRuns.observeSnapshot(snapshot).catch(error => {
+    console.warn("[FlowBatchRuns] Could not fold the queue snapshot into the active run:", error?.message || error);
   });
   // Failures during queue preflight happen before the download runner can mark
   // the source item. Repair its state from the durable download job outcome.
@@ -1440,6 +1449,24 @@ flowJobQueue.subscribe((snapshot, reason) => {
       .catch(error => console.warn("[FlowQueue] Could not update failed manual-download state:", error?.message || error));
   }
 });
+// FEAT-02: turn an enqueued draft run into a persistent batch run
+// record — create the record from the exact job inputs that were
+// enqueued, claim it, and write the index-aligned admission mapping
+// from the jobs the queue actually accepted. Callers treat failures as
+// bookkeeping failures: when the claim conflicts (another batch is
+// still active) the created record is removed again, so an untracked
+// run never leaves an orphan record behind.
+async function trackDraftRun(draft, jobs, addedJobs, batchId) {
+  const run = await flowBatchRuns.create({ draftId: draft.id, label: draft.label, items: jobs });
+  try {
+    const claim = await flowBatchRuns.claim(run.id, run.revision);
+    const mapping = addedJobs.map((job, position) => ({ index: claim.indexes[position], jobId: job.id }));
+    return await flowBatchRuns.recordAdmission(run.id, { batchId: batchId || null, kind: "initial", mapping });
+  } catch (error) {
+    await flowBatchRuns.remove(run.id).catch(() => {});
+    throw error;
+  }
+}
 void flowJobQueue.ready.then(() => flowJobQueue.resumeRecovered()).catch(error => {
   console.error("[FlowQueue] Could not resume a checkpointed job after worker restart:", error?.message || error);
 });
@@ -1669,17 +1696,26 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
             }));
             let snapshot;
             let runBatchId = null;
+            let addedJobs = [];
             if (jobs.length === 1) {
               const added = await flowJobQueue.add(jobs[0]);
+              addedJobs = [added];
               runBatchId = added?.batch?.batchId || null;
               snapshot = await flowJobQueue.snapshot();
             } else {
               const added = await flowJobQueue.addBatch(jobs, { batchLabel: draft.label });
+              addedJobs = added;
               runBatchId = added[0]?.batch?.batchId || null;
               snapshot = await flowJobQueue.snapshot();
             }
             // Bookkeeping must not misreport a successful enqueue as failed.
             const updated = await flowBatchDrafts.recordRun(draft.id, runBatchId).catch(() => draft);
+            // FEAT-02: the run also becomes a persistent batch run record
+            // whose receipts fold from queue snapshots. Tracking is
+            // bookkeeping — it must never fail a successful enqueue.
+            await trackDraftRun(draft, jobs, addedJobs, runBatchId).catch(error => {
+              console.warn("[FlowBatchRuns] Could not track this draft run:", error?.message || error);
+            });
             snapshot = message.autoStart === false || snapshot.isPaused || snapshot.waitingForUser > 0
               ? snapshot
               : await flowJobQueue.resume();
@@ -1741,6 +1777,122 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
     })().then(respond).catch(error => respond({
       ok: false,
       error: { code: error?.code || "FLOW_HISTORY_FAILED", message: String(error?.message || error) },
+    }));
+    return true;
+  }
+  if (typeof message?.type === "string" && message.type.startsWith("flow-batch-runs:")) {
+    if (_sender?.id !== chrome.runtime.id || _sender?.tab) {
+      respond({ ok: false, error: { code: "FLOW_BATCH_RUNS_FORBIDDEN", message: "Batch runs are available only from the extension UI." } });
+      return;
+    }
+    void (async () => {
+      await flowBatchRuns.ready;
+      switch (message.type) {
+        case "flow-batch-runs:list":
+          return { ok: true, runs: await flowBatchRuns.list() };
+        case "flow-batch-runs:get":
+          return { ok: true, run: await flowBatchRuns.get(String(message.id || "")) };
+        case "flow-batch-runs:remove": {
+          const removed = await flowBatchRuns.remove(String(message.id || ""));
+          return { ok: true, removed, runs: await flowBatchRuns.list() };
+        }
+        case "flow-batch-runs:create": {
+          const draftId = String(message.id || "");
+          if (!flowBatchDrafts.beginRun(draftId)) {
+            throw Object.assign(new Error("This batch draft is already being queued."), { code: "FLOW_BATCH_DRAFT_RUN_IN_PROGRESS" });
+          }
+          try {
+            const draft = await flowBatchDrafts.get(draftId);
+            if (!draft) throw Object.assign(new Error(`No batch draft with id ${message.id}.`), { code: "FLOW_BATCH_DRAFT_NOT_FOUND" });
+            const target = await captureFlowTargetMetadata();
+            const jobs = materializeDraftJobs(draft).map(job => ({
+              ...job,
+              // The current tab/project target wins over any target
+              // metadata stored with the draft: a draft runs here and now.
+              metadata: { source: "extension", ...(job.metadata || {}), ...target },
+            }));
+            const run = await flowBatchRuns.create({ draftId: draft.id, label: draft.label, items: jobs });
+            try {
+              // The claim gates the enqueue: a conflicting active batch
+              // surfaces before a single credit can be spent.
+              const claim = await flowBatchRuns.claim(run.id, run.revision);
+              let addedJobs = [];
+              let runBatchId = null;
+              if (jobs.length === 1) {
+                const added = await flowJobQueue.add(jobs[0]);
+                addedJobs = [added];
+                runBatchId = added?.batch?.batchId || null;
+              } else {
+                runBatchId = crypto.randomUUID();
+                addedJobs = await flowJobQueue.addBatch(jobs, { batchId: runBatchId, batchLabel: draft.label });
+              }
+              const mapping = addedJobs.map((job, position) => ({ index: claim.indexes[position], jobId: job.id }));
+              const admitted = await flowBatchRuns.recordAdmission(run.id, { batchId: runBatchId, kind: "initial", mapping });
+              // Bookkeeping must not misreport a successful enqueue as failed.
+              const updated = await flowBatchDrafts.recordRun(draft.id, runBatchId).catch(() => draft);
+              let snapshot = await flowJobQueue.snapshot();
+              snapshot = message.autoStart === false || snapshot.isPaused || snapshot.waitingForUser > 0
+                ? snapshot
+                : await flowJobQueue.resume();
+              return { ok: true, run: admitted, draft: updated, drafts: await flowBatchDrafts.list(), runs: await flowBatchRuns.list(), ...flowQueueSnapshot(snapshot) };
+            } catch (error) {
+              // The claim admitted nothing — drop the record again so a
+              // failed start leaves no orphan run behind.
+              await flowBatchRuns.remove(run.id).catch(() => {});
+              throw error;
+            }
+          } finally {
+            flowBatchDrafts.endRun(draftId);
+          }
+        }
+        case "flow-batch-runs:resume": {
+          const runId = String(message.id || "");
+          const current = await flowBatchRuns.get(runId);
+          if (!current) throw Object.assign(new Error(`No batch run with id ${message.id}.`), { code: "FLOW_BATCH_RUN_NOT_FOUND" });
+          // Index validation and the single-active invariant run inside
+          // the store before anything is enqueued.
+          const resumed = await flowBatchRuns.resume(runId, {
+            indexes: Array.isArray(message.indexes) ? message.indexes : undefined,
+            expectedRevision: message.expectedRevision,
+          });
+          const target = await captureFlowTargetMetadata();
+          const jobs = materializeDraftJobs({ jobs: resumed.jobs }).map(job => ({
+            ...job,
+            metadata: { source: "extension", ...(job.metadata || {}), ...target },
+          }));
+          let admitted;
+          try {
+            let addedJobs = [];
+            let runBatchId = null;
+            if (jobs.length === 1) {
+              const added = await flowJobQueue.add(jobs[0]);
+              addedJobs = [added];
+              runBatchId = added?.batch?.batchId || null;
+            } else {
+              runBatchId = crypto.randomUUID();
+              addedJobs = await flowJobQueue.addBatch(jobs, { batchId: runBatchId, batchLabel: current.label });
+            }
+            const mapping = addedJobs.map((job, position) => ({ index: resumed.indexes[position], jobId: job.id }));
+            admitted = await flowBatchRuns.recordAdmission(runId, { batchId: runBatchId, kind: "resume", mapping });
+          } catch (error) {
+            // The enqueue failed after the claim: hand the claim back so
+            // the run returns to its finalized state instead of wedging
+            // the scheduler behind a phantom active batch.
+            await flowBatchRuns.releaseClaim(runId).catch(() => {});
+            throw error;
+          }
+          let snapshot = await flowJobQueue.snapshot();
+          snapshot = message.autoStart === false || snapshot.isPaused || snapshot.waitingForUser > 0
+            ? snapshot
+            : await flowJobQueue.resume();
+          return { ok: true, run: admitted, runs: await flowBatchRuns.list(), ...flowQueueSnapshot(snapshot) };
+        }
+        default:
+          throw Object.assign(new Error(`Unsupported batch run action: ${message.type}`), { code: "FLOW_BATCH_RUNS_ACTION_UNSUPPORTED" });
+      }
+    })().then(respond).catch(error => respond({
+      ok: false,
+      error: { code: error?.code || "FLOW_BATCH_RUNS_FAILED", message: String(error?.message || error) },
     }));
     return true;
   }
