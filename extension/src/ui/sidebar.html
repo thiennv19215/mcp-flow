@@ -1105,6 +1105,22 @@
             </button>
           </div>
           <div class="wmtool-inline hidden" id="watermarkToolPanel"></div>
+          <div class="wmtool-inline hidden" id="flowTransformPanel">
+            <div class="section-title" id="flowTransformTitle">Đa góc nhìn (Angles)</div>
+            <label class="flow-transform-field"><span>Preset</span>
+              <select id="flowTransformPreset"></select>
+            </label>
+            <div id="flowTransformParams"></div>
+            <div class="flow-transform-source" style="display:flex;gap:6px;align-items:center;margin:8px 0;">
+              <span>Ảnh nguồn: <span id="flowTransformSourceLabel">Chưa có</span></span>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnPickTransformSource">Chọn ảnh nguồn</button>
+            </div>
+            <p id="flowTransformPreview" class="flow-inline-note"></p>
+            <div style="display:flex;gap:6px;margin-top:8px;">
+              <button type="button" class="btn btn-primary" id="btnApplyTransform">Áp dụng — đưa vào hàng đợi</button>
+              <button type="button" class="btn btn-secondary" id="btnCloseTransformPanel">Đóng</button>
+            </div>
+          </div>
         </div>
         <!-- TAB 5: HISTORY                             -->
         <!-- ========================================== -->
@@ -1274,6 +1290,7 @@
   <script src="flow-queue-panel.js"></script>
   <script src="reference-picker.js"></script>
   <script src="flow-snippets.js"></script>
+  <script src="../content/shared/flow-transforms.js"></script>
   <script src="sidebar.js"></script>
 </body>
 </html>
