@@ -2,7 +2,10 @@ import { z } from "zod";
 
 const frameAssetSchema = z.object({
   asset: z.string().trim().min(1).describe("Exact image title in the open Flow project."),
-  id: z.string().uuid().describe("Stable Flow media UUID from the upload or asset receipt; must match the selected tile."),
+  // The extension's reference picker accepts a UUID or an asb: id, and
+  // the generation validator accepts both; the backend schema must not
+  // be stricter than the picker it feeds.
+  id: z.union([z.string().uuid(), z.string().regex(/^asb:/)]).describe("Stable Flow media UUID from the upload or asset receipt, or its asb: id; must match the selected tile."),
 }).strict();
 const frameInputSchema = z.union([z.string(), frameAssetSchema]);
 
@@ -13,7 +16,7 @@ export const sceneSchema = z.object({
     .string()
     .optional()
     .describe("Model label as shown in Flow, e.g. 'Omni 1.1 Flash', 'Veo 3.1 - Fast', 'Veo 3.1 - Quality', 'Nano Banana Pro'. Images default to the newest Nano Banana (2.1 today); video omitted keeps Flow's current model."),
-  aspect_ratio: z.enum(["16:9", "9:16", "1:1", "4:3", "3:4"]).optional().describe("Video supports 16:9 and 9:16 only."),
+  aspect_ratio: z.enum(["16:9", "9:16", "1:1", "4:3", "3:4"]).optional().describe("Video scenes support 16:9 and 9:16 only; image scenes support all five ratios (enforced per type in superRefine below)."),
   duration: z.union([z.literal(4), z.literal(6), z.literal(8), z.literal(10)]).optional().describe("Video length in seconds. Omni models only; Veo 3.1 clips are fixed at 8s."),
   resolution: z.enum(["360p", "720p"]).optional().describe("Video resolution. Omni models only."),
   max_credits: z.number().int().min(0).default(25).describe("Video safety cap: the scene is skipped (nothing spent) if Flow quotes more credits than this. Image generation does not check a credit quote."),
@@ -54,6 +57,12 @@ export const sceneSchema = z.object({
   // the same registry — the backend no longer keeps a second copy.
   if (scene.voice && scene.type !== "video") {
     context.addIssue({ code: "custom", path: ["voice"], message: "Flow voice chips are available for video generation only." });
+  }
+  // The extension queue preflight enforces video 16:9/9:16 only; rejecting
+  // here keeps a video 1:1 scene from passing MCP validation only to fail
+  // later in the queue. Image scenes keep all five ratios.
+  if (scene.type === "video" && scene.aspect_ratio && !["16:9", "9:16"].includes(scene.aspect_ratio)) {
+    context.addIssue({ code: "custom", path: ["aspect_ratio"], message: "Video scenes support 16:9 and 9:16 only." });
   }
   if (scene.voice && (scene.first_frame || scene.last_frame)) {
     context.addIssue({ code: "custom", path: ["voice"], message: "Flow voice chips are not available in first/last frame mode." });
