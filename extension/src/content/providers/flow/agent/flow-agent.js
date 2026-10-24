@@ -1,10 +1,13 @@
 (function (root) {
   "use strict";
 
-  const foldFlowText = value => {
-    const norm = root.normalizeFlowUiText?.(value) || value;
-    return String(norm || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/Đ/g, "D").replace(/\s+/g, " ").trim().toLowerCase();
-  };
+  // Audit cluster E: this used to re-apply NFD-strip + đ-fold on top of
+  // normalizeFlowUiText, but the canonical fold already does NFKD-strip,
+  // đ-fold, zero-width strip, whitespace collapse and vi-lowercase, so
+  // the second pass was identity. Both compared sides (values and
+  // aliases) go through this one function, so the fold is safe here.
+  const foldFlowText = value => root.normalizeFlowUiText?.(value) ||
+    String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/Đ/g, "D").replace(/\s+/g, " ").trim().toLowerCase();
 
   function matchesLocalizedAction(el, ...keys) {
     const values = [root.accessibleName?.(el), el?.getAttribute?.("aria-label"), el?.getAttribute?.("title"), el?.innerText, el?.textContent]

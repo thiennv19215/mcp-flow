@@ -54,8 +54,13 @@
       if (!root.visible?.(el) || el.disabled || el.getAttribute?.("aria-disabled") === "true" || !isFlowProjectNavigationControl(el)) return false;
       const text = root.semanticActionText?.(el) || root.accessibleName?.(el) || el.innerText || el.textContent || "";
       if (regex) return regex.test(String(text).replace(/\s+/g, " ").trim());
-      const normalized = String(text).replace(/\s+/g, " ").trim().toLowerCase();
-      return (NAV_SYNONYMS[normalizeNavigationLabel(label)] || []).includes(normalized);
+      // Audit cluster E: fold BOTH sides with the canonical UI fold, so
+      // a decomposed-accent label ("Tất cả...") still matches its
+      // synonym. The lookup KEY stays strict-folded (NAV_SYNONYMS keys
+      // are literal), and ambiguity still fails closed below.
+      const foldNavigationText = value => root.normalizeFlowUiText?.(value) || String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+      const normalized = foldNavigationText(text);
+      return (NAV_SYNONYMS[normalizeNavigationLabel(label)] || []).map(foldNavigationText).includes(normalized);
     });
     // Refuse ambiguous sidebars. Toby's route fallback handles a missing All media control.
     return matches.length === 1 ? matches[0] : null;
