@@ -119,8 +119,17 @@
         const flowAbort = new AbortController();
         const unknownSubmitError = async (code, message, retryable = false) => {
           const error = this.error(code, message, retryable, true);
+          // Videofix M-E: the slate-bridge ambiguity flag is wired here
+          // instead of staying dead metadata on the activation. It records
+          // one real diagnostic fact — the click landed but the bridge's
+          // reply was lost — for every submit error that carries observer
+          // diagnostics. It is NOT a "dispatched, ambiguous" state: no
+          // code treats the submit as dispatched on this flag alone; the
+          // dispatch wait's correlation / DOM signals own the verdict.
+          const submitBridgeAmbiguous = activation?.mainActivationAmbiguous === true;
           error.diagnostics = {
             clickDelivered: true,
+            submitBridgeAmbiguous,
             observerReady: false,
             xhrHookActive: false,
             fetchHookActive: false,
@@ -130,6 +139,7 @@
             const observer = await tiles.readNativeFlowCorrelationHealth?.();
             if (observer) error.diagnostics = {
               clickDelivered: true,
+              submitBridgeAmbiguous,
               observerReady: observer.ready === true,
               xhrHookActive: observer.xhrHookActive === true,
               fetchHookActive: observer.fetchHookActive === true,
@@ -274,18 +284,32 @@
               return response?.ok ? response.entry || null : null;
             } catch { return null; }
           };
-          const refAssetExists = (ref, entry) => {
-            // Absence must be provable: when the asset scan is unavailable
-            // or fails, the ref cannot be declared missing — the attach
-            // stages below remain the authority, exactly as before this
-            // pass existed (same degrade discipline as the catalog lookup).
-            if (typeof menu.collectAssets !== "function") return true;
+          // M-A: provenance-graded reference trust. A name-only match
+          // used to pass whenever ANY tile's computed name equalled the
+          // ref name — including a tile whose name exists only because
+          // its aria-label is a UI action string ("Request for text
+          // translation"). That let a poisoned action label pass
+          // revalidation and reach the frame picker as a real asset.
+          // Now a name match only counts when the tile's name came from
+          // a dedicated attribute (see collectAssets nameSource); a
+          // fallback-only name without an id is untrusted and fails
+          // here, before anything is submitted. "unknown" keeps the old
+          // degrade discipline: an unavailable scan cannot prove
+          // absence, so the attach stages below remain the authority.
+          const refNameTrust = (ref, entry) => {
+            if (typeof menu.collectAssets !== "function") return "unknown";
             let assets;
-            try { assets = menu.collectAssets({ includeIncomplete: true }); } catch { return true; }
+            try { assets = menu.collectAssets({ includeIncomplete: true }); } catch { return "unknown"; }
             const ids = new Set([ref.expectedId, entry?.mediaId, entry?.uuid].filter(value => typeof value === "string" && value));
-            return assets.some(asset => (ids.size > 0 && (ids.has(asset?.id) || ids.has(asset?.persistentMediaId))) ||
-              String(asset?.name || "").trim() === ref.assetName);
+            if (ids.size > 0 && assets.some(asset => ids.has(asset?.id) || ids.has(asset?.persistentMediaId))) return "id";
+            const named = assets.filter(asset => String(asset?.name || "").trim() === ref.assetName);
+            if (named.some(asset => asset?.nameSource === "dedicated")) return "dedicated";
+            if (named.length > 0) return "fallback-only";
+            return "absent";
           };
+          // (No separate refAssetExists helper: the loop below reads the
+          // trust grade directly so it can report the fallback-only
+          // cause distinctly instead of a generic "missing".)
           const retainedRefFile = entry => {
             const wanted = [entry?.originalName, entry?.uploadName].filter(value => typeof value === "string" && value);
             if (!wanted.length || !root.stagedNativeFiles) return null;
@@ -296,9 +320,11 @@
           };
           await runFlowStage("revalidating queued references", async ({ signal }) => {
             const missing = [];
+            const missingFallback = [];
             for (const ref of refChecks) {
               const entry = await lookupRefCatalog(ref);
-              if (refAssetExists(ref, entry)) continue;
+              const trust = refNameTrust(ref, entry);
+              if (trust === "unknown" || trust === "id" || trust === "dedicated") continue;
               let restoredId = null;
               if (entry?.uploadName) {
                 const file = retainedRefFile(entry);
@@ -311,12 +337,17 @@
                 ref.applyId?.(restoredId);
                 continue;
               }
-              missing.push(ref.assetName);
+              if (trust === "fallback-only") missingFallback.push(ref.assetName);
+              else missing.push(ref.assetName);
             }
-            if (missing.length) {
+            if (missing.length || missingFallback.length) {
               throw this.error(
                 "FLOW_QUEUE_PREFLIGHT_REFERENCE_MISSING",
-                `Flow reference${missing.length === 1 ? "" : "s"} missing before generation: ${missing.join(", ")}. The referenced asset is no longer in the Flow project library, and no retained upload bytes are available to restore it. Re-attach the reference or remove it from the job; nothing was submitted.`,
+                [
+                  ...(missing.length ? [`Flow reference${missing.length === 1 ? "" : "s"} missing before generation: ${missing.join(", ")}. The referenced asset is no longer in the Flow project library, and no retained upload bytes are available to restore it.`] : []),
+                  ...(missingFallback.length ? [`The following reference name${missingFallback.length === 1 ? "" : "s"} ${missingFallback.length === 1 ? "was" : "were"} found only as a UI label (such as a tile aria-label), not as an asset file name, so ${missingFallback.length === 1 ? "it" : "they"} cannot be trusted as asset titles: ${missingFallback.join(", ")}. Re-attach ${missingFallback.length === 1 ? "it" : "them"} from the Flow library so ${missingFallback.length === 1 ? "it carries" : "they carry"} an asset ID, or remove ${missingFallback.length === 1 ? "it" : "them"} from the job.`] : []),
+                  "Nothing was submitted.",
+                ].join(" "),
                 false,
                 false,
               );
@@ -388,7 +419,12 @@
             throw uploadError;
           }
           if (popupCleanupError) throw popupCleanupError;
-          return await runFlowStage(`selecting uploaded image ${attachment.name}`, ({ signal }) => components.chooseNativePickerAsset(attachment.name, slot, { deadline: flowDeadline, signal, command, expectedId: uploadReceipt?.id }), true);
+          // M-B: the dispatched tile bears the uploader's digest-derived
+          // uploadName, not the client's safeName — pass uploadName (the
+          // same precedence the sidebar's uploadedAssetAttachment uses)
+          // so the picker's title leg can match the tile it just made.
+          const pickerTitle = uploadReceipt?.uploadName || uploadReceipt?.name || attachment.name;
+          return await runFlowStage(`selecting uploaded image ${attachment.name}`, ({ signal }) => components.chooseNativePickerAsset(pickerTitle, slot, { deadline: flowDeadline, signal, command, expectedId: uploadReceipt?.id }), true);
         };
 
         const resolveValue = async (value, slot) => {
@@ -597,9 +633,16 @@
           ...(expectedImageModelKey !== undefined ? { expectedImageModelKey } : {}),
         }));
         if (!correlationAttemptId || !tiles.nativeFlowCorrelationMap().has(correlationAttemptId)) {
+          // M-D: when the arm failed on a retired conflict, say so and
+          // say how to clear it (tab reload clears the hold immediately;
+          // the hold also expires after the observer TTL). The generic
+          // message hid this remedy and made the failure look permanent.
+          const armReason = root.__flowNativeCorrelationArmDiagnostics?.receipt?.reason;
           throw this.error(
             "FLOW_SUBMIT_CORRELATION_UNAVAILABLE",
-            "Flow's request observer could not be armed, so the submit cannot be safely confirmed. No generation request was sent.",
+            armReason === "ambiguous_retired_request"
+              ? "Flow's request observer refused a new attempt because a previous identical submit ended without a confirmed dispatch, so retrying now could double-generate. Reload the Flow tab (which clears the hold) or wait up to 15 minutes, then retry. No generation request was sent."
+              : "Flow's request observer could not be armed, so the submit cannot be safely confirmed. No generation request was sent.",
             false,
             false
           );
@@ -620,7 +663,8 @@
         }
         try { requireFlowTime("activating the Flow submit button"); }
         catch (error) {
-          if (correlationAttemptId) tiles.disarmNativeFlowCorrelation(correlationAttemptId);
+          // M-D: no click was attempted yet, so nothing can be in flight.
+          if (correlationAttemptId) tiles.disarmNativeFlowCorrelation(correlationAttemptId, { dispatchOutcome: "none" });
           throw error;
         }
 
@@ -634,7 +678,9 @@
             : await unknownSubmitError(error?.code || "FLOW_SUBMIT_ACTIVATION_UNKNOWN", error?.message || "Flow submit activation outcome is unknown; inspect Flow before retrying.", error?.retryable === true);
         }
         if (!activation.clickDelivered) {
-          if (correlationAttemptId) tiles.disarmNativeFlowCorrelation(correlationAttemptId);
+          // M-D: the button never received the click, so nothing can be
+          // in flight and the identical retry must not be retired.
+          if (correlationAttemptId) tiles.disarmNativeFlowCorrelation(correlationAttemptId, { dispatchOutcome: "none" });
           throw this.error(
             "FLOW_SUBMIT_CLICK_NOT_DELIVERED",
             "Flow did not receive a submit click; the button changed state before activation completed.",
@@ -675,13 +721,33 @@
         const submitEditorElement = typeof editor.getVisibleFlowPromptEditor === 'function'
           ? editor.getVisibleFlowPromptEditor()
           : (typeof root.getVisibleFlowPromptEditor === 'function' ? root.getVisibleFlowPromptEditor() : null);
-        const readEditorText = () => {
-          if (!submitEditorElement) return null;
-          if (typeof editor.getEditorUserText === 'function') return String(editor.getEditorUserText(submitEditorElement) || '');
-          if (typeof root.getEditorUserText === 'function') return String(root.getEditorUserText(submitEditorElement) || '');
+        // Videofix M-F: Flow may re-render the composer mid-wait, which
+        // detaches the submit-time element while it still holds the old
+        // prompt text. Reading that stale element forever would miss the
+        // acceptance and time out. Resolve the live editor on every read
+        // instead: the module's own current-editor finder keeps the
+        // submit-time element while it is still connected and falls back
+        // to the live visible editor once it detaches; a detached element
+        // is never read at all.
+        const resolveLiveEditor = () => {
+          try {
+            if (typeof editor.currentFlowPromptEditor === 'function') {
+              const current = editor.currentFlowPromptEditor(submitEditorElement);
+              if (current) return current;
+            }
+          } catch (_) { /* fall through to the plain finder */ }
+          return typeof editor.getVisibleFlowPromptEditor === 'function'
+            ? editor.getVisibleFlowPromptEditor()
+            : (typeof root.getVisibleFlowPromptEditor === 'function' ? root.getVisibleFlowPromptEditor() : null);
+        };
+        const readEditorText = (element) => {
+          const target = element === undefined ? resolveLiveEditor() : element;
+          if (!target || target.isConnected === false) return null;
+          if (typeof editor.getEditorUserText === 'function') return String(editor.getEditorUserText(target) || '');
+          if (typeof root.getEditorUserText === 'function') return String(root.getEditorUserText(target) || '');
           return null;
         };
-        const editorTextAtSubmit = readEditorText();
+        const editorTextAtSubmit = readEditorText(submitEditorElement);
         const editorHadTextAtSubmit = editorTextAtSubmit !== null && editorTextAtSubmit.trim() !== '';
         const liveTileBaseline = before.slice();
         const liveDomAccepted = () => {
@@ -702,6 +768,24 @@
           } catch (_) { /* a transient scan failure is not acceptance */ }
           return false;
         };
+        // Videofix M-E, design decision (fail-as-designed, not observe):
+        // a no-signal dispatch timeout has ZERO positive evidence — no
+        // request (even weak), no Flow error, no button disable, no
+        // editor-empty, no new tile. Moving such a job into observe would
+        // break the invariant every other acceptance path keeps (a
+        // positive signal is required: requestSeen, DOM acceptance, or
+        // the M-G domAccepted fallback) and could claim another job's
+        // tile after burning the full observe budget on a submit Flow
+        // most likely dropped. So the timeout stays a failure with
+        // outcome_unknown=true — which is what blocks queue retry and
+        // auto-retry for this record, correctly, while a possibly-late
+        // Flow dispatch is still possible. The recovery is therefore
+        // spelled out in the error itself: inspect Flow first, and only
+        // recreate the job (a fresh submit in the same tab arms cleanly
+        // since M-D removed the retired-conflict lock) when nothing
+        // appeared. There is no "dispatched, ambiguous" state in code
+        // and no comment below may claim one.
+        const dispatchTimeoutGuidance = " The outcome is unknown: Flow may still dispatch this submit late. Check the Flow project first — if a tile for this prompt appears there, Flow did dispatch it and this job cannot be retried from the queue. Only if nothing appears, create the job again; a fresh submit in the same tab is not blocked.";
         let acknowledged = false;
         let domAccepted = false;
         let lastSubmitProgress = "";
@@ -724,7 +808,9 @@
 
           const newError = editor.currentFlowSubmitErrors().find(msg => !errorsBeforeSubmit.has(msg));
           if (newError) {
-            tiles.disarmNativeFlowCorrelation(correlationAttemptId);
+            // M-D: Flow displayed an error, so the submit was rejected
+            // and nothing is in flight; the retry must not be retired.
+            tiles.disarmNativeFlowCorrelation(correlationAttemptId, { dispatchOutcome: "rejected" });
             const classified = root.classifyFlowError?.(newError);
             if (classified) throw await unknownSubmitError(classified.code, classified.message, classified.retryable);
             throw await unknownSubmitError("FLOW_SUBMIT_REJECTED", `Flow displayed an error before a correlated generation request was observed: ${newError}. Inspect Flow before retrying.`);
@@ -762,8 +848,15 @@
             // diagnostics as every sibling submit exit instead of dying
             // unexplained; code, message and retryable are preserved.
             if (error?.code !== "FLOW_OPERATION_TIMEOUT") throw error;
-            tiles.disarmNativeFlowCorrelation(correlationAttemptId);
-            throw await unknownSubmitError(error.code, error.message || "Timed out while waiting for Flow request dispatch.", error.retryable === true);
+            // M-D: at this point the iteration already checked requestSeen
+            // (false), a new Flow error (none) and live DOM acceptance
+            // (false) — the click produced zero signal, so nothing is
+            // known to be in flight and the retry must not be retired.
+            // Exposure accepted deliberately: a request that arrives late
+            // after this timeout is attributed to the retry attempt, the
+            // same exposure a reload-and-retry has today.
+            tiles.disarmNativeFlowCorrelation(correlationAttemptId, { dispatchOutcome: "none" });
+            throw await unknownSubmitError(error.code, (error.message || "Timed out while waiting for Flow request dispatch.") + dispatchTimeoutGuidance, error.retryable === true);
           }
         }
 
@@ -771,14 +864,17 @@
           const latestEntry = tiles.nativeFlowCorrelationMap().get(correlationAttemptId);
           if (latestEntry?.requestSeen) acknowledged = true;
           else {
-            tiles.disarmNativeFlowCorrelation(correlationAttemptId);
+            // M-D: check the rejection first so the disarm can carry the
+            // observed outcome (rejected vs no-signal) instead of the
+            // legacy ambiguous disarm. Throw behavior below is unchanged.
             const newError = editor.currentFlowSubmitErrors().find(msg => !errorsBeforeSubmit.has(msg));
+            tiles.disarmNativeFlowCorrelation(correlationAttemptId, { dispatchOutcome: newError ? "rejected" : "none" });
             if (newError) {
               const classified = root.classifyFlowError?.(newError);
               if (classified) throw await unknownSubmitError(classified.code, classified.message, classified.retryable);
               throw await unknownSubmitError("FLOW_SUBMIT_REJECTED", `Flow displayed an error before a correlated generation request was observed: ${newError}. Inspect Flow before retrying.`);
             }
-            throw await unknownSubmitError("FLOW_SUBMIT_UNCONFIRMED", `Flow did not emit a correlated generation request within the submit budget (click delivered: ${Boolean(activation.clickDelivered)}). The outcome is unknown; inspect Flow before retrying.`);
+            throw await unknownSubmitError("FLOW_SUBMIT_UNCONFIRMED", `Flow did not emit a correlated generation request within the submit budget (click delivered: ${Boolean(activation.clickDelivered)}).` + dispatchTimeoutGuidance);
           }
         }
 
@@ -808,6 +904,9 @@
             credits: Number.isFinite(credits) ? credits : null,
             timeoutMs: payload.type === "video" ? 600_000 : 300_000,
             submitOnly: payload.submitOnly === true || payload.submit_only === true,
+            // M-G: carry the DOM-accept flag through the checkpoint so a
+            // service-worker restart resumes observe with the fallback.
+            ...(domAccepted ? { domAccepted: true } : {}),
           },
         });
         return {
@@ -1034,6 +1133,26 @@
                 if (!(current.mediaReady || current.failed) && (recovered.mediaReady || recovered.failed)) fresh[index] = recovered;
               }
             }
+            // M-G: DOM-accepted fallback candidates. When the submit was
+            // accepted by Flow's own controls but the observer never
+            // correlated a request, the correlated set is empty forever
+            // and the loop below would wait out the full deadline despite
+            // a rendered tile. Only when NO correlation exists at all
+            // (empty set, no request ever seen) may new, ready,
+            // kind-matched tiles outside `before` stand in — and only
+            // when their count is EXACTLY the expected count, so an extra
+            // stray tile keeps the loop waiting instead of misattributing
+            // a result. The verdict itself is rendered below, next to the
+            // normal ready path, under the same isEarly guard.
+            const domFallbackActive = payload.domAccepted === true && correlatedIds.size === 0 && !evidence.requestSeen;
+            const domFallbackCandidates = domFallbackActive ? allMedia.filter(item =>
+              !before.includes(tiles.tileSnapshotKey?.(item) || item.id || `title:${item.title}`) &&
+              !item.title.startsWith("fm-") &&
+              (!kind || item.kind === kind || (kind === "video" && item.kind === "scene") || item.failed) &&
+              item.id
+            ) : [];
+            const domFallbackReady = domFallbackCandidates.filter(item => item.mediaReady && !item.busy && !item.failed);
+            const domFallbackSettled = domFallbackCandidates.filter(item => (item.mediaReady && !item.busy) || item.failed);
             // VID-08: progress, for quiet-window purposes, is the receipt
             // stage or correlated id set moving, or the fresh set's
             // observable state changing (including a busy tile's render
@@ -1156,6 +1275,32 @@
             // A tile is ready ONLY if !item.busy AND item.mediaReady (loaded image or video!)
             const ready = fresh.filter(item => item.mediaReady && !item.busy && !item.failed);
             const isEarly = Date.now() - observeStartedAt < 2000 && !renderObservedInFlight;
+
+            // M-G fallback verdict: an exact-count ready set is accepted
+            // as this job's media (marked, so the queue can tell it apart
+            // from a correlated success); an exact-count settled set that
+            // is not all ready fails fast with a diagnosis instead of
+            // idling to the deadline. Any other count keeps waiting.
+            if (domFallbackActive && !isEarly) {
+              if (domFallbackReady.length === expected) {
+                const media = domFallbackReady.map(({ id, title, kind: mediaKind }) => ({
+                  id,
+                  title,
+                  kind: mediaKind === "scene" ? "video" : mediaKind,
+                }));
+                await tiles.emitFlowProgress(command, kind === "video" ? "Tạo video hoàn tất 100%" : "Tạo ảnh hoàn tất 100%", {
+                  generationResult: { media },
+                });
+                return { media, domAcceptedFallback: true };
+              }
+              if (domFallbackSettled.length === expected && domFallbackReady.length < expected) {
+                evidence.readyCount = domFallbackReady.length;
+                evidence.failedCount = domFallbackCandidates.filter(item => item.failed).length;
+                evidence.busyCount = domFallbackCandidates.filter(item => item.busy && !item.failed).length;
+                const failedDetails = domFallbackCandidates.filter(item => item.failed).map(item => `${item.title}${item.failureReason ? `: ${item.failureReason}` : ""}`).join("; ");
+                throw observeError("FLOW_GENERATION_FAILED", `Flow báo cáo ${domFallbackCandidates.filter(item => item.failed).length} tile render thất bại: ${failedDetails}. Chưa bị trừ tín dụng cho render lỗi này.`, false, false);
+              }
+            }
 
             if (!isEarly && ready.length >= expected) {
               const picked = [...correlatedIds].map(id => ready.find(item => item.id?.toLowerCase() === id)).filter(Boolean);

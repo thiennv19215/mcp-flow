@@ -209,7 +209,8 @@
       expectedCharacterIds: [],
     });
     const armDiagnostics = root.__flowNativeCorrelationArmDiagnostics || null;
-    if (attemptId) disarmNativeFlowCorrelation(attemptId);
+    // M-D: the probe never clicks anything, so nothing can be in flight.
+    if (attemptId) disarmNativeFlowCorrelation(attemptId, { dispatchOutcome: "none" });
     diagnostics.armPreflight = {
       result: attemptId ? "armed_and_disarmed" : armDiagnostics?.result || "not_armed",
       expected: armDiagnostics?.expected || null,
@@ -289,12 +290,19 @@
     if (!entry) return;
     window.removeEventListener(FLOW_CORRELATION_RECEIPT_EVENT, entry.listener);
     window.removeEventListener("TOBY_FLOW_V2_CORRELATION_RECEIPT", entry.listener);
+    // M-D: forward the dispatch outcome the caller observed. Only the
+    // whitelisted outcomes travel: anything else is a legacy disarm and
+    // the observer keeps its conservative retire for it.
+    const dispatchOutcome = ["none", "rejected", "ambiguous"].includes(options.dispatchOutcome)
+      ? options.dispatchOutcome
+      : undefined;
     window.dispatchEvent(new CustomEvent(FLOW_CORRELATION_DISARM_EVENT, {
       detail: {
         nonce: entry.nonce,
         attemptId: entry.attemptId,
         dispatched: true,
         ...(options.completedDispatch === true ? { completedDispatch: true } : {}),
+        ...(dispatchOutcome !== undefined ? { dispatchOutcome } : {}),
       },
     }));
     nativeFlowCorrelationMap().delete(entry.attemptId);

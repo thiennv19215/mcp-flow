@@ -37,6 +37,11 @@
     )
       entry.refMatchVersion = 0;
   }
+  // M-D: drop TTL-expired retired entries carried over a re-injection.
+  // Entries without expiresAt predate the TTL and are kept (fail-closed).
+  retired.entries = (retired.entries || []).filter(
+    (entry) => !(Number.isFinite(entry?.expiresAt) && entry.expiresAt <= Date.now())
+  );
   if (old?.dispose) {
     try {
       old.dispose();
@@ -53,6 +58,19 @@
     /^(?:PUBLIC_ERROR(?:_[A-Z0-9]+)*|SEXUALLY_EXPLICIT|CHILD_SAFETY|[A-Z][A-Z0-9_]*(?:_ERROR|_FAILED|_FAILURE))$/;
   const BATCHEXECUTE_PATH = "/_/AiSandboxAngularFrontend/data/batchexecute";
   const REQUEST_DIAGNOSTIC_TTL_MS = 15 * 60_000;
+  // M-D: a retired fingerprint entry blocks an identical re-arm in the
+  // same tab. That block must be bounded, not permanent: a dispatch that
+  // genuinely ended ambiguously (click delivered, outcome unknown) keeps
+  // the conservative block for one TTL window, after which a retry may
+  // arm again. Entries recorded before this TTL existed carry no
+  // expiresAt and are kept (fail-closed for pre-fix sessions).
+  const RETIRED_ENTRY_TTL_MS = 15 * 60_000;
+  const pruneRetiredEntries = () => {
+    const now = Date.now();
+    retired.entries = (retired.entries || []).filter(
+      (entry) => !(Number.isFinite(entry?.expiresAt) && entry.expiresAt <= now)
+    );
+  };
   const REQUEST_DIAGNOSTIC_MAX = 32;
   const REQUEST_DIAGNOSTIC_PER_ATTEMPT_MAX = 12;
   const safeRequestPath = (value) => {
@@ -173,6 +191,12 @@
         const reason = ownData(rawReasons, String(index));
         if (typeof reason !== "string" || seenReasons.has(reason)) continue;
         if (DIAGNOSTIC_REASON_CODES.has(reason)) {
+          reasons.push(reason);
+          seenReasons.add(reason);
+        } else if (/^weak_match:(quantity|refs)$/.test(reason)) {
+          // Videofix M-C: the weak-match reason is one of two fixed field
+          // names, never free text, so it passes the same allowlist
+          // discipline as the dropped-references count above.
           reasons.push(reason);
           seenReasons.add(reason);
         } else if (/^dropped_references:[1-9][0-9]*$/.test(reason)) {
@@ -883,6 +907,127 @@
       plain === attempt.normalizedVoiceFingerprint
     );
   };
+  // Videofix M-C: prompt-only verdict for video attempts, mirroring the
+  // prompt branches of attemptMatchesPayload without the row checks. The
+  // prompt is the identity anchor of a weak match and is never waived.
+  const videoPromptMatches = (payload, attempt) => {
+    const plainSummary = plainInputSummary(payload);
+    const plain = plainSummary?.fingerprint || null;
+    if (!attempt.structuredPromptFingerprint) {
+      if (plain === attempt.promptFingerprint) return true;
+      return (
+        !!attempt.promptAnchorFingerprint &&
+        attempt.promptNormalizedLength > 4096 &&
+        plainSummary?.anchorFingerprint === attempt.promptAnchorFingerprint &&
+        plainSummary.normalizedLength > 0 &&
+        plainSummary.normalizedLength <= attempt.promptNormalizedLength
+      );
+    }
+    const fingerprints = structuredInputFingerprints(payload);
+    if (
+      fingerprints.length &&
+      fingerprints.every((value) => value === attempt.structuredPromptFingerprint)
+    )
+      return true;
+    return (
+      !!attempt.normalizedVoiceFingerprint &&
+      !!attempt.normalizedVideoModelKey &&
+      attempt.mediaType === "video" &&
+      payload?.[1]?.[5] === attempt.projectId &&
+      payload[0].length === 1 &&
+      plain === attempt.normalizedVoiceFingerprint
+    );
+  };
+  // Videofix M-C: weak acceptance for requestSeen. Returns the single
+  // deviating field group ("quantity" | "refs"), or false when the
+  // request is not a weak match. Rules:
+  // - video only, non-voice attempts only (voice jobs keep strict matching);
+  // - the prompt must match exactly, and the project gate still applies;
+  // - model and ratio are HARD requirements, never weak deviations:
+  //   they determine the output media, so a different model/ratio is a
+  //   different generation (VID-03 pins this as identity), and the
+  //   observer has no wire-key registry to tell a renamed key for the
+  //   same model apart from a genuinely different model — the label
+  //   alias table cannot serve as one, since it lumps every veo variant
+  //   together. Narrowing weak matching to quantity/refs keeps the
+  //   rescue for Flow repackaging a request (split/merge rows, injected
+  //   refs) without ever claiming media the job did not ask for;
+  // - refs may only deviate as a superset: every expected id present, all
+  //   ids valid UUIDs, at most 2 injected extras beyond the counts the
+  //   strict matcher already allows (global character + unverified).
+  // A wholly different prompt, a replaced ref set, a different model or
+  // ratio, or two simultaneous deviations are all still rejected, so an
+  // unrelated request can never be claimed by an attempt through this
+  // branch.
+  const attemptVideoWeakMatch = (payload, attempt) => {
+    if (attempt.mediaType !== "video" || attempt.expectedVoiceCount > 0) return false;
+    const rows = payload?.[0];
+    if (!Array.isArray(rows) || !rows.length) return false;
+    if (!videoPromptMatches(payload, attempt)) return false;
+    const declaredProject = payload?.[1]?.[5];
+    if (
+      typeof declaredProject === "string" &&
+      UUID_RE.test(declaredProject) &&
+      declaredProject !== attempt.projectId
+    )
+      return false;
+    const plainSummary = plainInputSummary(payload);
+    const plain = plainSummary?.fingerprint || null;
+    const expectedModel =
+      plain && attempt.structuredPromptFingerprint
+        ? attempt.normalizedVideoModelKey
+        : attempt.expectedVideoModelKey;
+    let modelOk = true;
+    let ratioOk = true;
+    const allRefs = [];
+    for (const input of rows) {
+      const decoded = decodeVideoInputRow(input);
+      if (!decoded || typeof decoded.model !== "string") return false;
+      if (expectedModel && decoded.model !== expectedModel) modelOk = false;
+      if (attempt.expectedVideoRatioEnum && decoded.ratio !== attempt.expectedVideoRatioEnum)
+        ratioOk = false;
+      allRefs.push(...decoded.refs);
+    }
+    // Model and ratio are output identity (see above): any deviation
+    // here rejects outright, whatever the other fields say.
+    if (!modelOk || !ratioOk) return false;
+    const quantityOk = rows.length === attempt.expectedQuantity;
+    const refsStrict = attemptRefsMatch(allRefs, attempt);
+    // A superset deviation is a weak acceptance, NOT a failure entry: the
+    // caller must report "refs" for it, while a hard refs failure (a
+    // replaced set, a subset, bad ids) must never report "refs" — it is
+    // a rejection, not a weak match. Keeping the two separate is what
+    // stops a replaced reference set from claiming the attempt.
+    let refsWeak = false;
+    if (!refsStrict) {
+      const actualIds = normalizedRefs(allRefs);
+      const expectedIds = normalizedRefs(attempt.expectedReferenceIds);
+      const allowed =
+        expectedIds.length + globalCharacterCount(attempt) + (attempt.unverifiedMediaCount || 0);
+      refsWeak =
+        allRefs.every((id) => typeof id === "string" && UUID_RE.test(id)) &&
+        actualIds.length === allRefs.length &&
+        expectedIds.every((id) => actualIds.includes(id)) &&
+        actualIds.length > allowed &&
+        actualIds.length <= allowed + 2;
+    }
+    const failures = [
+      !quantityOk ? "quantity" : null,
+      !refsStrict && !refsWeak ? "refs" : null,
+    ].filter(Boolean);
+    if (failures.length === 0) return refsWeak ? "refs" : false;
+    // A lone "refs" entry is a hard refs failure, never a weak reason;
+    // and any hard failure combined with a weak refs deviation is two
+    // deviations, not one. Only a lone quantity deviation is a weak
+    // match (besides the refs-superset case above).
+    if (failures.length === 1 && !refsWeak && failures[0] !== "refs") return failures[0];
+    return false;
+  };
+  // Videofix M-C: the single generation-request claim check, used both
+  // by candidacy (eligibleAttempt) and by the fetch/XHR begin gates, so a
+  // weak match is never claimed in one place and demoted in the other.
+  const attemptClaimsGenerationRequest = (payload, attempt) =>
+    attemptMatchesPayload(payload, attempt) || attemptVideoWeakMatch(payload, attempt) !== false;
   const videoInputDiagnostic = (payload, attempt) => {
     if (attempt.mediaType !== "video" || !Array.isArray(payload?.[0]) || !payload[0].length)
       return null;
@@ -959,11 +1104,15 @@
       else retired.requestSignatures.push(signature);
     }
     if (attempt.requestCount >= attempt.requestCardinality) return;
+    // M-D: bound the block — expired entries leave before the cap check
+    // so a stale block cannot wedge the list at 256 forever.
+    pruneRetiredEntries();
     if (retired.entries.length >= 256) {
       retired.saturated = true;
       return;
     }
     retired.entries.push({
+      expiresAt: Date.now() + RETIRED_ENTRY_TTL_MS,
       projectId: attempt.projectId,
       mediaType: attempt.mediaType,
       expectedQuantity: attempt.expectedQuantity,
@@ -1681,7 +1830,8 @@
       }
       return null;
     }
-    const candidates = [];
+    const strictCandidates = [];
+    const weakCandidates = [];
     for (const [id, attempt] of attempts) {
       if (now > attempt.expiresAt || attempt.projectId !== projectId()) {
         retireUnbound(attempt);
@@ -1699,12 +1849,19 @@
         ? structuredInputFingerprints(call.payload)
         : [];
       const promptMatched = attemptMatchesPayload(call.payload, attempt);
+      // Videofix M-C: a quantity split/merge or a Flow-injected ref set,
+      // with an exact prompt and exact model/ratio, is still this
+      // attempt's request. It claims the request like a strict match,
+      // but the receipt carries the weak reason so the panel and
+      // diagnostics can tell the two apart.
+      const weakReason = !promptMatched ? attemptVideoWeakMatch(call.payload, attempt) : false;
+      const matched = promptMatched || weakReason !== false;
       recordRequestDiagnostic(
         attempt,
         call,
         call.transport,
         call.requestPath,
-        promptMatched ? [] : ["payload_match_failed"]
+        matched ? (weakReason ? [`weak_match:${weakReason}`] : []) : ["payload_match_failed"]
       );
       if (!promptMatched && (attempt.bridgeInputDiagnostics || 0) < 2) {
         const mismatch = videoInputDiagnostic(call.payload, attempt);
@@ -1728,7 +1885,20 @@
             })
         );
       }
-      if (!promptMatched) continue;
+      if (!matched) continue;
+      if (weakReason) weakCandidates.push({ attempt, reason: weakReason });
+      else strictCandidates.push(attempt);
+    }
+    // Videofix M-C (VID-03): a strict claim always beats weak claims, so
+    // model/ratio separation between overlapping attempts survives — a
+    // request one attempt matches exactly is never stolen by, or
+    // interfered with, another attempt's weak claim. Weak claims only
+    // compete when no strict claim exists. The weak reason is attached
+    // to the winner only, so a dropped weak candidate never leaves a
+    // stale reason on an attempt that later matches strictly.
+    let winners = strictCandidates.length ? strictCandidates : weakCandidates.map(entry => entry.attempt);
+    const winnerWeakReason = strictCandidates.length || weakCandidates.length !== 1 ? false : weakCandidates[0].reason;
+    winners = winners.filter(attempt => {
       if (
         retired.saturated ||
         retired.entries.some(
@@ -1741,23 +1911,26 @@
       ) {
         attempt.interfered = true;
         emit(attempt, "acceptance_unknown", { reason: "ambiguous_retired_request" });
-        continue;
+        return false;
       }
-      candidates.push(attempt);
-    }
-    if (candidates.length > 1) {
+      return true;
+    });
+    if (winners.length > 1) {
       // One dispatched request matches several live attempts and cannot be
       // attributed safely. Surface it as interference — the same treatment
       // as the retired-overlap case above — instead of letting every
       // candidate expire as if nothing was sent.
-      for (const attempt of candidates) {
+      for (const attempt of winners) {
         attempt.interfered = true;
         recordRequestDiagnostic(attempt, call, call.transport, call.requestPath, ["attempt_interfered"]);
         emit(attempt, "acceptance_unknown", { reason: "ambiguous_live_request" });
       }
       return null;
     }
-    return candidates.length === 1 ? candidates[0] : null;
+    if (winners.length !== 1) return null;
+    if (winnerWeakReason) winners[0].weakMatchReason = winnerWeakReason;
+    else delete winners[0].weakMatchReason;
+    return winners[0];
   };
   const matchGenerationCall = (calls) => {
     const matches = [];
@@ -1803,11 +1976,14 @@
       rpcId: call.rpcId,
       requestOrdinal,
       requestCardinality: attempt.requestCardinality,
-      matchKind: attempt.structuredPromptFingerprint
-        ? plainInputFingerprint(call.payload)
-          ? "normalized_voice_text"
-          : "structured_ids"
-        : "plain_text",
+      matchKind: attempt.weakMatchReason
+        ? `weak_${attempt.weakMatchReason}`
+        : attempt.structuredPromptFingerprint
+          ? plainInputFingerprint(call.payload)
+            ? "normalized_voice_text"
+            : "structured_ids"
+          : "plain_text",
+      ...(attempt.weakMatchReason ? { weakMatchReason: attempt.weakMatchReason } : {}),
       requestIdentityCount: requestMachine.identities.length,
       requestIdentityFingerprint: identityFingerprint(requestMachine.identities),
       requestIdentityTokens: requestMachine.identities
@@ -2088,6 +2264,8 @@
       xhrHookActive: XMLHttpRequest.prototype.send === patchedSend,
       fetchHookActive: fetchHookActiveNow(),
     });
+    // M-D: expired retired entries must not block a re-arm.
+    pruneRetiredEntries();
     const conflict =
       retired.saturated ||
       retired.entries.some(
@@ -2121,7 +2299,16 @@
           payloadFingerprint: attempt.completedRequestFingerprint,
           expiresAt: now + 15 * 60_000,
         });
-      } else if (!completedDispatch && d.discardOnStop !== true && (d.dispatched !== false || attempt.requestCount > 0))
+      }
+      // M-D: the isolated side now reports what the dispatch wait actually
+      // observed. "none" (click delivered, zero signal) and "rejected"
+      // (Flow displayed an error) with no request observed mean nothing
+      // is in flight, so retiring would only wedge the identical retry
+      // until a tab reload. Any other outcome — including a legacy
+      // disarm with no outcome — keeps the conservative retire, and a
+      // request already observed always retires (the ambiguous case).
+      else if (!completedDispatch && d.discardOnStop !== true && (d.dispatched !== false || attempt.requestCount > 0) &&
+        !((d.dispatchOutcome === "none" || d.dispatchOutcome === "rejected") && attempt.requestCount === 0))
         retireUnbound(attempt);
       attempts.delete(d.attemptId);
     }
@@ -2200,7 +2387,7 @@
           const beginMatches = (matches) =>
             matches.map((matched) =>
               matched.attempt.requestCount < matched.attempt.requestCardinality &&
-              attemptMatchesPayload(matched.call.payload, matched.attempt)
+              attemptClaimsGenerationRequest(matched.call.payload, matched.attempt)
                 ? beginObservedRequest(matched.attempt, matched.call)
                 : beginFollowupRequest(matched.attempt, matched.call)
             );
@@ -2301,7 +2488,7 @@
                 }
                 return matchObservedCalls(calls).map(({ call, attempt }) =>
                   attempt.requestCount < attempt.requestCardinality &&
-                  attemptMatchesPayload(call.payload, attempt)
+                  attemptClaimsGenerationRequest(call.payload, attempt)
                     ? beginObservedRequest(attempt, call)
                     : beginFollowupRequest(attempt, call)
                 );

@@ -573,6 +573,9 @@ export class FlowJobQueue {
         timeoutMs: Math.max(1000, Math.min(15 * 60_000, Number(checkpoint?.timeoutMs) || 5 * 60_000)),
         ...(dispatchedAt ? { dispatchedAt } : {}),
         ...(typeof checkpoint?.credits === "number" && Number.isFinite(checkpoint.credits) ? { credits: checkpoint.credits } : {}),
+        // M-G: preserve the DOM-accept flag so a resumed observe can use
+        // the uncorrelated-tile fallback after a worker restart.
+        ...(checkpoint?.domAccepted === true ? { domAccepted: true } : {}),
         submitOnly: checkpoint?.submitOnly === true,
         recordedAt: Date.now(),
       },
@@ -1169,7 +1172,15 @@ export class FlowJobQueue {
             job.serverAcceptanceObserved === true ||
             Number(job.metadata?.generationObservation?.dispatchedAt) > 0 ||
             job.progress?.phase === "submit" || job.progress?.phase === "submitted";
-          const unknown = mayHaveDispatched(error) || (!explicitlySafe && this.stopRequested && this.controller?.signal.aborted && reachedSubmitPhase);
+          // Videofix M-I: an error that explicitly declares its outcome
+          // known (outcomeUnknown/outcome_unknown === false) wins over
+          // the inferred mayHaveDispatched signal. Without this, the SW
+          // runner's requestDispatched:true on observe errors re-derived
+          // unknown=true for determined render failures even after the
+          // runner stopped forcing outcomeUnknown — so the queue still
+          // paused and retry stayed blocked. Errors without an explicit
+          // flag keep the old inference unchanged.
+          const unknown = explicitlySafe ? false : (mayHaveDispatched(error) || (this.stopRequested && this.controller?.signal.aborted && reachedSubmitPhase));
           const downloadFailure = Boolean(error?.downloadError) || String(error?.code || "").toUpperCase().includes("DOWNLOAD");
           pageBlocked = !unknown && PAGE_BLOCKER_ERROR_CODES.has(String(error?.code || ""));
           job.status = "failed";

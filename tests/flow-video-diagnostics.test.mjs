@@ -56,6 +56,7 @@ const HEALTH = {
 
 const EXPECTED_DIAGNOSTICS = {
   clickDelivered: true,
+  submitBridgeAmbiguous: false,
   observerReady: true,
   xhrHookActive: true,
   fetchHookActive: false,
@@ -66,15 +67,40 @@ const EXPECTED_DIAGNOSTICS = {
 // Part 1 — dispatch wait diagnostics (generation-operations.js)
 // ---------------------------------------------------------------------------
 
-function dispatchHarness({ health = HEALTH, waitMode = 'throw-timeout', activation = null, requestSeen = false, components = null, liveButtonDisabledAfterMs = null, liveTilesAfterMs = null, editorClearedAfterMs = null } = {}) {
+function dispatchHarness({ health = HEALTH, waitMode = 'throw-timeout', activation = null, requestSeen = false, components = null, liveButtonDisabledAfterMs = null, liveTilesAfterMs = null, editorClearedAfterMs = null, editorSwapAfterMs = null, editorSwapNewText = '', menuAssets = null, stagedFiles = null } = {}) {
   const correlationMap = new Map([
     ['attempt-1', { attemptId: 'attempt-1', requestSeen, receipts: [], interfered: false }],
   ]);
   const disarmCalls = [];
+  const disarmOptions = [];
   const progressMessages = [];
   let now = 1_000_000;
   const startNow = now;
   const editorTextAt = () => (editorClearedAfterMs !== null && now - startNow >= editorClearedAfterMs ? '' : 'a lighthouse');
+  // Videofix M-F: Flow re-rendering the composer swaps the editor element.
+  // The old element detaches (isConnected === false) but keeps its old
+  // text; the new element starts empty. The resolver mirrors the live
+  // finder: before the swap it returns the old element, after it the new
+  // one, and the old element is marked detached at the swap.
+  const oldEditor = {};
+  const newEditor = {};
+  // Detachment is a DOM fact, not a finder side effect: like the real
+  // browser, the old element reports isConnected === false once the swap
+  // time passes, whether or not any finder ran in between.
+  Object.defineProperty(oldEditor, 'isConnected', {
+    get: () => editorSwapAfterMs === null || now - startNow < editorSwapAfterMs,
+  });
+  const editorAt = () => {
+    if (editorSwapAfterMs === null) return {};
+    return now - startNow >= editorSwapAfterMs ? newEditor : oldEditor;
+  };
+  const editorTextOf = (element) => {
+    if (editorSwapAfterMs !== null) {
+      if (element === oldEditor) return 'a lighthouse';
+      if (element === newEditor) return editorSwapNewText;
+    }
+    return editorTextAt();
+  };
   const fakeTiles = {
     stabilizeFlowResultViewport: async () => {},
     collectNativeMedia: () => (liveTilesAfterMs !== null && now - startNow >= liveTilesAfterMs
@@ -82,7 +108,7 @@ function dispatchHarness({ health = HEALTH, waitMode = 'throw-timeout', activati
       : []),
     armNativeFlowCorrelation: () => 'attempt-1',
     nativeFlowCorrelationMap: () => correlationMap,
-    disarmNativeFlowCorrelation: id => { disarmCalls.push(id); },
+    disarmNativeFlowCorrelation: (id, options) => { disarmCalls.push(id); disarmOptions.push(options); },
     emitFlowProgress: (_command, message) => { progressMessages.push(message); },
     readNativeFlowCorrelationHealth: async () => health,
     releaseSubmitOnlyCorrelation: () => null,
@@ -103,6 +129,7 @@ function dispatchHarness({ health = HEALTH, waitMode = 'throw-timeout', activati
       ensureFlowProjectEditor: async () => {},
       dismissBlockingOverlays: async () => {},
       ensureFlowLibrarySection: async () => {},
+      prepareFlowOperation: async () => {},
     },
     FlowEditor: {
       preflightGenerationPrompt: async () => ({}),
@@ -114,14 +141,17 @@ function dispatchHarness({ health = HEALTH, waitMode = 'throw-timeout', activati
       getFlowSubmitButton: () => (liveButtonDisabledAfterMs !== null && now - startNow >= liveButtonDisabledAfterMs
         ? { disabled: true, getAttribute: () => null }
         : null),
-      getVisibleFlowPromptEditor: () => ({}),
-      getEditorUserText: () => editorTextAt(),
+      getVisibleFlowPromptEditor: () => editorAt(),
+      getEditorUserText: (element) => editorTextOf(element),
+      currentFlowPromptEditor: (preferred) => (preferred && preferred.isConnected !== false ? preferred : editorAt()),
     },
-    getEditorUserText: () => editorTextAt(),
-    FlowSettings: {},
+    getEditorUserText: (element) => editorTextOf(element),
+    FlowSettings: { restoreNativeFramesMode: async () => {} },
     FlowComponents: components || {},
+    validStagedLocalImage: (value) => Boolean(value && value.transferId),
+    stagedNativeFiles: stagedFiles || new Map(),
     FlowTiles: fakeTiles,
-    FlowMediaMenu: { nativeRead: () => ({ signedIn: true, inProject: true }) },
+    FlowMediaMenu: { nativeRead: () => ({ signedIn: true, inProject: true }), ...(menuAssets !== null ? { collectAssets: () => menuAssets } : {}) },
     FlowAgent: { closeNativeAgentSession: async () => {} },
     FlowScreenState: { inspect: () => ({ state: 'ready' }), assertGenerationReady: () => {} },
     FlowImageActions: { prepare: async () => ({}) },
@@ -153,16 +183,16 @@ function dispatchHarness({ health = HEALTH, waitMode = 'throw-timeout', activati
   const submit = (payload = {}) => operations.execute('flow.generation.submit', {
     prompt: 'a lighthouse', type: 'video', ...payload,
   }, {});
-  return { submit, disarmCalls, correlationMap, progressMessages, elapsed: () => now - startNow };
+  return { submit, disarmCalls, disarmOptions, correlationMap, progressMessages, elapsed: () => now - startNow };
 }
 
 test('dispatch wait: a boundedWait timeout surfaces with correlation-observer diagnostics attached', async () => {
   const { submit, disarmCalls } = dispatchHarness({ waitMode: 'throw-timeout' });
   await assert.rejects(submit(), error => {
     assert.equal(error.code, 'FLOW_OPERATION_TIMEOUT', 'the timeout keeps its code');
-    assert.equal(error.message,
-      'Timed out while waiting for Flow request dispatch; no further Flow actions were started.',
-      'the boundedWait message is preserved verbatim');
+    assert.ok(error.message.startsWith(
+      'Timed out while waiting for Flow request dispatch; no further Flow actions were started.'),
+      'the boundedWait message is preserved as the prefix');
     assert.equal(error.retryable, true, 'the boundedWait retryable flag is preserved');
     assert.equal(error.outcome_unknown, true, 'the submit outcome stays unknown');
     assert.deepEqual(plain(error.diagnostics), EXPECTED_DIAGNOSTICS,
@@ -170,6 +200,79 @@ test('dispatch wait: a boundedWait timeout surfaces with correlation-observer di
     return true;
   });
   assert.deepEqual(disarmCalls, ['attempt-1'], 'the correlation attempt is disarmed, like every sibling submit exit');
+});
+
+test('M-D: a no-signal dispatch timeout disarms with outcome "none" so the identical retry is not retired', async () => {
+  const { submit, disarmOptions } = dispatchHarness({ waitMode: 'throw-timeout' });
+  await assert.rejects(submit(), error => error.code === 'FLOW_OPERATION_TIMEOUT');
+  // Compare primitives only: option objects are created inside the vm
+  // realm, so strict deepEqual rejects them despite identical structure.
+  assert.deepEqual(disarmOptions.map((option) => (option ? option.dispatchOutcome : undefined)), ['none'],
+    'the timeout exit checked requestSeen, Flow errors and DOM acceptance first and found zero signal');
+});
+
+test('M-D: exhausting the submit deadline without acknowledgement disarms with outcome "none"', async () => {
+  const { submit, disarmOptions } = dispatchHarness({ waitMode: 'advance' });
+  await assert.rejects(submit(), error => error.code === 'FLOW_SUBMIT_UNCONFIRMED');
+  assert.deepEqual(disarmOptions.map((option) => (option ? option.dispatchOutcome : undefined)), ['none']);
+});
+
+test('M-A: a fallback-only reference name with no id fails fast before submit', async () => {
+  const { submit } = dispatchHarness({
+    waitMode: 'throw-timeout',
+    menuAssets: [{ name: 'Request for text translation', nameSource: 'fallback' }],
+  });
+  await assert.rejects(submit({ firstFrame: { assetName: 'Request for text translation', kind: 'image' } }), (error) => {
+    assert.equal(error.code, 'FLOW_QUEUE_PREFLIGHT_REFERENCE_MISSING');
+    assert.match(error.message, /UI label/, 'the error must name the fallback-label cause, not just "missing"');
+    return true;
+  });
+});
+
+test('M-A: a dedicated-name reference with no id passes revalidation', async () => {
+  const { submit } = dispatchHarness({
+    waitMode: 'throw-timeout',
+    menuAssets: [{ name: 'My photo.png', nameSource: 'dedicated' }],
+  });
+  // It must get PAST revalidation: any later failure (here the unmocked
+  // frame picker) proves the gate did not stop it. Only the preflight
+  // code itself would prove the gate stopped it.
+  await assert.rejects(submit({ firstFrame: { assetName: 'My photo.png', kind: 'image' } }), (error) => {
+    assert.notEqual(error.code, 'FLOW_QUEUE_PREFLIGHT_REFERENCE_MISSING');
+    return true;
+  });
+});
+
+test('M-A: a reference with an expectedId passes revalidation by identity even when its name is fallback-only', async () => {
+  const { submit } = dispatchHarness({
+    waitMode: 'throw-timeout',
+    menuAssets: [{ id: '11111111-2222-4333-8444-555555555555', name: 'Request for text translation', nameSource: 'fallback' }],
+  });
+  await assert.rejects(submit({ firstFrame: { assetName: 'Request for text translation', kind: 'image', expectedId: '11111111-2222-4333-8444-555555555555' } }), (error) => {
+    assert.notEqual(error.code, 'FLOW_QUEUE_PREFLIGHT_REFERENCE_MISSING');
+    return true;
+  });
+});
+
+test('M-B: in-submit frame upload passes the tile uploadName to the picker, not the client name', async () => {
+  const picked = [];
+  const staged = new Map([['t1', { name: 'client-photo.png' }]]);
+  const components = {
+    clearExistingIngredientChips: async () => {},
+    uploadStagedFlowMedia: async () => ({ id: 'receipt-id', uploadName: 'a1b2c3d4-upload.png', name: 'client-photo.png' }),
+    chooseNativePickerAsset: async (title, slot, options) => {
+      picked.push({ title, slot, expectedId: options.expectedId });
+      return { id: '11111111-2222-4333-8444-555555555555' };
+    },
+  };
+  const { submit } = dispatchHarness({ waitMode: 'throw-timeout', components, stagedFiles: staged });
+  // The submit runs past frame selection and then dies at the mocked
+  // dispatch wait; the picker call itself is what this test observes.
+  await assert.rejects(submit({ firstFrame: { transferId: 't1', name: 'client-photo.png' } }), (error) => error.code === 'FLOW_OPERATION_TIMEOUT');
+  assert.deepEqual(picked.map((call) => call.title), ['a1b2c3d4-upload.png'],
+    'the dispatched tile bears the digest-derived uploadName, not the client safeName');
+  assert.equal(picked[0].slot, 'start');
+  assert.equal(picked[0].expectedId, 'receipt-id');
 });
 
 test('dispatch wait: exhausting the submit deadline without acknowledgement also carries diagnostics', async () => {
@@ -198,6 +301,7 @@ test('dispatch wait: a missing observer health still yields the default diagnost
     assert.equal(error.code, 'FLOW_OPERATION_TIMEOUT');
     assert.deepEqual(plain(error.diagnostics), {
       clickDelivered: true,
+      submitBridgeAmbiguous: false,
       observerReady: false,
       xhrHookActive: false,
       fetchHookActive: false,
@@ -539,7 +643,10 @@ test('frames submit: the selecting-asset stage label uses the stripped asset nam
 // the button (the capture listener fired). TobyFlow treats that case as
 // "dispatched, ambiguous": the activation returns with clickDelivered
 // intact and an ambiguity flag, and no second click is attempted. Only a
-// timeout where NO click ever landed still throws.
+// timeout where NO click ever landed still throws. Note for mcp-flow
+// (videofix M-E): the flag is diagnostic only — mcp-flow keeps NO
+// "dispatched, ambiguous" state, and the dispatch wait's correlation /
+// DOM signals own the verdict; the flag surfaces in timeout diagnostics.
 // ---------------------------------------------------------------------------
 
 function editorHarness({ clickDuringBridge = false } = {}) {
@@ -664,6 +771,81 @@ test('dispatch wait: an editor cleared after activation still resolves as dom_ac
   assert.equal(result.submitted, true, 'an editor that held text pre-click and is empty now resolves the submit');
   assert.equal(result.confirmationSignal, 'dom_acceptance');
   assert.deepEqual(disarmCalls, [], 'the correlation attempt is NOT disarmed on the live-DOM exit');
+});
+
+test('M-E: the dispatch timeout error tells the user to check Flow first and only recreate if nothing appears', async () => {
+  const { submit } = dispatchHarness({ waitMode: 'throw-timeout' });
+  await assert.rejects(submit(), error => {
+    assert.equal(error.code, 'FLOW_OPERATION_TIMEOUT');
+    assert.match(error.message, /Check the Flow project first/);
+    assert.match(error.message, /if a tile for this prompt appears there/);
+    assert.match(error.message, /cannot be retried from the queue/);
+    assert.match(error.message, /Only if nothing appears, create the job again/);
+    assert.match(error.message, /a fresh submit in the same tab is not blocked/);
+    return true;
+  });
+});
+
+test('M-E: the unconfirmed exit carries the same recovery guidance', async () => {
+  const { submit } = dispatchHarness({
+    waitMode: 'advance',
+    requestSeen: false,
+    activation: { clickDelivered: true, controlAccepted: false, strategy: 'fake-click' },
+  });
+  await assert.rejects(submit(), error => {
+    assert.equal(error.code, 'FLOW_SUBMIT_UNCONFIRMED');
+    assert.match(error.message, /Check the Flow project first/);
+    assert.match(error.message, /Only if nothing appears, create the job again/);
+    return true;
+  });
+});
+
+test('M-E: a bridge-ambiguous activation is wired into timeout diagnostics instead of staying dead metadata', async () => {
+  const { submit } = dispatchHarness({
+    waitMode: 'throw-timeout',
+    activation: { clickDelivered: true, controlAccepted: false, mainActivationAmbiguous: true, strategy: 'fake-click' },
+  });
+  await assert.rejects(submit(), error => {
+    assert.equal(error.diagnostics.submitBridgeAmbiguous, true);
+    return true;
+  });
+});
+
+test('M-E pin: a non-ambiguous activation reports submitBridgeAmbiguous false', async () => {
+  const { submit } = dispatchHarness({ waitMode: 'throw-timeout' });
+  await assert.rejects(submit(), error => {
+    assert.equal(error.diagnostics.submitBridgeAmbiguous, false);
+    return true;
+  });
+});
+
+test('M-F: a swapped editor that is empty still resolves as dom_acceptance', async () => {
+  const { submit, disarmCalls } = dispatchHarness({
+    waitMode: 'advance',
+    requestSeen: false,
+    activation: { clickDelivered: true, controlAccepted: false, strategy: 'fake-click' },
+    editorSwapAfterMs: 1000,
+    editorSwapNewText: '',
+  });
+  const result = await submit();
+  assert.equal(result.submitted, true, 'the re-resolved empty editor resolves the submit');
+  assert.equal(result.confirmationSignal, 'dom_acceptance');
+  assert.deepEqual(disarmCalls, [], 'the correlation attempt is NOT disarmed on the live-DOM exit');
+});
+
+test('M-F pin: a swapped editor that still holds text does NOT resolve via editor-empty', async () => {
+  const { submit, disarmCalls } = dispatchHarness({
+    waitMode: 'advance',
+    requestSeen: false,
+    activation: { clickDelivered: true, controlAccepted: false, strategy: 'fake-click' },
+    editorSwapAfterMs: 1000,
+    editorSwapNewText: 'a lighthouse',
+  });
+  await assert.rejects(submit(), error => {
+    assert.equal(error.code, 'FLOW_SUBMIT_UNCONFIRMED');
+    return true;
+  });
+  assert.deepEqual(disarmCalls, ['attempt-1'], 'a true no-signal timeout still disarms the attempt');
 });
 
 test('dispatch wait: live signals that never arrive keep the unconfirmed timeout', async () => {

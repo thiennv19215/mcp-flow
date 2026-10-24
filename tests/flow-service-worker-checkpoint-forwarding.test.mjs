@@ -195,6 +195,90 @@ test('SW-FWD: a partial observe result reaching the worker checkpoint call carri
   assert.deepEqual(job.failedOutputs, FAILED_OUTPUTS);
 });
 
+// ---------------------------------------------------------------------------
+// Videofix M-I: the SW runner must respect observe's outcomeUnknown flag.
+// ---------------------------------------------------------------------------
+
+function observeError(code, message, retryable, outcomeUnknown) {
+  return Object.assign(new Error(message), { code, retryable, outcome_unknown: outcomeUnknown });
+}
+
+test('M-I: a determined observe error keeps outcomeUnknown false and stays retryable through the SW runner', async () => {
+  const { queue } = loadWorkerRunner({
+    onExecute: name => {
+      if (name === 'flow.generation.submit') {
+        return { submitted: true, before: [], type: 'image', expectedCount: 1, correlationAttemptId: 'attempt-1' };
+      }
+      if (name === 'flow.generation.observe') {
+        // A rate-limit render error observe classified deliberately:
+        // retryable, but the outcome is KNOWN (nothing is in flight).
+        throw observeError('FLOW_RATE_LIMITED', 'Flow rate limit hit while rendering.', true, false);
+      }
+      throw new Error(`Unexpected page operation: ${name}`);
+    },
+  });
+  const { job } = await runJob(queue, {
+    operation: 'flow.generation.submit',
+    payload: { prompt: 'one scene', type: 'image' },
+    label: 'one scene',
+    metadata: { ...pinnedMetadata },
+  });
+  assert.equal(job.status, 'failed');
+  assert.equal(job.outcomeUnknown, false, 'observe\'s deliberate false must survive the SW runner');
+  assert.equal(job.retrySafe, true, 'a retryable determined error stays retry-safe');
+  assert.equal(queue.paused, false, 'a determined failure must not pause the queue');
+  const retried = await queue.retry(job.id);
+  assert.ok(retried, 'manual retry must not be blocked for a determined failure');
+});
+
+test('M-I pin: an observe timeout keeps outcomeUnknown true and pauses the queue as before', async () => {
+  const { queue } = loadWorkerRunner({
+    onExecute: name => {
+      if (name === 'flow.generation.submit') {
+        return { submitted: true, before: [], type: 'image', expectedCount: 1, correlationAttemptId: 'attempt-1' };
+      }
+      if (name === 'flow.generation.observe') {
+        throw observeError('FLOW_GENERATION_TIMEOUT', 'Timed out waiting for Flow to render.', false, true);
+      }
+      throw new Error(`Unexpected page operation: ${name}`);
+    },
+  });
+  const { job } = await runJob(queue, {
+    operation: 'flow.generation.submit',
+    payload: { prompt: 'one scene', type: 'image' },
+    label: 'one scene',
+    metadata: { ...pinnedMetadata },
+  });
+  assert.equal(job.status, 'failed');
+  assert.equal(job.outcomeUnknown, true);
+  assert.equal(job.retrySafe, false);
+  assert.equal(queue.paused, true, 'an ambiguous observe failure still pauses the queue');
+  assert.equal(queue.attention?.type, 'flow-outcome-unknown');
+  await assert.rejects(queue.retry(job.id), /cannot be retried from the queue/);
+});
+
+test('M-I pin: an unflagged observe error fails closed to outcomeUnknown true', async () => {
+  const { queue } = loadWorkerRunner({
+    onExecute: name => {
+      if (name === 'flow.generation.submit') {
+        return { submitted: true, before: [], type: 'image', expectedCount: 1, correlationAttemptId: 'attempt-1' };
+      }
+      if (name === 'flow.generation.observe') {
+        throw new Error('unexpected observe crash');
+      }
+      throw new Error(`Unexpected page operation: ${name}`);
+    },
+  });
+  const { job } = await runJob(queue, {
+    operation: 'flow.generation.submit',
+    payload: { prompt: 'one scene', type: 'image' },
+    label: 'one scene',
+    metadata: { ...pinnedMetadata },
+  });
+  assert.equal(job.status, 'failed');
+  assert.equal(job.outcomeUnknown, true, 'an error observe never classified must not be treated as determined');
+});
+
 test('SW-FWD control: a full-success observe result checkpoints exactly as before (no extras, no partial state)', async () => {
   const { queue, checkpointResultCalls } = loadWorkerRunner({
     onExecute: name => {

@@ -403,6 +403,55 @@ test('queue panel renders a dropped_references reason verbatim in request diagno
   assert.ok(lines.some(line => line.includes('reasons: dropped_references:2')), `expected a verbatim dropped_references reason line, got: ${JSON.stringify(lines)}`);
 });
 
+test('M-H: queue panel renders a full observe diagnostics bundle', () => {
+  const panelJs = readFileSync(new URL('../extension/src/ui/flow-queue-panel.js', import.meta.url), 'utf8');
+  const start = panelJs.indexOf('  function diagnosticsSummaryLines(diagnostics) {');
+  assert.ok(start >= 0, 'diagnosticsSummaryLines not found in panel source');
+  const end = panelJs.indexOf('\n  function progressPercent(task) {', start);
+  assert.ok(end > start, 'diagnosticsSummaryLines must precede progressPercent');
+  const sandbox = {};
+  vm.runInNewContext(`${panelJs.slice(start, end)}\nthis.__diagnosticsSummaryLines = diagnosticsSummaryLines;`, sandbox, { filename: 'flow-queue-panel-diagnostics.js' });
+  const lines = sandbox.__diagnosticsSummaryLines({
+    requestSeen: true,
+    lastReceiptStage: 'result_seen',
+    correlatedMediaIds: ['11111111-2222-4333-8444-555555555555'],
+    readyCount: 1,
+    busyCount: 2,
+    failedCount: 1,
+    recoverySweeps: 2,
+    elapsedMs: 600000,
+  });
+  const joined = lines.join('\n');
+  assert.match(joined, /request seen/, `expected requestSeen rendered, got: ${joined}`);
+  assert.match(joined, /result_seen/, `expected last stage rendered, got: ${joined}`);
+  assert.match(joined, /ready 1/, `expected ready count rendered, got: ${joined}`);
+  assert.match(joined, /busy 2/, `expected busy count rendered, got: ${joined}`);
+  assert.match(joined, /failed 1/, `expected failed count rendered, got: ${joined}`);
+  assert.match(joined, /11111111-2222-4333-8444-555555555555/, `expected correlated id rendered, got: ${joined}`);
+  assert.match(joined, /600s/, `expected elapsed rendered, got: ${joined}`);
+});
+
+test('M-H pin: a never-started observe bundle still renders instead of vanishing', () => {
+  const panelJs = readFileSync(new URL('../extension/src/ui/flow-queue-panel.js', import.meta.url), 'utf8');
+  const start = panelJs.indexOf('  function diagnosticsSummaryLines(diagnostics) {');
+  const end = panelJs.indexOf('\n  function progressPercent(task) {', start);
+  const sandbox = {};
+  vm.runInNewContext(`${panelJs.slice(start, end)}\nthis.__diagnosticsSummaryLines = diagnosticsSummaryLines;`, sandbox, { filename: 'flow-queue-panel-diagnostics.js' });
+  const lines = sandbox.__diagnosticsSummaryLines({
+    requestSeen: false,
+    lastReceiptStage: null,
+    correlatedMediaIds: [],
+    readyCount: 0,
+    busyCount: 0,
+    failedCount: 0,
+    recoverySweeps: 0,
+    elapsedMs: 600000,
+  });
+  const joined = lines.join('\n');
+  assert.ok(lines.length > 0, 'a never-started bundle must still produce lines');
+  assert.match(joined, /request not seen/, `expected the never-started state rendered, got: ${joined}`);
+});
+
 test('queue panel only renders diagnostics for failed items', () => {
   const panelJs = readFileSync(new URL('../extension/src/ui/flow-queue-panel.js', import.meta.url), 'utf8');
   const callSite = panelJs.indexOf('for (const line of diagnosticsSummaryLines(diagnostics))');
