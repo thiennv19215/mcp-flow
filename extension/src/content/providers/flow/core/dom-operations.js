@@ -172,7 +172,7 @@
 
       if (name === "flow.generation.wait") {
         if (typeof tiles?.waitForProgressResult !== "function") throw this.error("FLOW_TILE_WAIT_UNAVAILABLE", "Flow's tile wait helper is unavailable.", true, false);
-        const before = Array.isArray(payload.before) ? payload.before.map(item => typeof item === "string" ? item : item?.id || `title:${item?.title || ""}`) : [];
+        const before = Array.isArray(payload.before) ? payload.before.map(item => root.tileSnapshotKey?.(item) || (typeof item === "string" ? item : item?.id || `title:${item?.title || ""}`)) : [];
         const expected = Math.max(1, Number(payload.expected || payload.count || payload.maxQuantity || 1));
         const kind = payload.kind || payload.type || undefined;
         const timeoutMs = Math.max(1_000, Math.min(15 * 60_000, Number(payload.timeoutMs) || 10 * 60_000));

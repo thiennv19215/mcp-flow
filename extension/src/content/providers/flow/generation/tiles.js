@@ -435,7 +435,7 @@
     // wrapper around it — is excluded from the haystack; a dedicated in-tile
     // error banner still matches and is returned.
     const tileErrorTextPattern = /(?:failed to generate|generation failed|could not generate|something went wrong|try again|không thể tạo|không tạo được|thất bại|đã xảy ra lỗi|thử lại|bị từ chối|lỗi tạo|không thành công|vi phạm|nội dung không an toàn|chính sách an toàn|bị chặn)/i;
-    const normalizeTileText = value => String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const normalizeTileText = value => root.normalizeFlowUiText?.(value) || String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
     const tileTitleText = normalizeTileText(tile.getAttribute?.("aria-label") || tile.getAttribute?.("title") || "");
     const descendants = [...(tile.querySelectorAll?.("*") || [])];
     const isTitleElement = element => {
@@ -536,8 +536,31 @@
   // resolution), which resolve to a full title BEFORE calling this.
   // Pass { exact: false } only for a caller that deliberately wants the
   // historical prefix fallback.
+  // Canonical title folds (audit cluster E).
+  // - foldTileTitleStrict: whitespace/trim/lowercase ONLY, no accent
+  // folding. Used by the EXACT-match paths (findFlowTile,
+  // countFlowTitleAcrossGrid) where accent folding would be wrong:
+  // trash "anh" must not match tile "ánh".
+  // - tileSnapshotKey: the single builder for before/after tile-set
+  // keys (generation baselines, wait, character flows). Kept RAW on
+  // purpose: `before` arrays cross the SW/content boundary as
+  // strings, so the producer and every consumer must build
+  // byte-identical keys, including against already-persisted
+  // observations. (The retry key space in retryIdentity is separate
+  // and stays as cluster B left it.)
+  function foldTileTitleStrict(value) {
+    return String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+  }
+
+  function tileSnapshotKey(item) {
+    if (typeof item === "string") return item;
+    const id = item?.id;
+    if (id) return String(id);
+    return `title:${item?.title ?? ""}`;
+  }
+
   async function findFlowTile(title, retries = 100, options = {}) {
-    const norm = s => String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const norm = foldTileTitleStrict;
     const wanted = norm(title);
     const exact = options.exact !== false;
     const scroller = flowMediaGridScrollContainer();
@@ -812,7 +835,7 @@
   }
 
   async function countFlowTitleAcrossGrid(title, options = {}) {
-    const norm = s => String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const norm = foldTileTitleStrict;
     const wanted = norm(title);
     // Exact by default — see findFlowTile: the trash gate counts copies
     // with this, so a prefix-only match must not count as a copy.
@@ -955,7 +978,7 @@
   async function waitForProgressResult(command, before, expected, kind, timeoutMs, selector = "flow-grid-tile-container", allowConfirmedPartial = false, waitOptions = {}) {
     const until = Date.now() + timeoutMs;
     const startedAt = Date.now();
-    const beforeIds = new Set((Array.isArray(before) ? before : []).map(value => String(value)));
+    const beforeIds = new Set((Array.isArray(before) ? before : []).map(tileSnapshotKey));
     const preFileNames = new Set((Array.isArray(waitOptions.preFileNames) ? waitOptions.preFileNames : []).map(value => String(value).trim().toLowerCase()).filter(Boolean));
     const expectedMediaType = waitOptions.expectedMediaType || kind;
     const operationId = waitOptions.operationId ? String(waitOptions.operationId) : null;
@@ -968,7 +991,7 @@
       return !claim || claim.operationId === operationId;
     };
     const isBefore = item => {
-      const identity = String(item?.id || `title:${item?.title || ""}`);
+      const identity = tileSnapshotKey(item);
       if (beforeIds.has(identity)) return true;
       const fileName = String(item?.fileName || item?.file_name || "").trim().toLowerCase();
       return Boolean(fileName && preFileNames.has(fileName));
@@ -1016,7 +1039,7 @@
       if (!isEarly && ready.length >= expected) {
         const picked = ready.slice(0, expected);
         const titleOnly = picked.some(item => !item.id || item.id.startsWith("title:"));
-        const signature = picked.map(item => item.id || `title:${item.title}`).join("|");
+        const signature = picked.map(tileSnapshotKey).join("|");
         if (!titleOnly || signature === lastTitleOnlyResult) {
           emitFlowProgress(command, kind === "video" ? "Tạo video hoàn tất 100%" : "Tạo ảnh hoàn tất 100%");
           if (operationId) {
@@ -1107,6 +1130,8 @@
   }
 
   const FlowTiles = Object.freeze({
+    tileSnapshotKey,
+    foldTileTitleStrict,
     collectNativeMedia,
     isTileBusy,
     isTileMediaReady,
@@ -1138,6 +1163,7 @@
   });
 
   root.FlowTiles = FlowTiles;
+  root.tileSnapshotKey = tileSnapshotKey;
   root.collectNativeMedia = collectNativeMedia;
   root.isTileBusy = isTileBusy;
   root.isTileMediaReady = isTileMediaReady;

@@ -1056,21 +1056,34 @@
       const el = document.querySelector(selector);
       if (el && value != null && value !== "") el.value = String(value);
     };
+    // Audit cluster E: a restore writes BOTH trees. The old code wrote
+    // only the hidden selects (plus visible duration/resolution), so
+    // the visible ratio/model/quantity/mode controls — and the image
+    // builder, which reads #aspectRatio first — kept the pre-restore
+    // values. Voice goes through updateVoiceUiState so the label and
+    // the hidden voice select stay with the hidden voice input.
     if (type === "video") {
       setValue("#inputPromptVideo", payload.prompt);
+      setValue("#aspectRatio", payload.aspectRatio);
       setValue("#selectRatioVideo", payload.aspectRatio);
+      setValue("#quantitySelect", payload.count);
       setValue("#selectCountVideo", payload.count);
+      setValue("#videoInputType", payload.mode);
       setValue("#selectModeVideo", payload.mode);
+      setValue("#videoModel", payload.model);
       setValue("#selectModelVideo", payload.model);
       setValue("#flowVideoDuration", payload.duration);
       setValue("#selectDurationVideo", payload.duration);
       setValue("#flowVideoResolution", payload.resolution);
       setValue("#selectResolutionVideo", payload.resolution);
-      setValue("#genVideoVoiceSelect", payload.voice);
+      if (payload.voice != null && payload.voice !== "") updateVoiceUiState(payload.voice);
     } else {
       setValue("#inputPromptImage", payload.prompt);
+      setValue("#aspectRatio", payload.aspectRatio);
       setValue("#selectRatioImage", payload.aspectRatio);
+      setValue("#quantitySelect", payload.count);
       setValue("#selectQtyImage", payload.count);
+      setValue("#imageModel", payload.model);
       setValue("#selectModelImage", payload.model);
     }
     const refCount = Array.isArray(payload.attachments) ? payload.attachments.length : 0;
@@ -3750,6 +3763,117 @@
   }
 
   // 5. Gen Tab Controls
+  // Audit cluster E: the visible/hidden generation-control pairs,
+  // bound in one place so the wiring stays testable (see
+  // tests/flow-audit-e-sidebar-sync.test.mjs). Visible controls are
+  // what the user touches; hidden selects are what most builders read.
+  // Every pair is wired in BOTH directions: forward listeners copy
+  // visible -> hidden (dispatching change where the hidden side has
+  // rule listeners), reverse listeners copy hidden -> visible for the
+  // active type only, without dispatching back.
+  function bindGenerationControlSync() {
+    // Model selects synchronization
+    document.querySelector("#imageModel")?.addEventListener("change", function () {
+      const sel = document.querySelector("#selectModelImage");
+      if (sel && sel.value !== this.value) {
+        sel.value = this.value;
+        sel.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    });
+
+    document.querySelector("#videoModel")?.addEventListener("change", function () {
+      const sel = document.querySelector("#selectModelVideo");
+      if (sel && sel.value !== this.value) {
+        sel.value = this.value;
+        sel.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    });
+
+    for (const [visibleSelector, nativeSelector] of [
+      ["#flowVideoDuration", "#selectDurationVideo"],
+      ["#flowVideoResolution", "#selectResolutionVideo"],
+    ]) {
+      const visibleSelect = document.querySelector(visibleSelector);
+      const nativeSelect = document.querySelector(nativeSelector);
+      visibleSelect?.addEventListener("change", () => {
+        if (nativeSelect && nativeSelect.value !== visibleSelect.value) {
+          nativeSelect.value = visibleSelect.value;
+          nativeSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      });
+      nativeSelect?.addEventListener("change", () => {
+        if (visibleSelect && visibleSelect.value !== nativeSelect.value) visibleSelect.value = nativeSelect.value;
+      });
+    }
+
+    // Aspect ratio synchronization
+    document.querySelector("#aspectRatio")?.addEventListener("change", function () {
+      const val = this.value;
+      const ratioImage = document.querySelector("#selectRatioImage");
+      const ratioVideo = document.querySelector("#selectRatioVideo");
+      if (ratioImage) ratioImage.value = val;
+      if (ratioVideo) ratioVideo.value = val;
+    });
+
+    // Reverse direction (audit cluster E): writers that set the hidden
+    // selects directly (template restores, rule applications) must also
+    // move the visible control — otherwise the builder that reads the
+    // visible side first (image ratio reads #aspectRatio) submits the
+    // stale value. Reverse listeners never dispatch back, and the
+    // forward listeners never dispatch into them, so there is no loop;
+    // per-type pairs only follow the active type, because the two hidden
+    // selects hold independent per-type values.
+    for (const [nativeSelector, type] of [["#selectRatioImage", "image"], ["#selectRatioVideo", "video"]]) {
+      document.querySelector(nativeSelector)?.addEventListener("change", function () {
+        if ((document.querySelector("#genType")?.value || "image") !== type) return;
+        const visible = document.querySelector("#aspectRatio");
+        if (visible) visible.value = this.value;
+      });
+    }
+    for (const [nativeSelector, type] of [["#selectQtyImage", "image"], ["#selectCountVideo", "video"]]) {
+      document.querySelector(nativeSelector)?.addEventListener("change", function () {
+        if ((document.querySelector("#genType")?.value || "image") !== type) return;
+        const visible = document.querySelector("#quantitySelect");
+        if (visible) visible.value = this.value;
+      });
+    }
+    document.querySelector("#selectModeVideo")?.addEventListener("change", function () {
+      const visible = document.querySelector("#videoInputType");
+      if (visible) visible.value = this.value;
+    });
+
+    // Quantity controls
+    const quantityInput = document.querySelector("#quantitySelect");
+    const qtyMinus = document.querySelector("#genQtyMinus");
+    const qtyPlus = document.querySelector("#genQtyPlus");
+
+    function setQuantity(val) {
+      const clamped = Math.max(1, Math.min(4, Number(val) || 1));
+      if (quantityInput) quantityInput.value = String(clamped);
+      const selectQtyImage = document.querySelector("#selectQtyImage");
+      const selectCountVideo = document.querySelector("#selectCountVideo");
+      if (selectQtyImage) selectQtyImage.value = String(clamped);
+      if (selectCountVideo) selectCountVideo.value = String(clamped);
+    }
+
+    qtyMinus?.addEventListener("click", () => setQuantity((Number(quantityInput?.value) || 1) - 1));
+    qtyPlus?.addEventListener("click", () => setQuantity((Number(quantityInput?.value) || 1) + 1));
+    quantityInput?.addEventListener("change", e => setQuantity(e.target.value));
+
+    // Video frames and inputs
+    document.querySelector("#videoInputType")?.addEventListener("change", function () {
+      const mode = String(this.value || "ingredients").toLowerCase();
+      const selectModeVideo = document.querySelector("#selectModeVideo");
+      if (selectModeVideo) {
+        selectModeVideo.value = mode;
+        selectModeVideo.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      const framesSection = document.querySelector("#videoFramesSection");
+      if (framesSection) framesSection.classList.toggle("hidden", mode !== "frames");
+      document.querySelector("#genVideoVoiceContainer")?.classList.toggle("hidden", mode === "frames");
+    });
+  }
+
   function initGenerationControls() {
     const promptsArea = document.querySelector("#promptsArea");
     const multiPromptCheck = document.querySelector("#multiPromptCheck");
@@ -3944,79 +4068,7 @@
     hiddenGenType?.addEventListener("change", () => setGenType(hiddenGenType.value));
     setGenType(hiddenGenType?.value || document.querySelector("#genTypeToggle .gen-type-btn.active")?.dataset.value || "image");
 
-    // Model selects synchronization
-    document.querySelector("#imageModel")?.addEventListener("change", function () {
-      const sel = document.querySelector("#selectModelImage");
-      if (sel && sel.value !== this.value) {
-        sel.value = this.value;
-        sel.dispatchEvent(new Event("change", { bubbles: true }));
-      }
-    });
-
-    document.querySelector("#videoModel")?.addEventListener("change", function () {
-      const sel = document.querySelector("#selectModelVideo");
-      if (sel && sel.value !== this.value) {
-        sel.value = this.value;
-        sel.dispatchEvent(new Event("change", { bubbles: true }));
-      }
-    });
-
-    for (const [visibleSelector, nativeSelector] of [
-      ["#flowVideoDuration", "#selectDurationVideo"],
-      ["#flowVideoResolution", "#selectResolutionVideo"],
-    ]) {
-      const visibleSelect = document.querySelector(visibleSelector);
-      const nativeSelect = document.querySelector(nativeSelector);
-      visibleSelect?.addEventListener("change", () => {
-        if (nativeSelect && nativeSelect.value !== visibleSelect.value) {
-          nativeSelect.value = visibleSelect.value;
-          nativeSelect.dispatchEvent(new Event("change", { bubbles: true }));
-        }
-      });
-      nativeSelect?.addEventListener("change", () => {
-        if (visibleSelect && visibleSelect.value !== nativeSelect.value) visibleSelect.value = nativeSelect.value;
-      });
-    }
-
-    // Aspect ratio synchronization
-    document.querySelector("#aspectRatio")?.addEventListener("change", function () {
-      const val = this.value;
-      const ratioImage = document.querySelector("#selectRatioImage");
-      const ratioVideo = document.querySelector("#selectRatioVideo");
-      if (ratioImage) ratioImage.value = val;
-      if (ratioVideo) ratioVideo.value = val;
-    });
-
-    // Quantity controls
-    const quantityInput = document.querySelector("#quantitySelect");
-    const qtyMinus = document.querySelector("#genQtyMinus");
-    const qtyPlus = document.querySelector("#genQtyPlus");
-
-    function setQuantity(val) {
-      const clamped = Math.max(1, Math.min(4, Number(val) || 1));
-      if (quantityInput) quantityInput.value = String(clamped);
-      const selectQtyImage = document.querySelector("#selectQtyImage");
-      const selectCountVideo = document.querySelector("#selectCountVideo");
-      if (selectQtyImage) selectQtyImage.value = String(clamped);
-      if (selectCountVideo) selectCountVideo.value = String(clamped);
-    }
-
-    qtyMinus?.addEventListener("click", () => setQuantity((Number(quantityInput?.value) || 1) - 1));
-    qtyPlus?.addEventListener("click", () => setQuantity((Number(quantityInput?.value) || 1) + 1));
-    quantityInput?.addEventListener("change", e => setQuantity(e.target.value));
-
-    // Video frames and inputs
-    document.querySelector("#videoInputType")?.addEventListener("change", function () {
-      const mode = String(this.value || "ingredients").toLowerCase();
-      const selectModeVideo = document.querySelector("#selectModeVideo");
-      if (selectModeVideo) {
-        selectModeVideo.value = mode;
-        selectModeVideo.dispatchEvent(new Event("change", { bubbles: true }));
-      }
-      const framesSection = document.querySelector("#videoFramesSection");
-      if (framesSection) framesSection.classList.toggle("hidden", mode !== "frames");
-      document.querySelector("#genVideoVoiceContainer")?.classList.toggle("hidden", mode === "frames");
-    });
+    bindGenerationControlSync();
 
     document.querySelector("#genTabFrame1Slot")?.addEventListener("click", () => {
       referencePicker.openFrames(sources => {

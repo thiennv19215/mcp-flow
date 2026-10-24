@@ -609,18 +609,8 @@ async function execute(_ws, method, args = [], { queueOwner = false, connectorOw
         // of them enters the queue. Enqueueing one-by-one here would leave
         // earlier jobs queued (and spending credits) when a later job fails,
         // even though the caller is told the whole submission failed.
-        const added = jobInputs.length === 0
-          ? []
-          : jobInputs.length === 1
-            ? [await flowJobQueue.add(jobInputs[0])]
-            : await flowJobQueue.addBatch(jobInputs, { batchId });
-        // Match the extension UI: adding work must not implicitly clear a
-        // queue pause caused by an unresolved Flow page blocker or a manual
-        // submit. Only an explicit Resume command may continue that queue.
-        const beforeStart = await flowJobQueue.snapshot();
-        const snapshot = payload.autoStart === false || beforeStart.isPaused || beforeStart.waitingForUser > 0
-          ? beforeStart
-          : await flowJobQueue.resume();
+        const added = await enqueueJobs(jobInputs, { batchId });
+        const snapshot = await startEnqueuedWork({ autoStart: payload.autoStart });
         const plannedOutputDir = plannedJobs[0]?.payload?.output_dir ?? plannedJobs[0]?.payload?.params?.output_dir ?? payload.output_dir;
         return { jobs: added, job: added.length === 1 ? added[0] : undefined, output_dir: plannedOutputDir, batchId, snapshot: flowQueueSnapshot(snapshot) };
       }
@@ -989,10 +979,7 @@ async function enqueueGeneratedMediaDownload(id) {
     await flowJobQueue.updateGeneratedMediaDownload(jobId, {
       state: "queued", completed: 0, total: media.length,
     }, `Download queued for ${media.length} existing Flow result${media.length === 1 ? "" : "s"}.`);
-    const beforeStart = await flowJobQueue.snapshot();
-    const snapshot = beforeStart.isPaused || beforeStart.waitingForUser > 0
-      ? beforeStart
-      : await flowJobQueue.resume();
+    const snapshot = await startEnqueuedWork();
     return { job: downloadJob, snapshot: flowQueueSnapshot(snapshot) };
   })();
   queueDownloadEnqueues.set(jobId, request);
@@ -1550,6 +1537,35 @@ const flowJobQueue = new FlowJobQueue(runExtensionFlowJob, {
   // vm-extraction contract in flow-execution-lock-wiring keeps working.
   admissionCheck: jobs => flowTransformGate.admissionRefusal(jobs),
 });
+// Audit cluster E: the two enqueue choreographies every SW path used
+// to repeat inline, now in one place each. The transform-lock gate is
+// NOT bypassed: cluster C enforces it inside queue.add/addBatch, and
+// the UI add paths additionally return the typed refusal before
+// enqueueing (see flow-queue:add / flow-queue:add-batch below).
+// - enqueueJobs: a batch goes through addBatch (atomic preflight —
+//   enqueueing one-by-one would leave earlier jobs queued and spending
+//   credits when a later job fails); a single job through add; empty
+//   input yields [] without touching the queue.
+// - startEnqueuedWork: the pause-preserving start after enqueue.
+//   Adding work must not implicitly clear a queue pause caused by an
+//   unresolved Flow page blocker or a manual submit; only an explicit
+//   Resume may continue that queue. autoStart === false suppresses
+//   the start; `started` lets retry-batch skip the start when nothing
+//   was retried. A caller-supplied snapshot is used as-is (draft runs
+//   snapshot before bookkeeping, then apply the rule to that snapshot).
+async function enqueueJobs(jobs, batchOptions = {}) {
+  const list = Array.isArray(jobs) ? jobs : [];
+  if (!list.length) return [];
+  if (list.length === 1) return [await flowJobQueue.add(list[0])];
+  return flowJobQueue.addBatch(list, batchOptions);
+}
+
+async function startEnqueuedWork({ autoStart, snapshot, started = true } = {}) {
+  const current = snapshot ?? await flowJobQueue.snapshot();
+  if (autoStart === false || !started || current.isPaused || current.waitingForUser > 0) return current;
+  return flowJobQueue.resume();
+}
+
 // FEAT-07: enqueue one workflow graph handout (a level's worth of
 // compiled jobs, or a single node) and bind the minted runtime ids back
 // into the run record. Ids are minted up front, same as the generate
@@ -1571,9 +1587,7 @@ async function enqueueWorkflowGraphJobs(entries, { target = {} } = {}) {
     },
   }));
   try {
-    const added = jobs.length === 1
-      ? [await flowJobQueue.add(jobs[0])]
-      : await flowJobQueue.addBatch(jobs, { batchId: runId });
+    const added = await enqueueJobs(jobs, { batchId: runId });
     if (runId) {
       await flowWorkflowGraphRuns.recordAdmission(runId, {
         batchId: runId,
@@ -1815,10 +1829,7 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
           // Adding from the create form always enqueues first, then starts or
           // resumes the sequential worker. Keep a manual-submit pause intact so
           // the user can finish that confirmation before later jobs proceed.
-          const beforeStart = await flowJobQueue.snapshot();
-          snapshot = message.autoStart === false || beforeStart.isPaused || beforeStart.waitingForUser > 0
-            ? beforeStart
-            : await flowJobQueue.resume();
+          snapshot = await startEnqueuedWork({ autoStart: message.autoStart });
           break;
         }
         case "flow-queue:add-batch": {
@@ -1840,10 +1851,7 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
             batchId: message.batchId,
             batchLabel: message.batchLabel,
           });
-          const beforeStart = await flowJobQueue.snapshot();
-          snapshot = message.autoStart === false || beforeStart.isPaused || beforeStart.waitingForUser > 0
-            ? beforeStart
-            : await flowJobQueue.resume();
+          snapshot = await startEnqueuedWork({ autoStart: message.autoStart });
           break;
         }
         case "flow-queue:transform-lock":
@@ -1903,9 +1911,7 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
         case "flow-queue:retry-batch": {
           const result = await flowJobQueue.retryBatch(String(message.batchId || ""));
           const beforeStart = await flowJobQueue.snapshot();
-          snapshot = !result.retried.length || beforeStart.isPaused || beforeStart.waitingForUser > 0
-            ? beforeStart
-            : await flowJobQueue.resume();
+          snapshot = await startEnqueuedWork({ snapshot: beforeStart, started: result.retried.length > 0 });
           return { ok: true, retried: result.retried, skipped: result.skipped, ...flowQueueSnapshot(snapshot) };
         }
         case "flow-queue:reorder": {
@@ -1958,20 +1964,9 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
               // stored with the draft: a draft runs here and now.
               metadata: { source: "extension", ...(job.metadata || {}), ...target },
             }));
-            let snapshot;
-            let runBatchId = null;
-            let addedJobs = [];
-            if (jobs.length === 1) {
-              const added = await flowJobQueue.add(jobs[0]);
-              addedJobs = [added];
-              runBatchId = added?.batch?.batchId || null;
-              snapshot = await flowJobQueue.snapshot();
-            } else {
-              const added = await flowJobQueue.addBatch(jobs, { batchLabel: draft.label });
-              addedJobs = added;
-              runBatchId = added[0]?.batch?.batchId || null;
-              snapshot = await flowJobQueue.snapshot();
-            }
+            const addedJobs = await enqueueJobs(jobs, { batchLabel: draft.label });
+            const runBatchId = addedJobs[0]?.batch?.batchId || null;
+            let snapshot = await flowJobQueue.snapshot();
             // Bookkeeping must not misreport a successful enqueue as failed.
             const updated = await flowBatchDrafts.recordRun(draft.id, runBatchId).catch(() => draft);
             // FEAT-02: the run also becomes a persistent batch run record
@@ -1980,9 +1975,7 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
             await trackDraftRun(draft, jobs, addedJobs, runBatchId).catch(error => {
               console.warn("[FlowBatchRuns] Could not track this draft run:", error?.message || error);
             });
-            snapshot = message.autoStart === false || snapshot.isPaused || snapshot.waitingForUser > 0
-              ? snapshot
-              : await flowJobQueue.resume();
+            snapshot = await startEnqueuedWork({ autoStart: message.autoStart, snapshot });
             return { ok: true, draft: updated, drafts: await flowBatchDrafts.list(), ...flowQueueSnapshot(snapshot) };
           } finally {
             flowBatchDrafts.endRun(draftId);
@@ -2029,10 +2022,7 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
             metadata: { source: "extension", ...(built.metadata || {}), ...target },
           };
           await flowJobQueue.add(job);
-          let snapshot = await flowJobQueue.snapshot();
-          snapshot = message.autoStart === false || snapshot.isPaused || snapshot.waitingForUser > 0
-            ? snapshot
-            : await flowJobQueue.resume();
+          let snapshot = await startEnqueuedWork({ autoStart: message.autoStart });
           return { ok: true, record, ...flowQueueSnapshot(snapshot) };
         }
         default:
@@ -2115,16 +2105,8 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
               // metadata stored with the task: a task runs here and now.
               metadata: { source: "extension", ...(job.metadata || {}), ...target },
             }));
-            let addedJobs;
-            let runBatchId = null;
-            if (stamped.length === 1) {
-              const added = await flowJobQueue.add(stamped[0]);
-              addedJobs = [added];
-              runBatchId = added?.batch?.batchId || null;
-            } else {
-              addedJobs = await flowJobQueue.addBatch(stamped, { batchLabel: "Saved tasks" });
-              runBatchId = addedJobs[0]?.batch?.batchId || null;
-            }
+            const addedJobs = await enqueueJobs(stamped, { batchLabel: "Saved tasks" });
+            const runBatchId = addedJobs[0]?.batch?.batchId || null;
             // Bookkeeping must not misreport a successful enqueue as
             // failed: each segment's admitted jobs become that task's
             // fold target for the write-back.
@@ -2136,10 +2118,7 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
                 console.warn("[FlowTaskLists] Could not record this task run:", error?.message || error);
               });
             }
-            let snapshot = await flowJobQueue.snapshot();
-            snapshot = message.autoStart === false || snapshot.isPaused || snapshot.waitingForUser > 0
-              ? snapshot
-              : await flowJobQueue.resume();
+            let snapshot = await startEnqueuedWork({ autoStart: message.autoStart });
             return {
               ok: true,
               tasks: await flowTaskLists.list(),
@@ -2337,24 +2316,14 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
               // The claim gates the enqueue: a conflicting active batch
               // surfaces before a single credit can be spent.
               const claim = await flowBatchRuns.claim(run.id, run.revision);
-              let addedJobs = [];
-              let runBatchId = null;
-              if (jobs.length === 1) {
-                const added = await flowJobQueue.add(jobs[0]);
-                addedJobs = [added];
-                runBatchId = added?.batch?.batchId || null;
-              } else {
-                runBatchId = crypto.randomUUID();
-                addedJobs = await flowJobQueue.addBatch(jobs, { batchId: runBatchId, batchLabel: draft.label });
-              }
+              const preBatchId = jobs.length === 1 ? null : crypto.randomUUID();
+              const addedJobs = await enqueueJobs(jobs, { batchId: preBatchId, batchLabel: draft.label });
+              const runBatchId = jobs.length === 1 ? addedJobs[0]?.batch?.batchId || null : preBatchId;
               const mapping = addedJobs.map((job, position) => ({ index: claim.indexes[position], jobId: job.id }));
               const admitted = await flowBatchRuns.recordAdmission(run.id, { batchId: runBatchId, kind: "initial", mapping });
               // Bookkeeping must not misreport a successful enqueue as failed.
               const updated = await flowBatchDrafts.recordRun(draft.id, runBatchId).catch(() => draft);
-              let snapshot = await flowJobQueue.snapshot();
-              snapshot = message.autoStart === false || snapshot.isPaused || snapshot.waitingForUser > 0
-                ? snapshot
-                : await flowJobQueue.resume();
+              let snapshot = await startEnqueuedWork({ autoStart: message.autoStart });
               return { ok: true, run: admitted, draft: updated, drafts: await flowBatchDrafts.list(), runs: await flowBatchRuns.list(), ...flowQueueSnapshot(snapshot) };
             } catch (error) {
               // The claim admitted nothing — drop the record again so a
@@ -2383,16 +2352,9 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
           }));
           let admitted;
           try {
-            let addedJobs = [];
-            let runBatchId = null;
-            if (jobs.length === 1) {
-              const added = await flowJobQueue.add(jobs[0]);
-              addedJobs = [added];
-              runBatchId = added?.batch?.batchId || null;
-            } else {
-              runBatchId = crypto.randomUUID();
-              addedJobs = await flowJobQueue.addBatch(jobs, { batchId: runBatchId, batchLabel: current.label });
-            }
+            const preBatchId = jobs.length === 1 ? null : crypto.randomUUID();
+            const addedJobs = await enqueueJobs(jobs, { batchId: preBatchId, batchLabel: current.label });
+            const runBatchId = jobs.length === 1 ? addedJobs[0]?.batch?.batchId || null : preBatchId;
             const mapping = addedJobs.map((job, position) => ({ index: resumed.indexes[position], jobId: job.id }));
             admitted = await flowBatchRuns.recordAdmission(runId, { batchId: runBatchId, kind: "resume", mapping });
           } catch (error) {
@@ -2402,10 +2364,7 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
             await flowBatchRuns.releaseClaim(runId).catch(() => {});
             throw error;
           }
-          let snapshot = await flowJobQueue.snapshot();
-          snapshot = message.autoStart === false || snapshot.isPaused || snapshot.waitingForUser > 0
-            ? snapshot
-            : await flowJobQueue.resume();
+          let snapshot = await startEnqueuedWork({ autoStart: message.autoStart });
           return { ok: true, run: admitted, runs: await flowBatchRuns.list(), ...flowQueueSnapshot(snapshot) };
         }
         default:

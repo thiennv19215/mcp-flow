@@ -329,7 +329,7 @@
         let confirmedAttachmentCount = 0;
         await runFlowStage("stabilizing the Flow results grid before the generation baseline", ({ deadline, signal }) =>
           tiles.stabilizeFlowResultViewport?.({ deadline, signal }));
-        const before = tiles.collectNativeMedia().map(item => item.id || `title:${item.title}`);
+        const before = tiles.collectNativeMedia().map(item => tiles.tileSnapshotKey?.(item) || item.id || `title:${item.title}`);
         const activeAgent = root.flowButton?.("Agent");
         if (activeAgent?.getAttribute("aria-pressed") === "true") await runFlowStage("switching Agent mode off", ({ signal }) => agent.setNativeAgentMode(false, { signal, deadline: flowDeadline }));
         const clearReferenceChips = typeof root.clearExistingIngredientChips === "function"
@@ -698,7 +698,7 @@
           try {
             const liveTiles = tiles.collectNativeMedia?.() || [];
             const seen = new Set(liveTileBaseline);
-            if (liveTiles.some((item) => !seen.has(item.id || `title:${item.title}`))) return true;
+            if (liveTiles.some((item) => !seen.has(tiles.tileSnapshotKey?.(item) || item.id || `title:${item.title}`))) return true;
           } catch (_) { /* a transient scan failure is not acceptance */ }
           return false;
         };
@@ -1014,7 +1014,7 @@
               lastMediaScanAt = Date.now();
             }
             let fresh = allMedia.filter(item =>
-              !before.includes(item.id || `title:${item.title}`) &&
+              !before.includes(tiles.tileSnapshotKey?.(item) || item.id || `title:${item.title}`) &&
               !item.title.startsWith("fm-") &&
               (!kind || item.kind === kind || (kind === "video" && item.kind === "scene") || item.failed) &&
               item.id && correlatedIds.has(item.id.toLowerCase())
@@ -1164,7 +1164,7 @@
                 continue;
               }
               const titleOnly = picked.some(item => !item.id || item.id.startsWith("title:"));
-              const signature = picked.map(item => item.id || `title:${item.title}`).join("|");
+              const signature = picked.map(item => tiles.tileSnapshotKey?.(item) || item.id || `title:${item.title}`).join("|");
               if (!titleOnly || signature === lastTitleOnlyResult) {
                 const media = picked.map(({ id, title, kind: mediaKind }) => ({
                   id,

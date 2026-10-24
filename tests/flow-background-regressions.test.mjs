@@ -46,15 +46,23 @@ test('service worker reconnect paths go through the bridge client, not the dead 
 // The MCP bridge path used to enqueue planned jobs one by one; a failure on
 // job N left jobs 1..N-1 queued and spending credits after the caller had
 // already been told the submission failed.
+// Audit cluster E: the dispatch lives in enqueueJobs now (single job ->
+// add, batch -> addBatch, pinned at runtime by flow-audit-e-enqueue);
+// the bridge path must still go through it, never a per-job loop.
 
 test('bridge queue submissions admit multi-job batches atomically via addBatch', () => {
   const branch = serviceWorkerSource.slice(
     serviceWorkerSource.indexOf('const defaultFlowTarget = await captureFlowTargetMetadata();'),
     serviceWorkerSource.indexOf('if (command.name === "flow.queue.get")'));
-  assert.match(branch, /flowJobQueue\.addBatch\(jobInputs, \{ batchId \}\)/,
+  assert.match(branch, /await enqueueJobs\(jobInputs, \{ batchId \}\)/,
     'multi-job submissions go through the atomic batch admission');
-  assert.match(branch, /jobInputs\.length === 1[\s\S]*?flowJobQueue\.add\(jobInputs\[0\]\)/,
+  const helper = serviceWorkerSource.slice(
+    serviceWorkerSource.indexOf('async function enqueueJobs'),
+    serviceWorkerSource.indexOf('async function startEnqueuedWork'));
+  assert.match(helper, /if \(list\.length === 1\) return \[await flowJobQueue\.add\(list\[0\]\)\];/,
     'single-job submissions keep using add');
+  assert.match(helper, /return flowJobQueue\.addBatch\(list, batchOptions\);/,
+    'multi-job submissions keep using the atomic addBatch');
   assert.ok(!branch.includes('added.push(await flowJobQueue.add('),
     'the non-atomic per-job enqueue loop is gone');
   assert.match(branch, /dependsOnId: previousId/,
