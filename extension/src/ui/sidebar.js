@@ -1331,6 +1331,9 @@
       if ((targetId === "tab-library" || targetId === "tab-photos") && !flowPhotosScanned) {
         void runLibraryAction(null, refreshFlowPhotos);
       }
+      if (targetId === "tab-photos" && !albumsLoaded) {
+        void loadAlbums();
+      }
   };
   tabs.forEach((tab, index) => {
     tab.addEventListener("click", () => activateTab(tab));
@@ -1469,6 +1472,89 @@
     if (row.style.display !== "none") document.querySelector("#flowTaskSearch")?.focus();
   });
   document.querySelector("#flowTaskSearch")?.addEventListener("input", () => { void loadFlowTasks(); });
+
+  // FEAT-10: Photos ▸ Album controls for the generation albums.
+  async function createAlbumFromPrompt() {
+    const name = window.prompt("Tên album mới:");
+    if (!name?.trim()) return;
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-albums:create", name });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể tạo album.");
+      if (Array.isArray(res.albums)) albums = res.albums;
+      albumsLoaded = true;
+      renderAlbums();
+      setFeedback("✅ Đã tạo album.", true);
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.albums.create.error", err.message, false);
+    }
+  }
+
+  async function renameAlbum(id) {
+    const album = albums.find(entry => entry.id === id);
+    if (!album) return;
+    const name = window.prompt("Đổi tên album:", album.name || "");
+    if (!name?.trim() || name.trim() === album.name) return;
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-albums:rename", id, name });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể đổi tên album.");
+      if (Array.isArray(res.albums)) albums = res.albums;
+      renderAlbums();
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.albums.rename.error", err.message, false);
+    }
+  }
+
+  async function removeAlbum(id) {
+    const album = albums.find(entry => entry.id === id);
+    if (!album || !window.confirm(`Xoá album "${album.name}"? Ảnh gốc trong thư viện Flow không bị xoá.`)) return;
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-albums:remove", id });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể xoá album.");
+      if (Array.isArray(res.albums)) albums = res.albums;
+      renderAlbums();
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.albums.remove.error", err.message, false);
+    }
+  }
+
+  async function removeAlbumImage(albumId, imageId) {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-albums:remove-image", albumId, imageId });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể xoá ảnh khỏi album.");
+      if (Array.isArray(res.albums)) albums = res.albums;
+      renderAlbums();
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.albums.removeImage.error", err.message, false);
+    }
+  }
+
+  document.querySelector("#createAlbumBtn")?.addEventListener("click", () => { void createAlbumFromPrompt(); });
+  document.querySelector("#albumListContainer")?.addEventListener("click", event => {
+    const renameId = event.target.closest("[data-album-rename]")?.dataset.albumRename;
+    if (renameId) { void renameAlbum(renameId); return; }
+    const removeId = event.target.closest("[data-album-remove]")?.dataset.albumRemove;
+    if (removeId) { void removeAlbum(removeId); return; }
+    const refButton = event.target.closest("[data-album-ref-album]");
+    if (refButton) {
+      const album = albums.find(entry => entry.id === refButton.dataset.albumRefAlbum);
+      const image = album?.images?.find(entry => entry.id === refButton.dataset.albumRefImage);
+      if (image) {
+        void runLibraryAction(event.target, async () => {
+          await assertQueueIdleForDirectAction();
+          return dispatchFlowOperation("flow.references.attach", { references: [`asset:${image.name}`] });
+        });
+      }
+      return;
+    }
+    const imageRemoveButton = event.target.closest("[data-album-image-remove-album]");
+    if (imageRemoveButton) {
+      void removeAlbumImage(imageRemoveButton.dataset.albumImageRemoveAlbum, imageRemoveButton.dataset.albumImageRemoveImage);
+    }
+  });
 
   let isGenerating = false;
   let flowQueuePanel = null;
@@ -2617,6 +2703,7 @@
         await assertQueueIdleForDirectAction();
         return dispatchFlowOperation("flow.asset.download", { name: asset.name, id: asset.id, quality: "original" });
       });
+      addAction("Lưu vào Album", "Lưu vào Album", async () => saveAssetToAlbum(asset));
       card.append(preview, label, kindLabel, actions);
       grid.appendChild(card);
     }
@@ -2640,6 +2727,126 @@
       t("sidebar.librarySelectAsset"));
     renderFlowPhotos();
     return { assets: flowAssets.length };
+  }
+
+  // FEAT-10: generation albums live in the background album store
+  // (flow-albums.js); the Photos ▸ Album subtab renders them here, and
+  // Flow photo cards can save an asset into an album. An album holds
+  // image IDENTITIES only — the media stays in the Flow library.
+  let albums = [];
+  let albumsLoaded = false;
+
+  async function loadAlbums() {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-albums:list" });
+      albums = res?.ok && Array.isArray(res.albums) ? res.albums : [];
+    } catch {
+      albums = [];
+    }
+    albumsLoaded = true;
+    renderAlbums();
+  }
+
+  function renderAlbums() {
+    const container = document.querySelector("#albumListContainer");
+    if (!container) return;
+    container.replaceChildren();
+    if (!albums.length) {
+      const empty = document.createElement("p");
+      empty.style.cssText = "color:var(--text-muted);font-size:12px;text-align:center;padding:24px;";
+      empty.textContent = "Chưa có album nào.";
+      container.appendChild(empty);
+      return;
+    }
+    for (const album of albums) {
+      const card = document.createElement("article");
+      card.className = "album-card";
+      const cover = album.cover || null;
+      const header = document.createElement("div");
+      header.className = "album-card__header";
+      header.innerHTML = `<div class="flow-history-item__body"><div class="flow-history-item__title">${escapeHtml(album.name || "")}</div><div class="flow-history-item__detail">${escapeHtml(`${album.imageCount || 0} ảnh`)}</div></div><div class="flow-history-item__actions"><button type="button" class="btn btn-secondary btn-sm" data-album-rename="${escapeHtml(album.id)}">Đổi tên</button><button type="button" class="btn btn-secondary btn-sm" data-album-remove="${escapeHtml(album.id)}">Xoá album</button></div>`;
+      card.appendChild(header);
+      if (cover?.thumbnailUrl) {
+        const coverImage = document.createElement("img");
+        coverImage.className = "album-card__cover";
+        coverImage.src = cover.thumbnailUrl;
+        coverImage.alt = cover.name || "";
+        coverImage.loading = "lazy";
+        coverImage.onerror = () => coverImage.remove();
+        card.appendChild(coverImage);
+      }
+      const grid = document.createElement("div");
+      grid.className = "album-card__grid";
+      for (const image of album.images || []) {
+        const item = document.createElement("div");
+        item.className = "album-image-item";
+        if (image.thumbnailUrl) {
+          const thumb = document.createElement("img");
+          thumb.src = image.thumbnailUrl;
+          thumb.alt = "";
+          thumb.loading = "lazy";
+          thumb.onerror = () => thumb.remove();
+          item.appendChild(thumb);
+        }
+        const label = document.createElement("span");
+        label.className = "album-image-item__name";
+        label.textContent = image.name || "";
+        label.title = image.name || "";
+        item.appendChild(label);
+        const useRef = document.createElement("button");
+        useRef.type = "button";
+        useRef.className = "btn btn-secondary btn-sm";
+        useRef.textContent = "Dùng làm tham chiếu";
+        useRef.dataset.albumRefAlbum = album.id;
+        useRef.dataset.albumRefImage = image.id;
+        item.appendChild(useRef);
+        const removeImage = document.createElement("button");
+        removeImage.type = "button";
+        removeImage.className = "btn btn-secondary btn-sm";
+        removeImage.textContent = "Xoá";
+        removeImage.dataset.albumImageRemoveAlbum = album.id;
+        removeImage.dataset.albumImageRemoveImage = image.id;
+        item.appendChild(removeImage);
+        grid.appendChild(item);
+      }
+      card.appendChild(grid);
+      container.appendChild(card);
+    }
+  }
+
+  async function saveAssetToAlbum(asset) {
+    if (!albumsLoaded) await loadAlbums();
+    let albumId = null;
+    if (!albums.length) {
+      const name = window.prompt("Chưa có album nào. Nhập tên album mới:");
+      if (!name?.trim()) return;
+      const created = await chrome.runtime.sendMessage({ type: "flow-albums:create", name });
+      if (!created?.ok) throw new Error(created?.error?.message || "Không thể tạo album.");
+      if (Array.isArray(created.albums)) albums = created.albums;
+      albumId = created.album?.id || null;
+    } else {
+      const listing = albums.map((album, index) => `${index + 1}. ${album.name}`).join("\n");
+      const choice = window.prompt(`Lưu vào album nào?\n${listing}`, "1");
+      if (!choice) return;
+      const picked = albums[Number(choice) - 1]
+        || albums.find(album => String(album.name || "").toLowerCase() === choice.trim().toLowerCase());
+      if (!picked) throw new Error("Không tìm thấy album đã chọn.");
+      albumId = picked.id;
+    }
+    const res = await chrome.runtime.sendMessage({
+      type: "flow-albums:add-image",
+      albumId,
+      image: {
+        id: asset.id,
+        name: asset.name,
+        kind: asset.kind === "scene" ? "video" : asset.kind,
+        projectId: asset.projectId || null,
+        thumbnailUrl: asset.thumbnailUrl || null,
+      },
+    });
+    if (!res?.ok) throw new Error(res?.error?.message || "Không thể lưu vào album.");
+    if (Array.isArray(res.albums)) albums = res.albums;
+    renderAlbums();
   }
 
   const triggerPhotosRefresh = event => runLibraryAction(event.currentTarget, refreshFlowPhotos);
@@ -3127,6 +3334,9 @@
         });
         if (subtab === "photos-flow-images" && !flowPhotosScanned) {
           void runLibraryAction(null, refreshFlowPhotos);
+        }
+        if (subtab === "photos-album" && !albumsLoaded) {
+          void loadAlbums();
         }
       });
     });
