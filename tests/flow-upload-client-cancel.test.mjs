@@ -24,7 +24,7 @@ const sidebarSource = readFileSync(
   'utf8',
 );
 
-function clientHarness({ hangMediaUploadFor = null } = {}) {
+function clientHarness({ hangMediaUploadFor = null, mediaUploadValue = null } = {}) {
   const sent = [];
   const context = vm.createContext({
     window: {},
@@ -47,6 +47,9 @@ function clientHarness({ hangMediaUploadFor = null } = {}) {
             harness.onMediaUpload?.(payload);
             if (hangMediaUploadFor && payload.requestId === hangMediaUploadFor()) {
               return new Promise(() => {});
+            }
+            if (mediaUploadValue) {
+              return { ok: true, value: typeof mediaUploadValue === 'function' ? mediaUploadValue(payload) : mediaUploadValue };
             }
             return { ok: true, value: { name: payload.name, id: 'media-xyz' } };
           }
@@ -176,4 +179,81 @@ test('IMG-09 sidebar contract: in-flight uploads are tracked with per-upload can
     'the cancel buttons render into a dedicated bar');
   const helperUses = sidebarSource.match(/uploadWithCancel\(/g) || [];
   assert.ok(helperUses.length >= 3, 'the helper is defined once and used by both the reference-upload path and the media-upload button');
+});
+
+// Upload identity (livefix/upload-identity) — the content-side uploader
+// dispatches the staged file to Flow under a digest-derived uploadName, so
+// the new tile carries THAT name, not the client's safeName; the receipt
+// also carries the canonical mediaUuid when the raw id is an asb: handle.
+// FlowUploadClient must surface both fields, and the sidebar must build
+// generation attachments from them — an attachment naming the safeName
+// matches no tile the picker can see (the live "selecting asset" hang).
+
+test('upload identity client: uploadName and mediaUuid from the media upload receipt survive to the caller', async () => {
+  const mediaUuid = '123e4567-e89b-12d3-a456-426614174000';
+  const uploadName = '9f2c1ab4d6e847f5a0c3b2d1e4f50607.png';
+  const harness = clientHarness({
+    mediaUploadValue: payload => ({ name: payload.name, id: 'asb:media-xyz', mediaUuid, uploadName }),
+  });
+  const result = await harness.client.upload(makeFile(0x51, 64), { kind: 'image', name: 'photo.png' });
+  assert.equal(result.uploadName, uploadName, 'the tile-carried upload name is preserved');
+  assert.equal(result.mediaUuid, mediaUuid, 'the canonical media UUID is preserved');
+  assert.equal(result.id, 'asb:media-xyz', 'id keeps its previous receipt semantics');
+  assert.match(result.name, /^upload-image-photo-/, 'name still reports the client safe dispatch name');
+  assert.equal(String(result), result.name, 'toString still yields the safe name');
+  assert.ok(result.requestId && result.transferId, 'request/transfer ids are unchanged');
+});
+
+test('upload identity client: mediaUuid falls back to the nested receipt; absent identity fields stay null', async () => {
+  const mediaUuid = '223e4567-e89b-12d3-a456-426614174001';
+  const nested = clientHarness({
+    mediaUploadValue: payload => ({ name: payload.name, id: 'asb:media-abc', receipt: { id: 'asb:media-abc', mediaUuid } }),
+  });
+  const nestedResult = await nested.client.upload(makeFile(0x52, 64), { kind: 'image', name: 'nested.png' });
+  assert.equal(nestedResult.mediaUuid, mediaUuid, 'mediaUuid is read from the nested receipt when not top-level');
+  assert.equal(nestedResult.uploadName, null, 'a missing uploadName stays null so callers fall back to name');
+
+  const plain = clientHarness();
+  const plainResult = await plain.client.upload(makeFile(0x53, 64), { kind: 'image', name: 'plain.png' });
+  assert.equal(plainResult.uploadName, null, 'no uploadName in the receipt → null (legacy behaviour)');
+  assert.equal(plainResult.mediaUuid, null, 'no mediaUuid in the receipt → null (legacy behaviour)');
+  assert.equal(plainResult.id, 'media-xyz', 'the legacy receipt fields still flow through');
+});
+
+function extractUploadedAssetAttachment() {
+  const match = sidebarSource.match(/function uploadedAssetAttachment\(uploaded\) \{[\s\S]*?\n  \}/);
+  assert.ok(match, 'the sidebar defines one shared uploadedAssetAttachment helper');
+  const context = vm.createContext({});
+  vm.runInContext(`${match[0]}\nthis.__fn = uploadedAssetAttachment;`, context);
+  return context.__fn;
+}
+
+test('upload identity sidebar: the shared helper builds attachments from uploadName + mediaUuid', () => {
+  const build = extractUploadedAssetAttachment();
+  const mediaUuid = '123e4567-e89b-12d3-a456-426614174000';
+  const full = build({ name: 'ref-01-photo-deadbeef.png', uploadName: 'tile-name.png', mediaUuid, id: 'asb:media-xyz' });
+  assert.equal(full.assetName, 'asset:tile-name.png', 'the attachment names the tile-carried uploadName');
+  assert.equal(full.expectedId, mediaUuid, 'expectedId prefers the canonical mediaUuid over the asb: id');
+  assert.deepEqual(Object.keys(full).sort(), ['assetName', 'expectedId']);
+
+  const legacy = build({ name: 'ref-01-photo-deadbeef.png', id: 'asb:media-xyz' });
+  assert.equal(legacy.assetName, 'asset:ref-01-photo-deadbeef.png', 'without uploadName the safe name is used as before');
+  assert.equal(legacy.expectedId, 'asb:media-xyz', 'without mediaUuid the receipt id is used as before');
+
+  const noId = build({ name: 'ref-01-photo-deadbeef.png' });
+  assert.equal(noId.assetName, 'asset:ref-01-photo-deadbeef.png');
+  assert.equal('expectedId' in noId, false, 'expectedId is omitted entirely when no id exists');
+
+  const stringResult = build('ref-01-photo-deadbeef.png');
+  assert.equal(stringResult.assetName, 'asset:ref-01-photo-deadbeef.png', 'a bare string upload result still works');
+  assert.equal('expectedId' in stringResult, false);
+});
+
+test('upload identity sidebar: all three upload call sites route through the shared helper', () => {
+  const mentions = sidebarSource.match(/uploadedAssetAttachment\(uploaded\)/g) || [];
+  assert.equal(mentions.length, 4, 'one definition plus the image-submit, video-reference and video-frame call sites');
+  assert.doesNotMatch(sidebarSource, /asset:\$\{uploadedName\}/,
+    'no call site builds an attachment from the bare safe name anymore');
+  assert.doesNotMatch(sidebarSource, /uploaded\?\.id \|\| uploaded\?\.mediaId/,
+    'no call site resolves the expected id without preferring mediaUuid');
 });

@@ -2628,6 +2628,21 @@
     throw new Error("Dịch vụ tải ảnh lên Flow chưa được khởi tạo");
   }
 
+  // One builder for every attachment that comes out of an upload result
+  // (image submit, video references, video frames). The Flow tile carries
+  // the uploader's digest-derived uploadName — not the client's safeName —
+  // so the attachment must name uploadName when the receipt provided one,
+  // and expectedId prefers the canonical mediaUuid over an asb: receipt
+  // id. Missing fields fall back to the pre-identity behaviour exactly.
+  function uploadedAssetAttachment(uploaded) {
+    const tileName = typeof uploaded === "string" ? uploaded : (uploaded?.uploadName || uploaded?.name || uploaded?.title || String(uploaded));
+    const expectedId = uploaded && typeof uploaded === "object" ? (uploaded.mediaUuid || uploaded.id || uploaded.mediaId) : undefined;
+    return {
+      assetName: `asset:${tileName}`,
+      ...(expectedId ? { expectedId } : {}),
+    };
+  }
+
   async function assertQueueIdleForReferenceUpload() {
     const state = await chrome.runtime.sendMessage({ type: "flow-queue:get" });
     if (!state?.ok || state.isRunning || Number(state.waitingForUser) > 0) {
@@ -2705,11 +2720,8 @@
         uploadedImageCount++;
         setFeedback(`Đang tải ảnh tham chiếu ${uploadedImageCount}/${localImageReferences.length} lên Flow...`, true);
         const uploaded = await uploadReferenceImage(reference.file, undefined, i + 1);
-        const uploadedName = typeof uploaded === "string" ? uploaded : (uploaded?.name || uploaded?.title || String(uploaded));
-        const uploadedId = typeof uploaded === "object" ? (uploaded?.id || uploaded?.mediaId) : undefined;
         const attachment = {
-          assetName: `asset:${uploadedName}`,
-          ...(uploadedId ? { expectedId: uploadedId } : {}),
+          ...uploadedAssetAttachment(uploaded),
           kind: reference.kind || "image",
         };
         referenceAttachments.push(attachment);
@@ -2866,11 +2878,8 @@
         uploadedVideoCount++;
         setFeedback(`Đang tải media tham chiếu ${uploadedVideoCount}/${localVideoReferences.length} lên Flow...`, true);
         const uploaded = await uploadReferenceImage(reference.file, undefined, i + 1);
-        const uploadedName = typeof uploaded === "string" ? uploaded : (uploaded?.name || uploaded?.title || String(uploaded));
-        const uploadedId = typeof uploaded === "object" ? (uploaded?.id || uploaded?.mediaId) : undefined;
         const attachment = {
-          assetName: `asset:${uploadedName}`,
-          ...(uploadedId ? { expectedId: uploadedId } : {}),
+          ...uploadedAssetAttachment(uploaded),
           kind: reference.kind || "video",
         };
         referenceAttachments.push(attachment);
@@ -2898,9 +2907,7 @@
           uploadedFrameCount++;
           setFeedback(t("sidebar.frameUploading", { n: uploadedFrameCount, total: localFrameSources.length, name: source.name || source.file?.name || "" }), true);
           const uploaded = await uploadReferenceImage(source.file, undefined, uploadedFrameCount);
-          const uploadedName = typeof uploaded === "string" ? uploaded : (uploaded?.name || uploaded?.title || String(uploaded));
-          const uploadedId = typeof uploaded === "object" ? (uploaded?.id || uploaded?.mediaId) : undefined;
-          attachmentByReference.set(source, { assetName: `asset:${uploadedName}`, ...(uploadedId ? { expectedId: uploadedId } : {}) });
+          attachmentByReference.set(source, uploadedAssetAttachment(uploaded));
         }
         for (let index = 0; index < selectedFrameAssignments.length; index++) {
           const assignment = selectedFrameAssignments[index];
