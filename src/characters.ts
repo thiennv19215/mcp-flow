@@ -20,11 +20,14 @@ export const loadLooks = (): Record<string, string> => {
 // shared normalization layer (extension/src/content/shared/
 // selection-normalize.js) derives it, so a stored selection slug names
 // the same character on the MCP side as in the extension.
+// Audit cluster E: the extension is the source of truth, so this uses
+// toLocaleLowerCase() exactly like slugifySelectionName — toLowerCase()
+// diverges from it under tr/az ambient locales (I -> ı vs i).
 export const characterSlug = (name: string): string => String(name || "")
   .replace(/đ/g, "d").replace(/Đ/g, "D")
   .normalize("NFKD")
   .replace(/[\u0300-\u036f]/g, "")
-  .toLowerCase()
+  .toLocaleLowerCase()
   .replace(/[^a-z0-9]+/g, "-")
   .replace(/^-+|-+$/g, "");
 

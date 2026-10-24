@@ -6,6 +6,7 @@ import {
   buildFlowDownloadPlan,
   normalizePlanFolderPath,
   normalizePlannedDownloadPath,
+  sanitizePlanFilenameStem,
   serializeFilenameTicket,
   restoreFilenameTicket,
   FlowDownloadFilenameRecords,
@@ -120,13 +121,15 @@ export function flowDownloadBasename(value) {
   return String(value || "").split(/[\\/]/).pop().trim();
 }
 
+// Audit cluster E: the filename-safety pass now has ONE source —
+// sanitizePlanFilenameStem in flow-download-plan.js (illegal chars to
+// "_", trailing dots/spaces stripped, Windows reserved names prefixed,
+// capped at FLOW_PLAN_STEM_MAX = 120). This used to duplicate the pass
+// WITHOUT the cap, so a queue-derived stem over 120 chars could never
+// match its capped planned stem. The basename strip stays here: the
+// plan pass operates on bare stems, not paths.
 export function safeQueueFilenameStem(value) {
-  let stem = flowDownloadBasename(value)
-    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
-    .replace(/[. ]+$/g, "");
-  if (!stem || stem === "." || stem === "..") return "";
-  if (/^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(stem)) stem = `_${stem}`;
-  return stem;
+  return sanitizePlanFilenameStem(flowDownloadBasename(value));
 }
 
 export function queueDownloadExtension(downloadItem) {
