@@ -10,6 +10,7 @@ import { loadChatGptCapabilityRegistry } from "./chatgpt-capabilities.js";
 import { FlowBatchDrafts, materializeDraftJobs } from "./flow-batch-drafts.js";
 import { FlowHistory, buildJobFromRecord } from "./flow-history.js";
 import { FlowBatchRuns } from "./flow-batch-runs.js";
+import { FlowTaskLists, expandTasksToJobs, requiresSequential } from "./flow-task-lists.js";
 import { FlowMediaCatalog } from "./flow-media-catalog.js";
 import { revalidateJobReferences } from "./flow-ref-preflight.js";
 import { FlowBridgeClient, readBridgeConfig, postHttpMessage } from "./flow-bridge-client.js";
@@ -1419,6 +1420,7 @@ const flowJobQueue = new FlowJobQueue(runExtensionFlowJob, {
 const flowBatchDrafts = new FlowBatchDrafts();
 const flowHistory = new FlowHistory();
 const flowBatchRuns = new FlowBatchRuns();
+const flowTaskLists = new FlowTaskLists();
 flowJobQueue.subscribe((snapshot, reason) => {
   broadcastFlowQueue(snapshot, reason);
   // FEAT-01: every finished generation lands in the structured history
@@ -1433,6 +1435,11 @@ flowJobQueue.subscribe((snapshot, reason) => {
   // recording, must never disturb the queue path.
   void flowBatchRuns.observeSnapshot(snapshot).catch(error => {
     console.warn("[FlowBatchRuns] Could not fold the queue snapshot into the active run:", error?.message || error);
+  });
+  // FEAT-05: the same snapshots write task-run results back onto the
+  // saved tasks that produced them, through the same FEAT-02 fold.
+  void flowTaskLists.observeSnapshot(snapshot).catch(error => {
+    console.warn("[FlowTaskLists] Could not write task results back from the queue snapshot:", error?.message || error);
   });
   // Failures during queue preflight happen before the download runner can mark
   // the source item. Repair its state from the durable download job outcome.
@@ -1777,6 +1784,123 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
     })().then(respond).catch(error => respond({
       ok: false,
       error: { code: error?.code || "FLOW_HISTORY_FAILED", message: String(error?.message || error) },
+    }));
+    return true;
+  }
+  if (typeof message?.type === "string" && message.type.startsWith("flow-tasks:")) {
+    if (_sender?.id !== chrome.runtime.id || _sender?.tab) {
+      respond({ ok: false, error: { code: "FLOW_TASKS_FORBIDDEN", message: "Saved tasks are available only from the extension UI." } });
+      return;
+    }
+    void (async () => {
+      await flowTaskLists.ready;
+      switch (message.type) {
+        case "flow-tasks:list": {
+          const hasFilter = Boolean(message.query || message.projectId || message.provider);
+          const tasks = hasFilter
+            ? await flowTaskLists.search({ query: message.query || "", projectId: message.projectId || null, provider: message.provider || null })
+            : await flowTaskLists.list();
+          return { ok: true, tasks };
+        }
+        case "flow-tasks:create": {
+          const task = await flowTaskLists.create({ name: message.name, config: message.config });
+          return { ok: true, task, tasks: await flowTaskLists.list() };
+        }
+        case "flow-tasks:update": {
+          const task = await flowTaskLists.update(String(message.id || ""), { name: message.name, config: message.config });
+          return { ok: true, task, tasks: await flowTaskLists.list() };
+        }
+        case "flow-tasks:duplicate": {
+          const task = await flowTaskLists.duplicate(String(message.id || ""));
+          return { ok: true, task, tasks: await flowTaskLists.list() };
+        }
+        case "flow-tasks:remove": {
+          const removed = await flowTaskLists.remove(String(message.id || ""));
+          return { ok: true, removed, tasks: await flowTaskLists.list() };
+        }
+        case "flow-tasks:run": {
+          // Run one, a selection, or all: the ids resolve against the
+          // store, and a task already mid-run is skipped (reported, not
+          // silently dropped) instead of being enqueued twice.
+          const all = await flowTaskLists.list();
+          const wanted = message.all === true
+            ? all.map(task => task.id)
+            : (Array.isArray(message.ids) ? message.ids.map(id => String(id || "")) : [String(message.id || "")]);
+          const selected = [];
+          const skipped = [];
+          for (const id of wanted) {
+            const task = all.find(entry => entry.id === id);
+            if (!task) { skipped.push({ taskId: id, reason: "not_found" }); continue; }
+            if (task.activeRun) { skipped.push({ taskId: id, reason: "run_in_progress" }); continue; }
+            selected.push(task);
+          }
+          // The per-task run locks are claimed synchronously, before
+          // anything is enqueued, so two panels racing the same task
+          // cannot both spend its credits.
+          const claimed = [];
+          for (const task of selected) {
+            if (flowTaskLists.beginRun(task.id)) claimed.push(task);
+            else skipped.push({ taskId: task.id, reason: "run_in_progress" });
+          }
+          if (!claimed.length) {
+            throw Object.assign(new Error("No selected task is ready to run."), { code: "FLOW_TASK_RUN_EMPTY" });
+          }
+          try {
+            // The forced-sequential verdict travels with the response:
+            // the queue drains serially in enqueue order either way, so
+            // the verdict is surfaced for the panel, not re-implemented.
+            const verdict = requiresSequential(claimed);
+            const target = await captureFlowTargetMetadata();
+            const { jobs, segments } = expandTasksToJobs(claimed);
+            const stamped = jobs.map(job => ({
+              ...job,
+              // The current tab/project target wins over any target
+              // metadata stored with the task: a task runs here and now.
+              metadata: { source: "extension", ...(job.metadata || {}), ...target },
+            }));
+            let addedJobs;
+            let runBatchId = null;
+            if (stamped.length === 1) {
+              const added = await flowJobQueue.add(stamped[0]);
+              addedJobs = [added];
+              runBatchId = added?.batch?.batchId || null;
+            } else {
+              addedJobs = await flowJobQueue.addBatch(stamped, { batchLabel: "Saved tasks" });
+              runBatchId = addedJobs[0]?.batch?.batchId || null;
+            }
+            // Bookkeeping must not misreport a successful enqueue as
+            // failed: each segment's admitted jobs become that task's
+            // fold target for the write-back.
+            let offset = 0;
+            for (const [position, segment] of segments.entries()) {
+              const slice = addedJobs.slice(offset, offset + segment.jobCount);
+              offset += segment.jobCount;
+              await flowTaskLists.recordTaskRun(claimed[position].id, { jobs: slice, batchId: runBatchId }).catch(error => {
+                console.warn("[FlowTaskLists] Could not record this task run:", error?.message || error);
+              });
+            }
+            let snapshot = await flowJobQueue.snapshot();
+            snapshot = message.autoStart === false || snapshot.isPaused || snapshot.waitingForUser > 0
+              ? snapshot
+              : await flowJobQueue.resume();
+            return {
+              ok: true,
+              tasks: await flowTaskLists.list(),
+              skipped,
+              sequential: verdict.sequential,
+              sequentialReasons: verdict.reasons,
+              ...flowQueueSnapshot(snapshot),
+            };
+          } finally {
+            for (const task of claimed) flowTaskLists.endRun(task.id);
+          }
+        }
+        default:
+          throw Object.assign(new Error(`Unsupported saved task action: ${message.type}`), { code: "FLOW_TASKS_ACTION_UNSUPPORTED" });
+      }
+    })().then(respond).catch(error => respond({
+      ok: false,
+      error: { code: error?.code || "FLOW_TASKS_FAILED", message: String(error?.message || error) },
     }));
     return true;
   }
