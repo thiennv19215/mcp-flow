@@ -69,6 +69,11 @@ export interface Core {
   // with a clear error (handled in mcp-tools.ts) instead of the tool
   // silently missing. RemoteCore forwards it like its other methods.
   chatgpt_generate?(a: ChatGptGenerateArgs): Promise<unknown>;
+  // Optional for the same reason as chatgpt_generate above: a Core
+  // without the workflow-graph surface answers flow_run_workflow with
+  // a clear error (handled in mcp-tools.ts). LocalCore implements it;
+  // RemoteCore forwards it like its other methods.
+  run_workflow_graph?(a: RunWorkflowGraphArgs): Promise<unknown>;
   wait(a: Args<"wait">): Promise<unknown>;
   cancel(a: Args<"cancel">): Promise<unknown>;
   retry(a: Args<"retry">): Promise<unknown>;
