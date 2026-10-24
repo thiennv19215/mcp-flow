@@ -1047,7 +1047,7 @@
   function applyGenTemplateToComposer(job) {
     const payload = job?.payload || {};
     const type = payload.type === "video" ? "video" : "image";
-    if (typeof setGenType === "function") setGenType(type);
+    setGenType(type);
     const genTypeEl = document.querySelector("#genType");
     if (genTypeEl) genTypeEl.value = type;
     const autoDownloadEl = document.querySelector("#genTabAutoDownload");
@@ -1090,6 +1090,39 @@
     setFeedback(`✅ Đã nạp mẫu cấu hình vào khung tạo${refCount ? ` (mẫu mang ${refCount} ảnh tham chiếu nguồn Flow)` : ""}.`, true);
   }
 
+  function setGenType(type = "image") {
+      const normalizedType = String(type).toLowerCase() === "video" ? "video" : "image";
+      const compactBar = document.querySelector("#genCompactBar");
+      if (compactBar) compactBar.dataset.genMode = normalizedType;
+      document.querySelectorAll("#genTypeToggle .gen-type-btn").forEach(btn => {
+        const buttonType = String(btn.dataset.value || "").toLowerCase();
+        const active = buttonType === normalizedType;
+        const locale = typeof I18n !== "undefined" ? I18n.getLocale() : "vi";
+        btn.classList.toggle("active", active);
+        btn.setAttribute("aria-pressed", String(active));
+        btn.setAttribute("aria-label", locale === "en"
+          ? buttonType === "video" ? "Create video" : "Create image"
+          : buttonType === "video" ? "Tạo video" : "Tạo ảnh");
+      });
+      const hiddenGenType = document.querySelector("#genType");
+      if (hiddenGenType && hiddenGenType.value !== normalizedType) hiddenGenType.value = normalizedType;
+
+      const isImage = normalizedType === "image";
+      document.querySelector("#imageModelContainer")?.classList.toggle("hidden", !isImage);
+      document.querySelector("#videoModelContainer")?.classList.toggle("hidden", isImage);
+      document.querySelector("#videoInputTypeContainer")?.classList.toggle("hidden", isImage);
+      document.querySelector("#flowVideoDurationContainer")?.classList.toggle("hidden", isImage);
+      document.querySelector("#flowVideoResolutionContainer")?.classList.toggle("hidden", isImage);
+      document.querySelector("#genVideoVoiceContainer")?.classList.toggle("hidden", isImage);
+
+      const isFrames = String(document.querySelector("#videoInputType")?.value || "").toLowerCase() === "frames";
+      document.querySelector("#videoFramesSection")?.classList.toggle("hidden", isImage || !isFrames);
+
+      const submitText = document.querySelector("#genSubmitBtnText");
+      if (submitText) submitText.textContent = isImage ? t("sidebar.btnGenerateImage", "Tạo ảnh") : t("sidebar.btnGenerateVideo", "Tạo video");
+
+      referencePicker.renderReferenceCards?.(normalizedType);
+    }
   function renderGenTemplates() {
     const list = document.querySelector("#genTemplateList");
     const empty = document.querySelector("#genTemplateEmpty");
@@ -4027,40 +4060,7 @@
     }
 
     // Gen Type Toggle
-    function setGenType(type = "image") {
-      const normalizedType = String(type).toLowerCase() === "video" ? "video" : "image";
-      const compactBar = document.querySelector("#genCompactBar");
-      if (compactBar) compactBar.dataset.genMode = normalizedType;
-      document.querySelectorAll("#genTypeToggle .gen-type-btn").forEach(btn => {
-        const buttonType = String(btn.dataset.value || "").toLowerCase();
-        const active = buttonType === normalizedType;
-        const locale = typeof I18n !== "undefined" ? I18n.getLocale() : "vi";
-        btn.classList.toggle("active", active);
-        btn.setAttribute("aria-pressed", String(active));
-        btn.setAttribute("aria-label", locale === "en"
-          ? buttonType === "video" ? "Create video" : "Create image"
-          : buttonType === "video" ? "Tạo video" : "Tạo ảnh");
-      });
-      const hiddenGenType = document.querySelector("#genType");
-      if (hiddenGenType && hiddenGenType.value !== normalizedType) hiddenGenType.value = normalizedType;
-
-      const isImage = normalizedType === "image";
-      document.querySelector("#imageModelContainer")?.classList.toggle("hidden", !isImage);
-      document.querySelector("#videoModelContainer")?.classList.toggle("hidden", isImage);
-      document.querySelector("#videoInputTypeContainer")?.classList.toggle("hidden", isImage);
-      document.querySelector("#flowVideoDurationContainer")?.classList.toggle("hidden", isImage);
-      document.querySelector("#flowVideoResolutionContainer")?.classList.toggle("hidden", isImage);
-      document.querySelector("#genVideoVoiceContainer")?.classList.toggle("hidden", isImage);
-
-      const isFrames = String(document.querySelector("#videoInputType")?.value || "").toLowerCase() === "frames";
-      document.querySelector("#videoFramesSection")?.classList.toggle("hidden", isImage || !isFrames);
-
-      const submitText = document.querySelector("#genSubmitBtnText");
-      if (submitText) submitText.textContent = isImage ? t("sidebar.btnGenerateImage", "Tạo ảnh") : t("sidebar.btnGenerateVideo", "Tạo video");
-
-      referencePicker.renderReferenceCards?.(normalizedType);
-    }
-
+    
     document.querySelectorAll("#genTypeToggle .gen-type-btn").forEach(btn => {
       btn.addEventListener("click", () => setGenType(btn.dataset.value || "image"));
     });
