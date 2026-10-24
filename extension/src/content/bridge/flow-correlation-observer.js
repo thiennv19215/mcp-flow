@@ -193,6 +193,12 @@
         if (DIAGNOSTIC_REASON_CODES.has(reason)) {
           reasons.push(reason);
           seenReasons.add(reason);
+        } else if (/^weak_match:(quantity|model|ratio|refs)$/.test(reason)) {
+          // Videofix M-C: the weak-match reason is one of four fixed field
+          // names, never free text, so it passes the same allowlist
+          // discipline as the dropped-references count above.
+          reasons.push(reason);
+          seenReasons.add(reason);
         } else if (/^dropped_references:[1-9][0-9]*$/.test(reason)) {
           // Audit cluster B: the drop count is part of the reason code,
           // so the fixed allowlist above would strip it and the panel
@@ -901,6 +907,117 @@
       plain === attempt.normalizedVoiceFingerprint
     );
   };
+  // Videofix M-C: prompt-only verdict for video attempts, mirroring the
+  // prompt branches of attemptMatchesPayload without the row checks. The
+  // prompt is the identity anchor of a weak match and is never waived.
+  const videoPromptMatches = (payload, attempt) => {
+    const plainSummary = plainInputSummary(payload);
+    const plain = plainSummary?.fingerprint || null;
+    if (!attempt.structuredPromptFingerprint) {
+      if (plain === attempt.promptFingerprint) return true;
+      return (
+        !!attempt.promptAnchorFingerprint &&
+        attempt.promptNormalizedLength > 4096 &&
+        plainSummary?.anchorFingerprint === attempt.promptAnchorFingerprint &&
+        plainSummary.normalizedLength > 0 &&
+        plainSummary.normalizedLength <= attempt.promptNormalizedLength
+      );
+    }
+    const fingerprints = structuredInputFingerprints(payload);
+    if (
+      fingerprints.length &&
+      fingerprints.every((value) => value === attempt.structuredPromptFingerprint)
+    )
+      return true;
+    return (
+      !!attempt.normalizedVoiceFingerprint &&
+      !!attempt.normalizedVideoModelKey &&
+      attempt.mediaType === "video" &&
+      payload?.[1]?.[5] === attempt.projectId &&
+      payload[0].length === 1 &&
+      plain === attempt.normalizedVoiceFingerprint
+    );
+  };
+  // Videofix M-C: weak acceptance for requestSeen. Returns the single
+  // deviating field group ("quantity" | "model" | "ratio" | "refs"), or
+  // false when the request is not a weak match. Rules:
+  // - video only, non-voice attempts only (voice jobs keep strict matching);
+  // - the prompt must match exactly, and the project gate still applies;
+  // - exactly ONE of the four non-prompt field groups may deviate;
+  // - refs may only deviate as a superset: every expected id present, all
+  //   ids valid UUIDs, at most 2 injected extras beyond the counts the
+  //   strict matcher already allows (global character + unverified).
+  // A wholly different prompt, a replaced ref set, or two simultaneous
+  // deviations are all still rejected, so an unrelated request can never
+  // be claimed by an attempt through this branch.
+  const attemptVideoWeakMatch = (payload, attempt) => {
+    if (attempt.mediaType !== "video" || attempt.expectedVoiceCount > 0) return false;
+    const rows = payload?.[0];
+    if (!Array.isArray(rows) || !rows.length) return false;
+    if (!videoPromptMatches(payload, attempt)) return false;
+    const declaredProject = payload?.[1]?.[5];
+    if (
+      typeof declaredProject === "string" &&
+      UUID_RE.test(declaredProject) &&
+      declaredProject !== attempt.projectId
+    )
+      return false;
+    const plainSummary = plainInputSummary(payload);
+    const plain = plainSummary?.fingerprint || null;
+    const expectedModel =
+      plain && attempt.structuredPromptFingerprint
+        ? attempt.normalizedVideoModelKey
+        : attempt.expectedVideoModelKey;
+    let modelOk = true;
+    let ratioOk = true;
+    const allRefs = [];
+    for (const input of rows) {
+      const decoded = decodeVideoInputRow(input);
+      if (!decoded || typeof decoded.model !== "string") return false;
+      if (expectedModel && decoded.model !== expectedModel) modelOk = false;
+      if (attempt.expectedVideoRatioEnum && decoded.ratio !== attempt.expectedVideoRatioEnum)
+        ratioOk = false;
+      allRefs.push(...decoded.refs);
+    }
+    const quantityOk = rows.length === attempt.expectedQuantity;
+    const refsStrict = attemptRefsMatch(allRefs, attempt);
+    // A superset deviation is a weak acceptance, NOT a failure entry: the
+    // caller must report "refs" for it, while a hard refs failure (a
+    // replaced set, a subset, bad ids) must never report "refs" — it is
+    // a rejection, not a weak match. Keeping the two separate is what
+    // stops a replaced reference set from claiming the attempt.
+    let refsWeak = false;
+    if (!refsStrict) {
+      const actualIds = normalizedRefs(allRefs);
+      const expectedIds = normalizedRefs(attempt.expectedReferenceIds);
+      const allowed =
+        expectedIds.length + globalCharacterCount(attempt) + (attempt.unverifiedMediaCount || 0);
+      refsWeak =
+        allRefs.every((id) => typeof id === "string" && UUID_RE.test(id)) &&
+        actualIds.length === allRefs.length &&
+        expectedIds.every((id) => actualIds.includes(id)) &&
+        actualIds.length > allowed &&
+        actualIds.length <= allowed + 2;
+    }
+    const failures = [
+      !quantityOk ? "quantity" : null,
+      !modelOk ? "model" : null,
+      !ratioOk ? "ratio" : null,
+      !refsStrict && !refsWeak ? "refs" : null,
+    ].filter(Boolean);
+    if (failures.length === 0) return refsWeak ? "refs" : false;
+    // A lone "refs" entry is a hard refs failure, never a weak reason;
+    // and any hard failure combined with a weak refs deviation is two
+    // deviations, not one. Only a lone quantity/model/ratio deviation
+    // is a weak match.
+    if (failures.length === 1 && !refsWeak && failures[0] !== "refs") return failures[0];
+    return false;
+  };
+  // Videofix M-C: the single generation-request claim check, used both
+  // by candidacy (eligibleAttempt) and by the fetch/XHR begin gates, so a
+  // weak match is never claimed in one place and demoted in the other.
+  const attemptClaimsGenerationRequest = (payload, attempt) =>
+    attemptMatchesPayload(payload, attempt) || attemptVideoWeakMatch(payload, attempt) !== false;
   const videoInputDiagnostic = (payload, attempt) => {
     if (attempt.mediaType !== "video" || !Array.isArray(payload?.[0]) || !payload[0].length)
       return null;
@@ -1721,12 +1838,20 @@
         ? structuredInputFingerprints(call.payload)
         : [];
       const promptMatched = attemptMatchesPayload(call.payload, attempt);
+      // Videofix M-C: a single-field deviation with an exact prompt is
+      // still this attempt's request (new model/ratio wire key, a
+      // Flow-injected ref, a quantity split/merge). It claims the request
+      // like a strict match, but the receipt carries the weak reason so
+      // the panel and diagnostics can tell the two apart.
+      const weakReason = !promptMatched ? attemptVideoWeakMatch(call.payload, attempt) : false;
+      const matched = promptMatched || weakReason !== false;
+      if (weakReason) attempt.weakMatchReason = weakReason;
       recordRequestDiagnostic(
         attempt,
         call,
         call.transport,
         call.requestPath,
-        promptMatched ? [] : ["payload_match_failed"]
+        matched ? (weakReason ? [`weak_match:${weakReason}`] : []) : ["payload_match_failed"]
       );
       if (!promptMatched && (attempt.bridgeInputDiagnostics || 0) < 2) {
         const mismatch = videoInputDiagnostic(call.payload, attempt);
@@ -1750,7 +1875,7 @@
             })
         );
       }
-      if (!promptMatched) continue;
+      if (!matched) continue;
       if (
         retired.saturated ||
         retired.entries.some(
@@ -1825,11 +1950,14 @@
       rpcId: call.rpcId,
       requestOrdinal,
       requestCardinality: attempt.requestCardinality,
-      matchKind: attempt.structuredPromptFingerprint
-        ? plainInputFingerprint(call.payload)
-          ? "normalized_voice_text"
-          : "structured_ids"
-        : "plain_text",
+      matchKind: attempt.weakMatchReason
+        ? `weak_${attempt.weakMatchReason}`
+        : attempt.structuredPromptFingerprint
+          ? plainInputFingerprint(call.payload)
+            ? "normalized_voice_text"
+            : "structured_ids"
+          : "plain_text",
+      ...(attempt.weakMatchReason ? { weakMatchReason: attempt.weakMatchReason } : {}),
       requestIdentityCount: requestMachine.identities.length,
       requestIdentityFingerprint: identityFingerprint(requestMachine.identities),
       requestIdentityTokens: requestMachine.identities
@@ -2233,7 +2361,7 @@
           const beginMatches = (matches) =>
             matches.map((matched) =>
               matched.attempt.requestCount < matched.attempt.requestCardinality &&
-              attemptMatchesPayload(matched.call.payload, matched.attempt)
+              attemptClaimsGenerationRequest(matched.call.payload, matched.attempt)
                 ? beginObservedRequest(matched.attempt, matched.call)
                 : beginFollowupRequest(matched.attempt, matched.call)
             );
@@ -2334,7 +2462,7 @@
                 }
                 return matchObservedCalls(calls).map(({ call, attempt }) =>
                   attempt.requestCount < attempt.requestCardinality &&
-                  attemptMatchesPayload(call.payload, attempt)
+                  attemptClaimsGenerationRequest(call.payload, attempt)
                     ? beginObservedRequest(attempt, call)
                     : beginFollowupRequest(attempt, call)
                 );
