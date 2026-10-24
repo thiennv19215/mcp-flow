@@ -1030,6 +1030,20 @@
       }
     }
     if (!name || (sel.tagName !== "INPUT" && !sel.value)) return null;
+    // FEAT-06: resolve the DOM-extracted identity against the cached
+    // character list through the shared normalization layer
+    // (content/shared/selection-normalize.js) when it is loaded, so the
+    // sidebar modal, queue payloads and workflow planners all resolve a
+    // selection the same way. Without the layer, the extraction above
+    // stands as-is.
+    if (window.FlowSelectionNormalize && Array.isArray(currentCharacters) && currentCharacters.length) {
+      const [entry] = window.FlowSelectionNormalize.normalizeCharacterSelection(
+        { name, ...(uuid ? { uuid } : {}) }, currentCharacters);
+      if (entry) {
+        if (entry.name) name = entry.name;
+        if (entry.uuid && characterUuidPattern.test(entry.uuid)) uuid = entry.uuid.toLowerCase();
+      }
+    }
     return {
       name,
       identityAvailable: Boolean(uuid),
