@@ -662,9 +662,14 @@
         ? [task?.errorCode, task?.error].filter(Boolean).join(": ")
         : task?.progress?.message ?? task?.progressText ?? task?.message ?? task?.error ?? "";
       if (detail) item.append(makeElement("div", "flow-queue-panel__detail", detail));
-      const diagnostics = task?.diagnostics ?? task?.job?.diagnostics;
-      for (const line of diagnosticsSummaryLines(diagnostics)) {
-        item.append(makeElement("div", "flow-queue-panel__detail flow-queue-panel__diagnostics", line));
+      // Audit cluster C, defence in depth: the queue now clears
+      // diagnostics on every retry path, but a stale diagnostics string
+      // must never render under a fresh (non-failed) run anyway.
+      if (failed) {
+        const diagnostics = task?.diagnostics ?? task?.job?.diagnostics;
+        for (const line of diagnosticsSummaryLines(diagnostics)) {
+          item.append(makeElement("div", "flow-queue-panel__detail flow-queue-panel__diagnostics", line));
+        }
       }
       const generation = task?.progress?.generation;
       const download = task?.progress?.download;
