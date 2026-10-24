@@ -1117,6 +1117,11 @@ async function runExtensionFlowJob(job, hooks) {
         expectedCount: savedObservation.expectedCount,
         correlationAttemptId: savedObservation.correlationAttemptId,
         credits: savedObservation.credits,
+        // SW-FWD (VID-02): carry the restored checkpoint's dispatch stamp
+        // through the rebuilt receipt so it can reach the observe payload
+        // below; without it a resumed observe gets a fresh render window
+        // instead of the time remaining from the original dispatch.
+        ...(savedObservation.dispatchedAt ? { dispatchedAt: savedObservation.dispatchedAt } : {}),
         requestDispatched: true,
       };
     } else if (job.metadata?.manualSubmitPhase === "confirm") {
@@ -1185,6 +1190,7 @@ async function runExtensionFlowJob(job, hooks) {
     expectedCount: Math.max(1, Number(submitted?.expectedCount ?? payload.variants ?? payload.count ?? 1)),
     correlationAttemptId: String(submitted?.correlationAttemptId || ""),
     credits: Number.isFinite(submitted?.credits) ? submitted.credits : null,
+    ...(submitted?.dispatchedAt ? { dispatchedAt: submitted.dispatchedAt } : {}),
     timeoutMs: isVideo ? 600_000 : 300_000,
   };
   if (observation.correlationAttemptId) {
@@ -1204,6 +1210,10 @@ async function runExtensionFlowJob(job, hooks) {
       kind: observation.kind,
       retries: payload.retries,
       timeoutMs: observation.timeoutMs,
+      // SW-FWD (VID-02): forward the dispatch stamp so observe anchors
+      // its deadline at dispatch. Absent on legacy paths, where this
+      // payload stays exactly as it was before.
+      ...(observation.dispatchedAt ? { dispatchedAt: observation.dispatchedAt } : {}),
     });
   } catch (error) {
     throw Object.assign(error, {
@@ -1213,7 +1223,12 @@ async function runExtensionFlowJob(job, hooks) {
     });
   }
   if (Array.isArray(observed?.media) && observed.media.length) {
-    await flowJobQueue.checkpointGenerationResult(job.id, observed.media).catch(error => {
+    // SW-FWD (VID-01): forward a partial result's failed outputs into the
+    // checkpoint as the extras argument, passed through exactly as observe
+    // produced them (the queue checkpoint owns normalization), so a worker
+    // death after observe loses neither half of the outcome. Results
+    // without failed outputs pass no extras argument, exactly as before.
+    await flowJobQueue.checkpointGenerationResult(job.id, observed.media, ...(Array.isArray(observed.failedOutputs) && observed.failedOutputs.length ? [{ failedOutputs: observed.failedOutputs }] : [])).catch(error => {
       console.warn("[FlowQueue] Could not persist the worker-side generation result checkpoint:", error?.message || error);
     });
   }
