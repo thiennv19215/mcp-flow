@@ -88,12 +88,12 @@ function videoRow({ model = 'veo-3', ratio = 2, refs = [REF], prompt = PROMPT } 
   return row;
 }
 
-function armVideo(window, { expectedQuantity = 1, prompt = PROMPT } = {}) {
+function armVideo(window, { expectedQuantity = 1, prompt = PROMPT, attemptId = '00000000-0000-4000-8000-000000000001' } = {}) {
   window.dispatchEvent(new window.CustomEvent('TOBY_FLOW_V2_CORRELATION_ARM', {
     detail: {
       schemaVersion: 1,
       nonce: 'test-nonce-12345678',
-      attemptId: '00000000-0000-4000-8000-000000000001',
+      attemptId,
       mediaType: 'video',
       projectId,
       expectedQuantity,
@@ -131,22 +131,20 @@ test('M-C control: exact video request still matches strictly', async () => {
   assert.ok(!String(seen.matchKind || '').startsWith('weak_'), 'strict match must not be marked weak');
 });
 
-test('M-C: new model wire key alone is accepted as a weak match', async () => {
+test('M-C pin (VID-03): a different model wire key is still rejected — model is output identity', async () => {
   const { window, receipts } = observerHarness();
   armVideo(window);
   await sendRequest(window, [videoRow({ model: 'veo-3-renamed-key' })]);
-  const seen = requestSeen(receipts);
-  assert.ok(seen, 'expected a request_seen receipt for the model-deviation request');
-  assert.equal(seen.matchKind, 'weak_model');
+  assert.equal(requestSeen(receipts), undefined,
+    'a different model key must not weak-match: it is a different generation, and the observer has no wire-key registry to tell a renamed key from a different model');
 });
 
-test('M-C: new ratio enum alone is accepted as a weak match', async () => {
+test('M-C pin (VID-03): a different ratio enum is still rejected — ratio is output identity', async () => {
   const { window, receipts } = observerHarness();
   armVideo(window);
   await sendRequest(window, [videoRow({ ratio: 3 })]);
-  const seen = requestSeen(receipts);
-  assert.ok(seen, 'expected a request_seen receipt for the ratio-deviation request');
-  assert.equal(seen.matchKind, 'weak_ratio');
+  assert.equal(requestSeen(receipts), undefined,
+    'a different ratio enum must not weak-match: it is a different aspect, i.e. a different generation');
 });
 
 test('M-C: Flow-injected extra reference alone is accepted as a weak match', async () => {
@@ -182,6 +180,32 @@ test('M-C pin: two simultaneous deviations are still rejected', async () => {
   armVideo(window);
   await sendRequest(window, [videoRow({ model: 'veo-3-renamed-key', ratio: 3 })]);
   assert.equal(requestSeen(receipts), undefined);
+});
+
+test('M-C: a strict claim beats a weak claim — no interference, no cross-attribution', async () => {
+  const { window, receipts } = observerHarness();
+  armVideo(window, { expectedQuantity: 1, attemptId: '00000000-0000-4000-8000-000000000001' });
+  armVideo(window, { expectedQuantity: 2, attemptId: '00000000-0000-4000-8000-000000000002' });
+  // Two rows, each carrying the ref: a strict match for the quantity-2
+  // attempt (per-row model/ratio/refs all exact), only a weak quantity
+  // match for the quantity-1 attempt (same refs union, wrong row count).
+  // The strict winner must claim the request and the weak loser must
+  // drop silently — neither attempt may be marked interfered.
+  await sendRequest(window, [videoRow(), videoRow()]);
+  const seen = receipts.filter((receipt) => receipt.stage === 'request_seen');
+  assert.equal(seen.length, 1, 'exactly one request_seen receipt');
+  assert.equal(seen[0].attemptId, '00000000-0000-4000-8000-000000000002');
+  assert.ok(!String(seen[0].matchKind || '').startsWith('weak_'), 'the strict winner is not marked weak');
+  assert.ok(!receipts.some((receipt) => receipt.stage === 'acceptance_unknown'));
+});
+
+test('M-C pin: two weak claims for one request interfere instead of guessing', async () => {
+  const { window, receipts } = observerHarness();
+  armVideo(window, { expectedQuantity: 1, attemptId: '00000000-0000-4000-8000-000000000001' });
+  armVideo(window, { expectedQuantity: 1, attemptId: '00000000-0000-4000-8000-000000000002' });
+  await sendRequest(window, [videoRow(), videoRow({ refs: [] })]);
+  assert.equal(requestSeen(receipts), undefined, 'no weak claim may win when two attempts weakly match');
+  assert.ok(receipts.some((receipt) => receipt.stage === 'acceptance_unknown'));
 });
 
 test('M-C pin: replaced reference set (not a superset) is still rejected', async () => {

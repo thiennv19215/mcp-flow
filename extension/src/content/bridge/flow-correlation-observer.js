@@ -193,8 +193,8 @@
         if (DIAGNOSTIC_REASON_CODES.has(reason)) {
           reasons.push(reason);
           seenReasons.add(reason);
-        } else if (/^weak_match:(quantity|model|ratio|refs)$/.test(reason)) {
-          // Videofix M-C: the weak-match reason is one of four fixed field
+        } else if (/^weak_match:(quantity|refs)$/.test(reason)) {
+          // Videofix M-C: the weak-match reason is one of two fixed field
           // names, never free text, so it passes the same allowlist
           // discipline as the dropped-references count above.
           reasons.push(reason);
@@ -939,17 +939,26 @@
     );
   };
   // Videofix M-C: weak acceptance for requestSeen. Returns the single
-  // deviating field group ("quantity" | "model" | "ratio" | "refs"), or
-  // false when the request is not a weak match. Rules:
+  // deviating field group ("quantity" | "refs"), or false when the
+  // request is not a weak match. Rules:
   // - video only, non-voice attempts only (voice jobs keep strict matching);
   // - the prompt must match exactly, and the project gate still applies;
-  // - exactly ONE of the four non-prompt field groups may deviate;
+  // - model and ratio are HARD requirements, never weak deviations:
+  //   they determine the output media, so a different model/ratio is a
+  //   different generation (VID-03 pins this as identity), and the
+  //   observer has no wire-key registry to tell a renamed key for the
+  //   same model apart from a genuinely different model — the label
+  //   alias table cannot serve as one, since it lumps every veo variant
+  //   together. Narrowing weak matching to quantity/refs keeps the
+  //   rescue for Flow repackaging a request (split/merge rows, injected
+  //   refs) without ever claiming media the job did not ask for;
   // - refs may only deviate as a superset: every expected id present, all
   //   ids valid UUIDs, at most 2 injected extras beyond the counts the
   //   strict matcher already allows (global character + unverified).
-  // A wholly different prompt, a replaced ref set, or two simultaneous
-  // deviations are all still rejected, so an unrelated request can never
-  // be claimed by an attempt through this branch.
+  // A wholly different prompt, a replaced ref set, a different model or
+  // ratio, or two simultaneous deviations are all still rejected, so an
+  // unrelated request can never be claimed by an attempt through this
+  // branch.
   const attemptVideoWeakMatch = (payload, attempt) => {
     if (attempt.mediaType !== "video" || attempt.expectedVoiceCount > 0) return false;
     const rows = payload?.[0];
@@ -979,6 +988,9 @@
         ratioOk = false;
       allRefs.push(...decoded.refs);
     }
+    // Model and ratio are output identity (see above): any deviation
+    // here rejects outright, whatever the other fields say.
+    if (!modelOk || !ratioOk) return false;
     const quantityOk = rows.length === attempt.expectedQuantity;
     const refsStrict = attemptRefsMatch(allRefs, attempt);
     // A superset deviation is a weak acceptance, NOT a failure entry: the
@@ -1001,15 +1013,13 @@
     }
     const failures = [
       !quantityOk ? "quantity" : null,
-      !modelOk ? "model" : null,
-      !ratioOk ? "ratio" : null,
       !refsStrict && !refsWeak ? "refs" : null,
     ].filter(Boolean);
     if (failures.length === 0) return refsWeak ? "refs" : false;
     // A lone "refs" entry is a hard refs failure, never a weak reason;
     // and any hard failure combined with a weak refs deviation is two
-    // deviations, not one. Only a lone quantity/model/ratio deviation
-    // is a weak match.
+    // deviations, not one. Only a lone quantity deviation is a weak
+    // match (besides the refs-superset case above).
     if (failures.length === 1 && !refsWeak && failures[0] !== "refs") return failures[0];
     return false;
   };
@@ -1820,7 +1830,8 @@
       }
       return null;
     }
-    const candidates = [];
+    const strictCandidates = [];
+    const weakCandidates = [];
     for (const [id, attempt] of attempts) {
       if (now > attempt.expiresAt || attempt.projectId !== projectId()) {
         retireUnbound(attempt);
@@ -1838,14 +1849,13 @@
         ? structuredInputFingerprints(call.payload)
         : [];
       const promptMatched = attemptMatchesPayload(call.payload, attempt);
-      // Videofix M-C: a single-field deviation with an exact prompt is
-      // still this attempt's request (new model/ratio wire key, a
-      // Flow-injected ref, a quantity split/merge). It claims the request
-      // like a strict match, but the receipt carries the weak reason so
-      // the panel and diagnostics can tell the two apart.
+      // Videofix M-C: a quantity split/merge or a Flow-injected ref set,
+      // with an exact prompt and exact model/ratio, is still this
+      // attempt's request. It claims the request like a strict match,
+      // but the receipt carries the weak reason so the panel and
+      // diagnostics can tell the two apart.
       const weakReason = !promptMatched ? attemptVideoWeakMatch(call.payload, attempt) : false;
       const matched = promptMatched || weakReason !== false;
-      if (weakReason) attempt.weakMatchReason = weakReason;
       recordRequestDiagnostic(
         attempt,
         call,
@@ -1876,6 +1886,19 @@
         );
       }
       if (!matched) continue;
+      if (weakReason) weakCandidates.push({ attempt, reason: weakReason });
+      else strictCandidates.push(attempt);
+    }
+    // Videofix M-C (VID-03): a strict claim always beats weak claims, so
+    // model/ratio separation between overlapping attempts survives — a
+    // request one attempt matches exactly is never stolen by, or
+    // interfered with, another attempt's weak claim. Weak claims only
+    // compete when no strict claim exists. The weak reason is attached
+    // to the winner only, so a dropped weak candidate never leaves a
+    // stale reason on an attempt that later matches strictly.
+    let winners = strictCandidates.length ? strictCandidates : weakCandidates.map(entry => entry.attempt);
+    const winnerWeakReason = strictCandidates.length || weakCandidates.length !== 1 ? false : weakCandidates[0].reason;
+    winners = winners.filter(attempt => {
       if (
         retired.saturated ||
         retired.entries.some(
@@ -1888,23 +1911,26 @@
       ) {
         attempt.interfered = true;
         emit(attempt, "acceptance_unknown", { reason: "ambiguous_retired_request" });
-        continue;
+        return false;
       }
-      candidates.push(attempt);
-    }
-    if (candidates.length > 1) {
+      return true;
+    });
+    if (winners.length > 1) {
       // One dispatched request matches several live attempts and cannot be
       // attributed safely. Surface it as interference — the same treatment
       // as the retired-overlap case above — instead of letting every
       // candidate expire as if nothing was sent.
-      for (const attempt of candidates) {
+      for (const attempt of winners) {
         attempt.interfered = true;
         recordRequestDiagnostic(attempt, call, call.transport, call.requestPath, ["attempt_interfered"]);
         emit(attempt, "acceptance_unknown", { reason: "ambiguous_live_request" });
       }
       return null;
     }
-    return candidates.length === 1 ? candidates[0] : null;
+    if (winners.length !== 1) return null;
+    if (winnerWeakReason) winners[0].weakMatchReason = winnerWeakReason;
+    else delete winners[0].weakMatchReason;
+    return winners[0];
   };
   const matchGenerationCall = (calls) => {
     const matches = [];
