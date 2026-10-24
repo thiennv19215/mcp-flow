@@ -37,6 +37,11 @@
     )
       entry.refMatchVersion = 0;
   }
+  // M-D: drop TTL-expired retired entries carried over a re-injection.
+  // Entries without expiresAt predate the TTL and are kept (fail-closed).
+  retired.entries = (retired.entries || []).filter(
+    (entry) => !(Number.isFinite(entry?.expiresAt) && entry.expiresAt <= Date.now())
+  );
   if (old?.dispose) {
     try {
       old.dispose();
@@ -53,6 +58,19 @@
     /^(?:PUBLIC_ERROR(?:_[A-Z0-9]+)*|SEXUALLY_EXPLICIT|CHILD_SAFETY|[A-Z][A-Z0-9_]*(?:_ERROR|_FAILED|_FAILURE))$/;
   const BATCHEXECUTE_PATH = "/_/AiSandboxAngularFrontend/data/batchexecute";
   const REQUEST_DIAGNOSTIC_TTL_MS = 15 * 60_000;
+  // M-D: a retired fingerprint entry blocks an identical re-arm in the
+  // same tab. That block must be bounded, not permanent: a dispatch that
+  // genuinely ended ambiguously (click delivered, outcome unknown) keeps
+  // the conservative block for one TTL window, after which a retry may
+  // arm again. Entries recorded before this TTL existed carry no
+  // expiresAt and are kept (fail-closed for pre-fix sessions).
+  const RETIRED_ENTRY_TTL_MS = 15 * 60_000;
+  const pruneRetiredEntries = () => {
+    const now = Date.now();
+    retired.entries = (retired.entries || []).filter(
+      (entry) => !(Number.isFinite(entry?.expiresAt) && entry.expiresAt <= now)
+    );
+  };
   const REQUEST_DIAGNOSTIC_MAX = 32;
   const REQUEST_DIAGNOSTIC_PER_ATTEMPT_MAX = 12;
   const safeRequestPath = (value) => {
@@ -959,11 +977,15 @@
       else retired.requestSignatures.push(signature);
     }
     if (attempt.requestCount >= attempt.requestCardinality) return;
+    // M-D: bound the block — expired entries leave before the cap check
+    // so a stale block cannot wedge the list at 256 forever.
+    pruneRetiredEntries();
     if (retired.entries.length >= 256) {
       retired.saturated = true;
       return;
     }
     retired.entries.push({
+      expiresAt: Date.now() + RETIRED_ENTRY_TTL_MS,
       projectId: attempt.projectId,
       mediaType: attempt.mediaType,
       expectedQuantity: attempt.expectedQuantity,
@@ -2088,6 +2110,8 @@
       xhrHookActive: XMLHttpRequest.prototype.send === patchedSend,
       fetchHookActive: fetchHookActiveNow(),
     });
+    // M-D: expired retired entries must not block a re-arm.
+    pruneRetiredEntries();
     const conflict =
       retired.saturated ||
       retired.entries.some(
@@ -2121,7 +2145,16 @@
           payloadFingerprint: attempt.completedRequestFingerprint,
           expiresAt: now + 15 * 60_000,
         });
-      } else if (!completedDispatch && d.discardOnStop !== true && (d.dispatched !== false || attempt.requestCount > 0))
+      }
+      // M-D: the isolated side now reports what the dispatch wait actually
+      // observed. "none" (click delivered, zero signal) and "rejected"
+      // (Flow displayed an error) with no request observed mean nothing
+      // is in flight, so retiring would only wedge the identical retry
+      // until a tab reload. Any other outcome — including a legacy
+      // disarm with no outcome — keeps the conservative retire, and a
+      // request already observed always retires (the ambiguous case).
+      else if (!completedDispatch && d.discardOnStop !== true && (d.dispatched !== false || attempt.requestCount > 0) &&
+        !((d.dispatchOutcome === "none" || d.dispatchOutcome === "rejected") && attempt.requestCount === 0))
         retireUnbound(attempt);
       attempts.delete(d.attemptId);
     }

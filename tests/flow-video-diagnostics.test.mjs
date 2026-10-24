@@ -71,6 +71,7 @@ function dispatchHarness({ health = HEALTH, waitMode = 'throw-timeout', activati
     ['attempt-1', { attemptId: 'attempt-1', requestSeen, receipts: [], interfered: false }],
   ]);
   const disarmCalls = [];
+  const disarmOptions = [];
   const progressMessages = [];
   let now = 1_000_000;
   const startNow = now;
@@ -82,7 +83,7 @@ function dispatchHarness({ health = HEALTH, waitMode = 'throw-timeout', activati
       : []),
     armNativeFlowCorrelation: () => 'attempt-1',
     nativeFlowCorrelationMap: () => correlationMap,
-    disarmNativeFlowCorrelation: id => { disarmCalls.push(id); },
+    disarmNativeFlowCorrelation: (id, options) => { disarmCalls.push(id); disarmOptions.push(options); },
     emitFlowProgress: (_command, message) => { progressMessages.push(message); },
     readNativeFlowCorrelationHealth: async () => health,
     releaseSubmitOnlyCorrelation: () => null,
@@ -153,7 +154,7 @@ function dispatchHarness({ health = HEALTH, waitMode = 'throw-timeout', activati
   const submit = (payload = {}) => operations.execute('flow.generation.submit', {
     prompt: 'a lighthouse', type: 'video', ...payload,
   }, {});
-  return { submit, disarmCalls, correlationMap, progressMessages, elapsed: () => now - startNow };
+  return { submit, disarmCalls, disarmOptions, correlationMap, progressMessages, elapsed: () => now - startNow };
 }
 
 test('dispatch wait: a boundedWait timeout surfaces with correlation-observer diagnostics attached', async () => {
@@ -170,6 +171,21 @@ test('dispatch wait: a boundedWait timeout surfaces with correlation-observer di
     return true;
   });
   assert.deepEqual(disarmCalls, ['attempt-1'], 'the correlation attempt is disarmed, like every sibling submit exit');
+});
+
+test('M-D: a no-signal dispatch timeout disarms with outcome "none" so the identical retry is not retired', async () => {
+  const { submit, disarmOptions } = dispatchHarness({ waitMode: 'throw-timeout' });
+  await assert.rejects(submit(), error => error.code === 'FLOW_OPERATION_TIMEOUT');
+  // Compare primitives only: option objects are created inside the vm
+  // realm, so strict deepEqual rejects them despite identical structure.
+  assert.deepEqual(disarmOptions.map((option) => (option ? option.dispatchOutcome : undefined)), ['none'],
+    'the timeout exit checked requestSeen, Flow errors and DOM acceptance first and found zero signal');
+});
+
+test('M-D: exhausting the submit deadline without acknowledgement disarms with outcome "none"', async () => {
+  const { submit, disarmOptions } = dispatchHarness({ waitMode: 'advance' });
+  await assert.rejects(submit(), error => error.code === 'FLOW_SUBMIT_UNCONFIRMED');
+  assert.deepEqual(disarmOptions.map((option) => (option ? option.dispatchOutcome : undefined)), ['none']);
 });
 
 test('dispatch wait: exhausting the submit deadline without acknowledgement also carries diagnostics', async () => {

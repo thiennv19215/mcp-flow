@@ -597,9 +597,16 @@
           ...(expectedImageModelKey !== undefined ? { expectedImageModelKey } : {}),
         }));
         if (!correlationAttemptId || !tiles.nativeFlowCorrelationMap().has(correlationAttemptId)) {
+          // M-D: when the arm failed on a retired conflict, say so and
+          // say how to clear it (tab reload clears the hold immediately;
+          // the hold also expires after the observer TTL). The generic
+          // message hid this remedy and made the failure look permanent.
+          const armReason = root.__flowNativeCorrelationArmDiagnostics?.receipt?.reason;
           throw this.error(
             "FLOW_SUBMIT_CORRELATION_UNAVAILABLE",
-            "Flow's request observer could not be armed, so the submit cannot be safely confirmed. No generation request was sent.",
+            armReason === "ambiguous_retired_request"
+              ? "Flow's request observer refused a new attempt because a previous identical submit ended without a confirmed dispatch, so retrying now could double-generate. Reload the Flow tab (which clears the hold) or wait up to 15 minutes, then retry. No generation request was sent."
+              : "Flow's request observer could not be armed, so the submit cannot be safely confirmed. No generation request was sent.",
             false,
             false
           );
@@ -620,7 +627,8 @@
         }
         try { requireFlowTime("activating the Flow submit button"); }
         catch (error) {
-          if (correlationAttemptId) tiles.disarmNativeFlowCorrelation(correlationAttemptId);
+          // M-D: no click was attempted yet, so nothing can be in flight.
+          if (correlationAttemptId) tiles.disarmNativeFlowCorrelation(correlationAttemptId, { dispatchOutcome: "none" });
           throw error;
         }
 
@@ -634,7 +642,9 @@
             : await unknownSubmitError(error?.code || "FLOW_SUBMIT_ACTIVATION_UNKNOWN", error?.message || "Flow submit activation outcome is unknown; inspect Flow before retrying.", error?.retryable === true);
         }
         if (!activation.clickDelivered) {
-          if (correlationAttemptId) tiles.disarmNativeFlowCorrelation(correlationAttemptId);
+          // M-D: the button never received the click, so nothing can be
+          // in flight and the identical retry must not be retired.
+          if (correlationAttemptId) tiles.disarmNativeFlowCorrelation(correlationAttemptId, { dispatchOutcome: "none" });
           throw this.error(
             "FLOW_SUBMIT_CLICK_NOT_DELIVERED",
             "Flow did not receive a submit click; the button changed state before activation completed.",
@@ -724,7 +734,9 @@
 
           const newError = editor.currentFlowSubmitErrors().find(msg => !errorsBeforeSubmit.has(msg));
           if (newError) {
-            tiles.disarmNativeFlowCorrelation(correlationAttemptId);
+            // M-D: Flow displayed an error, so the submit was rejected
+            // and nothing is in flight; the retry must not be retired.
+            tiles.disarmNativeFlowCorrelation(correlationAttemptId, { dispatchOutcome: "rejected" });
             const classified = root.classifyFlowError?.(newError);
             if (classified) throw await unknownSubmitError(classified.code, classified.message, classified.retryable);
             throw await unknownSubmitError("FLOW_SUBMIT_REJECTED", `Flow displayed an error before a correlated generation request was observed: ${newError}. Inspect Flow before retrying.`);
@@ -762,7 +774,14 @@
             // diagnostics as every sibling submit exit instead of dying
             // unexplained; code, message and retryable are preserved.
             if (error?.code !== "FLOW_OPERATION_TIMEOUT") throw error;
-            tiles.disarmNativeFlowCorrelation(correlationAttemptId);
+            // M-D: at this point the iteration already checked requestSeen
+            // (false), a new Flow error (none) and live DOM acceptance
+            // (false) — the click produced zero signal, so nothing is
+            // known to be in flight and the retry must not be retired.
+            // Exposure accepted deliberately: a request that arrives late
+            // after this timeout is attributed to the retry attempt, the
+            // same exposure a reload-and-retry has today.
+            tiles.disarmNativeFlowCorrelation(correlationAttemptId, { dispatchOutcome: "none" });
             throw await unknownSubmitError(error.code, error.message || "Timed out while waiting for Flow request dispatch.", error.retryable === true);
           }
         }
@@ -771,8 +790,11 @@
           const latestEntry = tiles.nativeFlowCorrelationMap().get(correlationAttemptId);
           if (latestEntry?.requestSeen) acknowledged = true;
           else {
-            tiles.disarmNativeFlowCorrelation(correlationAttemptId);
+            // M-D: check the rejection first so the disarm can carry the
+            // observed outcome (rejected vs no-signal) instead of the
+            // legacy ambiguous disarm. Throw behavior below is unchanged.
             const newError = editor.currentFlowSubmitErrors().find(msg => !errorsBeforeSubmit.has(msg));
+            tiles.disarmNativeFlowCorrelation(correlationAttemptId, { dispatchOutcome: newError ? "rejected" : "none" });
             if (newError) {
               const classified = root.classifyFlowError?.(newError);
               if (classified) throw await unknownSubmitError(classified.code, classified.message, classified.retryable);
