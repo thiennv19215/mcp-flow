@@ -66,7 +66,7 @@ const EXPECTED_DIAGNOSTICS = {
 // Part 1 — dispatch wait diagnostics (generation-operations.js)
 // ---------------------------------------------------------------------------
 
-function dispatchHarness({ health = HEALTH, waitMode = 'throw-timeout', activation = null, requestSeen = false, components = null, liveButtonDisabledAfterMs = null, liveTilesAfterMs = null, editorClearedAfterMs = null } = {}) {
+function dispatchHarness({ health = HEALTH, waitMode = 'throw-timeout', activation = null, requestSeen = false, components = null, liveButtonDisabledAfterMs = null, liveTilesAfterMs = null, editorClearedAfterMs = null, menuAssets = null } = {}) {
   const correlationMap = new Map([
     ['attempt-1', { attemptId: 'attempt-1', requestSeen, receipts: [], interfered: false }],
   ]);
@@ -122,7 +122,7 @@ function dispatchHarness({ health = HEALTH, waitMode = 'throw-timeout', activati
     FlowSettings: {},
     FlowComponents: components || {},
     FlowTiles: fakeTiles,
-    FlowMediaMenu: { nativeRead: () => ({ signedIn: true, inProject: true }) },
+    FlowMediaMenu: { nativeRead: () => ({ signedIn: true, inProject: true }), ...(menuAssets !== null ? { collectAssets: () => menuAssets } : {}) },
     FlowAgent: { closeNativeAgentSession: async () => {} },
     FlowScreenState: { inspect: () => ({ state: 'ready' }), assertGenerationReady: () => {} },
     FlowImageActions: { prepare: async () => ({}) },
@@ -186,6 +186,43 @@ test('M-D: exhausting the submit deadline without acknowledgement disarms with o
   const { submit, disarmOptions } = dispatchHarness({ waitMode: 'advance' });
   await assert.rejects(submit(), error => error.code === 'FLOW_SUBMIT_UNCONFIRMED');
   assert.deepEqual(disarmOptions.map((option) => (option ? option.dispatchOutcome : undefined)), ['none']);
+});
+
+test('M-A: a fallback-only reference name with no id fails fast before submit', async () => {
+  const { submit } = dispatchHarness({
+    waitMode: 'throw-timeout',
+    menuAssets: [{ name: 'Request for text translation', nameSource: 'fallback' }],
+  });
+  await assert.rejects(submit({ firstFrame: { assetName: 'Request for text translation', kind: 'image' } }), (error) => {
+    assert.equal(error.code, 'FLOW_QUEUE_PREFLIGHT_REFERENCE_MISSING');
+    assert.match(error.message, /UI label/, 'the error must name the fallback-label cause, not just "missing"');
+    return true;
+  });
+});
+
+test('M-A: a dedicated-name reference with no id passes revalidation', async () => {
+  const { submit } = dispatchHarness({
+    waitMode: 'throw-timeout',
+    menuAssets: [{ name: 'My photo.png', nameSource: 'dedicated' }],
+  });
+  // It must get PAST revalidation: any later failure (here the unmocked
+  // frame picker) proves the gate did not stop it. Only the preflight
+  // code itself would prove the gate stopped it.
+  await assert.rejects(submit({ firstFrame: { assetName: 'My photo.png', kind: 'image' } }), (error) => {
+    assert.notEqual(error.code, 'FLOW_QUEUE_PREFLIGHT_REFERENCE_MISSING');
+    return true;
+  });
+});
+
+test('M-A: a reference with an expectedId passes revalidation by identity even when its name is fallback-only', async () => {
+  const { submit } = dispatchHarness({
+    waitMode: 'throw-timeout',
+    menuAssets: [{ id: '11111111-2222-4333-8444-555555555555', name: 'Request for text translation', nameSource: 'fallback' }],
+  });
+  await assert.rejects(submit({ firstFrame: { assetName: 'Request for text translation', kind: 'image', expectedId: '11111111-2222-4333-8444-555555555555' } }), (error) => {
+    assert.notEqual(error.code, 'FLOW_QUEUE_PREFLIGHT_REFERENCE_MISSING');
+    return true;
+  });
 });
 
 test('dispatch wait: exhausting the submit deadline without acknowledgement also carries diagnostics', async () => {

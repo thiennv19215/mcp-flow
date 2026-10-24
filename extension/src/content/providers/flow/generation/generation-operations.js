@@ -274,18 +274,32 @@
               return response?.ok ? response.entry || null : null;
             } catch { return null; }
           };
-          const refAssetExists = (ref, entry) => {
-            // Absence must be provable: when the asset scan is unavailable
-            // or fails, the ref cannot be declared missing — the attach
-            // stages below remain the authority, exactly as before this
-            // pass existed (same degrade discipline as the catalog lookup).
-            if (typeof menu.collectAssets !== "function") return true;
+          // M-A: provenance-graded reference trust. A name-only match
+          // used to pass whenever ANY tile's computed name equalled the
+          // ref name — including a tile whose name exists only because
+          // its aria-label is a UI action string ("Request for text
+          // translation"). That let a poisoned action label pass
+          // revalidation and reach the frame picker as a real asset.
+          // Now a name match only counts when the tile's name came from
+          // a dedicated attribute (see collectAssets nameSource); a
+          // fallback-only name without an id is untrusted and fails
+          // here, before anything is submitted. "unknown" keeps the old
+          // degrade discipline: an unavailable scan cannot prove
+          // absence, so the attach stages below remain the authority.
+          const refNameTrust = (ref, entry) => {
+            if (typeof menu.collectAssets !== "function") return "unknown";
             let assets;
-            try { assets = menu.collectAssets({ includeIncomplete: true }); } catch { return true; }
+            try { assets = menu.collectAssets({ includeIncomplete: true }); } catch { return "unknown"; }
             const ids = new Set([ref.expectedId, entry?.mediaId, entry?.uuid].filter(value => typeof value === "string" && value));
-            return assets.some(asset => (ids.size > 0 && (ids.has(asset?.id) || ids.has(asset?.persistentMediaId))) ||
-              String(asset?.name || "").trim() === ref.assetName);
+            if (ids.size > 0 && assets.some(asset => ids.has(asset?.id) || ids.has(asset?.persistentMediaId))) return "id";
+            const named = assets.filter(asset => String(asset?.name || "").trim() === ref.assetName);
+            if (named.some(asset => asset?.nameSource === "dedicated")) return "dedicated";
+            if (named.length > 0) return "fallback-only";
+            return "absent";
           };
+          // (No separate refAssetExists helper: the loop below reads the
+          // trust grade directly so it can report the fallback-only
+          // cause distinctly instead of a generic "missing".)
           const retainedRefFile = entry => {
             const wanted = [entry?.originalName, entry?.uploadName].filter(value => typeof value === "string" && value);
             if (!wanted.length || !root.stagedNativeFiles) return null;
@@ -296,9 +310,11 @@
           };
           await runFlowStage("revalidating queued references", async ({ signal }) => {
             const missing = [];
+            const missingFallback = [];
             for (const ref of refChecks) {
               const entry = await lookupRefCatalog(ref);
-              if (refAssetExists(ref, entry)) continue;
+              const trust = refNameTrust(ref, entry);
+              if (trust === "unknown" || trust === "id" || trust === "dedicated") continue;
               let restoredId = null;
               if (entry?.uploadName) {
                 const file = retainedRefFile(entry);
@@ -311,12 +327,17 @@
                 ref.applyId?.(restoredId);
                 continue;
               }
-              missing.push(ref.assetName);
+              if (trust === "fallback-only") missingFallback.push(ref.assetName);
+              else missing.push(ref.assetName);
             }
-            if (missing.length) {
+            if (missing.length || missingFallback.length) {
               throw this.error(
                 "FLOW_QUEUE_PREFLIGHT_REFERENCE_MISSING",
-                `Flow reference${missing.length === 1 ? "" : "s"} missing before generation: ${missing.join(", ")}. The referenced asset is no longer in the Flow project library, and no retained upload bytes are available to restore it. Re-attach the reference or remove it from the job; nothing was submitted.`,
+                [
+                  ...(missing.length ? [`Flow reference${missing.length === 1 ? "" : "s"} missing before generation: ${missing.join(", ")}. The referenced asset is no longer in the Flow project library, and no retained upload bytes are available to restore it.`] : []),
+                  ...(missingFallback.length ? [`The following reference name${missingFallback.length === 1 ? "" : "s"} ${missingFallback.length === 1 ? "was" : "were"} found only as a UI label (such as a tile aria-label), not as an asset file name, so ${missingFallback.length === 1 ? "it" : "they"} cannot be trusted as asset titles: ${missingFallback.join(", ")}. Re-attach ${missingFallback.length === 1 ? "it" : "them"} from the Flow library so ${missingFallback.length === 1 ? "it carries" : "they carry"} an asset ID, or remove ${missingFallback.length === 1 ? "it" : "them"} from the job.`] : []),
+                  "Nothing was submitted.",
+                ].join(" "),
                 false,
                 false,
               );

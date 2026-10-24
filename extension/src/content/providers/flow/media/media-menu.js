@@ -1134,9 +1134,17 @@
       // name, so the dedicated name attributes win and the accessible
       // label is only a last resort — otherwise every downstream
       // exact-title lookup searches for the action string.
-      const name = (tile.getAttribute("data-tile-name") || explicitDisplayName || fileName ||
-        tile.getAttribute("title") || tile.getAttribute("aria-label") ||
-        tile.querySelector("img")?.getAttribute("alt") || "").trim();
+      // M-A: record WHICH side produced the name. A name from a
+      // dedicated attribute is a file name; a name that only exists
+      // because of title/aria-label/img-alt may be a UI action string,
+      // and downstream gates must not trust it as an asset identity
+      // without an id. The name value itself is computed exactly as
+      // before — only the provenance annotation is new.
+      const dedicatedName = tile.getAttribute("data-tile-name") || explicitDisplayName || fileName || "";
+      const fallbackName = tile.getAttribute("title") || tile.getAttribute("aria-label") ||
+        tile.querySelector("img")?.getAttribute("alt") || "";
+      const name = (dedicatedName || fallbackName).trim();
+      const nameSource = dedicatedName ? "dedicated" : (fallbackName ? "fallback" : "none");
       const displayName = explicitDisplayName || name;
       const persistentMediaId = tile.getAttribute("data-persistent-media-id") || tile.getAttribute("data-media-id") ||
         mediaElement?.getAttribute?.("data-media-id") || undefined;
@@ -1154,6 +1162,7 @@
         ...(id ? { id } : {}),
         ...(persistentMediaId ? { persistentMediaId } : {}),
         name,
+        nameSource,
         displayName,
         fileName: fileName || undefined,
         kind,

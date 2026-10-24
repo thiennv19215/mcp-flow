@@ -217,3 +217,46 @@ test('collectAssets prefers real name fields over a UI action aria-label', () =>
   assert.equal(assets[0].displayName, realName);
   assert.equal(assets[1].name, tileName, 'data-tile-name beats data-display-name');
 });
+
+test('M-A: collectAssets records name provenance — dedicated vs fallback-only', () => {
+  const makeAssetTile = (attrs, imgAlt) => {
+    const img = mediaElement({ src: 'https://lh3.googleusercontent.com/no-uuid-here', alt: imgAlt || '' });
+    return {
+      getAttribute: (attribute) => attrs[attribute] ?? null,
+      querySelector(selector) {
+        if (selector === 'flow-image-tile') return img;
+        if (selector === 'img') return img;
+        return null;
+      },
+      querySelectorAll: (selector) => (selector === 'img,video' ? [img] : []),
+    };
+  };
+  const tiles = [
+    // Real name from a dedicated attribute, poisoned action aria-label.
+    makeAssetTile({ 'data-display-name': 'my-photo.png', 'aria-label': 'Request for text translation' }),
+    // No dedicated attribute at all: the action string IS the name.
+    makeAssetTile({ 'aria-label': 'Request for text translation', title: 'Request for text translation' }),
+    // File name attribute counts as dedicated.
+    makeAssetTile({ 'data-file-name': 'clip.mp4' }),
+    // Bare img alt is a fallback source, like aria-label.
+    makeAssetTile({}, 'alt-only-name.png'),
+  ];
+  const context = vm.createContext({
+    location: LOCATION,
+    URL,
+    console,
+    document: { querySelectorAll: (selector) => (selector === 'flow-grid-tile-container' ? tiles : []) },
+    FlowTiles: { isTileBusy: () => false, isTileMediaReady: () => true },
+  });
+  vm.runInContext(mediaMenuSource, context);
+  const assets = context.collectAssets({ includeIncomplete: true });
+  assert.equal(assets.length, 4);
+  assert.equal(assets[0].name, 'my-photo.png');
+  assert.equal(assets[0].nameSource, 'dedicated');
+  assert.equal(assets[1].name, 'Request for text translation');
+  assert.equal(assets[1].nameSource, 'fallback');
+  assert.equal(assets[2].name, 'clip.mp4');
+  assert.equal(assets[2].nameSource, 'dedicated');
+  assert.equal(assets[3].name, 'alt-only-name.png');
+  assert.equal(assets[3].nameSource, 'fallback');
+});
