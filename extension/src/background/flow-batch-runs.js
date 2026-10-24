@@ -29,6 +29,8 @@
 //
 // The receipt fold is a pure, exported helper on purpose: FEAT-05 task
 // lists write their results back through the very same fold.
+
+import { foldRegenReceiptIntoRun } from "./flow-regen-projection.js";
 //
 // Concurrency discipline mirrors the sibling stores: mutations are
 // guarded by the revision counter (a claim must name the revision it
@@ -416,6 +418,58 @@ export class FlowBatchRuns {
     }
     if (folded.changed || finalizeState) this.#schedulePersist();
     return { run: clone(run), changed: folded.changed, updatedIndexes: folded.updatedIndexes, finalizeState };
+  }
+
+  // FEAT-12b: fold regen receipts into runs that already finalized.
+  // Regenerating an item happens after its run closed, so the snapshot
+  // fold above (which owns the ACTIVE run, whose root jobs still ride
+  // the snapshot) can never land a regen receipt: the attempt is a new
+  // queue job whose id matches no run item. This pass runs over the
+  // same snapshot stream, serialized through the same fold chain, and
+  // applies the pure FEAT-12 fold to every non-active run; the helper
+  // itself enforces the match discipline (tracker session = the run's
+  // batch id, owner job id, root item id) and the seen-receipt set, so
+  // re-folding a snapshot is a no-op. A folded receipt rewrites the
+  // finalize verdict from the receipts as they now stand — a partial
+  // item healed by a clean regen completes its run. Returns one entry
+  // per run that changed.
+  foldRegenReceipts(snapshot) {
+    const task = this.foldChain.catch(() => {}).then(() => this.#foldRegenReceipts(snapshot));
+    this.foldChain = task.catch(() => {});
+    return task;
+  }
+
+  async #foldRegenReceipts(snapshot) {
+    await this.ready;
+    const jobs = Array.isArray(snapshot?.jobs) ? snapshot.jobs : [];
+    if (!jobs.length) return [];
+    const results = [];
+    for (const run of this.runs) {
+      if (run.state === "active" || !run.batchId) continue;
+      let current = run;
+      let changed = false;
+      for (const job of jobs) {
+        const folded = foldRegenReceiptIntoRun(current, job);
+        if (folded.changed) {
+          current = folded.run;
+          changed = true;
+        }
+      }
+      if (!changed) continue;
+      run.items = current.items;
+      run.regenReceiptIds = current.regenReceiptIds;
+      run.resumeIndexes = current.resumeIndexes;
+      run.updatedAt = Date.now();
+      const finalizeState = computeFinalizeState(run);
+      if (finalizeState && finalizeState !== run.finalizeState) {
+        run.finalizeState = finalizeState;
+        run.finalizedAt = Date.now();
+        run.revision += 1;
+      }
+      this.#schedulePersist();
+      results.push({ runId: run.id, finalizeState: run.finalizeState });
+    }
+    return results;
   }
 
   // Explicit finalize for a run whose receipts are all terminal (the

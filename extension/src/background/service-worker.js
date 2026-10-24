@@ -14,6 +14,9 @@ import { FlowWorkflowGraphRuns } from "./flow-workflow-graph.js";
 import { FlowExecutionLock } from "./flow-execution-lock.js";
 import { FlowTaskLists, expandTasksToJobs, requiresSequential } from "./flow-task-lists.js";
 import { FlowAlbums } from "./flow-albums.js";
+import { FlowWorkflowTemplates } from "./flow-workflow-templates.js";
+import { FlowGenTemplates } from "./flow-gen-templates.js";
+import { buildAssistantRequest, parseAssistantReply, parseImageToPromptReply } from "./flow-prompt-assistant.js";
 import { FlowMediaCatalog } from "./flow-media-catalog.js";
 import { revalidateJobReferences } from "./flow-ref-preflight.js";
 import { FlowBridgeClient, readBridgeConfig, postHttpMessage } from "./flow-bridge-client.js";
@@ -1581,6 +1584,8 @@ const flowWorkflowGraphRuns = new FlowWorkflowGraphRuns();
 const flowTransformGate = createTransformExecutionGate(new FlowExecutionLock());
 const flowTaskLists = new FlowTaskLists();
 const flowAlbums = new FlowAlbums();
+const flowWorkflowTemplates = new FlowWorkflowTemplates();
+const flowGenTemplates = new FlowGenTemplates();
 flowJobQueue.subscribe((snapshot, reason) => {
   broadcastFlowQueue(snapshot, reason);
   // FEAT-01: every finished generation lands in the structured history
@@ -1646,6 +1651,14 @@ flowJobQueue.subscribe((snapshot, reason) => {
   // saved tasks that produced them, through the same FEAT-02 fold.
   void flowTaskLists.observeSnapshot(snapshot).catch(error => {
     console.warn("[FlowTaskLists] Could not write task results back from the queue snapshot:", error?.message || error);
+  });
+  // FEAT-12b: regen receipts fold into the batch runs that already
+  // finalized (a regeneration is enqueued after its run closed, so the
+  // FEAT-02 fold above never sees its receipt land). Serialized inside
+  // the store behind the active-run fold; failures stay silent here
+  // for the same reason as the other folds.
+  void flowBatchRuns.foldRegenReceipts(snapshot).catch(error => {
+    console.warn("[FlowBatchRuns] Could not fold regen receipts into finalized runs:", error?.message || error);
   });
   // Failures during queue preflight happen before the download runner can mark
   // the source item. Repair its state from the durable download job outcome.
@@ -2175,6 +2188,106 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
     })().then(respond).catch(error => respond({
       ok: false,
       error: { code: error?.code || "FLOW_ALBUMS_FAILED", message: String(error?.message || error) },
+    }));
+    return true;
+  }
+  if (typeof message?.type === "string" && message.type.startsWith("flow-workflow-templates:")) {
+    if (_sender?.id !== chrome.runtime.id || _sender?.tab) {
+      respond({ ok: false, error: { code: "FLOW_WORKFLOW_TEMPLATES_FORBIDDEN", message: "Workflow templates are available only from the extension UI." } });
+      return;
+    }
+    void (async () => {
+      await flowWorkflowTemplates.ready;
+      switch (message.type) {
+        case "flow-workflow-templates:list":
+          return { ok: true, templates: await flowWorkflowTemplates.list({ category: message.category || "", search: message.search || "" }) };
+        case "flow-workflow-templates:save": {
+          const template = await flowWorkflowTemplates.save(message.graph, {
+            name: message.name, description: message.description, category: message.category,
+          });
+          return { ok: true, template, templates: await flowWorkflowTemplates.list() };
+        }
+        case "flow-workflow-templates:instantiate": {
+          const graph = await flowWorkflowTemplates.instantiate(String(message.id || ""), { name: message.name });
+          return { ok: true, graph };
+        }
+        case "flow-workflow-templates:export": {
+          const document = await flowWorkflowTemplates.exportTemplate(String(message.id || ""));
+          return { ok: true, document };
+        }
+        case "flow-workflow-templates:import": {
+          const template = await flowWorkflowTemplates.importTemplate(message.document);
+          return { ok: true, template, templates: await flowWorkflowTemplates.list() };
+        }
+        case "flow-workflow-templates:remove": {
+          const removed = await flowWorkflowTemplates.remove(String(message.id || ""));
+          return { ok: true, removed, templates: await flowWorkflowTemplates.list() };
+        }
+        default:
+          throw Object.assign(new Error(`Unsupported workflow template action: ${message.type}`), { code: "FLOW_WORKFLOW_TEMPLATES_ACTION_UNSUPPORTED" });
+      }
+    })().then(respond).catch(error => respond({
+      ok: false,
+      error: { code: error?.code || "FLOW_WORKFLOW_TEMPLATES_FAILED", message: String(error?.message || error) },
+    }));
+    return true;
+  }
+  if (typeof message?.type === "string" && message.type.startsWith("flow-gen-templates:")) {
+    if (_sender?.id !== chrome.runtime.id || _sender?.tab) {
+      respond({ ok: false, error: { code: "FLOW_GEN_TEMPLATES_FORBIDDEN", message: "Generation templates are available only from the extension UI." } });
+      return;
+    }
+    void (async () => {
+      await flowGenTemplates.ready;
+      switch (message.type) {
+        case "flow-gen-templates:list":
+          return { ok: true, templates: await flowGenTemplates.list({ search: message.search || "" }) };
+        case "flow-gen-templates:save": {
+          const template = await flowGenTemplates.save(message.state, { name: message.name });
+          return { ok: true, template, templates: await flowGenTemplates.list() };
+        }
+        case "flow-gen-templates:apply": {
+          const job = await flowGenTemplates.apply(String(message.id || ""));
+          return { ok: true, job };
+        }
+        case "flow-gen-templates:remove": {
+          const removed = await flowGenTemplates.remove(String(message.id || ""));
+          return { ok: true, removed, templates: await flowGenTemplates.list() };
+        }
+        default:
+          throw Object.assign(new Error(`Unsupported generation template action: ${message.type}`), { code: "FLOW_GEN_TEMPLATES_ACTION_UNSUPPORTED" });
+      }
+    })().then(respond).catch(error => respond({
+      ok: false,
+      error: { code: error?.code || "FLOW_GEN_TEMPLATES_FAILED", message: String(error?.message || error) },
+    }));
+    return true;
+  }
+  if (typeof message?.type === "string" && message.type.startsWith("flow-prompt-assistant:")) {
+    if (_sender?.id !== chrome.runtime.id || _sender?.tab) {
+      respond({ ok: false, error: { code: "FLOW_PROMPT_ASSISTANT_FORBIDDEN", message: "The prompt assistant is available only from the extension UI." } });
+      return;
+    }
+    void (async () => {
+      switch (message.type) {
+        case "flow-prompt-assistant:build": {
+          const built = buildAssistantRequest({ format: message.format || "single-en", idea: message.idea, options: message.options || {} });
+          return { ok: true, formatId: built.formatId, text: built.text };
+        }
+        case "flow-prompt-assistant:parse": {
+          const parsed = parseAssistantReply(message.text);
+          return { ok: true, prompts: parsed.prompts, raw: parsed.raw };
+        }
+        case "flow-prompt-assistant:parse-i2p": {
+          const result = parseImageToPromptReply(message.text);
+          return { ok: true, result };
+        }
+        default:
+          throw Object.assign(new Error(`Unsupported prompt assistant action: ${message.type}`), { code: "FLOW_PROMPT_ASSISTANT_ACTION_UNSUPPORTED" });
+      }
+    })().then(respond).catch(error => respond({
+      ok: false,
+      error: { code: error?.code || "FLOW_PROMPT_ASSISTANT_FAILED", message: String(error?.message || error) },
     }));
     return true;
   }
