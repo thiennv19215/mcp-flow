@@ -781,9 +781,13 @@
           </div>
           <!-- Subtab: Templates -->
           <div id="subtab-templates" class="prompts-subtab-pane active">
-            <div class="template-empty-state">
-              <p style="color:var(--text-muted);font-size:12px;text-align:center;padding:24px;">Chọn mẫu prompt từ thư viện hoặc tạo prompt của riêng bạn.</p>
-            </div>
+            <section class="section-card">
+              <div class="form-group"><label class="form-label" for="genTemplateName">Tên mẫu cấu hình</label><input class="form-input" id="genTemplateName" placeholder="Ví dụ: Hero sản phẩm 16:9" /></div>
+              <button type="button" class="btn btn-primary" id="saveGenTemplateBtn">Lưu cấu hình hiện tại</button>
+              <p class="flow-inline-note" style="margin-top:8px;">Lưu prompt + tuỳ chọn + ảnh tham chiếu (nguồn Flow) đang có trong khung tạo thành mẫu để dùng lại. Thư viện mẫu nằm trên máy này, không đồng bộ lên server.</p>
+            </section>
+            <div id="genTemplateList" style="margin-top:10px;"></div>
+            <p id="genTemplateEmpty" class="flow-inline-note">Chưa có mẫu cấu hình nào được lưu.</p>
           </div>
           <!-- Subtab: My Prompts -->
           <div id="subtab-myprompts" class="prompts-subtab-pane">
