@@ -1073,6 +1073,23 @@ test('frame picker selects by expected media identity when the option title is u
   assert.equal(context.FlowNativeFramePicker.inspectDiagnostics().optionIdentityUsed, true);
 });
 
+test('reviewfix false-stamp: a title match that exposes no UUID fails closed instead of borrowing the expected id', async () => {
+  // Before the fix, when the clicked option exposed no UUID but the
+  // caller supplied one, the picker stamped selectedId = expectedId —
+  // and the immediately following ID_MISMATCH check then compared the
+  // value with itself and passed vacuously, mis-reporting identity and
+  // breaking correlation. Like the Ingredients picker, the frame picker
+  // must now fail closed: an unverified title match is rejected before
+  // anything is clicked.
+  const expectedUuid = '55555555-5555-4555-8555-555555555555';
+  const { context, clicks } = framePickerIdentityHarness([
+    { label: 'still.png', id: 'title:still.png' },
+  ]);
+  await assert.rejects(context.chooseNativePickerAsset('still.png', 'start', { expectedId: expectedUuid }), error =>
+    error.code === 'FLOW_ASSET_ID_MISMATCH' && error.outcome_unknown === false);
+  assert.deepEqual(clicks, [], 'nothing is clicked: the unverified title match is rejected before selection');
+});
+
 test('frame picker lets the expected identity decide between options that share a title', async () => {
   const wrongUuid = '33333333-3333-4333-8333-333333333333';
   const rightUuid = '44444444-4444-4444-8444-444444444444';

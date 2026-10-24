@@ -411,7 +411,12 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
     const expectedId = await globalThis.resolveNativeMediaUuid?.(config.expectedId, "image") || config.expectedId;
     if (!uuidPattern.test(String(selectedId || ""))) {
       if (expectedId && uuidPattern.test(String(expectedId))) {
-        selectedId = expectedId;
+        // Review round 1 S4 / round 2 S1: never stamp the expected id
+        // onto a selection that did not expose one. The mismatch check
+        // below would then compare the value with itself and pass
+        // vacuously, mis-reporting identity and breaking correlation.
+        // Fail closed like the Ingredients picker does.
+        throw flowError("FLOW_ASSET_ID_MISMATCH", `Flow's exact frame option for "${assetName}" did not expose a verifiable media ID, so it cannot be proven to be the expected asset (${expectedId}). No frame was selected.`, false, false);
       } else {
         throw flowError("FLOW_ASSET_ID_UNAVAILABLE", `Flow's exact frame option for "${assetName}" did not expose a uniquely verifiable backend UUID. No frame was selected.`, false, false);
       }
