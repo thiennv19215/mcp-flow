@@ -711,13 +711,33 @@
         const submitEditorElement = typeof editor.getVisibleFlowPromptEditor === 'function'
           ? editor.getVisibleFlowPromptEditor()
           : (typeof root.getVisibleFlowPromptEditor === 'function' ? root.getVisibleFlowPromptEditor() : null);
-        const readEditorText = () => {
-          if (!submitEditorElement) return null;
-          if (typeof editor.getEditorUserText === 'function') return String(editor.getEditorUserText(submitEditorElement) || '');
-          if (typeof root.getEditorUserText === 'function') return String(root.getEditorUserText(submitEditorElement) || '');
+        // Videofix M-F: Flow may re-render the composer mid-wait, which
+        // detaches the submit-time element while it still holds the old
+        // prompt text. Reading that stale element forever would miss the
+        // acceptance and time out. Resolve the live editor on every read
+        // instead: the module's own current-editor finder keeps the
+        // submit-time element while it is still connected and falls back
+        // to the live visible editor once it detaches; a detached element
+        // is never read at all.
+        const resolveLiveEditor = () => {
+          try {
+            if (typeof editor.currentFlowPromptEditor === 'function') {
+              const current = editor.currentFlowPromptEditor(submitEditorElement);
+              if (current) return current;
+            }
+          } catch (_) { /* fall through to the plain finder */ }
+          return typeof editor.getVisibleFlowPromptEditor === 'function'
+            ? editor.getVisibleFlowPromptEditor()
+            : (typeof root.getVisibleFlowPromptEditor === 'function' ? root.getVisibleFlowPromptEditor() : null);
+        };
+        const readEditorText = (element) => {
+          const target = element === undefined ? resolveLiveEditor() : element;
+          if (!target || target.isConnected === false) return null;
+          if (typeof editor.getEditorUserText === 'function') return String(editor.getEditorUserText(target) || '');
+          if (typeof root.getEditorUserText === 'function') return String(root.getEditorUserText(target) || '');
           return null;
         };
-        const editorTextAtSubmit = readEditorText();
+        const editorTextAtSubmit = readEditorText(submitEditorElement);
         const editorHadTextAtSubmit = editorTextAtSubmit !== null && editorTextAtSubmit.trim() !== '';
         const liveTileBaseline = before.slice();
         const liveDomAccepted = () => {

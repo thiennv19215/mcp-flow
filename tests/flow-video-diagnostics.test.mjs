@@ -66,7 +66,7 @@ const EXPECTED_DIAGNOSTICS = {
 // Part 1 — dispatch wait diagnostics (generation-operations.js)
 // ---------------------------------------------------------------------------
 
-function dispatchHarness({ health = HEALTH, waitMode = 'throw-timeout', activation = null, requestSeen = false, components = null, liveButtonDisabledAfterMs = null, liveTilesAfterMs = null, editorClearedAfterMs = null, menuAssets = null, stagedFiles = null } = {}) {
+function dispatchHarness({ health = HEALTH, waitMode = 'throw-timeout', activation = null, requestSeen = false, components = null, liveButtonDisabledAfterMs = null, liveTilesAfterMs = null, editorClearedAfterMs = null, editorSwapAfterMs = null, editorSwapNewText = '', menuAssets = null, stagedFiles = null } = {}) {
   const correlationMap = new Map([
     ['attempt-1', { attemptId: 'attempt-1', requestSeen, receipts: [], interfered: false }],
   ]);
@@ -76,6 +76,30 @@ function dispatchHarness({ health = HEALTH, waitMode = 'throw-timeout', activati
   let now = 1_000_000;
   const startNow = now;
   const editorTextAt = () => (editorClearedAfterMs !== null && now - startNow >= editorClearedAfterMs ? '' : 'a lighthouse');
+  // Videofix M-F: Flow re-rendering the composer swaps the editor element.
+  // The old element detaches (isConnected === false) but keeps its old
+  // text; the new element starts empty. The resolver mirrors the live
+  // finder: before the swap it returns the old element, after it the new
+  // one, and the old element is marked detached at the swap.
+  const oldEditor = {};
+  const newEditor = {};
+  // Detachment is a DOM fact, not a finder side effect: like the real
+  // browser, the old element reports isConnected === false once the swap
+  // time passes, whether or not any finder ran in between.
+  Object.defineProperty(oldEditor, 'isConnected', {
+    get: () => editorSwapAfterMs === null || now - startNow < editorSwapAfterMs,
+  });
+  const editorAt = () => {
+    if (editorSwapAfterMs === null) return {};
+    return now - startNow >= editorSwapAfterMs ? newEditor : oldEditor;
+  };
+  const editorTextOf = (element) => {
+    if (editorSwapAfterMs !== null) {
+      if (element === oldEditor) return 'a lighthouse';
+      if (element === newEditor) return editorSwapNewText;
+    }
+    return editorTextAt();
+  };
   const fakeTiles = {
     stabilizeFlowResultViewport: async () => {},
     collectNativeMedia: () => (liveTilesAfterMs !== null && now - startNow >= liveTilesAfterMs
@@ -116,10 +140,11 @@ function dispatchHarness({ health = HEALTH, waitMode = 'throw-timeout', activati
       getFlowSubmitButton: () => (liveButtonDisabledAfterMs !== null && now - startNow >= liveButtonDisabledAfterMs
         ? { disabled: true, getAttribute: () => null }
         : null),
-      getVisibleFlowPromptEditor: () => ({}),
-      getEditorUserText: () => editorTextAt(),
+      getVisibleFlowPromptEditor: () => editorAt(),
+      getEditorUserText: (element) => editorTextOf(element),
+      currentFlowPromptEditor: (preferred) => (preferred && preferred.isConnected !== false ? preferred : editorAt()),
     },
-    getEditorUserText: () => editorTextAt(),
+    getEditorUserText: (element) => editorTextOf(element),
     FlowSettings: { restoreNativeFramesMode: async () => {} },
     FlowComponents: components || {},
     validStagedLocalImage: (value) => Boolean(value && value.transferId),
@@ -741,6 +766,35 @@ test('dispatch wait: an editor cleared after activation still resolves as dom_ac
   assert.equal(result.submitted, true, 'an editor that held text pre-click and is empty now resolves the submit');
   assert.equal(result.confirmationSignal, 'dom_acceptance');
   assert.deepEqual(disarmCalls, [], 'the correlation attempt is NOT disarmed on the live-DOM exit');
+});
+
+test('M-F: a swapped editor that is empty still resolves as dom_acceptance', async () => {
+  const { submit, disarmCalls } = dispatchHarness({
+    waitMode: 'advance',
+    requestSeen: false,
+    activation: { clickDelivered: true, controlAccepted: false, strategy: 'fake-click' },
+    editorSwapAfterMs: 1000,
+    editorSwapNewText: '',
+  });
+  const result = await submit();
+  assert.equal(result.submitted, true, 'the re-resolved empty editor resolves the submit');
+  assert.equal(result.confirmationSignal, 'dom_acceptance');
+  assert.deepEqual(disarmCalls, [], 'the correlation attempt is NOT disarmed on the live-DOM exit');
+});
+
+test('M-F pin: a swapped editor that still holds text does NOT resolve via editor-empty', async () => {
+  const { submit, disarmCalls } = dispatchHarness({
+    waitMode: 'advance',
+    requestSeen: false,
+    activation: { clickDelivered: true, controlAccepted: false, strategy: 'fake-click' },
+    editorSwapAfterMs: 1000,
+    editorSwapNewText: 'a lighthouse',
+  });
+  await assert.rejects(submit(), error => {
+    assert.equal(error.code, 'FLOW_SUBMIT_UNCONFIRMED');
+    return true;
+  });
+  assert.deepEqual(disarmCalls, ['attempt-1'], 'a true no-signal timeout still disarms the attempt');
 });
 
 test('dispatch wait: live signals that never arrive keep the unconfirmed timeout', async () => {
