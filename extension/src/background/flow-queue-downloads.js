@@ -31,6 +31,68 @@ const flowUrl = url => {
   } catch { return false; }
 };
 
+// GPT-15: download provenance generalized by provider (study (E)15,
+// §D.3.5). ChatGPT result URLs live on the chat host itself (chatgpt.com
+// — the backend-api estuary/file URLs of GPT-04's result-image tier)
+// and on the file-CDN host family (*.oaiusercontent.com — GPT-04's
+// cdn-image tier, e.g. files.oaiusercontent.com). Those are the only
+// ChatGPT bases accepted. Matching is exact-host or proper subdomain
+// (dot boundary) only, never substring, so lookalikes are rejected:
+// evil-oaiusercontent.com and notchatgpt.com are not subdomains of the
+// accepted bases, and oaiusercontent.com.evil.com /
+// chatgpt.com.evil.com are subdomains of evil.com, not of the bases.
+// The Flow row lists exactly the bases isFlowMediaHost above accepts,
+// in the same form, so the provider-keyed matcher below can be pinned
+// against the legacy Flow predicate row by row — the legacy Flow
+// functions themselves are untouched and Flow provenance behavior is
+// unchanged.
+export const CHATGPT_DOWNLOAD_HOST_BASES = Object.freeze(["chatgpt.com", "oaiusercontent.com"]);
+
+export const DOWNLOAD_PROVENANCE_HOST_BASES = Object.freeze({
+  flow: Object.freeze(["flow.google.com", "labs.google", "storage.googleapis.com", "googleusercontent.com", "googleapis.com", "usercontent.goog"]),
+  chatgpt: CHATGPT_DOWNLOAD_HOST_BASES,
+});
+
+const hostMatchesDownloadBase = (hostname, base) => {
+  const host = String(hostname || "").toLowerCase();
+  return host === base || host.endsWith(`.${base}`);
+};
+
+export function isChatGptDownloadHost(hostname) {
+  return CHATGPT_DOWNLOAD_HOST_BASES.some(base => hostMatchesDownloadBase(hostname, base));
+}
+
+export function isProviderDownloadHost(hostname, provider) {
+  const bases = DOWNLOAD_PROVENANCE_HOST_BASES[provider];
+  if (!bases) return false;
+  return bases.some(base => hostMatchesDownloadBase(hostname, base));
+}
+
+export function queueDownloadIsChatGptUrl(value) {
+  try {
+    const raw = String(value || "");
+    if (!raw) return false;
+    if (raw.startsWith("blob:")) {
+      // A blob URL carries its origin after the scheme; provenance is
+      // the parsed origin's host, never a substring of the blob id.
+      const inner = new URL(raw.slice("blob:".length));
+      return inner.protocol === "https:" && !inner.username && !inner.password && isChatGptDownloadHost(inner.hostname);
+    }
+    const url = new URL(raw);
+    return url.protocol === "https:" && !url.username && !url.password && isChatGptDownloadHost(url.hostname);
+  } catch { return false; }
+}
+
+// Which provider a URL's download provenance attributes it to, or null
+// when no provider's host rules accept it. Flow is checked through the
+// legacy predicate above (byte-identical verdicts); ChatGPT through
+// queueDownloadIsChatGptUrl (https, no embedded credentials).
+export function queueDownloadProvenance(value) {
+  if (flowUrl(value)) return "flow";
+  if (queueDownloadIsChatGptUrl(value)) return "chatgpt";
+  return null;
+}
+
 export function flowResultMedia(value) {
   if (!value || typeof value !== "object") return [];
   if (Array.isArray(value.media)) return value.media;
