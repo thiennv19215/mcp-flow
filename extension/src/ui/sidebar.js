@@ -2691,9 +2691,15 @@
   // One builder for every attachment that comes out of an upload result
   // (image submit, video references, video frames). The Flow tile carries
   // the uploader's digest-derived uploadName — not the client's safeName —
-  // so the attachment must name uploadName when the receipt provided one,
-  // and expectedId prefers the canonical mediaUuid over an asb: receipt
-  // id. Missing fields fall back to the pre-identity behaviour exactly.
+  // so the attachment must name uploadName when the receipt provided one.
+  // Review round 1, S7 (corrected): expectedId prefers the receipt's
+  // mediaUuid when upload enrichment resolved one — a UUID tile id, or
+  // an asb: id resolved via the media catalog / identities probe — but
+  // mediaUuid is NOT always present: when enrichment cannot resolve an
+  // asb: id it stays absent, and then the receipt id itself (possibly
+  // asb:) is still a real identity that attach-time resolution can
+  // resolve, so it stays as the fallback. Missing fields fall back to
+  // the pre-identity behaviour exactly.
   function uploadedAssetAttachment(uploaded) {
     const tileName = typeof uploaded === "string" ? uploaded : (uploaded?.uploadName || uploaded?.name || uploaded?.title || String(uploaded));
     const expectedId = uploaded && typeof uploaded === "object" ? (uploaded.mediaUuid || uploaded.id || uploaded.mediaId) : undefined;
