@@ -65,15 +65,21 @@
     const identitiesV2Event = "TOBY_FLOW_V2_MEDIA_IDENTITIES";
     const readEvent = "TOBY_FLOW_MEDIA_IDENTITIES_READ";
     const readV2Event = "TOBY_FLOW_V2_MEDIA_IDENTITIES_READ";
-    return new Promise(resolve => {
+    // Review round 1 S5 / round 2 S3 / round 3 S1: one 500 ms window was
+    // too tight for identities hydrating right after an upload, so a
+    // single retry window runs with fresh listeners and a fresh READ
+    // dispatch. Ambiguity still settles immediately (it can never
+    // resolve to one UUID), and two empty windows still fail closed —
+    // the wait stays bounded at ~1 s, never infinite.
+    const waitOnce = () => new Promise(resolve => {
       let settled = false;
-      const finish = idValue => {
+      const finish = (status, idValue) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
         window.removeEventListener(identitiesEvent, onIdentities);
         window.removeEventListener(identitiesV2Event, onIdentities);
-        resolve(idValue);
+        resolve({ status, idValue });
       };
       const onIdentities = event => {
         const detail = event?.detail;
@@ -84,15 +90,20 @@
         // identities hydrate. Only settle early on an exact match (or on
         // ambiguity, which can never resolve to one UUID); otherwise keep
         // waiting for a later publish until the window expires.
-        if (matches.length === 1) finish(String(matches[0].mediaUuid).toLowerCase());
-        else if (matches.length > 1) finish(undefined);
+        if (matches.length === 1) finish("found", String(matches[0].mediaUuid).toLowerCase());
+        else if (matches.length > 1) finish("ambiguous", undefined);
       };
-      const timer = setTimeout(() => finish(undefined), 500);
+      const timer = setTimeout(() => finish("timeout", undefined), 500);
       window.addEventListener(identitiesEvent, onIdentities);
       window.addEventListener(identitiesV2Event, onIdentities);
       window.dispatchEvent(new CustomEvent(readEvent));
       window.dispatchEvent(new CustomEvent(readV2Event));
     });
+    const first = await waitOnce();
+    if (first.status === "found") return first.idValue;
+    if (first.status === "ambiguous") return undefined;
+    const second = await waitOnce();
+    return second.status === "found" ? second.idValue : undefined;
   }
   async function resolveReferenceMediaIdentity(id, mediaType = "image") {
     const value = String(id || "");
