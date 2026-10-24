@@ -795,9 +795,12 @@
               </div>
               <section class="section-card" style="margin-top:10px;">
                 <div class="form-group"><label class="form-label" for="promptName" id="lblPromptName">Tên prompt</label><input class="form-input" id="promptName" placeholder="Ví dụ: Product hero"></div>
-                <div class="form-group"><label class="form-label" for="promptDraft" id="lblPromptDraft">Nội dung prompt</label><textarea class="form-textarea" id="promptDraft" placeholder="Nhập prompt cần lưu"></textarea></div>
+                <div class="form-group"><label class="form-label" for="promptDraft" id="lblPromptDraft">Nội dung prompt</label><textarea class="form-textarea" id="promptDraft" placeholder="Nhập prompt cần lưu. Dùng {{tên_biến}} để tạo biến cần điền khi chèn."></textarea></div>
+                <div class="form-group"><label class="form-label" for="promptCategory">Danh mục</label><input class="form-input" id="promptCategory" placeholder="Ví dụ: Sản phẩm"></div>
+                <div class="form-group"><label class="form-label" for="promptTags">Thẻ (cách nhau bằng dấu phẩy)</label><input class="form-input" id="promptTags" placeholder="Ví dụ: hero, studio"></div>
                 <button type="button" class="btn btn-primary" id="btnSavePrompt"><span id="txtSavePrompt">Lưu prompt</span></button>
               </section>
+              <div class="form-group" style="margin-top:10px;"><label class="form-label" for="promptAddonSelect">Addon/style gắn khi tạo ảnh/video (chỉ áp dụng lúc tạo, không lưu vào prompt)</label><select class="form-input" id="promptAddonSelect"><option value="">Không dùng addon</option></select></div>
               <div class="myprompts-list" id="myPromptsList" style="margin-top:10px;"></div>
               <div id="savedPromptsList" class="flow-saved-prompts" style="margin-top:10px;"></div>
               <p id="savedPromptsEmpty" class="flow-inline-note">Chưa có prompt nào được lưu.</p>
@@ -1270,6 +1273,7 @@
   <script src="flow-upload-client.js"></script>
   <script src="flow-queue-panel.js"></script>
   <script src="reference-picker.js"></script>
+  <script src="flow-snippets.js"></script>
   <script src="sidebar.js"></script>
 </body>
 </html>

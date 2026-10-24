@@ -26,6 +26,29 @@
   const UI_HISTORY_KEY = "flowMcpUiHistory";
   const SAVED_PROMPTS_KEY = "flowMcpSavedPrompts";
 
+  // FEAT-04: saved prompts are snippets, persisted through
+  // FlowSnippets.FlowSnippetStore over the SAME storage key — the
+  // store upgrades legacy flat entries in place on first read.
+  let snippetStoreInstance = null;
+  let selectedAddonSnippetId = "";
+
+  function snippetStore() {
+    if (!window.FlowSnippets || typeof chrome === "undefined" || !chrome.storage?.local) return null;
+    if (!snippetStoreInstance) {
+      snippetStoreInstance = new window.FlowSnippets.FlowSnippetStore({ storage: chrome.storage.local, key: SAVED_PROMPTS_KEY });
+    }
+    return snippetStoreInstance;
+  }
+
+  async function loadSavedSnippets() {
+    const store = snippetStore();
+    if (store) {
+      try { return await store.list(); } catch { /* fall through to the raw read */ }
+    }
+    const prompts = await readUiStorage(SAVED_PROMPTS_KEY, []);
+    return Array.isArray(prompts) ? prompts : [];
+  }
+
   async function dispatchFlowOperation(operation, payload = {}) {
     const response = await chrome.runtime.sendMessage({ type: "flow-mcp:dispatch", operation, payload });
     if (!response?.ok) throw new Error(response?.error?.message || `Flow operation failed: ${operation}`);
@@ -731,18 +754,62 @@
     list.replaceChildren();
     empty.hidden = savedPrompts.length > 0;
     for (const item of savedPrompts) {
+      const title = typeof item.title === "string" ? item.title : (item.name || "");
+      const content = typeof item.content === "string" ? item.content : (item.prompt || "");
+      const variables = Array.isArray(item.variables) ? item.variables
+        : (window.FlowSnippets ? window.FlowSnippets.extractSnippetVariables(content) : []);
+      const meta = [
+        typeof item.category === "string" ? item.category : "",
+        ...(Array.isArray(item.tags) ? item.tags.map(tag => `#${tag}`) : []),
+        ...variables.map(name => `{{${name}}}`),
+      ].filter(Boolean).join(" · ");
       const row = document.createElement("article");
       row.className = "flow-saved-prompt";
-      row.innerHTML = `<div class="flow-saved-prompt__body"><div class="flow-saved-prompt__title">${escapeHtml(item.name)}</div><div class="flow-saved-prompt__text">${escapeHtml(item.prompt)}</div></div><div class="flow-saved-prompt__actions"><button type="button" class="btn btn-secondary" data-prompt-use="${escapeHtml(item.id)}">${escapeHtml(t("sidebar.promptUse"))}</button><button type="button" class="btn btn-secondary" data-prompt-delete="${escapeHtml(item.id)}">${escapeHtml(t("sidebar.promptDelete"))}</button></div>`;
+      row.innerHTML = `<div class="flow-saved-prompt__body"><div class="flow-saved-prompt__title">${escapeHtml(title)}</div><div class="flow-saved-prompt__text">${escapeHtml(content)}</div>${meta ? `<div class="flow-saved-prompt__text">${escapeHtml(meta)}</div>` : ""}</div><div class="flow-saved-prompt__actions"><button type="button" class="btn btn-secondary" data-prompt-use="${escapeHtml(item.id)}">${escapeHtml(t("sidebar.promptUse"))}</button><button type="button" class="btn btn-secondary" data-prompt-delete="${escapeHtml(item.id)}">${escapeHtml(t("sidebar.promptDelete"))}</button></div>`;
       list.appendChild(row);
     }
+    renderAddonOptions();
+  }
+
+  function renderAddonOptions() {
+    const select = document.querySelector("#promptAddonSelect");
+    if (!select) return;
+    const eligible = savedPrompts.filter(item => {
+      const content = typeof item.content === "string" ? item.content : (item.prompt || "");
+      if (!content.trim()) return false;
+      // An addon is static style text: snippets with {{variables}} are
+      // excluded because batch-build time never collects values.
+      return !(window.FlowSnippets && window.FlowSnippets.extractSnippetVariables(content).length);
+    });
+    if (selectedAddonSnippetId && !eligible.some(item => item.id === selectedAddonSnippetId)) selectedAddonSnippetId = "";
+    select.replaceChildren();
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = "Không dùng addon";
+    select.appendChild(none);
+    for (const item of eligible) {
+      const option = document.createElement("option");
+      option.value = item.id;
+      option.textContent = typeof item.title === "string" ? item.title : (item.name || "");
+      select.appendChild(option);
+    }
+    select.value = selectedAddonSnippetId;
+  }
+
+  function selectedAddonText() {
+    if (!selectedAddonSnippetId) return "";
+    const item = savedPrompts.find(snippet => snippet.id === selectedAddonSnippetId);
+    if (!item) return "";
+    const content = typeof item.content === "string" ? item.content : (item.prompt || "");
+    if (!content.trim()) return "";
+    if (window.FlowSnippets && window.FlowSnippets.extractSnippetVariables(content).length) return "";
+    return content;
   }
 
   async function loadLocalUiState() {
     const history = await readUiStorage(UI_HISTORY_KEY, []);
-    const prompts = await readUiStorage(SAVED_PROMPTS_KEY, []);
     localUiHistory = Array.isArray(history) ? history : [];
-    savedPrompts = Array.isArray(prompts) ? prompts : [];
+    savedPrompts = await loadSavedSnippets();
     renderHistory();
     renderSavedPrompts();
     void loadGenerationHistory();
@@ -1023,14 +1090,27 @@
     const name = document.querySelector("#promptName")?.value.trim();
     const prompt = document.querySelector("#promptDraft")?.value.trim();
     if (!prompt) { setFeedback(t("sidebar.promptSaveError"), false); return; }
-    const item = { id: crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`, name: name || prompt.slice(0, 36), prompt, createdAt: Date.now() };
-    savedPrompts = [item, ...savedPrompts.filter(existing => existing.prompt !== prompt)].slice(0, 100);
-    await writeUiStorage(SAVED_PROMPTS_KEY, savedPrompts);
+    const category = document.querySelector("#promptCategory")?.value.trim() || "";
+    const tags = document.querySelector("#promptTags")?.value || "";
+    const store = snippetStore();
+    let item;
+    if (store) {
+      item = await store.add({ title: name, content: prompt, category, tags });
+      savedPrompts = await store.list();
+    } else {
+      item = { id: crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`, name: name || prompt.slice(0, 36), prompt, createdAt: Date.now() };
+      savedPrompts = [item, ...savedPrompts.filter(existing => existing.prompt !== prompt)].slice(0, 100);
+      await writeUiStorage(SAVED_PROMPTS_KEY, savedPrompts);
+    }
     renderSavedPrompts();
     setFeedback(t("sidebar.promptSaved"), true);
-    addLog("flow.prompt.save", item.name, true);
+    addLog("flow.prompt.save", item.title || item.name, true);
     document.querySelector("#promptName").value = "";
     document.querySelector("#promptDraft").value = "";
+    const categoryInput = document.querySelector("#promptCategory");
+    if (categoryInput) categoryInput.value = "";
+    const tagsInput = document.querySelector("#promptTags");
+    if (tagsInput) tagsInput.value = "";
   });
 
   document.querySelector("#savedPromptsList")?.addEventListener("click", async event => {
@@ -1039,9 +1119,25 @@
     if (useId) {
       const item = savedPrompts.find(prompt => prompt.id === useId);
       if (item) {
+        // FEAT-04 insert path: when the snippet has {{variables}},
+        // collect a value for each and fill every occurrence; a
+        // variable-free snippet inserts verbatim, as before.
+        let text = typeof item.content === "string" ? item.content : (item.prompt || "");
+        const variables = window.FlowSnippets ? window.FlowSnippets.extractSnippetVariables(text) : [];
+        if (variables.length && window.FlowSnippets) {
+          const values = {};
+          let cancelled = false;
+          for (const variableName of variables) {
+            const answer = window.prompt(variableName, "");
+            if (answer === null) { cancelled = true; break; }
+            values[variableName] = answer;
+          }
+          if (cancelled) return;
+          text = window.FlowSnippets.fillSnippetContent(text, values);
+        }
         const editor = document.querySelector("#promptsArea");
         if (editor) {
-          editor.value = item.prompt;
+          editor.value = text;
           editor.dispatchEvent(new Event("input", { bubbles: true }));
         }
         document.querySelector("#navGen")?.click();
@@ -1050,10 +1146,20 @@
       return;
     }
     if (deleteId) {
-      savedPrompts = savedPrompts.filter(prompt => prompt.id !== deleteId);
-      await writeUiStorage(SAVED_PROMPTS_KEY, savedPrompts);
+      const store = snippetStore();
+      if (store) {
+        await store.remove(deleteId);
+        savedPrompts = await store.list();
+      } else {
+        savedPrompts = savedPrompts.filter(prompt => prompt.id !== deleteId);
+        await writeUiStorage(SAVED_PROMPTS_KEY, savedPrompts);
+      }
       renderSavedPrompts();
     }
+  });
+
+  document.querySelector("#promptAddonSelect")?.addEventListener("change", event => {
+    selectedAddonSnippetId = event.target.value || "";
   });
 
   document.querySelector("#btnRefreshHistory")?.addEventListener("click", () => { renderHistory(); void loadLocalUiState(); });
@@ -1552,6 +1658,12 @@
   function promptsForGeneration(prompt, enabled) {
     const prompts = enabled ? prompt.split(/\n\s*\n/).map(value => value.trim()).filter(Boolean) : [prompt];
     if (prompts.length > 100) throw new Error(t("sidebar.multiPromptLimit"));
+    // FEAT-04: the selected addon/style snippet is appended here — at
+    // batch-build time, the one chokepoint every submit path (Flow
+    // image/video, ChatGPT) passes through — so stored prompts never
+    // carry addon text.
+    const addon = selectedAddonText();
+    if (addon && window.FlowSnippets) return prompts.map(item => window.FlowSnippets.applySnippetAddon(item, addon));
     return prompts;
   }
 
