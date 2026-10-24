@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import type { Core } from "./core.js";
+import type { ChatGptGenerateArgs, Core } from "./core.js";
 import { PORT, TOKEN_FILE } from "./server.js";
 
 // Forwards tool calls to the local owner process when several MCP clients
@@ -44,6 +44,10 @@ export class RemoteCore implements Core {
   observer_health = (a: Parameters<Core["observer_health"]>[0]) => this.request("observer_health", a);
   clear_prompt = (a: Parameters<Core["clear_prompt"]>[0]) => this.request("clear_prompt", a);
   generate = (a: Parameters<Core["generate"]>[0]) => this.request("generate", a);
+  // GPT-11 follow-up: the owner's HTTP API dispatches /api/<method>
+  // generically and LocalCore serves chatgpt_generate, so the relay
+  // only needed this forward for the surface to work end to end.
+  chatgpt_generate = (a: ChatGptGenerateArgs) => this.request("chatgpt_generate", a);
   cancel = (a: Parameters<Core["cancel"]>[0]) => this.request("cancel", a);
   retry = (a: Parameters<Core["retry"]>[0]) => this.request("retry", a);
   assets = (a: Parameters<Core["assets"]>[0]) => this.request("assets", a);
