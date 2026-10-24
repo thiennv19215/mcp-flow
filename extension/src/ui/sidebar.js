@@ -989,6 +989,159 @@
   }
 
 
+  // FEAT-09: local generation-config templates. The store lives in
+  // the background (flow-gen-templates.js); this surface talks to it
+  // over the same message convention as the workflow templates and
+  // degrades to an empty list until the handlers are wired. Saving
+  // captures the CURRENT composer state; applying rebuilds the queue
+  // job payload in the background and loads its prompt + settings
+  // back into the Gen composer fields.
+  let genTemplates = [];
+
+  function currentGenComposerState() {
+    const type = document.querySelector("#genType")?.value === "video" ? "video" : "image";
+    const autoDownload = document.querySelector("#genTabAutoDownload")?.checked === true;
+    // Only Flow-sourced references persist into a template: they
+    // resolve by identity at submit time. Local files are uploaded on
+    // submit and cannot be carried by a stored template.
+    const attachments = (referencePicker.getReferences(type) || [])
+      .filter(reference => reference?.source === "flow")
+      .map(reference => ({
+        assetName: reference.assetName,
+        ...(reference.expectedId ? { expectedId: reference.expectedId } : {}),
+        kind: reference.kind || type,
+      }));
+    if (type === "video") {
+      const model = document.querySelector("#selectModelVideo")?.value || "";
+      const duration = Number(document.querySelector("#flowVideoDuration")?.value ?? document.querySelector("#selectDurationVideo")?.value) || undefined;
+      const resolution = document.querySelector("#flowVideoResolution")?.value ?? document.querySelector("#selectResolutionVideo")?.value ?? undefined;
+      const voice = document.querySelector("#genVideoVoiceSelect")?.value || "";
+      return {
+        prompt: document.querySelector("#inputPromptVideo")?.value.trim() || "",
+        type,
+        aspectRatio: document.querySelector("#selectRatioVideo")?.value || "",
+        count: Number(document.querySelector("#selectCountVideo")?.value) || 1,
+        autoDownload,
+        settings: {
+          mode: document.querySelector("#selectModeVideo")?.value || "ingredients",
+          ...(model ? { model } : {}),
+          ...(duration != null ? { duration } : {}),
+          ...(resolution ? { resolution } : {}),
+          ...(voice ? { voice } : {}),
+        },
+        attachments,
+      };
+    }
+    return {
+      prompt: document.querySelector("#inputPromptImage")?.value.trim() || "",
+      type,
+      model: document.querySelector("#selectModelImage")?.value || "",
+      aspectRatio: document.querySelector("#selectRatioImage")?.value || "",
+      count: Number(document.querySelector("#selectQtyImage")?.value) || 1,
+      autoDownload,
+      settings: {},
+      attachments,
+    };
+  }
+
+  function applyGenTemplateToComposer(job) {
+    const payload = job?.payload || {};
+    const type = payload.type === "video" ? "video" : "image";
+    if (typeof setGenType === "function") setGenType(type);
+    const genTypeEl = document.querySelector("#genType");
+    if (genTypeEl) genTypeEl.value = type;
+    const autoDownloadEl = document.querySelector("#genTabAutoDownload");
+    if (autoDownloadEl) autoDownloadEl.checked = payload.autoDownload === true;
+    const setValue = (selector, value) => {
+      const el = document.querySelector(selector);
+      if (el && value != null && value !== "") el.value = String(value);
+    };
+    if (type === "video") {
+      setValue("#inputPromptVideo", payload.prompt);
+      setValue("#selectRatioVideo", payload.aspectRatio);
+      setValue("#selectCountVideo", payload.count);
+      setValue("#selectModeVideo", payload.mode);
+      setValue("#selectModelVideo", payload.model);
+      setValue("#flowVideoDuration", payload.duration);
+      setValue("#selectDurationVideo", payload.duration);
+      setValue("#flowVideoResolution", payload.resolution);
+      setValue("#selectResolutionVideo", payload.resolution);
+      setValue("#genVideoVoiceSelect", payload.voice);
+    } else {
+      setValue("#inputPromptImage", payload.prompt);
+      setValue("#selectRatioImage", payload.aspectRatio);
+      setValue("#selectQtyImage", payload.count);
+      setValue("#selectModelImage", payload.model);
+    }
+    const refCount = Array.isArray(payload.attachments) ? payload.attachments.length : 0;
+    setFeedback(`✅ Đã nạp mẫu cấu hình vào khung tạo${refCount ? ` (mẫu mang ${refCount} ảnh tham chiếu nguồn Flow)` : ""}.`, true);
+  }
+
+  function renderGenTemplates() {
+    const list = document.querySelector("#genTemplateList");
+    const empty = document.querySelector("#genTemplateEmpty");
+    if (!list || !empty) return;
+    list.replaceChildren();
+    empty.hidden = genTemplates.length > 0;
+    for (const template of genTemplates) {
+      const state = template.state || {};
+      const detail = [state.type === "video" ? "Video" : "Ảnh", state.model || state.settings?.model, state.aspectRatio].filter(Boolean).join(" · ");
+      const row = document.createElement("article");
+      row.className = "flow-history-item";
+      row.innerHTML = `<div class="flow-history-item__body"><div class="flow-history-item__title">${escapeHtml(template.name || "")}</div><div class="flow-history-item__detail">${escapeHtml(detail)}</div><div class="flow-history-item__detail">${escapeHtml(state.prompt || "")}</div></div><div class="flow-history-item__actions"><button type="button" class="btn btn-secondary btn-sm" data-gen-template-apply="${escapeHtml(template.id)}">Dùng mẫu</button><button type="button" class="btn btn-secondary btn-sm" data-gen-template-delete="${escapeHtml(template.id)}">Xoá</button></div>`;
+      list.appendChild(row);
+    }
+  }
+
+  async function loadGenTemplates() {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-gen-templates:list" });
+      genTemplates = res?.ok && Array.isArray(res.templates) ? res.templates : [];
+    } catch {
+      genTemplates = [];
+    }
+    renderGenTemplates();
+  }
+
+  async function saveGenTemplateFromForm() {
+    const name = document.querySelector("#genTemplateName")?.value.trim() || "";
+    try {
+      const state = currentGenComposerState();
+      const res = await chrome.runtime.sendMessage({ type: "flow-gen-templates:save", state, name });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể lưu mẫu cấu hình này.");
+      setFeedback("✅ Đã lưu mẫu cấu hình.", true);
+      addLog("flow.genTemplate.save", res.template?.name || name, true);
+      await loadGenTemplates();
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.genTemplate.save.error", err.message, false);
+    }
+  }
+
+  async function applyGenTemplate(id) {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-gen-templates:apply", id });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể dùng mẫu cấu hình này.");
+      applyGenTemplateToComposer(res.job);
+      addLog("flow.genTemplate.apply", res.job?.label || id, true);
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.genTemplate.apply.error", err.message, false);
+    }
+  }
+
+  async function removeGenTemplate(id) {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-gen-templates:remove", id });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể xoá mẫu cấu hình này.");
+      await loadGenTemplates();
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.genTemplate.remove.error", err.message, false);
+    }
+  }
+
+
   function renderSavedPrompts() {
     const list = document.querySelector("#savedPromptsList");
     const empty = document.querySelector("#savedPromptsEmpty");
@@ -1056,6 +1209,7 @@
     renderSavedPrompts();
     void loadGenerationHistory();
     void loadWorkflowTemplates();
+    void loadGenTemplates();
     void loadFlowTasks();
   }
 
@@ -1469,6 +1623,15 @@
     if (row.style.display !== "none") document.querySelector("#flowTaskSearch")?.focus();
   });
   document.querySelector("#flowTaskSearch")?.addEventListener("input", () => { void loadFlowTasks(); });
+
+  document.querySelector("#saveGenTemplateBtn")?.addEventListener("click", () => { void saveGenTemplateFromForm(); });
+  document.querySelector("#genTemplateList")?.addEventListener("click", event => {
+    const applyId = event.target.closest("[data-gen-template-apply]")?.dataset.genTemplateApply;
+    if (applyId) { void applyGenTemplate(applyId); return; }
+    const deleteId = event.target.closest("[data-gen-template-delete]")?.dataset.genTemplateDelete;
+    if (deleteId) void removeGenTemplate(deleteId);
+  });
+
 
   let isGenerating = false;
   let flowQueuePanel = null;
