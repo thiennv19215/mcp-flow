@@ -432,30 +432,6 @@
     return { x, y, prompt: promptBox ? normalizeFlowPrompt(promptBox.innerText || promptBox.textContent) : wanted };
   }
 
-  function pressFlowEditorSubmit(editor) {
-    if (!editor || !(editor instanceof HTMLElement) || !editor.isConnected) return false;
-    try {
-      editor.focus({ preventScroll: true });
-      const selection = window.getSelection?.();
-      const range = document.createRange?.();
-      range?.selectNodeContents(editor);
-      range?.collapse(false);
-      selection?.removeAllRanges?.();
-      if (range) selection?.addRange?.(range);
-
-      const baseOptions = { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true, composed: true };
-
-      // Keep this as a single, plain Enter fallback after Flow's click path.
-      editor.dispatchEvent(new KeyboardEvent("keydown", baseOptions));
-      editor.dispatchEvent(new KeyboardEvent("keypress", baseOptions));
-      editor.dispatchEvent(new KeyboardEvent("keyup", baseOptions));
-      return true;
-    } catch (err) {
-      console.warn("[FlowEditor] editor Enter press failed:", err);
-      return false;
-    }
-  }
-
   async function activateFlowSubmitButton(button, expectedPrompt) {
     const targetButton = button || (expectedPrompt ? getFlowSubmitButton(expectedPrompt) : null);
     if (!targetButton || !targetButton.isConnected) {
@@ -591,7 +567,7 @@
         mainActivationAmbiguous = true;
       } else if (!mainListenerInvoked) {
         // The bridge replied but found no page listener. Try one DOM click; the
-        // generation observer owns the later single Enter fallback if needed.
+        // dispatch wait's DOM-acceptance signals own the verdict from here.
         targetButton.click();
       }
 
@@ -797,7 +773,6 @@
     getFlowSubmitButton,
     waitForGenerationSubmitButton,
     inspectFlowSubmitTarget,
-    pressFlowEditorSubmit,
     activateFlowSubmitButton,
     currentFlowSubmitErrors,
     readGenerationCreditQuote,
@@ -816,7 +791,6 @@
   root.waitForGenerationSubmitButton = waitForGenerationSubmitButton;
   root.activateFlowSubmitButton = activateFlowSubmitButton;
   root.inspectFlowSubmitTarget = inspectFlowSubmitTarget;
-  root.pressFlowEditorSubmit = pressFlowEditorSubmit;
   root.currentFlowSubmitErrors = currentFlowSubmitErrors;
   root.waitForGenerationCreditQuote = waitForGenerationCreditQuote;
   root.normalizeFlowPrompt = normalizeFlowPrompt;
