@@ -158,6 +158,7 @@
     .flow-queue-panel__status{white-space:nowrap;color:var(--text-muted,#8b8b92);font-size:11px}
     .flow-queue-panel__detail{margin-top:4px;color:var(--text-muted,#8b8b92);white-space:pre-wrap;overflow-wrap:anywhere}
     .flow-queue-panel__detail--download-error{color:#f87171}
+    .flow-queue-panel__diagnostics{font-size:10.5px;opacity:.85}
     .flow-queue-panel__milestones{margin-top:5px;color:#a3e635;font-size:11px;overflow-wrap:anywhere}
     .flow-queue-panel__milestones--failed{color:#f87171}
     .flow-queue-panel__progress{height:4px;margin-top:7px;border-radius:4px;background:rgba(255,255,255,.1);overflow:hidden}
@@ -194,6 +195,52 @@
   function providerBadgeForTask(task) {
     const provider = task?.metadata?.provider;
     return typeof provider === "string" && provider.trim() ? provider.trim() : null;
+  }
+
+  // Compact, plain-text summary lines for a job's diagnostics payload
+  // (error.diagnostics preserved by the queue). Two sources are understood:
+  // the correlation-observer snapshot the submit path attaches (observer
+  // flags + the last few request events with their matched field flags and
+  // reasons — the evidence that explains a dispatch timeout), and the
+  // native frame picker's snapshot (phase, wanted asset, the option labels
+  // it actually saw). Anything else yields no lines, so jobs without
+  // recognizable diagnostics render exactly as before. Callers render the
+  // lines through makeElement (textContent), so diagnostic strings can
+  // never become markup.
+  function diagnosticsSummaryLines(diagnostics) {
+    const lines = [];
+    if (!diagnostics || typeof diagnostics !== "object") return lines;
+    const requestDiagnostics = diagnostics.requestDiagnostics;
+    if (requestDiagnostics && typeof requestDiagnostics === "object") {
+      const flags = [];
+      if (typeof diagnostics.observerReady === "boolean") flags.push(`observer ${diagnostics.observerReady ? "ready" : "not ready"}`);
+      if (typeof diagnostics.xhrHookActive === "boolean") flags.push(`xhr ${diagnostics.xhrHookActive ? "on" : "off"}`);
+      if (typeof diagnostics.fetchHookActive === "boolean") flags.push(`fetch ${diagnostics.fetchHookActive ? "on" : "off"}`);
+      if (flags.length) lines.push(flags.join(" · "));
+      const events = Array.isArray(requestDiagnostics.events) ? requestDiagnostics.events : [];
+      if (!events.length) lines.push("Requests observed: none");
+      for (const event of events.slice(-3)) {
+        const parts = [String(event?.transport || "unknown")];
+        const path = event?.path || event?.pathClass;
+        if (path) parts.push(String(path));
+        const matched = Object.entries(event?.fields || {}).filter(([, value]) => value === true).map(([key]) => key);
+        if (matched.length) parts.push(`matched: ${matched.join(", ")}`);
+        if (Array.isArray(event?.reasons) && event.reasons.length) parts.push(`reasons: ${event.reasons.join(", ")}`);
+        lines.push(`Request: ${parts.join(" · ")}`);
+      }
+    }
+    const framePicker = diagnostics.framePicker;
+    if (framePicker && typeof framePicker === "object") {
+      const parts = [];
+      if (framePicker.phase) parts.push(`phase ${framePicker.phase}`);
+      if (framePicker.assetName) parts.push(`asset ${framePicker.assetName}`);
+      const labels = Array.isArray(framePicker.exactFrameList?.options)
+        ? framePicker.exactFrameList.options.map(option => option?.label).filter(Boolean).slice(0, 6)
+        : [];
+      if (labels.length) parts.push(`options seen: ${labels.join(", ")}`);
+      if (parts.length) lines.push(`Frame picker: ${parts.join(" · ")}`);
+    }
+    return lines.map(line => line.slice(0, 400));
   }
 
   function progressPercent(task) {
@@ -615,6 +662,10 @@
         ? [task?.errorCode, task?.error].filter(Boolean).join(": ")
         : task?.progress?.message ?? task?.progressText ?? task?.message ?? task?.error ?? "";
       if (detail) item.append(makeElement("div", "flow-queue-panel__detail", detail));
+      const diagnostics = task?.diagnostics ?? task?.job?.diagnostics;
+      for (const line of diagnosticsSummaryLines(diagnostics)) {
+        item.append(makeElement("div", "flow-queue-panel__detail flow-queue-panel__diagnostics", line));
+      }
       const generation = task?.progress?.generation;
       const download = task?.progress?.download;
       if (generation?.state === "completed") {
