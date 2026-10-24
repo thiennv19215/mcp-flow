@@ -8,6 +8,7 @@ import { resolveProviderForOperation } from "./provider-router.js";
 import { runChatGptQueueJob } from "./chatgpt-queue-runner.js";
 import { loadChatGptCapabilityRegistry } from "./chatgpt-capabilities.js";
 import { FlowBatchDrafts, materializeDraftJobs } from "./flow-batch-drafts.js";
+import { FlowHistory, buildJobFromRecord } from "./flow-history.js";
 import { FlowMediaCatalog } from "./flow-media-catalog.js";
 import { revalidateJobReferences } from "./flow-ref-preflight.js";
 import { FlowBridgeClient, readBridgeConfig, postHttpMessage } from "./flow-bridge-client.js";
@@ -1415,8 +1416,15 @@ const flowJobQueue = new FlowJobQueue(runExtensionFlowJob, {
   refPreflight: createQueueRefPreflight({ catalog: flowMediaCatalog, projectIdForJob: queueJobProjectId }),
 });
 const flowBatchDrafts = new FlowBatchDrafts();
+const flowHistory = new FlowHistory();
 flowJobQueue.subscribe((snapshot, reason) => {
   broadcastFlowQueue(snapshot, reason);
+  // FEAT-01: every finished generation lands in the structured history
+  // store. Recording is deduped per finished attempt inside the store
+  // and must never disturb the queue path, so failures stay silent here.
+  void flowHistory.observeSnapshot(snapshot).catch(error => {
+    console.warn("[FlowHistory] Could not record finished queue jobs:", error?.message || error);
+  });
   // Failures during queue preflight happen before the download runner can mark
   // the source item. Repair its state from the durable download job outcome.
   if (!["job-finished", "attention-required", "paused"].includes(reason)) return;
@@ -1686,6 +1694,53 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
     })().then(respond).catch(error => respond({
       ok: false,
       error: { code: error?.code || "FLOW_BATCH_FAILED", message: String(error?.message || error) },
+    }));
+    return true;
+  }
+  if (typeof message?.type === "string" && message.type.startsWith("flow-history:")) {
+    if (_sender?.id !== chrome.runtime.id || _sender?.tab) {
+      respond({ ok: false, error: { code: "FLOW_HISTORY_FORBIDDEN", message: "Generation history is available only from the extension UI." } });
+      return;
+    }
+    void (async () => {
+      await flowHistory.ready;
+      switch (message.type) {
+        case "flow-history:list":
+          return { ok: true, records: await flowHistory.list(message.filter || {}) };
+        case "flow-history:remove": {
+          const removed = await flowHistory.remove(String(message.id || ""));
+          return { ok: true, removed, records: await flowHistory.list() };
+        }
+        case "flow-history:clear": {
+          await flowHistory.clear();
+          return { ok: true, records: [] };
+        }
+        case "flow-history:rerun": {
+          const record = await flowHistory.get(String(message.id || ""));
+          if (!record) throw Object.assign(new Error(`No history record with id ${message.id}.`), { code: "FLOW_HISTORY_NOT_FOUND" });
+          // The job is rebuilt from the record's stored snapshot — refs
+          // ride the saved payload, never a fresh library lookup. Like a
+          // draft run, the current tab/project target wins over the
+          // target metadata captured when the original job ran.
+          const target = await captureFlowTargetMetadata();
+          const built = buildJobFromRecord(record);
+          const job = {
+            ...built,
+            metadata: { source: "extension", ...(built.metadata || {}), ...target },
+          };
+          await flowJobQueue.add(job);
+          let snapshot = await flowJobQueue.snapshot();
+          snapshot = message.autoStart === false || snapshot.isPaused || snapshot.waitingForUser > 0
+            ? snapshot
+            : await flowJobQueue.resume();
+          return { ok: true, record, ...flowQueueSnapshot(snapshot) };
+        }
+        default:
+          throw Object.assign(new Error(`Unsupported history action: ${message.type}`), { code: "FLOW_HISTORY_ACTION_UNSUPPORTED" });
+      }
+    })().then(respond).catch(error => respond({
+      ok: false,
+      error: { code: error?.code || "FLOW_HISTORY_FAILED", message: String(error?.message || error) },
     }));
     return true;
   }

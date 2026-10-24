@@ -15,6 +15,7 @@
   let flowPhotosScanned = false;
   let localUiHistory = [];
   let savedPrompts = [];
+  let generationHistory = [];
   let flowModelCapabilities = null;
   let flowModelCapabilitiesPromise = null;
   let lastFlowVideoModel = null;
@@ -671,6 +672,58 @@
     renderHistory();
   }
 
+  // FEAT-01: structured generation records live in the background history
+  // store (flow-history.js); the History tab renders them under the
+  // activity log, each with a Re-run action that rebuilds the exact job
+  // from the record's stored settings snapshot.
+  const GEN_HISTORY_STATUS_LABELS = { success: "Thành công", partial: "Một phần", failed: "Thất bại", stopped: "Đã dừng" };
+
+  function renderGenerationHistory() {
+    const list = document.querySelector("#flowGenHistoryList");
+    const empty = document.querySelector("#flowGenHistoryEmpty");
+    if (!list || !empty) return;
+    list.replaceChildren();
+    empty.hidden = generationHistory.length > 0;
+    for (const record of generationHistory.slice(0, 80)) {
+      const title = record.prompt || record.label || "Flow job";
+      const meta = [
+        GEN_HISTORY_STATUS_LABELS[record.status] || record.status,
+        record.mediaType || "",
+        record.model || "",
+        record.ratio || "",
+        record.provider === "chatgpt" ? "ChatGPT" : "",
+      ].filter(Boolean).join(" · ");
+      const detail = record.status === "failed" && record.error ? `${meta} — ${record.error}` : meta;
+      const time = record.finishedAt ? new Date(record.finishedAt).toLocaleString() : "";
+      const row = document.createElement("article");
+      row.className = "flow-history-item";
+      row.innerHTML = `<div class="flow-history-item__body"><div class="flow-history-item__title">${escapeHtml(title)}</div><div class="flow-history-item__detail">${escapeHtml(detail)}</div></div><div class="flow-history-item__actions"><button type="button" class="btn btn-secondary btn-sm" data-history-rerun="${escapeHtml(record.id)}">Chạy lại</button></div><time class="flow-history-item__time">${escapeHtml(time)}</time>`;
+      list.appendChild(row);
+    }
+  }
+
+  async function loadGenerationHistory() {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-history:list" });
+      generationHistory = res?.ok && Array.isArray(res.records) ? res.records : [];
+    } catch {
+      generationHistory = [];
+    }
+    renderGenerationHistory();
+  }
+
+  async function rerunGenerationRecord(id) {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow-history:rerun", id });
+      if (!res?.ok) throw new Error(res?.error?.message || "Không thể chạy lại bản ghi này.");
+      setFeedback("✅ Đã đưa bản ghi vào hàng đợi Flow.", true);
+      addLog("flow.history.rerun", res.record?.label || id, true);
+    } catch (err) {
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.history.rerun.error", err.message, false);
+    }
+  }
+
   function renderSavedPrompts() {
     const list = document.querySelector("#savedPromptsList");
     const empty = document.querySelector("#savedPromptsEmpty");
@@ -692,6 +745,7 @@
     savedPrompts = Array.isArray(prompts) ? prompts : [];
     renderHistory();
     renderSavedPrompts();
+    void loadGenerationHistory();
   }
 
   function addLog(name, detail, isOk = true) {
@@ -1004,6 +1058,10 @@
 
   document.querySelector("#btnRefreshHistory")?.addEventListener("click", () => { renderHistory(); void loadLocalUiState(); });
   document.querySelector("#btnClearHistory")?.addEventListener("click", async () => { localUiHistory = []; await writeUiStorage(UI_HISTORY_KEY, []); renderHistory(); });
+  document.querySelector("#flowGenHistoryList")?.addEventListener("click", event => {
+    const rerunId = event.target.closest("[data-history-rerun]")?.dataset.historyRerun;
+    if (rerunId) void rerunGenerationRecord(rerunId);
+  });
 
   let isGenerating = false;
   let flowQueuePanel = null;
