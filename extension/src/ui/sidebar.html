@@ -981,6 +981,9 @@
 
           <!-- Subtab: Album -->
           <div class="photos-subtab-pane active" id="photos-album">
+            <div class="photos-albums-header" style="display:flex;justify-content:flex-end;margin-bottom:10px;">
+              <button type="button" class="btn btn-primary btn-sm" id="createAlbumBtn">+ Tạo album</button>
+            </div>
             <div class="album-list-container" id="albumListContainer">
               <p style="color:var(--text-muted);font-size:12px;text-align:center;padding:24px;">Chưa có album nào.</p>
             </div>
@@ -1240,6 +1243,14 @@
             <div class="ref-picker-grid" id="refPickerFlowGrid"></div>
             <button type="button" class="ref-picker-more" id="refPickerMore" hidden></button>
             <div class="ref-picker-message" id="refPickerFlowMessage">Đang tìm ảnh trong thư viện Flow...</div>
+            <div class="ref-picker-albums" id="refPickerAlbums">
+              <div class="ref-picker-toolbar">
+                <span style="font-size:12px;font-weight:600;">Album</span>
+                <select class="form-select" id="refPickerAlbumSelect" style="width:auto;margin:0;" aria-label="Chọn album"></select>
+              </div>
+              <div class="ref-picker-grid" id="refPickerAlbumGrid"></div>
+              <div class="ref-picker-message" id="refPickerAlbumMessage" hidden></div>
+            </div>
           </div>
           <div class="ref-picker-content" id="refPickerUploadPanel" hidden>
             <div class="ref-picker-drop" id="refPickerDrop">

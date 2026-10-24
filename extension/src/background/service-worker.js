@@ -13,6 +13,7 @@ import { FlowBatchRuns } from "./flow-batch-runs.js";
 import { FlowWorkflowGraphRuns } from "./flow-workflow-graph.js";
 import { FlowExecutionLock } from "./flow-execution-lock.js";
 import { FlowTaskLists, expandTasksToJobs, requiresSequential } from "./flow-task-lists.js";
+import { FlowAlbums } from "./flow-albums.js";
 import { FlowMediaCatalog } from "./flow-media-catalog.js";
 import { revalidateJobReferences } from "./flow-ref-preflight.js";
 import { FlowBridgeClient, readBridgeConfig, postHttpMessage } from "./flow-bridge-client.js";
@@ -1579,6 +1580,7 @@ const flowBatchRuns = new FlowBatchRuns();
 const flowWorkflowGraphRuns = new FlowWorkflowGraphRuns();
 const flowTransformGate = createTransformExecutionGate(new FlowExecutionLock());
 const flowTaskLists = new FlowTaskLists();
+const flowAlbums = new FlowAlbums();
 flowJobQueue.subscribe((snapshot, reason) => {
   broadcastFlowQueue(snapshot, reason);
   // FEAT-01: every finished generation lands in the structured history
@@ -2133,6 +2135,46 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
     })().then(respond).catch(error => respond({
       ok: false,
       error: { code: error?.code || "FLOW_TASKS_FAILED", message: String(error?.message || error) },
+    }));
+    return true;
+  }
+  if (typeof message?.type === "string" && message.type.startsWith("flow-albums:")) {
+    if (_sender?.id !== chrome.runtime.id || _sender?.tab) {
+      respond({ ok: false, error: { code: "FLOW_ALBUMS_FORBIDDEN", message: "Albums are available only from the extension UI." } });
+      return;
+    }
+    void (async () => {
+      await flowAlbums.ready;
+      switch (message.type) {
+        case "flow-albums:list": {
+          return { ok: true, albums: await flowAlbums.list() };
+        }
+        case "flow-albums:create": {
+          const album = await flowAlbums.create({ name: message.name });
+          return { ok: true, album, albums: await flowAlbums.list() };
+        }
+        case "flow-albums:rename": {
+          const album = await flowAlbums.rename(String(message.id || ""), message.name);
+          return { ok: true, album, albums: await flowAlbums.list() };
+        }
+        case "flow-albums:remove": {
+          const removed = await flowAlbums.remove(String(message.id || ""));
+          return { ok: true, removed, albums: await flowAlbums.list() };
+        }
+        case "flow-albums:add-image": {
+          const album = await flowAlbums.addImage(String(message.albumId || ""), message.image);
+          return { ok: true, album, albums: await flowAlbums.list() };
+        }
+        case "flow-albums:remove-image": {
+          const album = await flowAlbums.removeImage(String(message.albumId || ""), String(message.imageId || ""));
+          return { ok: true, album, albums: await flowAlbums.list() };
+        }
+        default:
+          throw Object.assign(new Error(`Unsupported album action: ${message.type}`), { code: "FLOW_ALBUMS_ACTION_UNSUPPORTED" });
+      }
+    })().then(respond).catch(error => respond({
+      ok: false,
+      error: { code: error?.code || "FLOW_ALBUMS_FAILED", message: String(error?.message || error) },
     }));
     return true;
   }
