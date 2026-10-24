@@ -84,6 +84,33 @@ export const shapes = {
     project: z.string().min(1).describe("Folder name for the downloaded clips, e.g. 'HotelPromo'."),
     scenes: z.array(sceneSchema).min(1).max(100),
   },
+  // These two shapes live here (not only in mcp-tools.ts) because the
+  // generic HTTP bridge validates /api/<method> bodies against schemas:
+  // a Core method without a shape entry used to reach the core as
+  // `undefined` args. Every Core interface method must have a shape.
+  chatgpt_generate: {
+    project: z.string().min(1).describe("Folder name for the downloaded images, e.g. 'ChatGPTArt'."),
+    prompt: z.string().min(1).describe("Image prompt for ChatGPT. Image generation only; there is no text-task mode."),
+    file_stem: z.string().min(1).optional().describe("Base file name for the downloaded images. Default 'chatgpt-01'; pass a distinct stem per call into the same project so later calls do not reuse the same names."),
+    ratio: z.string().min(1).optional().describe("Aspect ratio spelling or label, e.g. '16:9' or 'square'. Normalized against the ChatGPT capability registry by the extension; unsupported spellings are rejected by the queue preflight."),
+    model: z.string().min(1).optional().describe("ChatGPT image model label. Omitted keeps the provider default."),
+    conversation_id: z.string().min(1).optional().describe("Continue an existing ChatGPT conversation instead of starting a new one."),
+    refs: z.array(z.record(z.string(), z.unknown())).max(10).optional().describe("Reference images as payload records (base64, dataUrl or bytes fields). Uploaded references only: bare library or tile ids carry no payload and are rejected by the queue preflight."),
+    timeout_ms: z.number().int().min(1).max(1_800_000).optional().describe("Generation timeout in milliseconds."),
+  },
+  // FEAT-07: nodes stay permissive at the MCP boundary (the graph module
+  // validates types, ports and config); only the envelope the runner
+  // needs is pinned here.
+  run_workflow_graph: {
+    project: z.string().min(1),
+    graph: z.object({
+      name: z.string().optional(),
+      nodes: z.array(z.object({ id: z.string().min(1), type: z.string().min(1) }).passthrough()).min(1),
+      edges: z.array(z.object({}).passthrough()).optional(),
+    }).passthrough(),
+    output_dir: z.string().optional(),
+    auto_start: z.boolean().optional(),
+  },
   wait: {
     job_ids: z.array(z.string()).optional().describe("Job ids from a queued call, or the task_id of a call that answered still_working. Default: every queued job."),
     timeout_seconds: z.number().int().min(5).max(900).default(40).describe("An MCP call returns after at most 40 s whatever this says, so call again until finished is true."),

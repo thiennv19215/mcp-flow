@@ -529,9 +529,17 @@
     });
   }
 
-  async function findFlowTile(title, retries = 100) {
+  // Grid tile lookup is EXACT by default: destructive paths (trash,
+  // rename) and id-verified paths must never act on a merely
+  // prefix-matching tile ("anh" must not resolve to "anh 2"). Prefix
+  // semantics belong to the scan filters (download / workflow source
+  // resolution), which resolve to a full title BEFORE calling this.
+  // Pass { exact: false } only for a caller that deliberately wants the
+  // historical prefix fallback.
+  async function findFlowTile(title, retries = 100, options = {}) {
     const norm = s => String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
     const wanted = norm(title);
+    const exact = options.exact !== false;
     const scroller = flowMediaGridScrollContainer();
     if (scroller) scroller.scrollTop = 0;
     await root.wait?.(200);
@@ -541,7 +549,7 @@
         [...document.querySelectorAll("flow-grid-tile-container")];
       const tile = tileContainers.find(el => {
         const tTitle = norm(el.getAttribute("aria-label") || el.getAttribute("title"));
-        return tTitle === wanted || tTitle.startsWith(wanted);
+        return tTitle === wanted || (!exact && tTitle.startsWith(wanted));
       });
       if (tile) return tile;
       if (!scroller) break;
@@ -803,9 +811,12 @@
     });
   }
 
-  async function countFlowTitleAcrossGrid(title) {
+  async function countFlowTitleAcrossGrid(title, options = {}) {
     const norm = s => String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
     const wanted = norm(title);
+    // Exact by default — see findFlowTile: the trash gate counts copies
+    // with this, so a prefix-only match must not count as a copy.
+    const exact = options.exact !== false;
     const scroller = flowMediaGridScrollContainer();
     const originalTop = scroller?.scrollTop || 0;
     const seen = new Set();
@@ -818,7 +829,7 @@
           document.querySelectorAll("flow-grid-tile-container");
         for (const tile of tileContainers) {
           const tTitle = norm(tile.getAttribute("aria-label") || tile.getAttribute("title"));
-          if (tTitle === wanted || tTitle.startsWith(wanted)) {
+          if (tTitle === wanted || (!exact && tTitle.startsWith(wanted))) {
             const id = root.mediaId?.(tile) || tTitle;
             seen.add(id);
           }
