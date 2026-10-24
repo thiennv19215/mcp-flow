@@ -240,6 +240,29 @@
       if (labels.length) parts.push(`options seen: ${labels.join(", ")}`);
       if (parts.length) lines.push(`Frame picker: ${parts.join(" · ")}`);
     }
+    // Videofix M-H: the observe phase's evidence bundle (observeError in
+    // generation-operations.js) arrives flat on the diagnostics object
+    // and until now rendered nothing, so a job that failed in observe
+    // looked blind on the panel. Render it whenever requestSeen is
+    // present — false included, because a never-started observe (no
+    // request, zeroed tallies) is itself the diagnosis.
+    if (typeof diagnostics.requestSeen === "boolean") {
+      const parts = [`request ${diagnostics.requestSeen ? "seen" : "not seen"}`];
+      if (typeof diagnostics.lastReceiptStage === "string" && diagnostics.lastReceiptStage) parts.push(`stage ${diagnostics.lastReceiptStage}`);
+      for (const [key, label] of [["readyCount", "ready"], ["busyCount", "busy"], ["failedCount", "failed"], ["recoverySweeps", "sweeps"]]) {
+        const value = diagnostics[key];
+        if (Number.isFinite(value)) parts.push(`${label} ${value}`);
+      }
+      if (Number.isFinite(diagnostics.elapsedMs)) parts.push(`${Math.round(diagnostics.elapsedMs / 1000)}s`);
+      lines.push(`Observe: ${parts.join(" · ")}`);
+      const ids = Array.isArray(diagnostics.correlatedMediaIds)
+        ? diagnostics.correlatedMediaIds.filter(id => typeof id === "string" && id)
+        : [];
+      if (ids.length) {
+        const shown = ids.slice(0, 4);
+        lines.push(`Observe ids: ${shown.join(", ")}${ids.length > shown.length ? ` +${ids.length - shown.length} more` : ""}`);
+      }
+    }
     return lines.map(line => line.slice(0, 400));
   }
 
