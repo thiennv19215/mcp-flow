@@ -98,7 +98,7 @@ extension/src/
 └── ui/                              # Giao diện tiện ích Chrome
     ├── sidebar.js & sidebar.html    # Side panel điều khiển và theo dõi queue
     ├── options.js & options.html    # Trang cài đặt tiện ích
-    └── popup.js & popup.html        # Popup icon trên thanh công cụ trình duyệt
+    └── (popup đã gỡ: side panel thay thế từ bản này)
 ```
 
 ---

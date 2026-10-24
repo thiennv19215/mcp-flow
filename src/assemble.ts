@@ -70,13 +70,6 @@ function defaultClips(dir: string): string[] {
     .map((x) => join(dir, x.f));
 }
 
-// Pulls the spoken track out of a generated clip so Flow's voices can be used as narration.
-export async function extractAudio(video: string, target: string): Promise<{ output: string; duration: number }> {
-  await run(FFMPEG, ["-y", "-i", video, "-vn", "-af", "highpass=f=80,acompressor=threshold=-18dB:ratio=3:attack=5:release=120,loudnorm=I=-16:TP=-1.5:LRA=11", "-ar", "48000", "-ac", "2", target]);
-  const { stdout } = await run(FFPROBE, ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", target]);
-  return { output: target, duration: Number(stdout.trim()) };
-}
-
 // Joins the scene clips into one film, keeping their own sound and laying music / voiceover on top.
 export async function assemble(o: AssembleOptions): Promise<{ output: string; clips: string[]; duration: number; held_last_frame: number }> {
   // Clips can now come from anywhere, so the project folder the film is saved into may not exist yet.

@@ -1,4 +1,4 @@
-// Manual end-to-end check: node scripts/e2e.mjs <project> '<scenes json>'
+// Manual end-to-end check: node scripts/manual/e2e.mjs <project> '<scenes json>'
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 

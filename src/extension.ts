@@ -25,7 +25,6 @@ export type Connection = {
 };
 
 const connections = new Map<string, Connection>();
-const lastErrors = new Map<string, string>();
 const events = new EventEmitter();
 const initListeners: ((connection: Connection) => void)[] = [];
 const HTTP_POLL_STALE_MS = 90_000;
@@ -77,14 +76,6 @@ function enqueue(connection: Connection, message: OutboundMessage): void {
   }
   connection.outbound.push(message);
   wakePoller(connection);
-}
-
-export function extensionBroadcastEvent(method: string, params: unknown[]): void {
-  for (const connection of connections.values()) enqueue(connection, { type: "event", method, params });
-}
-
-export function extensionSendEvent(connection: Connection, method: string, params: unknown[]): void {
-  enqueue(connection, { type: "event", method, params });
 }
 
 const selectedDevice = () => "local";
@@ -180,7 +171,6 @@ function replaceConnection(connection: Connection): void {
 function dispose(connection: Connection, reason: string): void {
   if (connections.get(connection.deviceId) !== connection) return;
   connections.delete(connection.deviceId);
-  lastErrors.set(connection.deviceId, reason);
   connection.ready = false;
   for (const pending of connection.pending.values()) {
     clearTimeout(pending.timer);
@@ -225,7 +215,6 @@ function acceptInitialized(connection: Connection, info: { protocol?: number; ve
   connection.capabilities = Array.isArray(info.capabilities) ? info.capabilities.filter((value): value is string => typeof value === "string") : [];
   connection.ready = true;
   connection.lastSeen = Date.now();
-  lastErrors.delete(connection.deviceId);
   for (const listener of initListeners) {
     try { listener(connection); } catch (e) { console.warn("[extension] initListener error:", e); }
   }
@@ -239,7 +228,6 @@ export function extensionRegisterHttpPoll(deviceId: string, info: { protocol: nu
   connection.capabilities = Array.isArray(info.capabilities) ? info.capabilities.filter((value): value is string => typeof value === "string") : [];
   connection.ready = true;
   connection.lastSeen = Date.now();
-  lastErrors.delete(deviceId);
   for (const listener of initListeners) {
     try { listener(connection); } catch (e) { console.warn("[extension] initListener error:", e); }
   }
