@@ -204,7 +204,8 @@ async function expectPromptCancel(payloadExtra, requestId) {
   assert.ok(caught, 'the cancelled upload must fail instead of confirming');
   assert.equal(cancelReturn, true,
     'cancelUpload must find the in-flight upload — the request id has to reach the uploader through the operation');
-  assert.equal(caught.code, 'FLOW_UPLOAD_TIMEOUT', String(caught?.stack || caught));
+  // Reviewfix S6: an abort during confirmation reports CANCELLED, not TIMEOUT.
+  assert.equal(caught.code, 'FLOW_UPLOAD_CANCELLED', String(caught?.stack || caught));
   assert.ok(harness.elapsed() >= 9_000, `the cancel was armed during the confirmation wait (elapsed ${harness.elapsed()} ms)`);
   assert.ok(harness.elapsed() < 25_000,
     `the upload aborted at the cancel, not the 240 s hard cap (elapsed ${harness.elapsed()} ms)`);
