@@ -1320,6 +1320,16 @@
           externalDeadline,
         );
       }
+      // Review round 1, S1: an explicit extension ceiling from the caller
+      // (the in-submit path passes its submit budget) forwards into the
+      // confirmation options, capped by the confirmExtendable ceiling
+      // when both are set. waitForNativeMediaTile already honors
+      // extendableTo; it was this wrapper that never forwarded it.
+      if (Number.isFinite(options.extendableTo) && options.extendableTo > 0) {
+        confirmOptions.extendableTo = Number.isFinite(confirmOptions.extendableTo)
+          ? Math.min(confirmOptions.extendableTo, options.extendableTo)
+          : options.extendableTo;
+      }
       confirmed = await waitForNativeMediaTile(matchName, command, kind, confirmOptions);
     } catch (error) {
       // A definitively rejected tile ends the attempt; any other failure

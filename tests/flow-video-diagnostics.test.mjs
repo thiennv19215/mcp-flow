@@ -275,6 +275,31 @@ test('M-B: in-submit frame upload passes the tile uploadName to the picker, not 
   assert.equal(picked[0].expectedId, 'receipt-id');
 });
 
+test('S1 reviewfix: the in-submit staged upload passes the submit budget as its confirmation extension ceiling', async () => {
+  // Before the fix the in-submit upload passed only { deadline }, so
+  // waitForNativeMediaTile capped confirmation at min(budget, base cap)
+  // and a tile finishing past the 90 s base cap — still inside the submit
+  // budget — died with FLOW_UPLOAD_TIMEOUT. After the fix the call also
+  // carries extendableTo equal to the submit deadline, so confirmation
+  // may extend (while the owner tile processes) up to the budget itself.
+  const captured = [];
+  const staged = new Map([['t1', { name: 'client-photo.png' }]]);
+  const components = {
+    clearExistingIngredientChips: async () => {},
+    uploadStagedFlowMedia: async (file, kind, command, options) => {
+      captured.push(options);
+      return { id: 'receipt-id', uploadName: 'a1b2c3d4-upload.png', name: 'client-photo.png' };
+    },
+    chooseNativePickerAsset: async () => ({ id: '11111111-2222-4333-8444-555555555555' }),
+  };
+  const { submit } = dispatchHarness({ waitMode: 'throw-timeout', components, stagedFiles: staged });
+  await assert.rejects(submit({ firstFrame: { transferId: 't1', name: 'client-photo.png' } }), (error) => error.code === 'FLOW_OPERATION_TIMEOUT');
+  assert.equal(captured.length, 1, 'the in-submit staged upload ran exactly once');
+  assert.ok(Number.isFinite(captured[0].deadline), 'the upload call carries a deadline');
+  assert.equal(captured[0].extendableTo, captured[0].deadline,
+    'the confirmation extension ceiling is the submit budget itself');
+});
+
 test('dispatch wait: exhausting the submit deadline without acknowledgement also carries diagnostics', async () => {
   const { submit } = dispatchHarness({ waitMode: 'advance' });
   await assert.rejects(submit(), error => {

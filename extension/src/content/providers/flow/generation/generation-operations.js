@@ -329,7 +329,10 @@
               if (entry?.uploadName) {
                 const file = retainedRefFile(entry);
                 if (file) {
-                  const receipt = await components.uploadStagedFlowMedia(file, ref.kind === "video" ? "video" : "image", command, { deadline: flowDeadline, signal });
+                  // Review round 1, S1: the confirmation may extend up to
+                  // the submit budget itself while the owner tile
+                  // processes (see the uploadAndResolve call below).
+                  const receipt = await components.uploadStagedFlowMedia(file, ref.kind === "video" ? "video" : "image", command, { deadline: flowDeadline, extendableTo: flowDeadline, signal });
                   if (typeof receipt?.id === "string" && receipt.id) restoredId = receipt.id;
                 }
               }
@@ -381,7 +384,11 @@
           let uploadReceipt;
           let uploadError;
           try {
-            uploadReceipt = await runFlowStage(`uploading ${attachment.name}`, ({ signal }) => components.uploadStagedFlowMedia(file, "image", command, { deadline: flowDeadline, signal }), true);
+            // Review round 1, S1: pass the submit budget as the
+            // confirmation extension ceiling — a tile finishing past the
+            // 90 s base cap but inside the budget confirms instead of
+            // timing out, while the budget itself is never exceeded.
+            uploadReceipt = await runFlowStage(`uploading ${attachment.name}`, ({ signal }) => components.uploadStagedFlowMedia(file, "image", command, { deadline: flowDeadline, extendableTo: flowDeadline, signal }), true);
           } catch (error) {
             uploadError = error;
           }
