@@ -339,6 +339,35 @@ test('S3 reviewfix control: a malformed frame with no identifiable problem keeps
   });
 });
 
+test('reviewfix M-A off-screen: an identity-bearing ref with no mounted tile passes the gate for attach-time ID verification', async () => {
+  // Before the fix refNameTrust graded only against MOUNTED assets, so
+  // a valid library/album ref whose tile sat outside the virtualized
+  // grid viewport graded "absent" and failed before submit — even though
+  // attach() could have found it by picker search/scroll and verified
+  // its id. Now an "absent" grade with an identity downgrades to
+  // "unknown", and the attach stages decide. The job must get PAST
+  // revalidation (it dies later in this harness, which stubs no picker).
+  const { submit } = dispatchHarness({
+    waitMode: 'throw-timeout',
+    menuAssets: [],
+  });
+  await assert.rejects(submit({ firstFrame: { assetName: 'Off-screen photo.png', kind: 'image', expectedId: '11111111-2222-4333-8444-555555555555' } }), (error) => {
+    assert.notEqual(error.code, 'FLOW_QUEUE_PREFLIGHT_REFERENCE_MISSING');
+    return true;
+  });
+});
+
+test('reviewfix M-A off-screen control: a name-only ref with no mounted tile still fails at the gate', async () => {
+  const { submit } = dispatchHarness({
+    waitMode: 'throw-timeout',
+    menuAssets: [],
+  });
+  await assert.rejects(submit({ firstFrame: { assetName: 'Gone.png', kind: 'image' } }), (error) => {
+    assert.equal(error.code, 'FLOW_QUEUE_PREFLIGHT_REFERENCE_MISSING');
+    return true;
+  });
+});
+
 test('dispatch wait: exhausting the submit deadline without acknowledgement also carries diagnostics', async () => {
   const { submit } = dispatchHarness({ waitMode: 'advance' });
   await assert.rejects(submit(), error => {

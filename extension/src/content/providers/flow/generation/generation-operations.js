@@ -328,6 +328,14 @@
             const named = assets.filter(asset => String(asset?.name || "").trim() === ref.assetName);
             if (named.some(asset => asset?.nameSource === "dedicated")) return "dedicated";
             if (named.length > 0) return "fallback-only";
+            // Review round 3 MUST: collectAssets reads only MOUNTED
+            // tiles while the grid is virtualized, so "no mounted tile"
+            // cannot prove a ref WITH an identity is absent — its tile
+            // may simply sit outside the viewport. Downgrade to
+            // "unknown" and let the attach stages verify the id by
+            // picker search/scroll. A name-only ref with no identity
+            // still fails as "absent" below.
+            if (ids.size > 0) return "unknown";
             return "absent";
           };
           // (No separate refAssetExists helper: the loop below reads the
