@@ -171,7 +171,16 @@
       const seenReasons = new Set();
       for (let index = 0; index < rawReasons.length && reasons.length < 8; index++) {
         const reason = ownData(rawReasons, String(index));
-        if (typeof reason === "string" && DIAGNOSTIC_REASON_CODES.has(reason) && !seenReasons.has(reason)) {
+        if (typeof reason !== "string" || seenReasons.has(reason)) continue;
+        if (DIAGNOSTIC_REASON_CODES.has(reason)) {
+          reasons.push(reason);
+          seenReasons.add(reason);
+        } else if (/^dropped_references:[1-9][0-9]*$/.test(reason)) {
+          // Audit cluster B: the drop count is part of the reason code,
+          // so the fixed allowlist above would strip it and the panel
+          // would never show the loss. The strict numeric shape keeps
+          // the allowlist's protection: only a positive integer count
+          // passes, never free text.
           reasons.push(reason);
           seenReasons.add(reason);
         }
@@ -278,6 +287,9 @@
       ? Array.isArray(rows) ? rows.flatMap((row) => [payload?.[3]?.[5], row?.[7]?.[5]]) : []
       : [payload?.[1]?.[5]];
     const project = projectValues.every((value) => typeof value !== "string" || !UUID_RE.test(value) || value === attempt.projectId);
+    const droppedReferences = attempt.mediaType === "video" && Array.isArray(rows)
+      ? rows.reduce((total, row) => total + (decodeVideoInputRow(row)?.droppedReferences || 0), 0)
+      : 0;
     const reasons = [];
     if (!shape) reasons.push("payload_shape_mismatch");
     if (!quantity) reasons.push("quantity_mismatch");
@@ -285,7 +297,11 @@
     if (model === false) reasons.push("model_mismatch");
     if (!referenceIds) reasons.push("reference_ids_mismatch");
     if (!project) reasons.push("project_mismatch");
-    return { shape, prompt, model, quantity, referenceIds, project, reasons };
+    // The panel renders the request event's reasons, so a dropped
+    // reference surfaces there as dropped_references:<n> instead of
+    // vanishing silently behind shape=true.
+    if (droppedReferences > 0) reasons.push(`dropped_references:${droppedReferences}`);
+    return { shape, prompt, model, quantity, referenceIds, project, droppedReferences, reasons };
   };
   const recordRequestDiagnostic = (attempt, call, transport, requestPath, reasons = []) => {
     pruneRequestDiagnostics();
@@ -600,6 +616,14 @@
       ratio = row[3];
       if (row[0]?.[0] == null && UUID_RE.test(row[0]?.[1] || "")) {
         referenceSlots = [row[0], row[8]];
+      } else if (Array.isArray(row[0]) && row[0].every((entry) => Array.isArray(entry))) {
+        // row[0] is a reference LIST (frame refs, then the prompt nodes
+        // nested as a structural entry): it used to fall into the else
+        // branch below and its refs were never read at all. Read the
+        // list as an extra slot, keeping the proven row[1]/row[9] slots
+        // exactly as before; no further slot is guessed.
+        referenceSlots = [row[0], row[1]];
+        entitySlot = row[9];
       } else {
         referenceSlots = [row[1]];
         entitySlot = row[9];
@@ -615,6 +639,7 @@
     } else return null;
     if (!Number.isInteger(ratio) || ratio < 1) return null;
     const refs = [];
+    let droppedReferences = 0;
     for (const slot of referenceSlots) {
       if (slot == null) continue;
       if (!Array.isArray(slot)) return null;
@@ -623,17 +648,22 @@
         continue;
       }
       if (!slot.length || !slot.every((ref) => Array.isArray(ref))) continue;
-      const parsed = [];
-      let validReferenceList = true;
       for (const ref of slot) {
+        // A list slot can carry structural (non-reference) entries — e.g.
+        // the prompt nodes nested in a row[0] list. Those are not
+        // references at all and are skipped silently, not counted.
+        if (Array.isArray(ref[0])) continue;
         const id = ref[0] == null ? ref[1] : ref[0];
         if (typeof id !== "string" || !UUID_RE.test(id)) {
-          validReferenceList = false;
-          break;
+          // One bad entry used to drop the WHOLE list while decode
+          // still reported shape=true — a silent reference loss. Keep
+          // every valid ref and count only the bad entries, so the
+          // panel can show exactly what was dropped.
+          droppedReferences += 1;
+          continue;
         }
-        parsed.push(id);
+        refs.push(id);
       }
-      if (validReferenceList) refs.push(...parsed);
     }
     if (entitySlot != null) {
       if (!Array.isArray(entitySlot)) return null;
@@ -652,7 +682,7 @@
       const characterId = node?.[1]?.[2]?.[0];
       if (typeof characterId === "string" && UUID_RE.test(characterId)) refs.push(characterId);
     }
-    return { model, ratio, refs };
+    return { model, ratio, refs, droppedReferences };
   };
   const requestVariants = (attempt) => {
     const refs =
@@ -861,12 +891,14 @@
     const models = [];
     const ratios = [];
     const refs = [];
+    let droppedReferenceCount = 0;
     for (const input of payload[0]) {
       const decoded = decodeVideoInputRow(input);
       if (!decoded || typeof decoded.model !== "string") return null;
       models.push(decoded.model);
       ratios.push(decoded.ratio);
       refs.push(...decoded.refs);
+      droppedReferenceCount += decoded.droppedReferences || 0;
     }
     const actualRefs = normalizedRefs(
       refs.filter((id) => typeof id === "string" && UUID_RE.test(id))
@@ -888,6 +920,7 @@
       referencesMatched: attemptRefsMatch(actualRefs, attempt),
       actualReferenceCount: actualRefs.length,
       expectedReferenceCount: expectedRefs.length + globalCharacterCount(attempt) + (attempt.unverifiedMediaCount || 0),
+      droppedReferenceCount,
     };
   };
   const imageInputDiagnostic = (payload, attempt) => {

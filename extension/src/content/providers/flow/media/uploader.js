@@ -710,6 +710,17 @@
     let lastScan = null;
     let lastScanErrorCode = null;
     const getMediaId = root.mediaId || (el => el.getAttribute("data-media-id") || el.getAttribute("id") || "");
+    // Audit cluster B: confirm with the repo's identity alias system
+    // (UUID case-insensitive, asb: matching with or without the prefix)
+    // instead of a raw ===, so an expectedId in an equivalent form
+    // still confirms its tile. tiles.js loads AFTER this file in the
+    // manifest, so the matcher is resolved at CALL time — long after
+    // all content scripts loaded — and falls back to === when the
+    // tiles bundle is not loaded.
+    const identityMatches = (a, b) => {
+      const matcher = root.FlowTiles?.tileIdentityValuesMatch;
+      return typeof matcher === "function" ? matcher(a, b) : String(a) === String(b);
+    };
 
     while (Date.now() < deadline || (ownerProcessing && deadline < extensionCeiling)) {
       // IMG-09: an explicit cancellation anywhere in the wait exits
@@ -756,7 +767,7 @@
         .filter(item => matchesFlowTile(item, assetName));
       if (exactNameMatches.length) exactTileObserved = true;
       const exactMatches = expectedId && !requireNewOwner
-        ? exactNameMatches.filter(item => String(getMediaId(item)) === expectedId)
+        ? exactNameMatches.filter(item => identityMatches(getMediaId(item), expectedId))
         : exactNameMatches;
       if (exactMatches.length > 1 && !requireNewOwner) {
         throw fn("FLOW_UPLOAD_TILE_AMBIGUOUS", `More than one Flow tile exactly matches uploaded ${kind} "${assetName}". Inspect the library before retrying.`, false, true);
@@ -838,7 +849,7 @@
             },
           });
           const exactAssets = assets.filter(asset => asset?.id && (expectedId
-            ? String(asset.id) === expectedId && flowUploadNameMatches(asset?.name, assetName)
+            ? identityMatches(asset.id, expectedId) && flowUploadNameMatches(asset?.name, assetName)
             : flowUploadNameMatches(asset?.name, assetName)));
           const confirmedAssets = requireNewOwner
             ? exactAssets.filter(asset => asset?.newSinceBaseline === true && !baselineIds.has(String(asset.id)))
