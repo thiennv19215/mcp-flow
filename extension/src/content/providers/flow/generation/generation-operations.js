@@ -409,7 +409,12 @@
             throw uploadError;
           }
           if (popupCleanupError) throw popupCleanupError;
-          return await runFlowStage(`selecting uploaded image ${attachment.name}`, ({ signal }) => components.chooseNativePickerAsset(attachment.name, slot, { deadline: flowDeadline, signal, command, expectedId: uploadReceipt?.id }), true);
+          // M-B: the dispatched tile bears the uploader's digest-derived
+          // uploadName, not the client's safeName — pass uploadName (the
+          // same precedence the sidebar's uploadedAssetAttachment uses)
+          // so the picker's title leg can match the tile it just made.
+          const pickerTitle = uploadReceipt?.uploadName || uploadReceipt?.name || attachment.name;
+          return await runFlowStage(`selecting uploaded image ${attachment.name}`, ({ signal }) => components.chooseNativePickerAsset(pickerTitle, slot, { deadline: flowDeadline, signal, command, expectedId: uploadReceipt?.id }), true);
         };
 
         const resolveValue = async (value, slot) => {

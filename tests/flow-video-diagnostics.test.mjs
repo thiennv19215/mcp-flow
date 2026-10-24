@@ -66,7 +66,7 @@ const EXPECTED_DIAGNOSTICS = {
 // Part 1 — dispatch wait diagnostics (generation-operations.js)
 // ---------------------------------------------------------------------------
 
-function dispatchHarness({ health = HEALTH, waitMode = 'throw-timeout', activation = null, requestSeen = false, components = null, liveButtonDisabledAfterMs = null, liveTilesAfterMs = null, editorClearedAfterMs = null, menuAssets = null } = {}) {
+function dispatchHarness({ health = HEALTH, waitMode = 'throw-timeout', activation = null, requestSeen = false, components = null, liveButtonDisabledAfterMs = null, liveTilesAfterMs = null, editorClearedAfterMs = null, menuAssets = null, stagedFiles = null } = {}) {
   const correlationMap = new Map([
     ['attempt-1', { attemptId: 'attempt-1', requestSeen, receipts: [], interfered: false }],
   ]);
@@ -104,6 +104,7 @@ function dispatchHarness({ health = HEALTH, waitMode = 'throw-timeout', activati
       ensureFlowProjectEditor: async () => {},
       dismissBlockingOverlays: async () => {},
       ensureFlowLibrarySection: async () => {},
+      prepareFlowOperation: async () => {},
     },
     FlowEditor: {
       preflightGenerationPrompt: async () => ({}),
@@ -119,8 +120,10 @@ function dispatchHarness({ health = HEALTH, waitMode = 'throw-timeout', activati
       getEditorUserText: () => editorTextAt(),
     },
     getEditorUserText: () => editorTextAt(),
-    FlowSettings: {},
+    FlowSettings: { restoreNativeFramesMode: async () => {} },
     FlowComponents: components || {},
+    validStagedLocalImage: (value) => Boolean(value && value.transferId),
+    stagedNativeFiles: stagedFiles || new Map(),
     FlowTiles: fakeTiles,
     FlowMediaMenu: { nativeRead: () => ({ signedIn: true, inProject: true }), ...(menuAssets !== null ? { collectAssets: () => menuAssets } : {}) },
     FlowAgent: { closeNativeAgentSession: async () => {} },
@@ -223,6 +226,27 @@ test('M-A: a reference with an expectedId passes revalidation by identity even w
     assert.notEqual(error.code, 'FLOW_QUEUE_PREFLIGHT_REFERENCE_MISSING');
     return true;
   });
+});
+
+test('M-B: in-submit frame upload passes the tile uploadName to the picker, not the client name', async () => {
+  const picked = [];
+  const staged = new Map([['t1', { name: 'client-photo.png' }]]);
+  const components = {
+    clearExistingIngredientChips: async () => {},
+    uploadStagedFlowMedia: async () => ({ id: 'receipt-id', uploadName: 'a1b2c3d4-upload.png', name: 'client-photo.png' }),
+    chooseNativePickerAsset: async (title, slot, options) => {
+      picked.push({ title, slot, expectedId: options.expectedId });
+      return { id: '11111111-2222-4333-8444-555555555555' };
+    },
+  };
+  const { submit } = dispatchHarness({ waitMode: 'throw-timeout', components, stagedFiles: staged });
+  // The submit runs past frame selection and then dies at the mocked
+  // dispatch wait; the picker call itself is what this test observes.
+  await assert.rejects(submit({ firstFrame: { transferId: 't1', name: 'client-photo.png' } }), (error) => error.code === 'FLOW_OPERATION_TIMEOUT');
+  assert.deepEqual(picked.map((call) => call.title), ['a1b2c3d4-upload.png'],
+    'the dispatched tile bears the digest-derived uploadName, not the client safeName');
+  assert.equal(picked[0].slot, 'start');
+  assert.equal(picked[0].expectedId, 'receipt-id');
 });
 
 test('dispatch wait: exhausting the submit deadline without acknowledgement also carries diagnostics', async () => {
