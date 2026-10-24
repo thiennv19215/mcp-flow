@@ -64,11 +64,16 @@ export interface Core {
   observer_health(a: Args<"observer_health">): Promise<unknown>;
   clear_prompt(a: Args<"clear_prompt">): Promise<unknown>;
   generate(a: Args<"generate">): Promise<unknown>;
-  // Optional on the interface: RemoteCore's forwarding properties are an
-  // explicit list that does not include this method yet, so a relay-hosted
-  // MCP server answers chatgpt_generate with a clear error (handled in
-  // mcp-tools.ts) instead of the tool silently missing.
+  // Optional on the interface: the method stays optional so a Core
+  // implementation without the ChatGPT surface answers chatgpt_generate
+  // with a clear error (handled in mcp-tools.ts) instead of the tool
+  // silently missing. RemoteCore forwards it like its other methods.
   chatgpt_generate?(a: ChatGptGenerateArgs): Promise<unknown>;
+  // Optional for the same reason as chatgpt_generate above: a Core
+  // without the workflow-graph surface answers flow_run_workflow with
+  // a clear error (handled in mcp-tools.ts). LocalCore implements it;
+  // RemoteCore forwards it like its other methods.
+  run_workflow_graph?(a: RunWorkflowGraphArgs): Promise<unknown>;
   wait(a: Args<"wait">): Promise<unknown>;
   cancel(a: Args<"cancel">): Promise<unknown>;
   retry(a: Args<"retry">): Promise<unknown>;
@@ -210,6 +215,18 @@ async function downloadChatGptImageUrls(imageUrls: string[], outputDir: string, 
     files.push(destination);
   }
   return files;
+}
+
+// Arguments for the workflow-graph run surface (FEAT-07). The graph
+// document stays permissive here — the extension's graph module
+// validates node types, ports and config — and only the envelope the
+// bridge command needs is pinned: the graph, the project it runs
+// against, and the run controls.
+export interface RunWorkflowGraphArgs {
+  graph: Record<string, unknown>;
+  project: string;
+  output_dir?: string;
+  auto_start?: boolean;
 }
 
 export async function materializeQueueJob(job: ExtensionQueueJob): Promise<ExtensionQueueJob> {
@@ -396,6 +413,29 @@ export class LocalCore implements Core {
     const job = result.job || result.jobs?.[0];
     if (!job) throw new Error("The extension did not return the queued ChatGPT job.");
     return { output_dir: queued.metadata.output_dir as string, jobs: [jobView(extensionJobAsLegacy(job))] };
+  }
+
+  // FEAT-07 follow-up: forward one workflow-graph run to the extension
+  // bridge command the graph run store serves. The worker validates,
+  // levels and compiles the graph, enqueues the first runnable level
+  // and returns the run record plus that level's jobs — later levels
+  // follow from the worker's own snapshot fold, so this returns as soon
+  // as the run is admitted instead of waiting for it to finish. The
+  // bridge payload spells the flag autoStart (the worker's reader);
+  // output_dir defaults to the project's folder, like the SW handler's
+  // own fallback to the project name.
+  async run_workflow_graph(args: RunWorkflowGraphArgs) {
+    if (!args?.project?.trim()) throw new Error("flow_run_workflow needs a project folder name for the workflow run.");
+    if (!args?.graph || typeof args.graph !== "object" || Array.isArray(args.graph)) {
+      throw new Error("flow_run_workflow needs a workflow graph document (an object with nodes and edges).");
+    }
+    const result = await extensionQueueCall<{ run: unknown; jobs?: ExtensionQueueJob[] }>("flow.queue.workflow", {
+      graph: args.graph,
+      project: args.project,
+      output_dir: args.output_dir ?? projectDir(args.project),
+      autoStart: args.auto_start,
+    }, 45_000);
+    return { run: result.run, jobs: (result.jobs || []).map(job => jobView(extensionJobAsLegacy(job))) };
   }
 
   async wait({ job_ids, timeout_seconds }: Args<"wait">) {

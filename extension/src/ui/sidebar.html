@@ -289,6 +289,24 @@
                   <span data-i18n="gen.multiPromptHint">Separate each prompt with a blank line</span>
                 </div>
               </div>
+              <div class="prompt-assistant-panel hidden" id="promptAssistantPanel">
+                <div class="prompt-assistant-controls">
+                  <select id="paFormat">
+                    <option value="single-en">Single prompt (EN)</option>
+                    <option value="single-vi">Một prompt (VI)</option>
+                    <option value="scenes">Scene breakdown</option>
+                  </select>
+                </div>
+                <textarea id="paIdea" rows="2" placeholder="Ý tưởng của bạn..."></textarea>
+                <button class="btn btn-secondary btn-xs" id="paBuildBtn" type="button">Tạo yêu cầu</button>
+                <textarea id="paRequest" rows="5" readonly placeholder="Yêu cầu gửi cho nhà cung cấp chat sẽ hiện ở đây — sao chép và gửi thủ công."></textarea>
+                <textarea id="paReply" rows="4" placeholder="Dán câu trả lời của nhà cung cấp chat vào đây..."></textarea>
+                <button class="btn btn-secondary btn-xs" id="paParseBtn" type="button">Tách prompt</button>
+                <div id="paPromptList"></div>
+                <textarea id="paI2pReply" rows="4" placeholder="Dán câu trả lời image-to-prompt (khối I2P) vào đây..."></textarea>
+                <button class="btn btn-secondary btn-xs" id="paI2pParseBtn" type="button">Tách I2P</button>
+                <div id="paI2pResult"></div>
+              </div>
               <!-- Hidden backward compatibility prompt inputs -->
               <textarea id="inputPromptImage" class="hidden"></textarea>
               <textarea id="inputPromptVideo" class="hidden"></textarea>
@@ -781,9 +799,13 @@
           </div>
           <!-- Subtab: Templates -->
           <div id="subtab-templates" class="prompts-subtab-pane active">
-            <div class="template-empty-state">
-              <p style="color:var(--text-muted);font-size:12px;text-align:center;padding:24px;">Chọn mẫu prompt từ thư viện hoặc tạo prompt của riêng bạn.</p>
-            </div>
+            <section class="section-card">
+              <div class="form-group"><label class="form-label" for="genTemplateName">Tên mẫu cấu hình</label><input class="form-input" id="genTemplateName" placeholder="Ví dụ: Hero sản phẩm 16:9" /></div>
+              <button type="button" class="btn btn-primary" id="saveGenTemplateBtn">Lưu cấu hình hiện tại</button>
+              <p class="flow-inline-note" style="margin-top:8px;">Lưu prompt + tuỳ chọn + ảnh tham chiếu (nguồn Flow) đang có trong khung tạo thành mẫu để dùng lại. Thư viện mẫu nằm trên máy này, không đồng bộ lên server.</p>
+            </section>
+            <div id="genTemplateList" style="margin-top:10px;"></div>
+            <p id="genTemplateEmpty" class="flow-inline-note">Chưa có mẫu cấu hình nào được lưu.</p>
           </div>
           <!-- Subtab: My Prompts -->
           <div id="subtab-myprompts" class="prompts-subtab-pane">
@@ -795,9 +817,12 @@
               </div>
               <section class="section-card" style="margin-top:10px;">
                 <div class="form-group"><label class="form-label" for="promptName" id="lblPromptName">Tên prompt</label><input class="form-input" id="promptName" placeholder="Ví dụ: Product hero"></div>
-                <div class="form-group"><label class="form-label" for="promptDraft" id="lblPromptDraft">Nội dung prompt</label><textarea class="form-textarea" id="promptDraft" placeholder="Nhập prompt cần lưu"></textarea></div>
+                <div class="form-group"><label class="form-label" for="promptDraft" id="lblPromptDraft">Nội dung prompt</label><textarea class="form-textarea" id="promptDraft" placeholder="Nhập prompt cần lưu. Dùng {{tên_biến}} để tạo biến cần điền khi chèn."></textarea></div>
+                <div class="form-group"><label class="form-label" for="promptCategory">Danh mục</label><input class="form-input" id="promptCategory" placeholder="Ví dụ: Sản phẩm"></div>
+                <div class="form-group"><label class="form-label" for="promptTags">Thẻ (cách nhau bằng dấu phẩy)</label><input class="form-input" id="promptTags" placeholder="Ví dụ: hero, studio"></div>
                 <button type="button" class="btn btn-primary" id="btnSavePrompt"><span id="txtSavePrompt">Lưu prompt</span></button>
               </section>
+              <div class="form-group" style="margin-top:10px;"><label class="form-label" for="promptAddonSelect">Addon/style gắn khi tạo ảnh/video (chỉ áp dụng lúc tạo, không lưu vào prompt)</label><select class="form-input" id="promptAddonSelect"><option value="">Không dùng addon</option></select></div>
               <div class="myprompts-list" id="myPromptsList" style="margin-top:10px;"></div>
               <div id="savedPromptsList" class="flow-saved-prompts" style="margin-top:10px;"></div>
               <p id="savedPromptsEmpty" class="flow-inline-note">Chưa có prompt nào được lưu.</p>
@@ -831,6 +856,15 @@
               </button>
             </div>
           </div>
+          <!-- FEAT-05: saved multi-task lists (flow-task-lists.js) -->
+          <div id="flowTaskSearchRow" style="display:none;margin:10px 0;">
+            <input type="search" id="flowTaskSearch" placeholder="Tìm tác vụ theo tên hoặc prompt…" style="width:100%;">
+          </div>
+          <div style="display:flex;gap:6px;margin:10px 0;">
+            <button type="button" class="btn btn-secondary btn-sm" id="flowTaskRunSelectedBtn">Chạy đã chọn</button>
+          </div>
+          <div id="flowTaskList" class="flow-history-list" aria-live="polite"></div>
+          <p id="flowTaskEmpty" class="flow-inline-note">Chưa có tác vụ nào được lưu.</p>
         <!-- ========================================== -->
         <!-- TAB 2: WORKFLOW                            -->
         <!-- ========================================== -->
@@ -912,6 +946,66 @@
             </div>
             <div id="workflowList" class="workflow-list"></div>
           </section>
+          <section class="section" id="workflowTemplatesSection">
+            <h3>Mẫu workflow</h3>
+            <p class="section-hint">Lưu một workflow (dán JSON đồ thị) thành mẫu có tên để tạo lại workflow mới, xuất/nhập file. Mẫu chỉ giữ các field trong whitelist của đồ thị — trạng thái chạy không được lưu.</p>
+            <div class="form-group">
+              <label for="wfTemplateName">Tên mẫu</label>
+              <input type="text" id="wfTemplateName" placeholder="VD: Drama gia đình" />
+            </div>
+            <div class="form-group">
+              <label for="wfTemplateCategory">Danh mục</label>
+              <input type="text" id="wfTemplateCategory" placeholder="VD: drama" />
+            </div>
+            <div class="form-group">
+              <label for="wfTemplateDescription">Mô tả</label>
+              <input type="text" id="wfTemplateDescription" placeholder="Mô tả ngắn (tuỳ chọn)" />
+            </div>
+            <div class="form-group">
+              <label for="wfTemplateGraph">JSON workflow</label>
+              <textarea id="wfTemplateGraph" rows="5" placeholder='{"name":"...","nodes":[...],"edges":[...]}'></textarea>
+            </div>
+            <div class="btn-row">
+              <button class="btn btn-primary btn-sm" id="saveWorkflowTemplateBtn" type="button">Lưu mẫu</button>
+              <button class="btn btn-secondary btn-sm" id="importWorkflowTemplateBtn" type="button">Nhập mẫu từ file</button>
+              <input type="file" id="wfTemplateImportFile" accept="application/json,.json" class="hidden" />
+            </div>
+            <div id="workflowTemplateEmpty" class="empty-state">Chưa có mẫu workflow nào.</div>
+            <div id="workflowTemplateList"></div>
+          </section>
+          <section class="section" id="workflowEditorSection">
+            <h3>Trình soạn workflow</h3>
+            <p class="section-hint">Soạn đồ thị node trên đúng định dạng workflow (FEAT-07): thêm node, nối cạnh bằng thao tác trên bản tóm tắt, hoàn tác/làm lại tối đa 40 bước (bản nháp tự lưu). Xuất JSON cho ra đúng document mà đường FEAT-07 thuần tạo ra — chỉ giữ field trong whitelist, không mang trạng thái chạy.</p>
+            <div class="form-group">
+              <label for="wfEditorName">Tên workflow</label>
+              <input type="text" id="wfEditorName" placeholder="VD: Drama tập 1" />
+            </div>
+            <div class="form-group">
+              <label for="wfEditorNodeType">Loại node</label>
+              <select id="wfEditorNodeType">
+                <option value="text">Text</option>
+                <option value="image">Image</option>
+                <option value="generate">Generate Image/Video</option>
+                <option value="chatgpt">ChatGPT</option>
+                <option value="download">Download</option>
+                <option value="delay">Wait</option>
+              </select>
+            </div>
+            <div class="btn-row">
+              <button class="btn btn-primary btn-sm" id="wfEditorAddNodeBtn" type="button">Thêm node</button>
+              <button class="btn btn-secondary btn-sm" id="wfEditorUndoBtn" type="button">Hoàn tác</button>
+              <button class="btn btn-secondary btn-sm" id="wfEditorRedoBtn" type="button">Làm lại</button>
+            </div>
+            <div id="wfEditorSummary" class="empty-state">Chưa có node nào.</div>
+            <div class="form-group">
+              <label for="wfEditorJson">JSON workflow</label>
+              <textarea id="wfEditorJson" rows="5" placeholder='{"kind":"flow.workflow-graph","version":1,"nodes":[...],"edges":[...]}'></textarea>
+            </div>
+            <div class="btn-row">
+              <button class="btn btn-secondary btn-sm" id="wfEditorOpenBtn" type="button">Mở JSON</button>
+              <button class="btn btn-secondary btn-sm" id="wfEditorExportBtn" type="button">Xuất JSON</button>
+            </div>
+          </section>
         </div>
 
           <div id="queuePage" style="margin-top:12px;"></div>
@@ -938,6 +1032,9 @@
 
           <!-- Subtab: Album -->
           <div class="photos-subtab-pane active" id="photos-album">
+            <div class="photos-albums-header" style="display:flex;justify-content:flex-end;margin-bottom:10px;">
+              <button type="button" class="btn btn-primary btn-sm" id="createAlbumBtn">+ Tạo album</button>
+            </div>
             <div class="album-list-container" id="albumListContainer">
               <p style="color:var(--text-muted);font-size:12px;text-align:center;padding:24px;">Chưa có album nào.</p>
             </div>
@@ -1102,6 +1199,22 @@
             </button>
           </div>
           <div class="wmtool-inline hidden" id="watermarkToolPanel"></div>
+          <div class="wmtool-inline hidden" id="flowTransformPanel">
+            <div class="section-title" id="flowTransformTitle">Đa góc nhìn (Angles)</div>
+            <label class="flow-transform-field"><span>Preset</span>
+              <select id="flowTransformPreset"></select>
+            </label>
+            <div id="flowTransformParams"></div>
+            <div class="flow-transform-source" style="display:flex;gap:6px;align-items:center;margin:8px 0;">
+              <span>Ảnh nguồn: <span id="flowTransformSourceLabel">Chưa có</span></span>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnPickTransformSource">Chọn ảnh nguồn</button>
+            </div>
+            <p id="flowTransformPreview" class="flow-inline-note"></p>
+            <div style="display:flex;gap:6px;margin-top:8px;">
+              <button type="button" class="btn btn-primary" id="btnApplyTransform">Áp dụng — đưa vào hàng đợi</button>
+              <button type="button" class="btn btn-secondary" id="btnCloseTransformPanel">Đóng</button>
+            </div>
+          </div>
         </div>
         <!-- TAB 5: HISTORY                             -->
         <!-- ========================================== -->
@@ -1115,6 +1228,11 @@
           </div>
           <div id="flowHistoryList" class="flow-history-list" aria-live="polite"></div>
           <p id="flowHistoryEmpty" class="flow-inline-note">Chưa có lịch sử cục bộ.</p>
+          <div class="flow-history-toolbar" style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 12px;">
+            <span class="section-title">Lịch sử tạo — chạy lại được</span>
+          </div>
+          <div id="flowGenHistoryList" class="flow-history-list" aria-live="polite"></div>
+          <p id="flowGenHistoryEmpty" class="flow-inline-note">Chưa có bản ghi tạo nào.</p>
         </div>
 
         <!-- ========================================== -->
@@ -1176,6 +1294,14 @@
             <div class="ref-picker-grid" id="refPickerFlowGrid"></div>
             <button type="button" class="ref-picker-more" id="refPickerMore" hidden></button>
             <div class="ref-picker-message" id="refPickerFlowMessage">Đang tìm ảnh trong thư viện Flow...</div>
+            <div class="ref-picker-albums" id="refPickerAlbums">
+              <div class="ref-picker-toolbar">
+                <span style="font-size:12px;font-weight:600;">Album</span>
+                <select class="form-select" id="refPickerAlbumSelect" style="width:auto;margin:0;" aria-label="Chọn album"></select>
+              </div>
+              <div class="ref-picker-grid" id="refPickerAlbumGrid"></div>
+              <div class="ref-picker-message" id="refPickerAlbumMessage" hidden></div>
+            </div>
           </div>
           <div class="ref-picker-content" id="refPickerUploadPanel" hidden>
             <div class="ref-picker-drop" id="refPickerDrop">
@@ -1265,6 +1391,10 @@
   <script src="flow-upload-client.js"></script>
   <script src="flow-queue-panel.js"></script>
   <script src="reference-picker.js"></script>
+  <script src="flow-snippets.js"></script>
+  <script src="../content/shared/selection-normalize.js"></script>
+  <script src="../content/shared/flow-transforms.js"></script>
+  <script type="module" src="workflow-editor.js"></script>
   <script src="sidebar.js"></script>
 </body>
 </html>

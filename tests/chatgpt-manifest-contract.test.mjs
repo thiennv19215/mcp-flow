@@ -92,8 +92,11 @@ test("extension_pages CSP admits chatgpt.com for images and connections (§D.4)"
 test("the two Flow content-script entries are byte-for-byte unchanged and the ChatGPT entry is appended last", () => {
   assert.equal(manifest.content_scripts.length, 3);
   const [mainEntry, flowEntry] = manifest.content_scripts;
-  // Full-shape pin (parsed deepEqual) of both pre-existing Flow entries,
-  // exactly as they stood before GPT-12: matches, ordered js, run_at, world.
+  // Full-shape pin (parsed deepEqual) of both pre-existing Flow entries:
+  // matches, ordered js, run_at, world. The isolated entry's pin was
+  // deliberately extended once after GPT-12 — FEAT-06b added
+  // content/shared/selection-normalize.js (the shared selection layer must
+  // load in the Flow content world before its consumers).
   assert.deepEqual(mainEntry, {
     matches: ["https://flow.google.com/*"],
     js: [
@@ -113,6 +116,7 @@ test("the two Flow content-script entries are byte-for-byte unchanged and the Ch
       "build-revision.js",
       "content/shared/i18n.js",
       "content/shared/dom-utils.js",
+      "content/shared/selection-normalize.js",
       "content/providers/flow/core/selectors.js",
       "content/shared/activity-overlay.js",
       "content/shared/native-file-transfer.js",

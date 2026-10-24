@@ -176,6 +176,20 @@ server.registerTool(
 // generic HTTP bridge validates against schemas, and this surface is
 // MCP-only for now (the Core method is an optional interface member —
 // RemoteCore does not forward it yet).
+// FEAT-07: the workflow-graph run surface. Nodes stay permissive at the
+// MCP boundary (the graph module validates types, ports and config);
+// only the envelope the runner needs is pinned here.
+const runWorkflowGraphShape = {
+  project: z.string().min(1),
+  graph: z.object({
+    name: z.string().optional(),
+    nodes: z.array(z.object({ id: z.string().min(1), type: z.string().min(1) }).passthrough()).min(1),
+    edges: z.array(z.object({}).passthrough()).optional(),
+  }).passthrough(),
+  output_dir: z.string().optional(),
+  auto_start: z.boolean().optional(),
+};
+
 const chatgptGenerateShape = {
   project: z.string().min(1).describe("Folder name for the downloaded images, e.g. 'ChatGPTArt'."),
   prompt: z.string().min(1).describe("Image prompt for ChatGPT. Image generation only; there is no text-task mode."),
@@ -199,6 +213,27 @@ server.registerTool(
   (args) => reply(core.chatgpt_generate
     ? core.chatgpt_generate(args)
     : Promise.reject(new Error("chatgpt_generate is not available in this process: the relay core (RemoteCore) does not forward it yet. Run chatgpt_generate against the owner process."))),
+);
+
+// FEAT-07: run a node-graph workflow. The extension's graph module
+// validates, levels and compiles the graph into the same queue-job
+// shapes the existing planners produce; the core forwards the document
+// to the flow.queue.workflow bridge command. The Core interface does
+// not declare run_workflow_graph yet (same class of small debt as
+// GPT-11's RemoteCore forward), so the lookup goes through a cast and
+// an absent method answers a clear error instead of a TypeError.
+server.registerTool(
+  "flow_run_workflow",
+  {
+    title: "Run a workflow graph",
+    description:
+      "Run a node-graph workflow on the generation queue. Nodes (text and image sources, Flow generate, ChatGPT, download, delay) are validated against the port-compatibility matrix, topologically leveled, and compiled into queue jobs with workflow metadata; each level is enqueued as its dependencies complete, and a node whose dependency failed is skipped together with everything downstream of it. Returns the run record and the first level's queued jobs; use flow_status or the run id to follow progress.",
+    inputSchema: runWorkflowGraphShape,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  },
+  (args) => reply((core as any).run_workflow_graph
+    ? (core as any).run_workflow_graph(args)
+    : Promise.reject(new Error("run_workflow_graph is not available in this process: this core does not implement run_workflow_graph yet. The extension bridge command flow.queue.workflow is ready for it."))),
 );
 
 server.registerTool(

@@ -20,6 +20,8 @@
     draftSave: "flow-batch:save",
     draftRun: "flow-batch:run",
     draftRemove: "flow-batch:remove",
+    runList: "flow-batch-runs:list",
+    runResume: "flow-batch-runs:resume",
   });
 
   const RETRYABLE_OPERATIONS = new Set([
@@ -30,6 +32,15 @@
     "flow.character.create",
     "flow.character.edit",
     "flow.asset.trash",
+  ]);
+
+  // FEAT-12: operations whose finished item can be regenerated in place
+  // (a new attempt of the same slot, not a retry of the same record).
+  const REGENERABLE_OPERATIONS = new Set([
+    "flow.generation.submit",
+    "flow.edit.run",
+    "flow.continue.run",
+    "flow.agent.batch",
   ]);
 
   const TEXT = Object.freeze({
@@ -70,6 +81,11 @@
       retryBatch: "Thử lại {n} tác vụ lỗi an toàn",
       saveDraft: "Lưu nháp", draftsTitle: "Batch nháp", draftEmpty: "Chưa có batch nháp nào.",
       draftMeta: "{n} tác vụ · đã chạy {runs} lần", runDraft: "Chạy", deleteDraft: "Xóa",
+      runActive: "Batch đang chạy", runCompleted: "Lần chạy gần nhất: hoàn tất",
+      runFailed: "Lần chạy gần nhất: thất bại", runNeedsReview: "Lần chạy gần nhất: cần xem lại",
+      resumeUnfinished: "Chạy tiếp phần chưa xong ({n})",
+      regenerate: "Tạo lại", regenAttempts: "Đã tạo lại · {n} lần thử",
+      regenExhausted: "Lần tạo lại đã biến mất trước khi hoàn tất — khôi phục đã hết.",
     },
     en: {
       aria: "Flow task queue", title: "Flow queue", loading: "Loading…",
@@ -108,6 +124,11 @@
       retryBatch: "Retry {n} safe failed tasks",
       saveDraft: "Save draft", draftsTitle: "Batch drafts", draftEmpty: "No batch drafts yet.",
       draftMeta: "{n} tasks · ran {runs} time(s)", runDraft: "Run", deleteDraft: "Delete",
+      runActive: "Batch running", runCompleted: "Last run: completed",
+      runFailed: "Last run: failed", runNeedsReview: "Last run: needs review",
+      resumeUnfinished: "Resume unfinished ({n})",
+      regenerate: "Regenerate", regenAttempts: "Regenerated · {n} attempts",
+      regenExhausted: "The regeneration disappeared before finishing — recovery exhausted.",
     },
   });
 
@@ -492,15 +513,35 @@
       this.render();
     }
 
+    // FEAT-12: the display list. When the snapshot carries the slot
+    // projection, the panel renders one row per slot (the winning
+    // attempt) instead of one row per raw attempt; without slots the
+    // raw job list renders exactly as before.
+    _displaySlots() {
+      const slots = this.snapshot?.slots;
+      return Array.isArray(slots) && slots.length ? slots : null;
+    }
+
+    _displayItems() {
+      const slots = this._displaySlots();
+      return slots ? slots.map(slot => slot.winner) : normalizeItems(this.snapshot);
+    }
+
     render() {
       if (!this.itemsElement) return;
-      const items = normalizeItems(this.snapshot);
+      const slots = this._displaySlots();
+      const items = this._displayItems();
+      this._displayedItems = items;
+      this._displayedSlots = slots;
+      this._viewFolded = Boolean(slots?.some(slot => slot.attemptCount > 1));
       const running = Boolean(this.snapshot.running ?? this.snapshot.isRunning ?? this.snapshot.state?.running);
       const paused = Boolean(this.snapshot.paused ?? this.snapshot.isPaused ?? this.snapshot.state?.paused);
       const attention = this.snapshot.attention ?? this.snapshot.state?.attention;
       const active = Number(this.snapshot.activeCount ?? this.snapshot.active ?? this.snapshot.state?.activeCount ?? 0);
       const counts = this.snapshot.counts || {};
-      const completed = Number(counts.completed ?? this.snapshot.completed ?? items.filter(item => this._status(item) === "completed").length);
+      const completed = slots
+        ? Number(this.snapshot.slotCounts?.completed ?? items.filter(item => String(item?.status ?? "").toLowerCase() === "completed").length)
+        : Number(counts.completed ?? this.snapshot.completed ?? items.filter(item => this._status(item) === "completed").length);
       this.summary.textContent = `${items.length} ${this._text("tasks")} · ${completed} ${this._text("completed")}${paused ? ` · ${this._text("paused")}` : running ? ` · ${this._text("running")}${active ? ` (${active})` : ""}` : ""}`;
       this.attentionBanner.hidden = !["flow-page-blocked", "flow-outcome-unknown", "flow-dependency-blocked"].includes(attention?.type);
       this.attentionBanner.textContent = this.attentionBanner.hidden ? "" : attention?.type === "flow-dependency-blocked"
@@ -519,9 +560,11 @@
     }
 
     _renderItem(task, index, count) {
+      const slot = this._displayedSlots?.[index] || null;
       const item = makeElement("article", "flow-queue-panel__item");
       const id = taskIdentity(task, index);
       item.dataset.flowQueueItem = id;
+      if (slot) item.dataset.regenSlot = slot.slotKey;
       const head = makeElement("div", "flow-queue-panel__item-head");
       const label = task?.label ?? task?.title ?? task?.name ?? task?.prompt ?? task?.payload?.prompt ?? task?.job?.label ?? task?.job?.payload?.prompt ?? task?.task?.prompt ?? `Task ${index + 1}`;
       const source = task?.metadata?.source || "manual";
@@ -546,10 +589,18 @@
       head.append(labelContainer, status);
       item.append(head);
       if (task?.batch && Number.isInteger(task.batch.batchIndex) && Number.isInteger(task.batch.batchCount)) {
-        const siblings = normalizeItems(this.snapshot).filter(candidate => candidate?.batch?.batchId === task.batch.batchId);
+        const siblings = (this._displayedItems || normalizeItems(this.snapshot)).filter(candidate => candidate?.batch?.batchId === task.batch.batchId);
         const completedCount = siblings.filter(candidate => ["completed", "done"].includes(String(candidate.status || "").toLowerCase())).length;
         const batchText = `${task.batch.batchLabel || this._text("batchName")} · ${this._text("batchItem", { n: task.batch.batchIndex + 1, total: task.batch.batchCount })} · ${this._text("batchComplete", { n: completedCount, total: task.batch.batchCount })}`;
         item.append(makeElement("div", "flow-queue-panel__detail", batchText));
+      }
+      if (slot && slot.attemptCount > 1) {
+        const regenBadge = makeElement("span", "flow-queue-panel__regen-badge", this._text("regenAttempts", { n: slot.attemptCount }));
+        regenBadge.style.cssText = "display:inline-block;margin-top:5px;font-size:10px;padding:2px 6px;border-radius:4px;background:rgba(163,230,53,0.12);color:#a3e635;border:1px solid rgba(163,230,53,0.3);font-weight:600";
+        item.append(regenBadge);
+      }
+      if (slot?.recoveryExhausted) {
+        item.append(makeElement("div", "flow-queue-panel__detail flow-queue-panel__detail--download-error", this._text("regenExhausted")));
       }
       const failed = ["failed", "error", "rejected"].includes(String(task?.status ?? task?.state ?? "").toLowerCase());
       const autoRetry = String(task?.status || "").toLowerCase() === "pending" && task?.progress?.phase === "auto_retry";
@@ -603,12 +654,16 @@
         item.append(bar);
       }
       const actions = makeElement("div", "flow-queue-panel__item-actions");
+      // In a folded view the display indexes no longer line up with the
+      // raw queue positions, so reordering is disabled rather than
+      // moving the wrong job.
+      const reorderLocked = this._viewFolded === true;
       const up = this._button("↑", "reorder");
       up.dataset.itemId = id; up.dataset.fromIndex = String(index); up.dataset.toIndex = String(Math.max(0, index - 1));
-      up.setAttribute("aria-label", this._text("moveUp", { n: index + 1 })); up.dataset.stateDisabled = String(index === 0); up.disabled = index === 0;
+      up.setAttribute("aria-label", this._text("moveUp", { n: index + 1 })); up.dataset.stateDisabled = String(index === 0 || reorderLocked); up.disabled = index === 0 || reorderLocked;
       const down = this._button("↓", "reorder");
       down.dataset.itemId = id; down.dataset.fromIndex = String(index); down.dataset.toIndex = String(Math.min(count - 1, index + 1));
-      down.setAttribute("aria-label", this._text("moveDown", { n: index + 1 })); down.dataset.stateDisabled = String(index === count - 1); down.disabled = index === count - 1;
+      down.setAttribute("aria-label", this._text("moveDown", { n: index + 1 })); down.dataset.stateDisabled = String(index === count - 1 || reorderLocked); down.disabled = index === count - 1 || reorderLocked;
       actions.append(up, down);
       if (String(task?.status || "").toLowerCase() === "waiting_for_user") {
         const continueButton = this._button(this._text("continueManual"), "manual-continue");
@@ -625,6 +680,11 @@
         retry.dataset.index = String(index);
         actions.append(retry);
       }
+      if (this._isRegenerable(task)) {
+        const regenerate = this._button(this._text("regenerate"), "regenerate");
+        regenerate.dataset.itemId = id;
+        actions.append(regenerate);
+      }
       if (canDownloadGeneratedMedia(task)) {
         const downloadButton = this._button(this._text("download"), "download");
         downloadButton.dataset.itemId = id;
@@ -633,8 +693,8 @@
       }
       const batchId = task?.batch?.batchId;
       if (batchId) {
-        const siblings = normalizeItems(this.snapshot).filter(candidate => candidate?.batch?.batchId === batchId);
-        const firstVisibleIndex = normalizeItems(this.snapshot).findIndex(candidate => candidate?.batch?.batchId === batchId);
+        const siblings = (this._displayedItems || normalizeItems(this.snapshot)).filter(candidate => candidate?.batch?.batchId === batchId);
+        const firstVisibleIndex = (this._displayedItems || normalizeItems(this.snapshot)).findIndex(candidate => candidate?.batch?.batchId === batchId);
         const retryableCount = siblings.filter(candidate => this._isKnownSafeRetry(candidate) && String(candidate.status).toLowerCase() === "failed").length;
         if (index === firstVisibleIndex && retryableCount > 0) {
           const retryBatch = this._button(this._text("retryBatch", { n: retryableCount }), "retry-batch");
@@ -652,6 +712,17 @@
     _status(task) {
       const status = String(task?.status ?? task?.state ?? task?.phase ?? "pending").toLowerCase();
       return ({ pending: this._text("pending"), running: this._text("runningStatus"), completed: this._text("completedStatus"), failed: this._text("failed"), cancelled: this._text("cancelled"), waiting_for_user: this._text("waitingForUser") })[status] || status.replaceAll("_", " ");
+    }
+
+    // FEAT-12: a finished generation item can be regenerated in place.
+    // Unlike retry (same record, safe failures only), regenerate starts
+    // a NEW attempt of the same slot — so it is offered for every
+    // terminal generation job, completed ones included.
+    _isRegenerable(task) {
+      const status = String(task?.status ?? task?.state ?? "").toLowerCase();
+      if (!["completed", "failed", "cancelled"].includes(status)) return false;
+      const operation = String(task?.operation ?? task?.job?.operation ?? "");
+      return REGENERABLE_OPERATIONS.has(operation);
     }
 
     _isKnownSafeRetry(task) {
@@ -757,12 +828,22 @@
       if (response?.ok !== false && !response?.error && input) input.value = "";
     }
 
+    async _loadRuns() {
+      if (!this.runtime?.sendMessage) return;
+      try {
+        const response = await this.runtime.sendMessage({ type: MESSAGE.runList });
+        if (response?.ok === false || response?.error) return;
+        this.runs = Array.isArray(response?.runs) ? response.runs : [];
+      } catch { /* run state is an enhancement; drafts keep working without it */ }
+    }
+
     async _loadDrafts() {
       if (!this.draftsElement || !this.runtime?.sendMessage) return;
       try {
         const response = await this.runtime.sendMessage({ type: MESSAGE.draftList });
         if (response?.ok === false || response?.error) return;
         this.drafts = Array.isArray(response?.drafts) ? response.drafts : [];
+        await this._loadRuns();
         this._renderDrafts();
       } catch { /* drafts are an enhancement; the queue itself must keep working */ }
     }
@@ -783,12 +864,28 @@
         item.append(head);
         item.append(makeElement("div", "flow-queue-panel__detail",
           this._text("draftMeta", { n: Array.isArray(draft.jobs) ? draft.jobs.length : 0, runs: draft.runCount || 0 })));
+        // FEAT-02: the draft's latest batch run contributes its state,
+        // and a run that ended partial offers to resume only the
+        // unfinished items.
+        const batchRun = (Array.isArray(this.runs) ? this.runs : []).find(candidate => candidate?.draftId === draft.id) || null;
+        if (batchRun) {
+          const stateKey = batchRun.state === "active" ? "runActive"
+            : batchRun.finalizeState === "completed" ? "runCompleted"
+            : batchRun.finalizeState === "failed" ? "runFailed" : "runNeedsReview";
+          item.append(makeElement("div", "flow-queue-panel__detail", this._text(stateKey)));
+        }
         const actions = makeElement("div", "flow-queue-panel__item-actions");
         const run = this._button(this._text("runDraft"), "draft-run");
         run.dataset.draftId = String(draft.id);
         const remove = this._button(this._text("deleteDraft"), "draft-remove");
         remove.dataset.draftId = String(draft.id);
         actions.append(run, remove);
+        if (batchRun?.state === "finalized" && batchRun.finalizeState === "needs_review" &&
+            Array.isArray(batchRun.resumeIndexes) && batchRun.resumeIndexes.length) {
+          const resumeRun = this._button(this._text("resumeUnfinished", { n: batchRun.resumeIndexes.length }), "run-resume");
+          resumeRun.dataset.runId = String(batchRun.id);
+          actions.append(resumeRun);
+        }
         item.append(actions);
         fragment.append(item);
       }
@@ -835,9 +932,28 @@
       });
       if (action === "retry") {
         const index = Number(button.dataset.index);
-        const task = normalizeItems(this.snapshot)[index];
+        const task = (this._displayedItems || normalizeItems(this.snapshot))[index];
         if (!this._isKnownSafeRetry(task)) return;
         return this._send(MESSAGE.retry, { id: taskIdentity(task, index), taskId: taskIdentity(task, index) });
+      }
+      if (action === "regenerate") {
+        const items = this._displayedItems || normalizeItems(this.snapshot);
+        const task = items.find(item => String(item?.id ?? "") === String(button.dataset.itemId))
+          || items.find((item, itemIndex) => taskIdentity(item, itemIndex) === button.dataset.itemId);
+        if (!task || !this._isRegenerable(task)) return;
+        // Ride the existing add path with the lineage pointer; the
+        // queue resolves it into the canonical regen stamp. Stale
+        // receipts from the old attempt never ride along.
+        const metadata = { ...(task.metadata || {}) };
+        delete metadata.generationResultCheckpoint;
+        delete metadata.generationObservation;
+        delete metadata.generationQuoteFields;
+        delete metadata.regen;
+        metadata.regenOf = String(task.id);
+        const payload = task.payload ? JSON.parse(JSON.stringify(task.payload)) : {};
+        return this._send(MESSAGE.add, {
+          job: { operation: task.operation, payload, label: task.label || task.name, metadata },
+        });
       }
       if (action === "retry-batch") return this._send(MESSAGE.retryBatch, { batchId: button.dataset.batchId });
       if (action === "draft-run") {
@@ -847,6 +963,11 @@
       }
       if (action === "draft-remove") {
         const response = await this._send(MESSAGE.draftRemove, { id: button.dataset.draftId });
+        await this._loadDrafts();
+        return response;
+      }
+      if (action === "run-resume") {
+        const response = await this._send(MESSAGE.runResume, { id: button.dataset.runId });
         await this._loadDrafts();
         return response;
       }

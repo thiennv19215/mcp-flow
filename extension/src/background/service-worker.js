@@ -8,6 +8,15 @@ import { resolveProviderForOperation } from "./provider-router.js";
 import { runChatGptQueueJob } from "./chatgpt-queue-runner.js";
 import { loadChatGptCapabilityRegistry } from "./chatgpt-capabilities.js";
 import { FlowBatchDrafts, materializeDraftJobs } from "./flow-batch-drafts.js";
+import { FlowHistory, buildJobFromRecord } from "./flow-history.js";
+import { FlowBatchRuns } from "./flow-batch-runs.js";
+import { FlowWorkflowGraphRuns } from "./flow-workflow-graph.js";
+import { FlowExecutionLock } from "./flow-execution-lock.js";
+import { FlowTaskLists, expandTasksToJobs, requiresSequential } from "./flow-task-lists.js";
+import { FlowAlbums } from "./flow-albums.js";
+import { FlowWorkflowTemplates } from "./flow-workflow-templates.js";
+import { FlowGenTemplates } from "./flow-gen-templates.js";
+import { buildAssistantRequest, parseAssistantReply, parseImageToPromptReply } from "./flow-prompt-assistant.js";
 import { FlowMediaCatalog } from "./flow-media-catalog.js";
 import { revalidateJobReferences } from "./flow-ref-preflight.js";
 import { FlowBridgeClient, readBridgeConfig, postHttpMessage } from "./flow-bridge-client.js";
@@ -57,11 +66,12 @@ const nativeFlowOperations = new Set([
   "flow.frame.extract_last",
   "flow.queue.add", "flow.queue.generate", "flow.queue.edit", "flow.queue.continue", "flow.queue.agent",
   "flow.queue.get", "flow.queue.wait", "flow.queue.cancel", "flow.queue.retry", "flow.queue.metadata",
-  "flow.queue.manual.continue",
+  "flow.queue.manual.continue", "flow.queue.workflow",
 ]);
 const extensionQueueOperations = new Set([
   "flow.queue.add", "flow.queue.generate", "flow.queue.edit", "flow.queue.continue", "flow.queue.agent",
   "flow.queue.get", "flow.queue.wait", "flow.queue.cancel", "flow.queue.retry", "flow.queue.metadata", "flow.queue.manual.continue",
+  "flow.queue.workflow",
 ]);
 const extensionQueueJobOperations = new Set([
   "flow.generation.submit", "flow.edit.run", "flow.continue.run", "flow.agent.batch",
@@ -613,6 +623,25 @@ async function execute(_ws, method, args = [], { queueOwner = false, connectorOw
           : await flowJobQueue.resume();
         const plannedOutputDir = plannedJobs[0]?.payload?.output_dir ?? plannedJobs[0]?.payload?.params?.output_dir ?? payload.output_dir;
         return { jobs: added, job: added.length === 1 ? added[0] : undefined, output_dir: plannedOutputDir, batchId, snapshot: flowQueueSnapshot(snapshot) };
+      }
+      // FEAT-07: run a node-graph workflow on the queue. The graph is
+      // validated and compiled by the run store; the first runnable
+      // level is enqueued now and later levels follow from the queue
+      // snapshot fold in the subscribe callback.
+      if (command.name === "flow.queue.workflow") {
+        if (!payload.graph || typeof payload.graph !== "object") {
+          throw Object.assign(new Error("flow.queue.workflow requires a graph document."), { code: "FLOW_QUEUE_INVALID", outcome_unknown: false });
+        }
+        const { run, toEnqueue } = await flowWorkflowGraphRuns.create({
+          graph: payload.graph,
+          project: payload.project,
+          outputDir: payload.output_dir || payload.project,
+        });
+        const { added, snapshot } = await enqueueWorkflowGraphJobs(toEnqueue, { target: queueTargetMetadata(command) });
+        if (payload.autoStart !== false && snapshot.status !== "paused" && snapshot.status !== "waiting_for_user") {
+          await flowJobQueue.resume();
+        }
+        return { run, jobs: added, snapshot: flowQueueSnapshot(snapshot) };
       }
       if (command.name === "flow.queue.get") {
         if (!id) return flowQueueSnapshot(await flowJobQueue.snapshot());
@@ -1389,6 +1418,103 @@ function createQueueRefPreflight(environment) {
     reupload: async () => null,
   });
 }
+// FEAT-11b: production wiring for the FEAT-11 cross-engine execution
+// lock. The worker owns ONE gate over ONE FlowExecutionLock; transform
+// jobs are identified solely by the metadata.transform stamp that
+// buildTransformJob (content/shared/flow-transforms.js) already writes,
+// so ordinary queue jobs are never affected. The gate is deliberately
+// self-contained so tests can extract and exercise it against the real
+// lock:
+//   - admissionRefusal(jobs): the UI add paths consult it BEFORE
+//     enqueueing; while one family holds the lock, a submission
+//     carrying another family's transform is refused with a typed
+//     payload (owner + canStopCurrent) instead of being queued to run
+//     over it. Same-family and non-transform submissions always pass.
+//   - observeSnapshot(snapshot): folds queue snapshots into the lock —
+//     a family acquires when its first transform job is seen running
+//     and releases when its last running transform job leaves the
+//     running state (any terminal status). A cross-family overlap that
+//     somehow happens anyway (jobs queued before the holder started,
+//     worker-restart recovery) is NOT seized: it is surfaced as a
+//     conflict in status() and the waiting family acquires on the
+//     first snapshot after the holder releases.
+//   - requestStop / stopRequestFor: a blocked engine records a stop
+//     request on the lock; the snapshot fold surfaces it on the
+//     running job's durable record at the queue's own generation
+//     checkpoints (see the subscribe callback) — the request is
+//     observed, never enforced by seizing the job.
+function createTransformExecutionGate(lock) {
+  let runningFamilies = new Set();
+  let conflict = null;
+
+  function familyOf(job) {
+    const transform = job?.metadata?.transform;
+    if (!transform || typeof transform !== "object") return null;
+    const family = typeof transform.family === "string" ? transform.family.trim().toLowerCase() : "";
+    return family || null;
+  }
+
+  function admissionRefusal(jobs) {
+    const current = lock.current();
+    if (!current) return null;
+    const foreign = (Array.isArray(jobs) ? jobs : []).some(job => {
+      const family = familyOf(job);
+      return family !== null && family !== current.owner;
+    });
+    if (!foreign) return null;
+    return {
+      code: "FLOW_TRANSFORM_EXECUTION_LOCKED",
+      message: `A ${current.owner} transform is still running; a different transform family cannot start over it. Wait for it to finish or ask it to stop.`,
+      owner: current.owner,
+      since: current.since,
+      canStopCurrent: true,
+    };
+  }
+
+  function observeSnapshot(snapshot) {
+    const runningNow = new Set();
+    for (const job of snapshot?.jobs || []) {
+      if (job?.status !== "running") continue;
+      const family = familyOf(job);
+      if (family) runningNow.add(family);
+    }
+    // Release first: a family whose last running transform job left
+    // frees the lock inside this same fold, so a waiting family that
+    // is already running (the conflict case) acquires immediately
+    // below instead of one snapshot later.
+    for (const family of runningFamilies) {
+      if (!runningNow.has(family) && lock.isHeldBy(family)) lock.release(family);
+    }
+    conflict = null;
+    for (const family of runningNow) {
+      const result = lock.acquire(family);
+      if (!result.ok) conflict = { family, owner: result.owner, since: result.since, canStopCurrent: true };
+    }
+    runningFamilies = runningNow;
+  }
+
+  function requestStop(requestedBy) {
+    return lock.requestStop(typeof requestedBy === "string" ? requestedBy.trim().toLowerCase() : "");
+  }
+
+  function stopRequestFor(family) {
+    return family && lock.isHeldBy(family) ? lock.stopRequested() : null;
+  }
+
+  function status() {
+    const current = lock.current();
+    return {
+      held: Boolean(current),
+      owner: current?.owner ?? null,
+      since: current?.since ?? null,
+      stopRequested: lock.stopRequested(),
+      conflict,
+      runningFamilies: [...runningFamilies],
+    };
+  }
+
+  return { familyOf, admissionRefusal, observeSnapshot, requestStop, stopRequestFor, status };
+}
 // Keep a small cooldown between generations to avoid hammering Flow while
 // removing most of the previous 5–10 second idle wait between queued jobs.
 const flowJobQueue = new FlowJobQueue(runExtensionFlowJob, {
@@ -1414,9 +1540,126 @@ const flowJobQueue = new FlowJobQueue(runExtensionFlowJob, {
   // legs are live at this level and which stay with the content stage).
   refPreflight: createQueueRefPreflight({ catalog: flowMediaCatalog, projectIdForJob: queueJobProjectId }),
 });
+// FEAT-07: enqueue one workflow graph handout (a level's worth of
+// compiled jobs, or a single node) and bind the minted runtime ids back
+// into the run record. Ids are minted up front, same as the generate
+// bridge path, so the admission mapping is exact. A failed enqueue
+// releases the handout so the next fold retries instead of wedging.
+async function enqueueWorkflowGraphJobs(entries, { target = {} } = {}) {
+  const list = Array.isArray(entries) ? entries.filter(entry => entry?.job) : [];
+  if (!list.length) return { added: [], snapshot: flowJobQueue.getSnapshot() };
+  const runId = list[0].job.metadata?.workflowGraphRunId || null;
+  const jobs = list.map(entry => ({
+    id: crypto.randomUUID(),
+    operation: entry.job.operation,
+    label: entry.job.label,
+    payload: entry.job.payload,
+    metadata: {
+      source: "extension",
+      ...target,
+      ...(entry.job.metadata || {}),
+    },
+  }));
+  try {
+    const added = jobs.length === 1
+      ? [await flowJobQueue.add(jobs[0])]
+      : await flowJobQueue.addBatch(jobs, { batchId: runId });
+    if (runId) {
+      await flowWorkflowGraphRuns.recordAdmission(runId, {
+        batchId: runId,
+        mapping: jobs.map((job, index) => ({ nodeId: list[index].nodeId, jobId: job.id })),
+      });
+    }
+    return { added, snapshot: flowJobQueue.getSnapshot() };
+  } catch (error) {
+    if (runId) await flowWorkflowGraphRuns.releaseEnqueue(runId, list.map(entry => entry.nodeId)).catch(() => {});
+    throw error;
+  }
+}
+
 const flowBatchDrafts = new FlowBatchDrafts();
+const flowHistory = new FlowHistory();
+const flowBatchRuns = new FlowBatchRuns();
+const flowWorkflowGraphRuns = new FlowWorkflowGraphRuns();
+const flowTransformGate = createTransformExecutionGate(new FlowExecutionLock());
+const flowTaskLists = new FlowTaskLists();
+const flowAlbums = new FlowAlbums();
+const flowWorkflowTemplates = new FlowWorkflowTemplates();
+const flowGenTemplates = new FlowGenTemplates();
 flowJobQueue.subscribe((snapshot, reason) => {
   broadcastFlowQueue(snapshot, reason);
+  // FEAT-01: every finished generation lands in the structured history
+  // store. Recording is deduped per finished attempt inside the store
+  // and must never disturb the queue path, so failures stay silent here.
+  void flowHistory.observeSnapshot(snapshot).catch(error => {
+    console.warn("[FlowHistory] Could not record finished queue jobs:", error?.message || error);
+  });
+  // FEAT-02: the same snapshots fold into the active batch run's
+  // receipts, so a run record always reflects what the queue actually
+  // did. Folding is serialized inside the store and, like history
+  // recording, must never disturb the queue path.
+  void flowBatchRuns.observeSnapshot(snapshot).catch(error => {
+    console.warn("[FlowBatchRuns] Could not fold the queue snapshot into the active run:", error?.message || error);
+  });
+  // FEAT-07: the same snapshots fold into active workflow graph runs;
+  // each fold may release the next level's jobs, which are enqueued
+  // right away. Enqueueing re-emits a snapshot, and the run store's
+  // handout flag flips synchronously inside the fold, so this cannot
+  // double-enqueue or loop.
+  void flowWorkflowGraphRuns.observeSnapshot(snapshot).then(results => {
+    for (const result of results) {
+      if (result.finalizeState) console.info(`[FlowWorkflowGraph] Run ${result.run.id} finalized as ${result.finalizeState}`);
+      if (!result.toEnqueue?.length) continue;
+      void enqueueWorkflowGraphJobs(result.toEnqueue, {}).then(({ snapshot: next }) => {
+        if (snapshot.status !== "paused" && snapshot.status !== "waiting_for_user" && next.status !== "running" && !next.paused) flowJobQueue.resume();
+      }).catch(error => console.warn("[FlowWorkflowGraph] Could not enqueue the next workflow level:", error?.message || error));
+    }
+  }).catch(error => {
+    console.warn("[FlowWorkflowGraph] Could not fold the queue snapshot into workflow runs:", error?.message || error);
+  });
+  // FEAT-11b: the same snapshots drive the transform execution lock —
+  // a family acquires when its first transform job starts running and
+  // releases when its last one ends. Pure in-memory bookkeeping; a
+  // failure here must never disturb the queue path either.
+  try {
+    flowTransformGate.observeSnapshot(snapshot);
+  } catch (error) {
+    console.warn("[FlowTransformLock] Could not fold the queue snapshot into the execution lock:", error?.message || error);
+  }
+  // FEAT-11b: at the queue's own generation checkpoints, surface a
+  // pending stop request on the running transform job's durable
+  // record, where the lock owner sees it next to the job itself. The
+  // stamp is bookkeeping only — nothing here cancels or seizes the
+  // job; honoring the request stays the owner's decision (let it
+  // finish, or cancel through the regular queue path, whose terminal
+  // snapshot then releases the lock). The stamp is idempotent per
+  // request, and stamping re-emits as "metadata-updated", which is
+  // not a checkpoint reason, so this cannot loop.
+  if (reason === "generation-observation-checkpoint" || reason === "generation-result-checkpoint") {
+    for (const job of snapshot.jobs || []) {
+      if (job?.status !== "running") continue;
+      const stop = flowTransformGate.stopRequestFor(flowTransformGate.familyOf(job));
+      if (!stop) continue;
+      const stamped = job.metadata?.transformStopRequested;
+      if (stamped?.requestedBy === stop.requestedBy && stamped?.at === stop.at) continue;
+      void flowJobQueue.updateMetadata(job.id, { transformStopRequested: stop }).catch(error => {
+        console.warn("[FlowTransformLock] Could not stamp the stop request on the running job:", error?.message || error);
+      });
+    }
+  }
+  // FEAT-05: the same snapshots write task-run results back onto the
+  // saved tasks that produced them, through the same FEAT-02 fold.
+  void flowTaskLists.observeSnapshot(snapshot).catch(error => {
+    console.warn("[FlowTaskLists] Could not write task results back from the queue snapshot:", error?.message || error);
+  });
+  // FEAT-12b: regen receipts fold into the batch runs that already
+  // finalized (a regeneration is enqueued after its run closed, so the
+  // FEAT-02 fold above never sees its receipt land). Serialized inside
+  // the store behind the active-run fold; failures stay silent here
+  // for the same reason as the other folds.
+  void flowBatchRuns.foldRegenReceipts(snapshot).catch(error => {
+    console.warn("[FlowBatchRuns] Could not fold regen receipts into finalized runs:", error?.message || error);
+  });
   // Failures during queue preflight happen before the download runner can mark
   // the source item. Repair its state from the durable download job outcome.
   if (!["job-finished", "attention-required", "paused"].includes(reason)) return;
@@ -1432,6 +1675,24 @@ flowJobQueue.subscribe((snapshot, reason) => {
       .catch(error => console.warn("[FlowQueue] Could not update failed manual-download state:", error?.message || error));
   }
 });
+// FEAT-02: turn an enqueued draft run into a persistent batch run
+// record — create the record from the exact job inputs that were
+// enqueued, claim it, and write the index-aligned admission mapping
+// from the jobs the queue actually accepted. Callers treat failures as
+// bookkeeping failures: when the claim conflicts (another batch is
+// still active) the created record is removed again, so an untracked
+// run never leaves an orphan record behind.
+async function trackDraftRun(draft, jobs, addedJobs, batchId) {
+  const run = await flowBatchRuns.create({ draftId: draft.id, label: draft.label, items: jobs });
+  try {
+    const claim = await flowBatchRuns.claim(run.id, run.revision);
+    const mapping = addedJobs.map((job, position) => ({ index: claim.indexes[position], jobId: job.id }));
+    return await flowBatchRuns.recordAdmission(run.id, { batchId: batchId || null, kind: "initial", mapping });
+  } catch (error) {
+    await flowBatchRuns.remove(run.id).catch(() => {});
+    throw error;
+  }
+}
 void flowJobQueue.ready.then(() => flowJobQueue.resumeRecovered()).catch(error => {
   console.error("[FlowQueue] Could not resume a checkpointed job after worker restart:", error?.message || error);
 });
@@ -1523,7 +1784,7 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
           break;
         case "flow-queue:add": {
           const source = message.job || {};
-          addedJob = await flowJobQueue.add({
+          const jobInput = {
             // Preserve a client-assigned job id: chained submissions name
             // their jobs up front and reference them from dependsOnId, so
             // dropping the id would orphan every dependency edge.
@@ -1532,7 +1793,15 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
             payload: source.payload,
             label: source.label || source.name,
             metadata: { source: "extension", ...await captureFlowTargetMetadata(), ...(source.metadata || {}) },
-          });
+          };
+          // FEAT-11b: while one transform family holds the execution
+          // lock, a different family's transform is refused here with
+          // the typed lock payload instead of being queued to run over
+          // it. The refusal is returned, not thrown, so its typed
+          // fields (owner, canStopCurrent) survive the response path.
+          const lockRefusal = flowTransformGate.admissionRefusal([jobInput]);
+          if (lockRefusal) return { ok: false, error: lockRefusal, transformLock: flowTransformGate.status() };
+          addedJob = await flowJobQueue.add(jobInput);
           // Adding from the create form always enqueues first, then starts or
           // resumes the sequential worker. Keep a manual-submit pause intact so
           // the user can finish that confirmation before later jobs proceed.
@@ -1545,13 +1814,19 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
         case "flow-queue:add-batch": {
           const source = Array.isArray(message.jobs) ? message.jobs : [];
           const metadata = { source: "extension", ...await captureFlowTargetMetadata() };
-          addedJob = await flowJobQueue.addBatch(source.map(job => ({
+          const jobInputs = source.map(job => ({
             ...(typeof job?.id === "string" && job.id ? { id: job.id } : {}),
             operation: job?.operation,
             payload: job?.payload,
             label: job?.label || job?.name,
             metadata: { ...metadata, ...(job?.metadata || {}) },
-          })), {
+          }));
+          // FEAT-11b: the same transform-lock admission as
+          // flow-queue:add — a batch carrying a foreign-family
+          // transform is refused whole, before anything is enqueued.
+          const lockRefusal = flowTransformGate.admissionRefusal(jobInputs);
+          if (lockRefusal) return { ok: false, error: lockRefusal, transformLock: flowTransformGate.status() };
+          addedJob = await flowJobQueue.addBatch(jobInputs, {
             batchId: message.batchId,
             batchLabel: message.batchLabel,
           });
@@ -1560,6 +1835,20 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
             ? beforeStart
             : await flowJobQueue.resume();
           break;
+        }
+        case "flow-queue:transform-lock":
+          // FEAT-11b: read-only view of the transform execution lock —
+          // current holder, any pending stop request, and any live
+          // cross-family conflict the snapshot fold has surfaced.
+          return { ok: true, transformLock: flowTransformGate.status() };
+        case "flow-queue:transform-lock-stop": {
+          // FEAT-11b: a blocked transform engine asks the running one
+          // to stop. This only RECORDS the request on the lock: the
+          // snapshot fold surfaces it on the running job's record at
+          // the queue's generation checkpoints and the owner decides
+          // whether to honor it — nothing is seized or cancelled here.
+          const stopResult = flowTransformGate.requestStop(String(message.family || message.requestedBy || ""));
+          return { ok: true, stop: stopResult, transformLock: flowTransformGate.status() };
         }
         case "flow-queue:pause":
           await flowJobQueue.pause();
@@ -1661,17 +1950,26 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
             }));
             let snapshot;
             let runBatchId = null;
+            let addedJobs = [];
             if (jobs.length === 1) {
               const added = await flowJobQueue.add(jobs[0]);
+              addedJobs = [added];
               runBatchId = added?.batch?.batchId || null;
               snapshot = await flowJobQueue.snapshot();
             } else {
               const added = await flowJobQueue.addBatch(jobs, { batchLabel: draft.label });
+              addedJobs = added;
               runBatchId = added[0]?.batch?.batchId || null;
               snapshot = await flowJobQueue.snapshot();
             }
             // Bookkeeping must not misreport a successful enqueue as failed.
             const updated = await flowBatchDrafts.recordRun(draft.id, runBatchId).catch(() => draft);
+            // FEAT-02: the run also becomes a persistent batch run record
+            // whose receipts fold from queue snapshots. Tracking is
+            // bookkeeping — it must never fail a successful enqueue.
+            await trackDraftRun(draft, jobs, addedJobs, runBatchId).catch(error => {
+              console.warn("[FlowBatchRuns] Could not track this draft run:", error?.message || error);
+            });
             snapshot = message.autoStart === false || snapshot.isPaused || snapshot.waitingForUser > 0
               ? snapshot
               : await flowJobQueue.resume();
@@ -1686,6 +1984,426 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
     })().then(respond).catch(error => respond({
       ok: false,
       error: { code: error?.code || "FLOW_BATCH_FAILED", message: String(error?.message || error) },
+    }));
+    return true;
+  }
+  if (typeof message?.type === "string" && message.type.startsWith("flow-history:")) {
+    if (_sender?.id !== chrome.runtime.id || _sender?.tab) {
+      respond({ ok: false, error: { code: "FLOW_HISTORY_FORBIDDEN", message: "Generation history is available only from the extension UI." } });
+      return;
+    }
+    void (async () => {
+      await flowHistory.ready;
+      switch (message.type) {
+        case "flow-history:list":
+          return { ok: true, records: await flowHistory.list(message.filter || {}) };
+        case "flow-history:remove": {
+          const removed = await flowHistory.remove(String(message.id || ""));
+          return { ok: true, removed, records: await flowHistory.list() };
+        }
+        case "flow-history:clear": {
+          await flowHistory.clear();
+          return { ok: true, records: [] };
+        }
+        case "flow-history:rerun": {
+          const record = await flowHistory.get(String(message.id || ""));
+          if (!record) throw Object.assign(new Error(`No history record with id ${message.id}.`), { code: "FLOW_HISTORY_NOT_FOUND" });
+          // The job is rebuilt from the record's stored snapshot — refs
+          // ride the saved payload, never a fresh library lookup. Like a
+          // draft run, the current tab/project target wins over the
+          // target metadata captured when the original job ran.
+          const target = await captureFlowTargetMetadata();
+          const built = buildJobFromRecord(record);
+          const job = {
+            ...built,
+            metadata: { source: "extension", ...(built.metadata || {}), ...target },
+          };
+          await flowJobQueue.add(job);
+          let snapshot = await flowJobQueue.snapshot();
+          snapshot = message.autoStart === false || snapshot.isPaused || snapshot.waitingForUser > 0
+            ? snapshot
+            : await flowJobQueue.resume();
+          return { ok: true, record, ...flowQueueSnapshot(snapshot) };
+        }
+        default:
+          throw Object.assign(new Error(`Unsupported history action: ${message.type}`), { code: "FLOW_HISTORY_ACTION_UNSUPPORTED" });
+      }
+    })().then(respond).catch(error => respond({
+      ok: false,
+      error: { code: error?.code || "FLOW_HISTORY_FAILED", message: String(error?.message || error) },
+    }));
+    return true;
+  }
+  if (typeof message?.type === "string" && message.type.startsWith("flow-tasks:")) {
+    if (_sender?.id !== chrome.runtime.id || _sender?.tab) {
+      respond({ ok: false, error: { code: "FLOW_TASKS_FORBIDDEN", message: "Saved tasks are available only from the extension UI." } });
+      return;
+    }
+    void (async () => {
+      await flowTaskLists.ready;
+      switch (message.type) {
+        case "flow-tasks:list": {
+          const hasFilter = Boolean(message.query || message.projectId || message.provider);
+          const tasks = hasFilter
+            ? await flowTaskLists.search({ query: message.query || "", projectId: message.projectId || null, provider: message.provider || null })
+            : await flowTaskLists.list();
+          return { ok: true, tasks };
+        }
+        case "flow-tasks:create": {
+          const task = await flowTaskLists.create({ name: message.name, config: message.config });
+          return { ok: true, task, tasks: await flowTaskLists.list() };
+        }
+        case "flow-tasks:update": {
+          const task = await flowTaskLists.update(String(message.id || ""), { name: message.name, config: message.config });
+          return { ok: true, task, tasks: await flowTaskLists.list() };
+        }
+        case "flow-tasks:duplicate": {
+          const task = await flowTaskLists.duplicate(String(message.id || ""));
+          return { ok: true, task, tasks: await flowTaskLists.list() };
+        }
+        case "flow-tasks:remove": {
+          const removed = await flowTaskLists.remove(String(message.id || ""));
+          return { ok: true, removed, tasks: await flowTaskLists.list() };
+        }
+        case "flow-tasks:run": {
+          // Run one, a selection, or all: the ids resolve against the
+          // store, and a task already mid-run is skipped (reported, not
+          // silently dropped) instead of being enqueued twice.
+          const all = await flowTaskLists.list();
+          const wanted = message.all === true
+            ? all.map(task => task.id)
+            : (Array.isArray(message.ids) ? message.ids.map(id => String(id || "")) : [String(message.id || "")]);
+          const selected = [];
+          const skipped = [];
+          for (const id of wanted) {
+            const task = all.find(entry => entry.id === id);
+            if (!task) { skipped.push({ taskId: id, reason: "not_found" }); continue; }
+            if (task.activeRun) { skipped.push({ taskId: id, reason: "run_in_progress" }); continue; }
+            selected.push(task);
+          }
+          // The per-task run locks are claimed synchronously, before
+          // anything is enqueued, so two panels racing the same task
+          // cannot both spend its credits.
+          const claimed = [];
+          for (const task of selected) {
+            if (flowTaskLists.beginRun(task.id)) claimed.push(task);
+            else skipped.push({ taskId: task.id, reason: "run_in_progress" });
+          }
+          if (!claimed.length) {
+            throw Object.assign(new Error("No selected task is ready to run."), { code: "FLOW_TASK_RUN_EMPTY" });
+          }
+          try {
+            // The forced-sequential verdict travels with the response:
+            // the queue drains serially in enqueue order either way, so
+            // the verdict is surfaced for the panel, not re-implemented.
+            const verdict = requiresSequential(claimed);
+            const target = await captureFlowTargetMetadata();
+            const { jobs, segments } = expandTasksToJobs(claimed);
+            const stamped = jobs.map(job => ({
+              ...job,
+              // The current tab/project target wins over any target
+              // metadata stored with the task: a task runs here and now.
+              metadata: { source: "extension", ...(job.metadata || {}), ...target },
+            }));
+            let addedJobs;
+            let runBatchId = null;
+            if (stamped.length === 1) {
+              const added = await flowJobQueue.add(stamped[0]);
+              addedJobs = [added];
+              runBatchId = added?.batch?.batchId || null;
+            } else {
+              addedJobs = await flowJobQueue.addBatch(stamped, { batchLabel: "Saved tasks" });
+              runBatchId = addedJobs[0]?.batch?.batchId || null;
+            }
+            // Bookkeeping must not misreport a successful enqueue as
+            // failed: each segment's admitted jobs become that task's
+            // fold target for the write-back.
+            let offset = 0;
+            for (const [position, segment] of segments.entries()) {
+              const slice = addedJobs.slice(offset, offset + segment.jobCount);
+              offset += segment.jobCount;
+              await flowTaskLists.recordTaskRun(claimed[position].id, { jobs: slice, batchId: runBatchId }).catch(error => {
+                console.warn("[FlowTaskLists] Could not record this task run:", error?.message || error);
+              });
+            }
+            let snapshot = await flowJobQueue.snapshot();
+            snapshot = message.autoStart === false || snapshot.isPaused || snapshot.waitingForUser > 0
+              ? snapshot
+              : await flowJobQueue.resume();
+            return {
+              ok: true,
+              tasks: await flowTaskLists.list(),
+              skipped,
+              sequential: verdict.sequential,
+              sequentialReasons: verdict.reasons,
+              ...flowQueueSnapshot(snapshot),
+            };
+          } finally {
+            for (const task of claimed) flowTaskLists.endRun(task.id);
+          }
+        }
+        default:
+          throw Object.assign(new Error(`Unsupported saved task action: ${message.type}`), { code: "FLOW_TASKS_ACTION_UNSUPPORTED" });
+      }
+    })().then(respond).catch(error => respond({
+      ok: false,
+      error: { code: error?.code || "FLOW_TASKS_FAILED", message: String(error?.message || error) },
+    }));
+    return true;
+  }
+  if (typeof message?.type === "string" && message.type.startsWith("flow-albums:")) {
+    if (_sender?.id !== chrome.runtime.id || _sender?.tab) {
+      respond({ ok: false, error: { code: "FLOW_ALBUMS_FORBIDDEN", message: "Albums are available only from the extension UI." } });
+      return;
+    }
+    void (async () => {
+      await flowAlbums.ready;
+      switch (message.type) {
+        case "flow-albums:list": {
+          return { ok: true, albums: await flowAlbums.list() };
+        }
+        case "flow-albums:create": {
+          const album = await flowAlbums.create({ name: message.name });
+          return { ok: true, album, albums: await flowAlbums.list() };
+        }
+        case "flow-albums:rename": {
+          const album = await flowAlbums.rename(String(message.id || ""), message.name);
+          return { ok: true, album, albums: await flowAlbums.list() };
+        }
+        case "flow-albums:remove": {
+          const removed = await flowAlbums.remove(String(message.id || ""));
+          return { ok: true, removed, albums: await flowAlbums.list() };
+        }
+        case "flow-albums:add-image": {
+          const album = await flowAlbums.addImage(String(message.albumId || ""), message.image);
+          return { ok: true, album, albums: await flowAlbums.list() };
+        }
+        case "flow-albums:remove-image": {
+          const album = await flowAlbums.removeImage(String(message.albumId || ""), String(message.imageId || ""));
+          return { ok: true, album, albums: await flowAlbums.list() };
+        }
+        default:
+          throw Object.assign(new Error(`Unsupported album action: ${message.type}`), { code: "FLOW_ALBUMS_ACTION_UNSUPPORTED" });
+      }
+    })().then(respond).catch(error => respond({
+      ok: false,
+      error: { code: error?.code || "FLOW_ALBUMS_FAILED", message: String(error?.message || error) },
+    }));
+    return true;
+  }
+  if (typeof message?.type === "string" && message.type.startsWith("flow-workflow-templates:")) {
+    if (_sender?.id !== chrome.runtime.id || _sender?.tab) {
+      respond({ ok: false, error: { code: "FLOW_WORKFLOW_TEMPLATES_FORBIDDEN", message: "Workflow templates are available only from the extension UI." } });
+      return;
+    }
+    void (async () => {
+      await flowWorkflowTemplates.ready;
+      switch (message.type) {
+        case "flow-workflow-templates:list":
+          return { ok: true, templates: await flowWorkflowTemplates.list({ category: message.category || "", search: message.search || "" }) };
+        case "flow-workflow-templates:save": {
+          const template = await flowWorkflowTemplates.save(message.graph, {
+            name: message.name, description: message.description, category: message.category,
+          });
+          return { ok: true, template, templates: await flowWorkflowTemplates.list() };
+        }
+        case "flow-workflow-templates:instantiate": {
+          const graph = await flowWorkflowTemplates.instantiate(String(message.id || ""), { name: message.name });
+          return { ok: true, graph };
+        }
+        case "flow-workflow-templates:export": {
+          const document = await flowWorkflowTemplates.exportTemplate(String(message.id || ""));
+          return { ok: true, document };
+        }
+        case "flow-workflow-templates:import": {
+          const template = await flowWorkflowTemplates.importTemplate(message.document);
+          return { ok: true, template, templates: await flowWorkflowTemplates.list() };
+        }
+        case "flow-workflow-templates:remove": {
+          const removed = await flowWorkflowTemplates.remove(String(message.id || ""));
+          return { ok: true, removed, templates: await flowWorkflowTemplates.list() };
+        }
+        default:
+          throw Object.assign(new Error(`Unsupported workflow template action: ${message.type}`), { code: "FLOW_WORKFLOW_TEMPLATES_ACTION_UNSUPPORTED" });
+      }
+    })().then(respond).catch(error => respond({
+      ok: false,
+      error: { code: error?.code || "FLOW_WORKFLOW_TEMPLATES_FAILED", message: String(error?.message || error) },
+    }));
+    return true;
+  }
+  if (typeof message?.type === "string" && message.type.startsWith("flow-gen-templates:")) {
+    if (_sender?.id !== chrome.runtime.id || _sender?.tab) {
+      respond({ ok: false, error: { code: "FLOW_GEN_TEMPLATES_FORBIDDEN", message: "Generation templates are available only from the extension UI." } });
+      return;
+    }
+    void (async () => {
+      await flowGenTemplates.ready;
+      switch (message.type) {
+        case "flow-gen-templates:list":
+          return { ok: true, templates: await flowGenTemplates.list({ search: message.search || "" }) };
+        case "flow-gen-templates:save": {
+          const template = await flowGenTemplates.save(message.state, { name: message.name });
+          return { ok: true, template, templates: await flowGenTemplates.list() };
+        }
+        case "flow-gen-templates:apply": {
+          const job = await flowGenTemplates.apply(String(message.id || ""));
+          return { ok: true, job };
+        }
+        case "flow-gen-templates:remove": {
+          const removed = await flowGenTemplates.remove(String(message.id || ""));
+          return { ok: true, removed, templates: await flowGenTemplates.list() };
+        }
+        default:
+          throw Object.assign(new Error(`Unsupported generation template action: ${message.type}`), { code: "FLOW_GEN_TEMPLATES_ACTION_UNSUPPORTED" });
+      }
+    })().then(respond).catch(error => respond({
+      ok: false,
+      error: { code: error?.code || "FLOW_GEN_TEMPLATES_FAILED", message: String(error?.message || error) },
+    }));
+    return true;
+  }
+  if (typeof message?.type === "string" && message.type.startsWith("flow-prompt-assistant:")) {
+    if (_sender?.id !== chrome.runtime.id || _sender?.tab) {
+      respond({ ok: false, error: { code: "FLOW_PROMPT_ASSISTANT_FORBIDDEN", message: "The prompt assistant is available only from the extension UI." } });
+      return;
+    }
+    void (async () => {
+      switch (message.type) {
+        case "flow-prompt-assistant:build": {
+          const built = buildAssistantRequest({ format: message.format || "single-en", idea: message.idea, options: message.options || {} });
+          return { ok: true, formatId: built.formatId, text: built.text };
+        }
+        case "flow-prompt-assistant:parse": {
+          const parsed = parseAssistantReply(message.text);
+          return { ok: true, prompts: parsed.prompts, raw: parsed.raw };
+        }
+        case "flow-prompt-assistant:parse-i2p": {
+          const result = parseImageToPromptReply(message.text);
+          return { ok: true, result };
+        }
+        default:
+          throw Object.assign(new Error(`Unsupported prompt assistant action: ${message.type}`), { code: "FLOW_PROMPT_ASSISTANT_ACTION_UNSUPPORTED" });
+      }
+    })().then(respond).catch(error => respond({
+      ok: false,
+      error: { code: error?.code || "FLOW_PROMPT_ASSISTANT_FAILED", message: String(error?.message || error) },
+    }));
+    return true;
+  }
+  if (typeof message?.type === "string" && message.type.startsWith("flow-batch-runs:")) {
+    if (_sender?.id !== chrome.runtime.id || _sender?.tab) {
+      respond({ ok: false, error: { code: "FLOW_BATCH_RUNS_FORBIDDEN", message: "Batch runs are available only from the extension UI." } });
+      return;
+    }
+    void (async () => {
+      await flowBatchRuns.ready;
+      switch (message.type) {
+        case "flow-batch-runs:list":
+          return { ok: true, runs: await flowBatchRuns.list() };
+        case "flow-batch-runs:get":
+          return { ok: true, run: await flowBatchRuns.get(String(message.id || "")) };
+        case "flow-batch-runs:remove": {
+          const removed = await flowBatchRuns.remove(String(message.id || ""));
+          return { ok: true, removed, runs: await flowBatchRuns.list() };
+        }
+        case "flow-batch-runs:create": {
+          const draftId = String(message.id || "");
+          if (!flowBatchDrafts.beginRun(draftId)) {
+            throw Object.assign(new Error("This batch draft is already being queued."), { code: "FLOW_BATCH_DRAFT_RUN_IN_PROGRESS" });
+          }
+          try {
+            const draft = await flowBatchDrafts.get(draftId);
+            if (!draft) throw Object.assign(new Error(`No batch draft with id ${message.id}.`), { code: "FLOW_BATCH_DRAFT_NOT_FOUND" });
+            const target = await captureFlowTargetMetadata();
+            const jobs = materializeDraftJobs(draft).map(job => ({
+              ...job,
+              // The current tab/project target wins over any target
+              // metadata stored with the draft: a draft runs here and now.
+              metadata: { source: "extension", ...(job.metadata || {}), ...target },
+            }));
+            const run = await flowBatchRuns.create({ draftId: draft.id, label: draft.label, items: jobs });
+            try {
+              // The claim gates the enqueue: a conflicting active batch
+              // surfaces before a single credit can be spent.
+              const claim = await flowBatchRuns.claim(run.id, run.revision);
+              let addedJobs = [];
+              let runBatchId = null;
+              if (jobs.length === 1) {
+                const added = await flowJobQueue.add(jobs[0]);
+                addedJobs = [added];
+                runBatchId = added?.batch?.batchId || null;
+              } else {
+                runBatchId = crypto.randomUUID();
+                addedJobs = await flowJobQueue.addBatch(jobs, { batchId: runBatchId, batchLabel: draft.label });
+              }
+              const mapping = addedJobs.map((job, position) => ({ index: claim.indexes[position], jobId: job.id }));
+              const admitted = await flowBatchRuns.recordAdmission(run.id, { batchId: runBatchId, kind: "initial", mapping });
+              // Bookkeeping must not misreport a successful enqueue as failed.
+              const updated = await flowBatchDrafts.recordRun(draft.id, runBatchId).catch(() => draft);
+              let snapshot = await flowJobQueue.snapshot();
+              snapshot = message.autoStart === false || snapshot.isPaused || snapshot.waitingForUser > 0
+                ? snapshot
+                : await flowJobQueue.resume();
+              return { ok: true, run: admitted, draft: updated, drafts: await flowBatchDrafts.list(), runs: await flowBatchRuns.list(), ...flowQueueSnapshot(snapshot) };
+            } catch (error) {
+              // The claim admitted nothing — drop the record again so a
+              // failed start leaves no orphan run behind.
+              await flowBatchRuns.remove(run.id).catch(() => {});
+              throw error;
+            }
+          } finally {
+            flowBatchDrafts.endRun(draftId);
+          }
+        }
+        case "flow-batch-runs:resume": {
+          const runId = String(message.id || "");
+          const current = await flowBatchRuns.get(runId);
+          if (!current) throw Object.assign(new Error(`No batch run with id ${message.id}.`), { code: "FLOW_BATCH_RUN_NOT_FOUND" });
+          // Index validation and the single-active invariant run inside
+          // the store before anything is enqueued.
+          const resumed = await flowBatchRuns.resume(runId, {
+            indexes: Array.isArray(message.indexes) ? message.indexes : undefined,
+            expectedRevision: message.expectedRevision,
+          });
+          const target = await captureFlowTargetMetadata();
+          const jobs = materializeDraftJobs({ jobs: resumed.jobs }).map(job => ({
+            ...job,
+            metadata: { source: "extension", ...(job.metadata || {}), ...target },
+          }));
+          let admitted;
+          try {
+            let addedJobs = [];
+            let runBatchId = null;
+            if (jobs.length === 1) {
+              const added = await flowJobQueue.add(jobs[0]);
+              addedJobs = [added];
+              runBatchId = added?.batch?.batchId || null;
+            } else {
+              runBatchId = crypto.randomUUID();
+              addedJobs = await flowJobQueue.addBatch(jobs, { batchId: runBatchId, batchLabel: current.label });
+            }
+            const mapping = addedJobs.map((job, position) => ({ index: resumed.indexes[position], jobId: job.id }));
+            admitted = await flowBatchRuns.recordAdmission(runId, { batchId: runBatchId, kind: "resume", mapping });
+          } catch (error) {
+            // The enqueue failed after the claim: hand the claim back so
+            // the run returns to its finalized state instead of wedging
+            // the scheduler behind a phantom active batch.
+            await flowBatchRuns.releaseClaim(runId).catch(() => {});
+            throw error;
+          }
+          let snapshot = await flowJobQueue.snapshot();
+          snapshot = message.autoStart === false || snapshot.isPaused || snapshot.waitingForUser > 0
+            ? snapshot
+            : await flowJobQueue.resume();
+          return { ok: true, run: admitted, runs: await flowBatchRuns.list(), ...flowQueueSnapshot(snapshot) };
+        }
+        default:
+          throw Object.assign(new Error(`Unsupported batch run action: ${message.type}`), { code: "FLOW_BATCH_RUNS_ACTION_UNSUPPORTED" });
+      }
+    })().then(respond).catch(error => respond({
+      ok: false,
+      error: { code: error?.code || "FLOW_BATCH_RUNS_FAILED", message: String(error?.message || error) },
     }));
     return true;
   }
