@@ -84,28 +84,6 @@
     return variants.length ? variants : undefined;
   }
 
-  // DL-02: the video frame pipeline rides the same flowWatermark config
-  // family. Its settings are validated per field before forwarding, like
-  // the mask: a bad value forwards nothing for that field (the cleaner
-  // falls back to its defaults) and never poisons the rest of the
-  // config. The input cap can only ever be LOWERED locally — the
-  // cleaner's 300 MB ceiling is hard, so a config value above it is
-  // invalid here too. (Mask/threshold VALUE parity stays blocked, DL-B1;
-  // this is mechanism only.)
-  const VIDEO_MAX_INPUT_BYTES = 300 * 1024 * 1024;
-  function forwardVideoSampleFrames(value) {
-    const count = Number(value);
-    return Number.isInteger(count) && count >= 1 && count <= 32 ? count : undefined;
-  }
-  function forwardVideoMaxInputBytes(value) {
-    const bytes = Number(value);
-    return Number.isFinite(bytes) && bytes > 0 && bytes <= VIDEO_MAX_INPUT_BYTES ? Math.floor(bytes) : undefined;
-  }
-  function forwardVideoBitrateRatio(value) {
-    const ratio = Number(value);
-    return Number.isFinite(ratio) && ratio >= 0.1 && ratio <= 2 ? ratio : undefined;
-  }
-
   async function load() {
     try {
       const stored = await chrome.storage.local.get(["flowWatermark", "watermark"]);
@@ -118,9 +96,6 @@
         variants: forwardVariants(config.variants),
         nccThreshold: config.nccThreshold,
         minNccAfter: config.minNccAfter,
-        videoSampleFrames: forwardVideoSampleFrames(config.videoSampleFrames),
-        videoMaxInputBytes: forwardVideoMaxInputBytes(config.videoMaxInputBytes),
-        videoBitrateRatio: forwardVideoBitrateRatio(config.videoBitrateRatio),
       });
     } catch (_) {}
   }
