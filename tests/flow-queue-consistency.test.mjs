@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
 
 import { FlowJobQueue } from '../extension/src/background/flow-job-queue.js';
@@ -366,6 +367,40 @@ test('auto-retry progress still reports the global cap when no budget is declare
   assert.equal(retrying.progress.maxAttempts, 2);
   await queue.wait(added.id, 5_000);
   await queue.stop();
+});
+
+test('queue panel renders a dropped_references reason verbatim in request diagnostics', () => {
+  // Audit cluster C follow-up (cluster B decoder drop count): the
+  // panel-visible request events carry the drop as a reason string
+  // (dropped_references:<n>), NOT as a droppedReferenceCount field —
+  // the count lives only in the observer's request_seen/input_seen
+  // payloads, which the queue never stores on the job. So the reason
+  // line is the surface that shows the drop, and this test pins it.
+  // diagnosticsSummaryLines is self-contained (argument only), so it
+  // extracts cleanly into a vm sandbox like the gate factory suites.
+  const panelJs = readFileSync(new URL('../extension/src/ui/flow-queue-panel.js', import.meta.url), 'utf8');
+  const start = panelJs.indexOf('  function diagnosticsSummaryLines(diagnostics) {');
+  assert.ok(start >= 0, 'diagnosticsSummaryLines not found in panel source');
+  const end = panelJs.indexOf('\n  function progressPercent(task) {', start);
+  assert.ok(end > start, 'diagnosticsSummaryLines must precede progressPercent');
+  const sandbox = {};
+  vm.runInNewContext(`${panelJs.slice(start, end)}\nthis.__diagnosticsSummaryLines = diagnosticsSummaryLines;`, sandbox, { filename: 'flow-queue-panel-diagnostics.js' });
+  const lines = sandbox.__diagnosticsSummaryLines({
+    observerReady: true,
+    xhrHookActive: true,
+    fetchHookActive: true,
+    requestDiagnostics: {
+      version: 1,
+      count: 1,
+      events: [{
+        transport: 'fetch',
+        path: '/video/generate',
+        fields: { shape: true, prompt: true, model: true, quantity: true, referenceIds: true, project: true },
+        reasons: ['dropped_references:2'],
+      }],
+    },
+  });
+  assert.ok(lines.some(line => line.includes('reasons: dropped_references:2')), `expected a verbatim dropped_references reason line, got: ${JSON.stringify(lines)}`);
 });
 
 test('queue panel only renders diagnostics for failed items', () => {
