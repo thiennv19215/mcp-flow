@@ -10,6 +10,7 @@ import { loadChatGptCapabilityRegistry } from "./chatgpt-capabilities.js";
 import { FlowBatchDrafts, materializeDraftJobs } from "./flow-batch-drafts.js";
 import { FlowHistory, buildJobFromRecord } from "./flow-history.js";
 import { FlowBatchRuns } from "./flow-batch-runs.js";
+import { FlowWorkflowGraphRuns } from "./flow-workflow-graph.js";
 import { FlowExecutionLock } from "./flow-execution-lock.js";
 import { FlowMediaCatalog } from "./flow-media-catalog.js";
 import { revalidateJobReferences } from "./flow-ref-preflight.js";
@@ -60,11 +61,12 @@ const nativeFlowOperations = new Set([
   "flow.frame.extract_last",
   "flow.queue.add", "flow.queue.generate", "flow.queue.edit", "flow.queue.continue", "flow.queue.agent",
   "flow.queue.get", "flow.queue.wait", "flow.queue.cancel", "flow.queue.retry", "flow.queue.metadata",
-  "flow.queue.manual.continue",
+  "flow.queue.manual.continue", "flow.queue.workflow",
 ]);
 const extensionQueueOperations = new Set([
   "flow.queue.add", "flow.queue.generate", "flow.queue.edit", "flow.queue.continue", "flow.queue.agent",
   "flow.queue.get", "flow.queue.wait", "flow.queue.cancel", "flow.queue.retry", "flow.queue.metadata", "flow.queue.manual.continue",
+  "flow.queue.workflow",
 ]);
 const extensionQueueJobOperations = new Set([
   "flow.generation.submit", "flow.edit.run", "flow.continue.run", "flow.agent.batch",
@@ -616,6 +618,25 @@ async function execute(_ws, method, args = [], { queueOwner = false, connectorOw
           : await flowJobQueue.resume();
         const plannedOutputDir = plannedJobs[0]?.payload?.output_dir ?? plannedJobs[0]?.payload?.params?.output_dir ?? payload.output_dir;
         return { jobs: added, job: added.length === 1 ? added[0] : undefined, output_dir: plannedOutputDir, batchId, snapshot: flowQueueSnapshot(snapshot) };
+      }
+      // FEAT-07: run a node-graph workflow on the queue. The graph is
+      // validated and compiled by the run store; the first runnable
+      // level is enqueued now and later levels follow from the queue
+      // snapshot fold in the subscribe callback.
+      if (command.name === "flow.queue.workflow") {
+        if (!payload.graph || typeof payload.graph !== "object") {
+          throw Object.assign(new Error("flow.queue.workflow requires a graph document."), { code: "FLOW_QUEUE_INVALID", outcome_unknown: false });
+        }
+        const { run, toEnqueue } = await flowWorkflowGraphRuns.create({
+          graph: payload.graph,
+          project: payload.project,
+          outputDir: payload.output_dir || payload.project,
+        });
+        const { added, snapshot } = await enqueueWorkflowGraphJobs(toEnqueue, { target: queueTargetMetadata(command) });
+        if (payload.autoStart !== false && snapshot.status !== "paused" && snapshot.status !== "waiting_for_user") {
+          await flowJobQueue.resume();
+        }
+        return { run, jobs: added, snapshot: flowQueueSnapshot(snapshot) };
       }
       if (command.name === "flow.queue.get") {
         if (!id) return flowQueueSnapshot(await flowJobQueue.snapshot());
@@ -1514,9 +1535,47 @@ const flowJobQueue = new FlowJobQueue(runExtensionFlowJob, {
   // legs are live at this level and which stay with the content stage).
   refPreflight: createQueueRefPreflight({ catalog: flowMediaCatalog, projectIdForJob: queueJobProjectId }),
 });
+// FEAT-07: enqueue one workflow graph handout (a level's worth of
+// compiled jobs, or a single node) and bind the minted runtime ids back
+// into the run record. Ids are minted up front, same as the generate
+// bridge path, so the admission mapping is exact. A failed enqueue
+// releases the handout so the next fold retries instead of wedging.
+async function enqueueWorkflowGraphJobs(entries, { target = {} } = {}) {
+  const list = Array.isArray(entries) ? entries.filter(entry => entry?.job) : [];
+  if (!list.length) return { added: [], snapshot: flowJobQueue.getSnapshot() };
+  const runId = list[0].job.metadata?.workflowGraphRunId || null;
+  const jobs = list.map(entry => ({
+    id: crypto.randomUUID(),
+    operation: entry.job.operation,
+    label: entry.job.label,
+    payload: entry.job.payload,
+    metadata: {
+      source: "extension",
+      ...target,
+      ...(entry.job.metadata || {}),
+    },
+  }));
+  try {
+    const added = jobs.length === 1
+      ? [await flowJobQueue.add(jobs[0])]
+      : await flowJobQueue.addBatch(jobs, { batchId: runId });
+    if (runId) {
+      await flowWorkflowGraphRuns.recordAdmission(runId, {
+        batchId: runId,
+        mapping: jobs.map((job, index) => ({ nodeId: list[index].nodeId, jobId: job.id })),
+      });
+    }
+    return { added, snapshot: flowJobQueue.getSnapshot() };
+  } catch (error) {
+    if (runId) await flowWorkflowGraphRuns.releaseEnqueue(runId, list.map(entry => entry.nodeId)).catch(() => {});
+    throw error;
+  }
+}
+
 const flowBatchDrafts = new FlowBatchDrafts();
 const flowHistory = new FlowHistory();
 const flowBatchRuns = new FlowBatchRuns();
+const flowWorkflowGraphRuns = new FlowWorkflowGraphRuns();
 const flowTransformGate = createTransformExecutionGate(new FlowExecutionLock());
 flowJobQueue.subscribe((snapshot, reason) => {
   broadcastFlowQueue(snapshot, reason);
@@ -1532,6 +1591,22 @@ flowJobQueue.subscribe((snapshot, reason) => {
   // recording, must never disturb the queue path.
   void flowBatchRuns.observeSnapshot(snapshot).catch(error => {
     console.warn("[FlowBatchRuns] Could not fold the queue snapshot into the active run:", error?.message || error);
+  });
+  // FEAT-07: the same snapshots fold into active workflow graph runs;
+  // each fold may release the next level's jobs, which are enqueued
+  // right away. Enqueueing re-emits a snapshot, and the run store's
+  // handout flag flips synchronously inside the fold, so this cannot
+  // double-enqueue or loop.
+  void flowWorkflowGraphRuns.observeSnapshot(snapshot).then(results => {
+    for (const result of results) {
+      if (result.finalizeState) console.info(`[FlowWorkflowGraph] Run ${result.run.id} finalized as ${result.finalizeState}`);
+      if (!result.toEnqueue?.length) continue;
+      void enqueueWorkflowGraphJobs(result.toEnqueue, {}).then(({ snapshot: next }) => {
+        if (snapshot.status !== "paused" && snapshot.status !== "waiting_for_user" && next.status !== "running" && !next.paused) flowJobQueue.resume();
+      }).catch(error => console.warn("[FlowWorkflowGraph] Could not enqueue the next workflow level:", error?.message || error));
+    }
+  }).catch(error => {
+    console.warn("[FlowWorkflowGraph] Could not fold the queue snapshot into workflow runs:", error?.message || error);
   });
   // FEAT-11b: the same snapshots drive the transform execution lock —
   // a family acquires when its first transform job starts running and
