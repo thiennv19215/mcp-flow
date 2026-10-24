@@ -10,6 +10,7 @@ import { loadChatGptCapabilityRegistry } from "./chatgpt-capabilities.js";
 import { FlowBatchDrafts, materializeDraftJobs } from "./flow-batch-drafts.js";
 import { FlowHistory, buildJobFromRecord } from "./flow-history.js";
 import { FlowBatchRuns } from "./flow-batch-runs.js";
+import { FlowExecutionLock } from "./flow-execution-lock.js";
 import { FlowMediaCatalog } from "./flow-media-catalog.js";
 import { revalidateJobReferences } from "./flow-ref-preflight.js";
 import { FlowBridgeClient, readBridgeConfig, postHttpMessage } from "./flow-bridge-client.js";
@@ -1391,6 +1392,103 @@ function createQueueRefPreflight(environment) {
     reupload: async () => null,
   });
 }
+// FEAT-11b: production wiring for the FEAT-11 cross-engine execution
+// lock. The worker owns ONE gate over ONE FlowExecutionLock; transform
+// jobs are identified solely by the metadata.transform stamp that
+// buildTransformJob (content/shared/flow-transforms.js) already writes,
+// so ordinary queue jobs are never affected. The gate is deliberately
+// self-contained so tests can extract and exercise it against the real
+// lock:
+//   - admissionRefusal(jobs): the UI add paths consult it BEFORE
+//     enqueueing; while one family holds the lock, a submission
+//     carrying another family's transform is refused with a typed
+//     payload (owner + canStopCurrent) instead of being queued to run
+//     over it. Same-family and non-transform submissions always pass.
+//   - observeSnapshot(snapshot): folds queue snapshots into the lock —
+//     a family acquires when its first transform job is seen running
+//     and releases when its last running transform job leaves the
+//     running state (any terminal status). A cross-family overlap that
+//     somehow happens anyway (jobs queued before the holder started,
+//     worker-restart recovery) is NOT seized: it is surfaced as a
+//     conflict in status() and the waiting family acquires on the
+//     first snapshot after the holder releases.
+//   - requestStop / stopRequestFor: a blocked engine records a stop
+//     request on the lock; the snapshot fold surfaces it on the
+//     running job's durable record at the queue's own generation
+//     checkpoints (see the subscribe callback) — the request is
+//     observed, never enforced by seizing the job.
+function createTransformExecutionGate(lock) {
+  let runningFamilies = new Set();
+  let conflict = null;
+
+  function familyOf(job) {
+    const transform = job?.metadata?.transform;
+    if (!transform || typeof transform !== "object") return null;
+    const family = typeof transform.family === "string" ? transform.family.trim().toLowerCase() : "";
+    return family || null;
+  }
+
+  function admissionRefusal(jobs) {
+    const current = lock.current();
+    if (!current) return null;
+    const foreign = (Array.isArray(jobs) ? jobs : []).some(job => {
+      const family = familyOf(job);
+      return family !== null && family !== current.owner;
+    });
+    if (!foreign) return null;
+    return {
+      code: "FLOW_TRANSFORM_EXECUTION_LOCKED",
+      message: `A ${current.owner} transform is still running; a different transform family cannot start over it. Wait for it to finish or ask it to stop.`,
+      owner: current.owner,
+      since: current.since,
+      canStopCurrent: true,
+    };
+  }
+
+  function observeSnapshot(snapshot) {
+    const runningNow = new Set();
+    for (const job of snapshot?.jobs || []) {
+      if (job?.status !== "running") continue;
+      const family = familyOf(job);
+      if (family) runningNow.add(family);
+    }
+    // Release first: a family whose last running transform job left
+    // frees the lock inside this same fold, so a waiting family that
+    // is already running (the conflict case) acquires immediately
+    // below instead of one snapshot later.
+    for (const family of runningFamilies) {
+      if (!runningNow.has(family) && lock.isHeldBy(family)) lock.release(family);
+    }
+    conflict = null;
+    for (const family of runningNow) {
+      const result = lock.acquire(family);
+      if (!result.ok) conflict = { family, owner: result.owner, since: result.since, canStopCurrent: true };
+    }
+    runningFamilies = runningNow;
+  }
+
+  function requestStop(requestedBy) {
+    return lock.requestStop(typeof requestedBy === "string" ? requestedBy.trim().toLowerCase() : "");
+  }
+
+  function stopRequestFor(family) {
+    return family && lock.isHeldBy(family) ? lock.stopRequested() : null;
+  }
+
+  function status() {
+    const current = lock.current();
+    return {
+      held: Boolean(current),
+      owner: current?.owner ?? null,
+      since: current?.since ?? null,
+      stopRequested: lock.stopRequested(),
+      conflict,
+      runningFamilies: [...runningFamilies],
+    };
+  }
+
+  return { familyOf, admissionRefusal, observeSnapshot, requestStop, stopRequestFor, status };
+}
 // Keep a small cooldown between generations to avoid hammering Flow while
 // removing most of the previous 5–10 second idle wait between queued jobs.
 const flowJobQueue = new FlowJobQueue(runExtensionFlowJob, {
@@ -1419,6 +1517,7 @@ const flowJobQueue = new FlowJobQueue(runExtensionFlowJob, {
 const flowBatchDrafts = new FlowBatchDrafts();
 const flowHistory = new FlowHistory();
 const flowBatchRuns = new FlowBatchRuns();
+const flowTransformGate = createTransformExecutionGate(new FlowExecutionLock());
 flowJobQueue.subscribe((snapshot, reason) => {
   broadcastFlowQueue(snapshot, reason);
   // FEAT-01: every finished generation lands in the structured history
@@ -1434,6 +1533,36 @@ flowJobQueue.subscribe((snapshot, reason) => {
   void flowBatchRuns.observeSnapshot(snapshot).catch(error => {
     console.warn("[FlowBatchRuns] Could not fold the queue snapshot into the active run:", error?.message || error);
   });
+  // FEAT-11b: the same snapshots drive the transform execution lock —
+  // a family acquires when its first transform job starts running and
+  // releases when its last one ends. Pure in-memory bookkeeping; a
+  // failure here must never disturb the queue path either.
+  try {
+    flowTransformGate.observeSnapshot(snapshot);
+  } catch (error) {
+    console.warn("[FlowTransformLock] Could not fold the queue snapshot into the execution lock:", error?.message || error);
+  }
+  // FEAT-11b: at the queue's own generation checkpoints, surface a
+  // pending stop request on the running transform job's durable
+  // record, where the lock owner sees it next to the job itself. The
+  // stamp is bookkeeping only — nothing here cancels or seizes the
+  // job; honoring the request stays the owner's decision (let it
+  // finish, or cancel through the regular queue path, whose terminal
+  // snapshot then releases the lock). The stamp is idempotent per
+  // request, and stamping re-emits as "metadata-updated", which is
+  // not a checkpoint reason, so this cannot loop.
+  if (reason === "generation-observation-checkpoint" || reason === "generation-result-checkpoint") {
+    for (const job of snapshot.jobs || []) {
+      if (job?.status !== "running") continue;
+      const stop = flowTransformGate.stopRequestFor(flowTransformGate.familyOf(job));
+      if (!stop) continue;
+      const stamped = job.metadata?.transformStopRequested;
+      if (stamped?.requestedBy === stop.requestedBy && stamped?.at === stop.at) continue;
+      void flowJobQueue.updateMetadata(job.id, { transformStopRequested: stop }).catch(error => {
+        console.warn("[FlowTransformLock] Could not stamp the stop request on the running job:", error?.message || error);
+      });
+    }
+  }
   // Failures during queue preflight happen before the download runner can mark
   // the source item. Repair its state from the durable download job outcome.
   if (!["job-finished", "attention-required", "paused"].includes(reason)) return;
@@ -1558,7 +1687,7 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
           break;
         case "flow-queue:add": {
           const source = message.job || {};
-          addedJob = await flowJobQueue.add({
+          const jobInput = {
             // Preserve a client-assigned job id: chained submissions name
             // their jobs up front and reference them from dependsOnId, so
             // dropping the id would orphan every dependency edge.
@@ -1567,7 +1696,15 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
             payload: source.payload,
             label: source.label || source.name,
             metadata: { source: "extension", ...await captureFlowTargetMetadata(), ...(source.metadata || {}) },
-          });
+          };
+          // FEAT-11b: while one transform family holds the execution
+          // lock, a different family's transform is refused here with
+          // the typed lock payload instead of being queued to run over
+          // it. The refusal is returned, not thrown, so its typed
+          // fields (owner, canStopCurrent) survive the response path.
+          const lockRefusal = flowTransformGate.admissionRefusal([jobInput]);
+          if (lockRefusal) return { ok: false, error: lockRefusal, transformLock: flowTransformGate.status() };
+          addedJob = await flowJobQueue.add(jobInput);
           // Adding from the create form always enqueues first, then starts or
           // resumes the sequential worker. Keep a manual-submit pause intact so
           // the user can finish that confirmation before later jobs proceed.
@@ -1580,13 +1717,19 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
         case "flow-queue:add-batch": {
           const source = Array.isArray(message.jobs) ? message.jobs : [];
           const metadata = { source: "extension", ...await captureFlowTargetMetadata() };
-          addedJob = await flowJobQueue.addBatch(source.map(job => ({
+          const jobInputs = source.map(job => ({
             ...(typeof job?.id === "string" && job.id ? { id: job.id } : {}),
             operation: job?.operation,
             payload: job?.payload,
             label: job?.label || job?.name,
             metadata: { ...metadata, ...(job?.metadata || {}) },
-          })), {
+          }));
+          // FEAT-11b: the same transform-lock admission as
+          // flow-queue:add — a batch carrying a foreign-family
+          // transform is refused whole, before anything is enqueued.
+          const lockRefusal = flowTransformGate.admissionRefusal(jobInputs);
+          if (lockRefusal) return { ok: false, error: lockRefusal, transformLock: flowTransformGate.status() };
+          addedJob = await flowJobQueue.addBatch(jobInputs, {
             batchId: message.batchId,
             batchLabel: message.batchLabel,
           });
@@ -1595,6 +1738,20 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
             ? beforeStart
             : await flowJobQueue.resume();
           break;
+        }
+        case "flow-queue:transform-lock":
+          // FEAT-11b: read-only view of the transform execution lock —
+          // current holder, any pending stop request, and any live
+          // cross-family conflict the snapshot fold has surfaced.
+          return { ok: true, transformLock: flowTransformGate.status() };
+        case "flow-queue:transform-lock-stop": {
+          // FEAT-11b: a blocked transform engine asks the running one
+          // to stop. This only RECORDS the request on the lock: the
+          // snapshot fold surfaces it on the running job's record at
+          // the queue's generation checkpoints and the owner decides
+          // whether to honor it — nothing is seized or cancelled here.
+          const stopResult = flowTransformGate.requestStop(String(message.family || message.requestedBy || ""));
+          return { ok: true, stop: stopResult, transformLock: flowTransformGate.status() };
         }
         case "flow-queue:pause":
           await flowJobQueue.pause();
