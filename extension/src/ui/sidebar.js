@@ -2270,54 +2270,67 @@
   const referencePicker = window.createFlowReferencePicker({ dispatchFlowOperation, setFeedback });
   const videoFrameSelection = { first: null, last: null };
 
-  function bindFrameThumbnail(container, source, placeholderClass) {
-    if (!container || !source) return false;
-    const image = document.createElement("img");
-    image.alt = "";
-    image.loading = "lazy";
-    const placeholder = document.createElement("span");
-    placeholder.className = placeholderClass;
-    placeholder.textContent = "▧";
-    container.append(image);
-    const bound = referencePicker.bindThumbnail(image, source, () => {
-      if (image.isConnected) image.replaceWith(placeholder);
-    });
-    if (!bound && image.isConnected) image.replaceWith(placeholder);
-    return true;
+  function renderVideoFramePreview() {
+    const preview = document.querySelector("#videoFramesPreview");
+    const count = document.querySelector("#videoFramesCount");
+    if (!preview) return;
+    const sources = [
+      { key: "first", source: videoFrameSelection.first, labelKey: "sidebar.frameStart" },
+      { key: "last", source: videoFrameSelection.last, labelKey: "sidebar.frameEnd" },
+    ].filter(item => item.source);
+    preview.replaceChildren();
+    if (count) count.textContent = `${sources.length}/2`;
+    for (const [index, itemData] of sources.entries()) {
+      const item = document.createElement("div");
+      item.className = "ref-grid-item video-frame-grid-item";
+      item.dataset.index = String(index);
+      const image = document.createElement("img");
+      const sourceName = itemData.source.name || itemData.source.file?.name || t("sidebar.frameImage");
+      image.alt = `${t(itemData.labelKey)}: ${sourceName}`;
+      image.title = image.alt;
+      image.onerror = () => { image.style.display = "none"; };
+      const tag = document.createElement("span");
+      tag.className = "ref-grid-tag";
+      tag.textContent = `${t(itemData.labelKey)} · ${sourceName}`;
+      tag.title = tag.textContent;
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "ref-grid-remove";
+      remove.title = t("sidebar.frameClearSlot", "Xóa ảnh khung này");
+      remove.setAttribute("aria-label", remove.title);
+      remove.innerHTML = '<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg>';
+      remove.addEventListener("click", event => {
+        event.stopPropagation();
+        setVideoFrameSelection(itemData.key, null);
+      });
+      item.append(image, tag, remove);
+      preview.appendChild(item);
+      referencePicker.bindThumbnail?.(image, itemData.source, () => { image.style.display = "none"; });
+    }
   }
 
-  function renderGenTabFrameSlot(buttonSelector, source, labelKey) {
-    const button = document.querySelector(buttonSelector);
-    if (!button || !source) return;
-    if (!button.dataset.emptyText) button.dataset.emptyText = button.querySelector(".frame-dropzone-text")?.textContent || "";
-    if (!button.dataset.emptyHint) button.dataset.emptyHint = button.querySelector(".frame-dropzone-source")?.textContent || t("sidebar.framePickerSlotHint");
-    const sourceName = source.name || source.file?.name || t("sidebar.frameImage");
-    const label = t(labelKey) + ": " + sourceName;
-    button.className = "frame-thumb-wrap";
-    button.setAttribute("aria-label", label);
-    button.title = label;
-    button.replaceChildren();
-    bindFrameThumbnail(button, source, "frame-thumb-fallback");
+  function setVideoFrameSelections(sources) {
+    const next = Array.isArray(sources) ? sources.filter(Boolean).slice(0, 2) : [];
+    const previous = [videoFrameSelection.first, videoFrameSelection.last].filter(Boolean);
+    for (const source of previous) {
+      if (source.source === "local" && source.previewUrl && !next.includes(source)) URL.revokeObjectURL(source.previewUrl);
+    }
+    videoFrameSelection.first = next[0] || null;
+    videoFrameSelection.last = next[1] || null;
+    renderVideoFramePreview();
   }
 
-  function restoreGenTabFrameDropzone(button) {
-    if (!button) return;
-    if (!button.dataset.emptyText) button.dataset.emptyText = button.querySelector(".frame-dropzone-text")?.textContent || "";
-    if (!button.dataset.emptyHint) button.dataset.emptyHint = button.querySelector(".frame-dropzone-source")?.textContent || t("sidebar.framePickerSlotHint");
-    button.className = "frame-dropzone";
-    button.removeAttribute("title");
-    const slotLabelKey = button.id === "genTabFrame2PickBtn" ? "sidebar.frameEnd" : "sidebar.frameStart";
-    button.setAttribute("aria-label", `${t(slotLabelKey)} — ${t("sidebar.framePickerSlotHint")}`);
-    const content = document.createElement("span");
-    content.className = "frame-dropzone-content";
-    const text = document.createElement("span");
-    text.className = "frame-dropzone-text";
-    text.textContent = button.dataset.emptyText;
-    const hint = document.createElement("span");
-    hint.className = "frame-dropzone-source";
-    hint.textContent = button.dataset.emptyHint;
-    content.append(text, hint);
-    button.replaceChildren(content);
+  function applyVideoFramePickerSelection(picked) {
+    const next = Array.isArray(picked) ? picked.filter(Boolean).slice(0, 2) : [];
+    const current = [videoFrameSelection.first, videoFrameSelection.last].filter(Boolean);
+    // If one frame is already present and the user opens the picker to add
+    // another, keep the existing image as Start and append the new image as End.
+    // Removing a thumbnail first remains the explicit replacement path.
+    if (current.length === 1 && next.length === 1 && next[0] !== current[0]) {
+      setVideoFrameSelections([...current, next[0]]);
+      return;
+    }
+    setVideoFrameSelections(next);
   }
 
   function setVideoFrameSelection(slotKey, source) {
@@ -2328,15 +2341,7 @@
       URL.revokeObjectURL(previous.previewUrl);
     }
     videoFrameSelection[slotKey] = source || null;
-
-    const buttonSelector = slotKey === "first" ? "#genTabFrame1PickBtn" : "#genTabFrame2PickBtn";
-    const button = document.querySelector(buttonSelector);
-    if (!button) return;
-    if (source) {
-      renderGenTabFrameSlot(buttonSelector, source, slotKey === "first" ? "sidebar.frameStart" : "sidebar.frameEnd");
-      return;
-    }
-    restoreGenTabFrameDropzone(button);
+    renderVideoFramePreview();
   }
 
   referencePicker.setFrameProjectChanged(projectId => {
@@ -2646,13 +2651,6 @@
     throw new Error("Dịch vụ tải ảnh lên Flow chưa được khởi tạo");
   }
 
-  async function uploadFrameImageToLibrary(file, onProgress) {
-    await assertQueueIdleForReferenceUpload();
-    const uploaded = await uploadReferenceImage(file, onProgress, 1);
-    await referencePicker.refreshFlowAssets();
-    return uploaded;
-  }
-
   // One builder for every attachment that comes out of an upload result
   // (image submit, video references, video frames). The Flow tile carries
   // the uploader's digest-derived uploadName — not the client's safeName —
@@ -2679,13 +2677,6 @@
       assetName: `asset:${tileName}`,
       ...(expectedId ? { expectedId } : {}),
     };
-  }
-
-  async function assertQueueIdleForReferenceUpload() {
-    const state = await chrome.runtime.sendMessage({ type: "flow-queue:get" });
-    if (!state?.ok || state.isRunning || Number(state.waitingForUser) > 0) {
-      throw new Error(t("sidebar.referenceUploadQueueBusy"));
-    }
   }
 
   // SUBMIT TẠO ẢNH (GENERATE IMAGE)
@@ -2749,10 +2740,6 @@
       // current project's library does not already contain the matching asset.
       const attachmentByReference = new Map();
       const localImageReferences = activeImageReferences.filter(reference => reference.source === "local");
-      if (localImageReferences.length > 0) {
-        try { await assertQueueIdleForReferenceUpload(); }
-        catch (error) { setFeedback(error.message, false); return; }
-      }
       let uploadedImageCount = 0;
       for (let i = 0; i < activeImageReferences.length; i++) {
         const reference = activeImageReferences[i];
@@ -2908,10 +2895,6 @@
           : refFilesVideo;
       const attachmentByReference = new Map();
       const localVideoReferences = activeVideoReferences.filter(reference => reference.source === "local");
-      if (localVideoReferences.length > 0) {
-        try { await assertQueueIdleForReferenceUpload(); }
-        catch (error) { setFeedback(error.message, false); return; }
-      }
       let uploadedVideoCount = 0;
       for (let i = 0; i < activeVideoReferences.length; i++) {
         const reference = activeVideoReferences[i];
@@ -2944,10 +2927,6 @@
           : selectedFrameAssignments;
         const usedFrameSources = [...new Set(usedFrameAssignments.flatMap(assignment => [assignment?.first, assignment?.last]).filter(Boolean))];
         const localFrameSources = usedFrameSources.filter(source => source.source === "local");
-        if (localFrameSources.length) {
-          try { await assertQueueIdleForReferenceUpload(); }
-          catch (error) { setFeedback(error.message, false); return; }
-        }
         let uploadedFrameCount = 0;
         for (const source of usedFrameSources) {
           if (source.source === "flow") {
@@ -3767,6 +3746,25 @@
         const blob = await res.blob();
         const file = new File([blob], `screenshot-${Date.now()}.png`, { type: "image/png" });
         const currentGenType = document.querySelector("#genType")?.value || "image";
+        const isFramesMode = currentGenType === "video" && document.querySelector("#selectModeVideo")?.value === "frames";
+        if (isFramesMode) {
+          const source = {
+            source: "local",
+            file,
+            name: file.name,
+            kind: "image",
+            previewUrl: URL.createObjectURL(file),
+          };
+          const currentFrames = [videoFrameSelection.first, videoFrameSelection.last].filter(Boolean);
+          if (currentFrames.length >= 2) {
+            URL.revokeObjectURL(source.previewUrl);
+            setFeedback("Frames đã đủ 2 ảnh. Xóa một ảnh trước khi chụp thêm.", false);
+            return;
+          }
+          setVideoFrameSelections([...currentFrames, source]);
+          setFeedback("Đã chụp ảnh màn hình và thêm vào Frames!", true);
+          return;
+        }
         referencePicker.addLocalFilesToReferences(currentGenType, [file]);
         setFeedback("Đã chụp ảnh màn hình và thêm vào danh sách tham chiếu!", true);
       } catch (err) {
@@ -3776,6 +3774,7 @@
 
     document.querySelector("#headerCaptureBtn")?.addEventListener("click", triggerCapture);
     document.querySelector("#screenCaptureBtn")?.addEventListener("click", triggerCapture);
+    document.querySelector("#frameScreenCaptureBtn")?.addEventListener("click", triggerCapture);
   }
 
   // 4. Subtab switching for Templates and Photos
@@ -4035,63 +4034,11 @@
 
     bindGenerationControlSync();
 
-    const frameStartButton = document.querySelector("#genTabFrame1PickBtn");
-    frameStartButton?.setAttribute("aria-haspopup", "dialog");
-    frameStartButton?.setAttribute("aria-controls", "referencePickerModal");
-    frameStartButton?.setAttribute("aria-label", `${t("sidebar.frameStart")} — ${t("sidebar.framePickerSlotHint")}`);
-    frameStartButton?.addEventListener("click", () => {
-      referencePicker.openFrameSlot(source => setVideoFrameSelection("first", source));
+    const framePickerButton = document.querySelector("#openFramePickerBtn");
+    framePickerButton?.addEventListener("click", () => {
+      referencePicker.openFrameSlots?.(applyVideoFramePickerSelection);
     });
-
-    const frameEndButton = document.querySelector("#genTabFrame2PickBtn");
-    frameEndButton?.setAttribute("aria-haspopup", "dialog");
-    frameEndButton?.setAttribute("aria-controls", "referencePickerModal");
-    frameEndButton?.setAttribute("aria-label", `${t("sidebar.frameEnd")} — ${t("sidebar.framePickerSlotHint")}`);
-    frameEndButton?.addEventListener("click", () => {
-      referencePicker.openFrameSlot(source => setVideoFrameSelection("last", source));
-    });
-
-    const frameUploadButton = document.querySelector("#videoFramesUploadBtn");
-    const frameUploadInput = document.querySelector("#videoFramesUploadInput");
-    const frameUploadStatus = document.querySelector("#videoFramesUploadStatus");
-    const setFrameUploadStatus = (message, isError = false) => {
-      if (!frameUploadStatus) return;
-      frameUploadStatus.textContent = message;
-      frameUploadStatus.hidden = !message;
-      frameUploadStatus.dataset.error = isError ? "true" : "false";
-      frameUploadStatus.setAttribute("role", isError ? "alert" : "status");
-      frameUploadStatus.setAttribute("aria-live", isError ? "assertive" : "polite");
-    };
-    frameUploadButton?.addEventListener("click", () => frameUploadInput?.click());
-    frameUploadInput?.addEventListener("change", async () => {
-      const file = frameUploadInput.files?.[0];
-      frameUploadInput.value = "";
-      if (!file || !frameUploadButton) return;
-      frameUploadButton.disabled = true;
-      frameUploadButton.setAttribute("aria-busy", "true");
-      const pending = t("sidebar.frameLibraryUploadPending");
-      setFrameUploadStatus(pending);
-      setFeedback(pending, true);
-      try {
-        const uploaded = await uploadFrameImageToLibrary(file, progress => {
-          const message = t("sidebar.frameLibraryUploadProgress", { name: file.name, progress });
-          setFrameUploadStatus(message);
-          setFeedback(message, true);
-        });
-        const message = uploaded?.reusedFromLibrary === true
-          ? t("sidebar.frameLibraryUploadReused", { name: file.name })
-          : t("sidebar.frameLibraryUploadComplete", { name: file.name });
-        setFrameUploadStatus(message);
-        setFeedback(message, true);
-      } catch (error) {
-        const message = error?.message || String(error);
-        setFrameUploadStatus(message, true);
-        setFeedback(`❌ ${message}`, false);
-      } finally {
-        frameUploadButton.disabled = false;
-        frameUploadButton.removeAttribute("aria-busy");
-      }
-    });
+    renderVideoFramePreview();
 
     // Reference images buttons
     document.querySelector("#openImagePickerBtn")?.addEventListener("click", () => {

@@ -8,6 +8,7 @@
     let pickerType = "image";
     let pickerPurpose = "references";
     let onFrameSlotPicked = null;
+    let onFrameSlotsPicked = null;
     let onFrameProjectChanged = null;
     let pickerFlowAssets = [];
     let pickerAlbums = [];
@@ -64,10 +65,11 @@
     const localFileKey = file => `${file.name}\u0000${file.size}\u0000${file.lastModified}`;
     const isVideoFile = file => file?.type?.startsWith("video/") || /\.(mp4|mov|webm|mkv|avi|m4v)$/i.test(String(file?.name || ""));
     const normalizeReferenceId = value => String(value || "").toLowerCase();
-    const selectionLimit = () => pickerPurpose === "frame-slot" ? 1 : 3;
-    const selectedCount = () => (pickerPurpose === "frame-slot" ? 0 : referencesFor(pickerType).length)
+    const isFramePicker = () => pickerPurpose === "frame-slot" || pickerPurpose === "frame-pair";
+    const selectionLimit = () => pickerPurpose === "frame-slot" ? 1 : pickerPurpose === "frame-pair" ? 2 : 3;
+    const selectedCount = () => (isFramePicker() ? 0 : referencesFor(pickerType).length)
       + pickerFlowSelection.size + pickerLocalFiles.length;
-    const hasLocalFile = file => (pickerPurpose === "frame-slot" ? pickerLocalFiles : referencesFor(pickerType))
+    const hasLocalFile = file => (isFramePicker() ? pickerLocalFiles : referencesFor(pickerType))
       .some(item => item.source === "local" && localFileKey(item.file) === localFileKey(file));
 
     function normalizeFlowThumbnailUrl(asset) {
@@ -283,7 +285,7 @@
           : pickerScannedCount >= pickerScanLimit ? `⊕  Quét thêm ${allowVideo ? "media" : "ảnh"} trên Flow` : "";
       }
       flowGrid.replaceChildren();
-      const selectedReferences = pickerPurpose === "frame-slot" ? [] : referencesFor(pickerType);
+      const selectedReferences = isFramePicker() ? [] : referencesFor(pickerType);
       const existingIds = new Set(selectedReferences.filter(item => item.source === "flow").map(item => normalizeReferenceId(item.id)));
       for (const asset of list.slice(0, pickerVisibleLimit)) {
         const assetId = String(asset.id || "");
@@ -406,7 +408,7 @@
           ? "Chưa có album nào. Hãy tạo album trong tab Ảnh."
           : album && !images.length ? "Album này chưa có ảnh phù hợp." : "";
       }
-      const selectedReferences = pickerPurpose === "frame-slot" ? [] : referencesFor(pickerType);
+      const selectedReferences = isFramePicker() ? [] : referencesFor(pickerType);
       const existingIds = new Set(selectedReferences.filter(item => item.source === "flow").map(item => normalizeReferenceId(item.id)));
       for (const image of images) {
         const assetId = String(image.id || "");
@@ -467,12 +469,14 @@
     }
 
     function updatePickerCount() {
-      const existingCount = pickerPurpose === "frame-slot" ? 0 : referencesFor(pickerType).length;
+      const existingCount = isFramePicker() ? 0 : referencesFor(pickerType).length;
       const pendingCount = pickerSelectionOrder.length;
       const countValue = Math.min(selectionLimit(), existingCount + pendingCount);
       const count = document.querySelector("#refPickerCount");
       if (count) count.textContent = pickerPurpose === "frame-slot"
         ? `${countValue}/1 ảnh khung đã chọn`
+        : pickerPurpose === "frame-pair"
+          ? `${countValue}/2 ảnh khung đã chọn`
         : `${countValue}/3 ảnh đã chọn${existingCount ? ` (${existingCount} đã có)` : ""}`;
       const confirm = document.querySelector("#refPickerConfirm");
       if (confirm) confirm.disabled = pendingCount === 0 || existingCount + pendingCount > selectionLimit();
@@ -622,7 +626,8 @@
 
     function open(type, purpose = "references") {
       pickerType = normalizeType(type);
-      pickerPurpose = purpose === "frame-slot" ? "frame-slot" : "references";
+      pickerPurpose = purpose === "frame-slot" || purpose === "frame-pair" ? purpose : "references";
+      const framePicker = isFramePicker();
       const cachedProjectAssets = pickerProjectId ? flowAssetCacheByProject.get(pickerProjectId) : null;
       pickerFlowAssets = Array.isArray(cachedProjectAssets?.assets) ? [...cachedProjectAssets.assets] : [];
       pickerVisibleLimit = 20;
@@ -635,26 +640,31 @@
       searchInput.value = "";
       localList.replaceChildren();
       document.querySelector("#refPickerTitle").textContent = pickerPurpose === "frame-slot" ? t("frameSlotPickerTitle", "Chọn ảnh cho khung video")
+        : pickerPurpose === "frame-pair" ? t("framePairPickerTitle", "Chọn tối đa 2 ảnh khung video")
         : pickerType === "video" ? t("videoReferencePickerTitle", "Chọn ảnh hoặc video tham chiếu")
           : t("referencePickerTitle", "Chọn / Tải ảnh lên");
-      document.querySelector("#refPickerLimitHint").textContent = pickerPurpose === "frame-slot" ? t("frameSlotPickerLimit", "Chọn tối đa 1 ảnh cho khung này") : t("referencePickerLimit", "Tối đa 3 ảnh tham chiếu");
-      document.querySelector("#refPickerUploadHint").textContent = pickerPurpose === "frame-slot"
+      document.querySelector("#refPickerLimitHint").textContent = pickerPurpose === "frame-slot" ? t("frameSlotPickerLimit", "Chọn tối đa 1 ảnh cho khung này")
+        : pickerPurpose === "frame-pair" ? t("framePairPickerLimit", "Ảnh đầu là Start; ảnh thứ hai là End, không bắt buộc.")
+        : t("referencePickerLimit", "Tối đa 3 ảnh tham chiếu");
+      document.querySelector("#refPickerUploadHint").textContent = framePicker
         ? t("frameSlotPickerUploadHint", "Ảnh từ máy sẽ được tải lên Flow trước khi tạo video.")
         : pickerType === "video"
           ? t("videoReferencePickerUploadHint", "Ảnh từ máy có thể dùng làm tham chiếu; video phải được chọn từ Thư viện Flow.")
           : t("referencePickerUploadHint", "Ảnh sẽ được tải lên Flow khi bạn bấm Tạo ảnh hoặc Tạo video.");
       const localDescription = document.querySelector("#refPickerDrop > span");
       if (localDescription) {
-        localDescription.textContent = pickerPurpose === "frame-slot"
+        localDescription.textContent = framePicker
           ? t("framePickerLocalDescription", "Chọn ảnh từ máy hoặc kéo thả ảnh vào đây")
           : t("referencePickerLocalDescription", "Chỉ nhận ảnh từ máy; video từ máy chưa được hỗ trợ.");
       }
-      document.querySelector('[data-ref-picker-tab="flow"]').textContent = pickerPurpose === "frame-slot" ? t("framePickerFlowTab", "Thư viện Flow")
+      document.querySelector('[data-ref-picker-tab="flow"]').textContent = framePicker ? t("framePickerFlowTab", "Thư viện Flow")
         : pickerType === "video" ? t("videoReferencePickerFlowTab", "Ảnh & video trên Flow")
           : t("referencePickerFlowTab", "Ảnh trên Flow");
-      document.querySelector('[data-ref-picker-tab="upload"]').textContent = pickerPurpose === "frame-slot" ? t("framePickerLocalTab", "Máy tính") : t("referencePickerLocalTab", "Ảnh từ máy");
+      document.querySelector('[data-ref-picker-tab="upload"]').textContent = framePicker ? t("framePickerLocalTab", "Máy tính") : t("referencePickerLocalTab", "Ảnh từ máy");
       const confirmButton = document.querySelector("#refPickerConfirm");
-      confirmButton.textContent = pickerPurpose === "frame-slot" ? t("frameSlotPickerConfirm", "Chọn ảnh") : t("referencePickerConfirm", "Xác nhận");
+      confirmButton.textContent = pickerPurpose === "frame-slot" ? t("frameSlotPickerConfirm", "Chọn ảnh")
+        : pickerPurpose === "frame-pair" ? t("framePairPickerConfirm", "Dùng ảnh đã chọn")
+        : t("referencePickerConfirm", "Xác nhận");
       confirmButton.hidden = pickerPurpose === "frame-slot";
       const countLabel = document.querySelector("#refPickerCount");
       if (countLabel) countLabel.hidden = pickerPurpose === "frame-slot";
@@ -665,7 +675,7 @@
       void loadPickerAlbums();
       // Show the cached same-project gallery immediately, or scan it when the
       // user visits the Flow tab if project-entry warm-up has not finished.
-      setPickerTab(pickerPurpose === "frame-slot" ? "flow" : "upload");
+      setPickerTab(framePicker ? "flow" : "upload");
       updatePickerCount();
       document.querySelector("#refPickerClose").focus();
     }
@@ -675,7 +685,10 @@
       const refresh = document.querySelector("#refPickerRefresh");
       if (refresh) refresh.disabled = false;
       if (!confirmed) pickerLocalFiles.forEach(entry => URL.revokeObjectURL(entry.previewUrl));
-      if (!confirmed) onFrameSlotPicked = null;
+      if (!confirmed) {
+        onFrameSlotPicked = null;
+        onFrameSlotsPicked = null;
+      }
       pickerLocalFiles = [];
       pickerFlowSelection.clear();
       pickerSelectionOrder = [];
@@ -838,6 +851,24 @@
         close({ confirmed: true });
         return;
       }
+      if (pickerPurpose === "frame-pair") {
+        const picked = pending.slice(0, 2);
+        if (!picked.length) {
+          setFeedback?.(t("framePairPickerNeedImage", "Hãy chọn ít nhất một ảnh cho Frames."), false);
+          return;
+        }
+        const onPicked = onFrameSlotsPicked;
+        onFrameSlotsPicked = null;
+        try {
+          onPicked?.(picked);
+        } catch (error) {
+          close();
+          setFeedback?.(error?.message || String(error), false);
+          return;
+        }
+        close({ confirmed: true });
+        return;
+      }
       if (list.length + pending.length > 3) {
         setFeedback?.(t("referencePickerTooMany", "Flow chỉ nhận tối đa 3 ảnh tham chiếu. Hãy bỏ bớt ảnh rồi thử lại."), false);
         return;
@@ -879,6 +910,10 @@
       openFrameSlot: onPicked => {
         onFrameSlotPicked = typeof onPicked === "function" ? onPicked : null;
         open("video", "frame-slot");
+      },
+      openFrameSlots: onPicked => {
+        onFrameSlotsPicked = typeof onPicked === "function" ? onPicked : null;
+        open("video", "frame-pair");
       },
       setFrameProjectChanged: onChanged => { onFrameProjectChanged = typeof onChanged === "function" ? onChanged : null; },
       bindThumbnail: (img, source, onUnavailable) => {

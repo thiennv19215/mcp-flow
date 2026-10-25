@@ -44,20 +44,24 @@ test('queue panel does not guess the source badge from the label text', () => {
   assert.match(panelJs, /task\?\.metadata\?\.source \|\| "manual"/);
 });
 
-test('Gen-tab frame slots stay clickable when their thumbnails render', () => {
-  assert.ok(sidebarHtml.includes('<button type="button" class="frame-dropzone" id="genTabFrame1PickBtn">'));
-  assert.ok(sidebarHtml.includes('<button type="button" class="frame-dropzone" id="genTabFrame2PickBtn">'));
-  assert.ok(sidebarJs.includes('function renderGenTabFrameSlot(buttonSelector, source, labelKey)'));
-  assert.ok(sidebarJs.includes('button.replaceChildren();'));
-  assert.ok(sidebarJs.includes('bindFrameThumbnail(button, source, "frame-thumb-fallback")'));
-  assert.ok(!sidebarJs.includes('button.replaceWith'));
+test('Frames reuses the reference-style picker layout', () => {
+  assert.ok(sidebarHtml.includes('id="openFramePickerBtn"'));
+  assert.ok(sidebarHtml.includes('id="frameScreenCaptureBtn"'));
+  assert.ok(sidebarHtml.includes('id="videoFramesPreview"'));
+  assert.ok(sidebarJs.includes('function renderVideoFramePreview()'));
+  assert.ok(sidebarJs.includes('referencePicker.bindThumbnail?.(image, itemData.source'));
+  assert.ok(!sidebarJs.includes('genTabFrame1PickBtn'));
+  assert.ok(!sidebarJs.includes('genTabFrame2PickBtn'));
 });
 
-test('Start and End choose one frame directly from the library, with two slots total', () => {
-  assert.equal([...sidebarHtml.matchAll(/id="genTabFrame[12]PickBtn"/g)].length, 2);
-  assert.ok(referencePickerJs.includes('const selectionLimit = () => pickerPurpose === "frame-slot" ? 1 : 3;'));
+test('Frames chooses up to two ordered images in one shared picker', () => {
+  assert.match(sidebarHtml, /id="videoFramesSection"[^>]*data-max-frame-images="2"/);
+  assert.ok(referencePickerJs.includes('const selectionLimit = () => pickerPurpose === "frame-slot" ? 1 : pickerPurpose === "frame-pair" ? 2 : 3;'));
   assert.ok(referencePickerJs.includes('open("video", "frame-slot");'));
-  assert.ok(referencePickerJs.includes('setPickerTab(pickerPurpose === "frame-slot" ? "flow" : "upload");'));
+  assert.ok(referencePickerJs.includes('pickerPurpose === "frame-pair" ? 2 : 3'));
+  assert.ok(referencePickerJs.includes('open("video", "frame-pair");'));
+  assert.ok(referencePickerJs.includes('openFrameSlots: onPicked =>'));
+  assert.ok(referencePickerJs.includes('setPickerTab(framePicker ? "flow" : "upload");'));
   assert.ok(referencePickerJs.includes('function commitFrameSlot(source)'));
   assert.ok(referencePickerJs.includes('commitFrameSlot(flowReferenceFor(asset, thumbnailUrl))'));
   assert.ok(referencePickerJs.includes('commitFrameSlot(flowReferenceFor(image, image.thumbnailUrl || null))'));
@@ -65,36 +69,29 @@ test('Start and End choose one frame directly from the library, with two slots t
   assert.match(sidebarCss, /#refPickerConfirm\[hidden\]\s*\{\s*display:\s*none\s*!important/);
   assert.ok(referencePickerJs.includes('fileInput.multiple = pickerPurpose !== "frame-slot";'));
   assert.match(referencePickerJs, /commitFrameSlot\(\{\s*source: "local",[\s\S]*?previewUrl: URL\.createObjectURL\(file\)/);
-  assert.ok(sidebarJs.includes('referencePicker.openFrameSlot(source => setVideoFrameSelection("first", source))'));
-  assert.ok(sidebarJs.includes('referencePicker.openFrameSlot(source => setVideoFrameSelection("last", source))'));
+  assert.ok(sidebarJs.includes('referencePicker.openFrameSlots?.(applyVideoFramePickerSelection)'));
+  assert.ok(sidebarJs.includes('videoFrameSelection.first'));
+  assert.ok(sidebarJs.includes('videoFrameSelection.last'));
   for (const staleName of ['openFrames', 'getFrameSources', 'videoFrameSources', 'videoFrameAssignments']) {
     assert.ok(!sidebarJs.includes(staleName), 'sidebar.js no longer uses ' + staleName);
   }
 });
 
-test('Frames has an independent Flow library upload action that refreshes the picker', () => {
-  assert.match(sidebarHtml, /id="videoFramesUploadBtn"[^>]*type="button"/);
-  assert.match(sidebarHtml, /id="videoFramesUploadInput"[^>]*type="file" accept="image\/\*"/);
-  assert.match(sidebarHtml, /id="videoFramesUploadStatus"[^>]*role="status" aria-live="polite"/);
-  const uploadBlock = sidebarJs.slice(sidebarJs.indexOf('async function uploadFrameImageToLibrary'), sidebarJs.indexOf('// One builder for every attachment'));
-  assert.match(uploadBlock, /assertQueueIdleForReferenceUpload\(\)/);
-  assert.match(uploadBlock, /uploadReferenceImage\(file, onProgress, 1\)/);
-  assert.match(uploadBlock, /referencePicker\.refreshFlowAssets\(\)/);
-  const handler = sidebarJs.slice(sidebarJs.indexOf('const frameUploadButton ='), sidebarJs.indexOf('// Reference images buttons'));
-  assert.match(handler, /frameUploadButton\?\.addEventListener\("click", \(\) => frameUploadInput\?\.click\(\)\)/);
-  assert.match(handler, /uploadFrameImageToLibrary\(file, progress =>/);
-  assert.match(handler, /frameLibraryUploadComplete/);
-  assert.match(handler, /catch \(error\)[\s\S]*?setFrameUploadStatus\(message, true\)/);
-  assert.doesNotMatch(handler, /btnSubmitVideo|submitVideo|genSubmitBtn/);
-  assert.match(referencePickerJs, /refreshFlowAssets: async \(\) => \{[\s\S]*?flowAssetCacheByProject\.delete\(pickerProjectId\)[\s\S]*?loadFlowPickerAssets\(\{ background: true, force: true \}\)/);
+test('Frames keeps upload inside the shared picker', () => {
+  assert.doesNotMatch(sidebarHtml, /videoFramesUploadBtn|videoFramesUploadInput|videoFramesUploadStatus/);
+  assert.doesNotMatch(sidebarJs, /uploadFrameImageToLibrary|frameLibraryUploadComplete|frameUploadButton/);
+  assert.match(referencePickerJs, /pickerPurpose === "frame-pair"/);
+  assert.match(referencePickerJs, /framePickerLocalTab/);
+  assert.match(referencePickerJs, /fileInput\.multiple = pickerPurpose !== "frame-slot"/);
 });
 
-test('Frames mode removes the shared reference picker and explains the two frame limit', () => {
+test('Frames mode uses a separate reference-style picker and explains the two frame limit', () => {
   const frameInputs = sidebarJs.slice(sidebarJs.indexOf('function updateVideoFrameInputs'), sidebarJs.indexOf('function updateVideoChainUI'));
   assert.match(frameInputs, /const framesMode = isVideo && .*?=== "frames"/);
   assert.match(frameInputs, /querySelector\("#refImagesSection"\)/);
   assert.match(frameInputs, /classList\.toggle\("hidden", framesMode\)/);
-  assert.match(sidebarHtml, /data-i18n="sidebar\.videoFramesHint"[^>]*>[^<]*Tối đa 2 ảnh/);
+  assert.match(sidebarHtml, /data-i18n="sidebar\.framePairPickerLimit"/);
+  assert.ok(sidebarHtml.includes('id="openFramePickerBtn"'));
 });
 
 test('Flow home requires an explicit project before generation', () => {
@@ -145,15 +142,13 @@ test('My Prompts editor keeps fields readable and confirms local storage', () =>
 });
 
 test('Video Frames section uses compact but clickable Start/End slots', () => {
-  assert.match(sidebarCss, /#videoFramesSection \.frame-slot-body,[\s\S]*height: 58px/);
-  assert.match(sidebarCss, /#videoFramesSection \.frame-dropzone[\s\S]*height: 58px/);
-  assert.match(sidebarCss, /#videoFramesSection \.video-frames-upload-btn[\s\S]*min-height: 26px/);
-  assert.match(sidebarCss, /#videoFramesSection \.frame-dropzone-content[\s\S]*display: inline-flex/);
-  assert.match(sidebarCss, /#videoFramesSection \.frame-dropzone:focus-visible,[\s\S]*outline: 2px solid var\(--primary\)/);
-  assert.ok(sidebarHtml.includes('id="genTabFrame1PickBtn"'));
-  assert.ok(sidebarHtml.includes('id="genTabFrame2PickBtn"'));
-  assert.match(sidebarHtml, /data-i18n="sidebar\.framePickerSlotHint"/);
-  assert.match(sidebarJs, /setAttribute\("aria-controls", "referencePickerModal"\)/);
+  assert.match(sidebarCss, /#videoFramesSection \.frame-reference-toolbar/);
+  assert.match(sidebarCss, /#videoFramesSection \.video-frame-grid-item/);
+  assert.match(sidebarCss, /#videoFramesSection \.video-frames-hint[\s\S]*font-size: 9px/);
+  assert.match(sidebarCss, /#videoFramesSection \.ref-btn-upload:focus-visible,[\s\S]*outline: 2px solid var\(--primary\)/);
+  assert.ok(sidebarHtml.includes('id="openFramePickerBtn"'));
+  assert.ok(sidebarHtml.includes('id="videoFramesPreview"'));
+  assert.match(sidebarJs, /openFrameSlots\?\.\(applyVideoFramePickerSelection\)/);
 });
 
 test('local media checks the complete Flow library before uploading', () => {
@@ -173,6 +168,13 @@ test('local media checks the complete Flow library before uploading', () => {
   assert.match(listBlock, /maxDurationMs:\s*payload\.maxDurationMs/);
   assert.match(flowMediaMenuJs, /if \(options\.requireComplete && !reachedEnd && !options\.exactName\)[\s\S]*FLOW_ASSET_SCAN_INCOMPLETE/,
     'an incomplete scan fails before the caller can decide to upload');
+});
+
+test('generation does not block queue additions while another job is running', () => {
+  assert.doesNotMatch(sidebarJs, /assertQueueIdleForReferenceUpload/);
+  assert.doesNotMatch(sidebarJs, /referenceUploadQueueBusy/);
+  assert.match(sidebarJs, /uploadReferenceImage\(reference\.file/);
+  assert.match(sidebarJs, /executeGenerationTask\(\{/);
 });
 
 test('generation progress is routed by the gen-type select, not a missing form', () => {
@@ -206,11 +208,6 @@ test('previously raw i18n keys resolve in both locales', () => {
     'sidebar.framePickerLocalDescription',
     'sidebar.referencePickerLocalDescription',
     'sidebar.referencePickerVideoUploadUnsupported',
-    'sidebar.frameLibraryUploadButton',
-    'sidebar.frameLibraryUploadPending',
-    'sidebar.frameLibraryUploadProgress',
-    'sidebar.frameLibraryUploadComplete',
-    'sidebar.frameLibraryUploadReused',
     'sidebar.projectGateTitle',
     'sidebar.projectGateHint',
     'sidebar.projectGatePlaceholder',

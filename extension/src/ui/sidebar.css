@@ -2768,54 +2768,6 @@ button.frame-thumb-wrap {
   line-height: 1.4
 }
 
-.video-frames-upload-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  margin: 0 0 8px
-}
-
-.video-frames-upload-btn {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: 28px;
-  padding: 4px 9px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  color: var(--foreground);
-  background: var(--surface);
-  font: inherit;
-  font-size: 11px;
-  cursor: pointer
-}
-
-.video-frames-upload-btn:hover:not(:disabled) {
-  border-color: var(--primary);
-  background: var(--surface-elevated, rgba(255, 255, 255, 0.06))
-}
-
-.video-frames-upload-btn:disabled {
-  opacity: 0.55;
-  cursor: progress
-}
-
-.video-frames-upload-status {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--muted-foreground);
-  font-size: 10px;
-  line-height: 1.3;
-  text-overflow: ellipsis
-}
-
-.video-frames-upload-status[data-error="true"] {
-  color: #f87171
-}
-
 #videoFramesSection .frame-slot {
   min-width: 0;
   padding: 7px;
@@ -18339,15 +18291,6 @@ button.extension-update-badge,
   margin: -1px 0 5px;
   font-size: 9px;
 }
-#videoFramesSection .video-frames-upload-row {
-  gap: 6px;
-  margin-bottom: 5px;
-}
-#videoFramesSection .video-frames-upload-btn {
-  min-height: 26px;
-  padding: 3px 8px;
-  font-size: 10px;
-}
 #videoFramesSection .frame-config {
   gap: 6px;
 }
@@ -18370,33 +18313,29 @@ button.extension-update-badge,
   padding: 3px;
   gap: 2px;
 }
-#videoFramesSection .frame-dropzone-content {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-  min-width: 0;
+/* Frames uses the same single-picker layout as Reference Images; only the
+   mode-specific two-image limit and Start/End ordering differ. */
+#videoFramesSection .frame-reference-toolbar {
+  margin: 4px 0 0;
 }
-#videoFramesSection .frame-dropzone-text {
-  font-size: 8px;
-  line-height: 1.15;
-}
-#videoFramesSection .frame-dropzone-source {
-  max-width: 100%;
-  overflow: hidden;
+#videoFramesSection .video-frames-count {
+  flex: 0 0 auto;
   color: var(--muted-foreground);
-  font-size: 7px;
-  line-height: 1.1;
-  opacity: .7;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 600;
 }
-#videoFramesSection .frame-dropzone:focus-visible,
-#videoFramesSection .frame-thumb-wrap:focus-visible {
+#videoFramesSection .video-frames-hint {
+  display: block;
+  margin: 6px 0 0;
+  color: var(--muted-foreground);
+  font-size: 9px;
+  line-height: 1.3;
+}
+#videoFramesSection .video-frame-grid-item {
+  flex-basis: 148px;
+}
+#videoFramesSection .ref-btn-upload:focus-visible,
+#videoFramesSection .ref-btn-capture:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
-}
-#videoFramesSection .frame-dropzone:active,
-#videoFramesSection .frame-thumb-wrap:active {
-  background: color-mix(in srgb, var(--primary) 10%, transparent);
 }

@@ -646,8 +646,8 @@
             </section>
 
             <!-- Video Frames Config Section (#videoFramesSection) -->
-            <section class="section hidden" id="videoFramesSection">
-              <div class="section-header">
+            <section class="section hidden" id="videoFramesSection" data-max-frame-images="2">
+              <div class="section-header section-header--with-select">
                 <label>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect>
@@ -656,40 +656,31 @@
                   </svg>
                   <span data-i18n="gen.videoFrames">Video Frames</span>
                 </label>
+                <span class="video-frames-count" id="videoFramesCount">0/2</span>
               </div>
-              <p class="section-hint video-frames-hint" data-i18n="sidebar.videoFramesHint">Chọn ảnh từ thư viện Flow hoặc tải ảnh lên; bấm Start/End để chọn. Start bắt buộc, End tùy chọn. Tối đa 2 ảnh.</p>
-              <div class="video-frames-upload-row">
-                <button class="video-frames-upload-btn" id="videoFramesUploadBtn" type="button">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M5 14v5h14v-5"/></svg>
-                  <span data-i18n="sidebar.frameLibraryUploadButton">Tải ảnh lên Flow</span>
-                </button>
-                <input class="hidden" id="videoFramesUploadInput" type="file" accept="image/*" />
-                <span class="video-frames-upload-status" id="videoFramesUploadStatus" hidden role="status" aria-live="polite"></span>
-              </div>
-              <div id="globalFrameConfig" class="frame-config">
-                <div class="frame-slot" id="genTabFrame1Slot">
-                  <div class="frame-slot-header"><span class="frame-slot-label" data-i18n="gen.frameStart">Start</span></div>
-                  <div class="frame-slot-body" id="genTabFrame1Body">
-                    <button type="button" class="frame-dropzone" id="genTabFrame1PickBtn">
-                      <span class="frame-dropzone-content">
-                        <span class="frame-dropzone-text" data-i18n="gen.addFrame">+ Add Start Frame</span>
-                        <span class="frame-dropzone-source" data-i18n="sidebar.framePickerSlotHint">Thư viện Flow hoặc máy tính</span>
-                      </span>
-                    </button>
-                  </div>
-                </div>
-                <div class="frame-slot" id="genTabFrame2Slot">
-                  <div class="frame-slot-header"><span class="frame-slot-label" data-i18n="gen.frameEnd">End</span></div>
-                  <div class="frame-slot-body" id="genTabFrame2Body">
-                    <button type="button" class="frame-dropzone" id="genTabFrame2PickBtn">
-                      <span class="frame-dropzone-content">
-                        <span class="frame-dropzone-text" data-i18n="gen.addFrame">+ Add End Frame</span>
-                        <span class="frame-dropzone-source" data-i18n="sidebar.framePickerSlotHint">Thư viện Flow hoặc máy tính</span>
-                      </span>
-                    </button>
-                  </div>
+              <div class="ref-toolbar frame-reference-toolbar" id="videoFramesPickerToolbar">
+                <div class="ref-toolbar-actions ref-toolbar-actions--full">
+                  <button class="ref-btn-upload ref-btn-upload--wide" id="openFramePickerBtn" type="button" aria-haspopup="dialog" aria-controls="referencePickerModal">
+                    <svg class="ref-btn-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                      <path d="M15 8h.01"></path>
+                      <path d="M12.5 21h-6.5a3 3 0 0 1 -3 -3v-12a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v6.5"></path>
+                      <path d="M3 16l5 -5c.928 -.893 2.072 -.893 3 0l3.5 3.5"></path>
+                      <path d="M14 14l1 -1c.679 -.653 1.473 -.829 2.214 -.526"></path>
+                      <path d="M19 22v-6"></path>
+                      <path d="M22 19l-3 -3l-3 3"></path>
+                    </svg>
+                    <span class="ref-btn-text" data-i18n="gen.selectUploadImage">Select image / Drag here</span>
+                  </button>
+                  <button class="ref-btn-capture" id="frameScreenCaptureBtn" type="button" title="Chụp ảnh màn hình" aria-label="Chụp ảnh màn hình">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <circle cx="12" cy="12" r="4" stroke="currentColor" fill="currentColor" stroke-width="1.5"></circle>
+                      <path d="M22 12C22 16.714 22 19.0711 20.5355 20.5355C19.0711 22 16.714 22 12 22C7.28595 22 4.92893 22 3.46447 20.5355C2 19.0711 2 16.714 2 12C2 7.28595 2 4.92893 3.46447 3.46447C4.92893 2 7.28595 2 12 2C16.714 2 19.0711 2 20.5355 3.46447C21.5093 4.43821 21.8356 5.80655 21.9449 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
+                    </svg>
+                  </button>
                 </div>
               </div>
+              <div id="videoFramesPreview" class="ref-grid"></div>
+              <p class="video-frames-hint" data-i18n="sidebar.framePairPickerLimit">Ảnh đầu là Start; ảnh thứ hai là End, không bắt buộc.</p>
             </section>
 
             <!-- Auto Download Options -->
