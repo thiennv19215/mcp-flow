@@ -2029,6 +2029,11 @@
   let flowQueuePanel = null;
   const submittedQueueJobIds = new Set();
   const handledFinishedQueueJobIds = new Set();
+  const preparedGenerationQueueIds = new Set();
+  const cancelledPreparedQueueIds = new Set();
+  const inFlightUploads = new Set();
+  const terminalQueueAttempts = new Map();
+  let lastQueueProgressLogKey = "";
 
   function rememberSubmittedQueueJob(result) {
     const id = result?.job?.id;
@@ -2052,8 +2057,51 @@
     chrome.runtime.onMessage.addListener(msg => {
     if (msg?.type === "flow-queue:changed") {
       const jobs = msg.snapshot?.jobs || msg.snapshot?.items || [];
-      const active = jobs.find(job => job.status === "running");
-      if (active?.progress?.message) setFeedback(`⏳ ${active.progress.message}`, true);
+      for (const job of jobs) {
+        const id = String(job?.id || "");
+        if (!id) continue;
+        const attempts = Math.max(0, Number(job.attempts) || 0);
+        if (["completed", "failed", "cancelled"].includes(job.status)) {
+          terminalQueueAttempts.set(id, Math.max(terminalQueueAttempts.get(id) || 0, attempts));
+        }
+        if (job.status === "cancelled" && preparedGenerationQueueIds.has(id)) cancelledPreparedQueueIds.add(id);
+      }
+      const cancelledQueueIds = new Set(jobs.filter(job => job?.status === "cancelled").map(job => String(job.id)));
+      const dependentIds = new Set();
+      let foundDependent = true;
+      while (foundDependent) {
+        foundDependent = false;
+        for (const job of jobs) {
+          const id = String(job?.id || "");
+          const dependencyId = String(job?.metadata?.dependsOnId || "");
+          if (!id || !dependencyId || !preparedGenerationQueueIds.has(id) || cancelledQueueIds.has(id) || !cancelledQueueIds.has(dependencyId)) continue;
+          cancelledQueueIds.add(id);
+          cancelledPreparedQueueIds.add(id);
+          dependentIds.add(id);
+          foundDependent = true;
+        }
+      }
+      if (dependentIds.size) void cancelPreparedGeneration([...dependentIds], { retainCancellationState: true });
+      for (const entry of inFlightUploads) {
+        if (preparedUploadOwnersCancelled(entry.queueJobIds)) {
+          entry.controller.abort(new Error("The queued generation was cancelled."));
+        }
+      }
+      const active = jobs.find(job => job.status === "running" &&
+        Number(job.attempts || 0) > (terminalQueueAttempts.get(String(job.id)) || 0));
+      if (active?.progress?.message) {
+        setFeedback(`⏳ ${active.progress.message}`, true);
+        if (isGenerating) {
+          const isImage = (document.querySelector("#genType")?.value || "image") === "image";
+          const buttonText = document.querySelector(isImage ? "#txtBtnSubmitImage" : "#txtBtnSubmitVideo");
+          if (buttonText) buttonText.textContent = active.progress.message;
+        }
+        const progressKey = `${active.id}:${active.attempts || 0}:${active.progress.message}`;
+        if (progressKey !== lastQueueProgressLogKey) {
+          addLog("Tiến trình", active.progress.message, true);
+          lastQueueProgressLogKey = progressKey;
+        }
+      }
       if (msg.reason === "job-finished") {
         const finished = [...jobs]
           .filter(job => submittedQueueJobIds.has(String(job.id))
@@ -2163,11 +2211,14 @@
     if (!(await ensureFlowProjectSelected())) return null;
     isGenerating = true;
     if (options.btn) options.btn.disabled = true;
+    let stagedIds = [];
     try {
       const jobs = buildGenerationQueueJobs({ ...options, preparing: true });
+      stagedIds = jobs.map(job => String(job.id));
       if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) {
         throw new Error("Không thể kết nối với extension background. Vui lòng mở tiện ích trong Chrome Side Panel.");
       }
+      for (const job of jobs) preparedGenerationQueueIds.add(job.id);
       const addResult = await chrome.runtime.sendMessage(jobs.length > 1
         ? { type: "flow-queue:add-batch", jobs, batchLabel: `${options.type === "video" ? "Video" : "Image"} batch`, autoStart: false }
         : { type: "flow-queue:add", job: jobs[0], autoStart: false });
@@ -2177,6 +2228,10 @@
       addLog("flow.queue.add", `${jobs.length > 1 ? t("sidebar.multiPromptQueued", { count: jobs.length }) : `[${options.type.toUpperCase()}] ${options.prompt.slice(0, 96)}`}`, true);
       return { jobIds: jobs.map(job => job.id), jobs };
     } catch (err) {
+      for (const id of stagedIds) {
+        preparedGenerationQueueIds.delete(id);
+        cancelledPreparedQueueIds.delete(id);
+      }
       isGenerating = false;
       if (options.btn) options.btn.disabled = false;
       setFeedback(`❌ ${err.message}`, false);
@@ -2185,11 +2240,15 @@
     }
   }
 
-  async function cancelPreparedGeneration(jobIds) {
+  async function cancelPreparedGeneration(jobIds, { retainCancellationState = false } = {}) {
     if (!Array.isArray(jobIds) || typeof chrome === "undefined" || !chrome.runtime?.sendMessage) return;
     await Promise.all(jobIds.map(async id => {
       try { await chrome.runtime.sendMessage({ type: "flow-queue:cancel", id }); } catch { /* best effort cleanup */ }
     }));
+    for (const id of jobIds) {
+      preparedGenerationQueueIds.delete(String(id));
+      if (!retainCancellationState) cancelledPreparedQueueIds.delete(String(id));
+    }
   }
 
   async function executeGenerationTask({ type, prompt, prompts, aspect_ratio, count = 1, model, autoDownload = false, attachments = [], attachmentsPerPrompt, firstFramesPerPrompt, lastFramesPerPrompt, video_settings, chainVideo = false, preparedJobIds, btn, btnTextEl, defaultTextKey }) {
@@ -2210,17 +2269,28 @@
         throw new Error("Không thể kết nối với extension background. Vui lòng mở tiện ích trong Chrome Side Panel.");
       }
       if (prepared) {
-        for (let index = 0; index < jobs.length; index++) {
-          const job = jobs[index];
-          const updateResult = await chrome.runtime.sendMessage({
-            type: "flow-queue:update",
+        const updateResult = await chrome.runtime.sendMessage({
+          type: "flow-queue:update-batch",
+          jobs: jobs.map(job => ({
             id: job.id,
             payload: job.payload,
             metadata: job.metadata,
             removeMetadata: ["preparingReferences"],
-            autoStart: index === jobs.length - 1,
-          });
-          if (!updateResult?.ok) throw new Error(updateResult?.error?.message || "Không thể thêm tác vụ vào hàng đợi Flow.");
+          })),
+          autoStart: true,
+        });
+        if (!updateResult?.ok) throw new Error(updateResult?.error?.message || "Không thể thêm tác vụ vào hàng đợi Flow.");
+        if (Array.isArray(updateResult.addedJobs) && updateResult.addedJobs.length === 0) {
+          for (const id of preparedJobIds) {
+            preparedGenerationQueueIds.delete(String(id));
+            cancelledPreparedQueueIds.delete(String(id));
+          }
+          return false;
+        }
+        rememberSubmittedQueueJob(updateResult);
+        for (const id of preparedJobIds) {
+          preparedGenerationQueueIds.delete(String(id));
+          cancelledPreparedQueueIds.delete(String(id));
         }
       } else {
         const addResult = await chrome.runtime.sendMessage(jobs.length > 1
@@ -2479,15 +2549,52 @@
   bindPromptImport("image");
   bindPromptImport("video");
 
-  function assignBatchReferences(prompts, mode, common, selectedReferences, referencesPerPrompt = 1) {
-    if (mode === "none") return prompts.map(() => [...common]);
-    if (prompts.length < 2 || mode !== "sequential") {
-      const attachments = [...common, ...selectedReferences];
-      return prompts.map(() => attachments);
+  function queueJobsUsingReference(reference, { prompts, mode, selectedReferences, mentionAssignments, referencesPerPrompt, jobIds }) {
+    const indices = Array.isArray(prompts) ? prompts.map((_, index) => index) : [];
+    if (mode === "none") return [];
+    if (mode === "mention") {
+      return indices.filter(index => mentionAssignments?.[index]?.includes(reference)).map(index => jobIds[index]).filter(Boolean);
     }
-    const count = Math.max(1, Math.min(3, Number(referencesPerPrompt) || 1));
-    if (selectedReferences.length < prompts.length * count) throw new Error(t("sidebar.multiPromptRefsMissing"));
-    return prompts.map((_, index) => [...common, ...selectedReferences.slice(index * count, (index + 1) * count)]);
+    if (prompts.length > 1 && mode === "sequential") {
+      const count = Math.max(1, Math.min(3, Number(referencesPerPrompt) || 1));
+      return indices.filter(index => selectedReferences.slice(index * count, (index + 1) * count).includes(reference))
+        .map(index => jobIds[index]).filter(Boolean);
+    }
+    return [...jobIds];
+  }
+
+  function preparedUploadOwnersCancelled(jobIds) {
+    return Array.isArray(jobIds) && jobIds.length > 0 && jobIds.every(id => cancelledPreparedQueueIds.has(String(id)));
+  }
+
+  function queueJobsUsingFrame(source, assignments, jobIds) {
+    return (Array.isArray(assignments) ? assignments : []).flatMap((assignment, index) =>
+      assignment && (assignment.first === source || assignment.last === source) && jobIds[index] ? [jobIds[index]] : []);
+  }
+
+  function referencesForPrompt(index, prompts, mode, selectedReferences, mentionAssignments, referencesPerPrompt) {
+    if (mode === "none") return [];
+    if (mode === "mention") return mentionAssignments?.[index] || [];
+    if (prompts.length > 1 && mode === "sequential") {
+      const count = Math.max(1, Math.min(3, Number(referencesPerPrompt) || 1));
+      return selectedReferences.slice(index * count, (index + 1) * count);
+    }
+    return selectedReferences;
+  }
+
+  async function uploadPreparedReference(file, referenceIndex, jobIds) {
+    try {
+      return await uploadReferenceImage(file, undefined, referenceIndex, jobIds);
+    } catch (error) {
+      if (jobIds.length && jobIds.every(id => cancelledPreparedQueueIds.has(id))) return null;
+      throw error;
+    }
+  }
+
+  function activePreparedIndices(jobIds, chainVideo = false) {
+    const cancelledIndex = jobIds.findIndex(id => cancelledPreparedQueueIds.has(String(id)));
+    if (chainVideo && cancelledIndex >= 0) return Array.from({ length: cancelledIndex }, (_, index) => index);
+    return jobIds.map((_, index) => index).filter(index => !cancelledPreparedQueueIds.has(String(jobIds[index])));
   }
 
   function resolveMentionReferences(prompts, selectedReferences) {
@@ -2564,8 +2671,6 @@
   // aborts exactly that upload — its chunk stream stops and the client
   // stops waiting for the in-page upload command — while any other
   // in-flight upload keeps running.
-  const inFlightUploads = new Set();
-
   function renderUploadCancelBar() {
     const feedbackBox = document.querySelector("#feedbackBox");
     if (!feedbackBox?.parentElement) return;
@@ -2590,10 +2695,13 @@
   async function uploadWithCancel(file, options = {}) {
     if (!window.FlowUploadClient) throw new Error("Dịch vụ tải media lên chưa sẵn sàng.");
     const controller = new AbortController();
-    const entry = { controller, requestId: null, label: options.name || file?.name || "tệp" };
+    const queueJobIds = Array.isArray(options.queueJobIds) ? [...new Set(options.queueJobIds.map(id => String(id)))] : [];
+    const entry = { controller, requestId: null, label: options.name || file?.name || "tệp", queueJobIds };
     inFlightUploads.add(entry);
     renderUploadCancelBar();
     try {
+      if (preparedUploadOwnersCancelled(queueJobIds)) controller.abort(new Error("The queued generation was cancelled."));
+      if (controller.signal.aborted) throw controller.signal.reason || new Error("Upload cancelled.");
       return await window.FlowUploadClient.upload(file, {
         ...options,
         signal: controller.signal,
@@ -2630,9 +2738,11 @@
       const deadline = Date.now() + FLOW_LIBRARY_QUEUE_WAIT_TIMEOUT_MS;
       while (true) {
         const response = await chrome.runtime.sendMessage({ type: "flow-queue:get" }).catch(() => null);
+        if (!response?.ok) throw new Error(t("sidebar.uploadLibraryScanFailed"));
         const snapshot = response?.snapshot || response;
         const jobs = snapshot?.jobs || snapshot?.items || [];
-        const queueActive = snapshot?.isRunning === true || jobs.some(job => job?.status === "running");
+        const queueActive = snapshot?.isRunning === true || Number(snapshot?.waitingForUser) > 0 ||
+          jobs.some(job => job?.status === "running" || job?.status === "waiting_for_user");
         if (!queueActive) return;
         setFeedback(t("sidebar.uploadLibraryWaitingQueue"), true);
         if (Date.now() >= deadline) throw new Error(t("sidebar.uploadLibraryScanFailed"));
@@ -2732,7 +2842,7 @@
     };
   }
 
-  async function uploadReferenceImage(file, onProgress, referenceIndex) {
+  async function uploadReferenceImage(file, onProgress, referenceIndex, queueJobIds = []) {
     const kind = referenceUploadKind(file);
     const existingAsset = await findExistingFlowAsset(file, kind);
     if (existingAsset) {
@@ -2742,7 +2852,7 @@
     setFeedback(t("sidebar.uploadLibraryMissing", { name: file?.name || "" }), true);
     if (window.FlowUploadClient) {
       try {
-        return await uploadWithCancel(file, { onProgress, kind, referenceIndex, callerKey: "flow-sidebar-reference-v1" });
+        return await uploadWithCancel(file, { onProgress, kind, referenceIndex, callerKey: "flow-sidebar-reference-v1", queueJobIds });
       } finally {
         // A successful upload (or an ambiguous timeout) may have changed Flow's
         // library, so the next selection must perform a fresh complete scan.
@@ -2833,12 +2943,9 @@
     const character = selectedCharacter?.name || "";
     if (!validateCharacterSelections(prompts, selectedCharacter, "ảnh")) return;
 
-    const commonAttachments = [];
-    const referenceAttachments = [];
     const activeImageReferences = referenceMode === "none" ? []
       : referenceMode === "mention" ? mentionResolution.usedReferences
         : refFilesImage;
-    if (selectedCharacter) commonAttachments.push(selectedCharacter.attachment);
 
     let prepared = null;
     try {
@@ -2868,41 +2975,52 @@
             expectedId: reference.expectedId,
             kind: reference.kind || "image",
           };
-          referenceAttachments.push(attachment);
           attachmentByReference.set(reference, attachment);
           continue;
         }
         uploadedImageCount++;
         setFeedback(`Đang tải ảnh tham chiếu ${uploadedImageCount}/${localImageReferences.length} lên Flow...`, true);
-        const uploaded = await uploadReferenceImage(reference.file, undefined, i + 1);
+        const uploadJobIds = queueJobsUsingReference(reference, {
+          prompts,
+          mode: referenceMode,
+          selectedReferences: activeImageReferences,
+          mentionAssignments: mentionResolution?.assignments,
+          referencesPerPrompt,
+          jobIds: prepared.jobIds,
+        });
+        const uploaded = await uploadPreparedReference(reference.file, i + 1, uploadJobIds);
+        if (!uploaded) {
+          attachmentByReference.set(reference, null);
+          continue;
+        }
         const attachment = {
           ...uploadedAssetAttachment(uploaded),
           kind: reference.kind || "image",
         };
-        referenceAttachments.push(attachment);
         attachmentByReference.set(reference, attachment);
       }
 
-      const baseBatchAttachments = assignBatchReferences(prompts, referenceMode, [], referenceAttachments, referencesPerPrompt);
       const attachmentsPerPrompt = prompts.map((itemPrompt, idx) => {
         const itemChar = findCharacterMentionInPrompt(itemPrompt, currentCharacters) || selectedCharacter;
         const charAtts = itemChar ? [itemChar.attachment] : [];
-        if (referenceMode === "mention") {
-          const refs = mentionResolution.assignments[idx].map(reference => attachmentByReference.get(reference)).filter(Boolean);
-          return [...charAtts, ...refs];
-        }
-        return [...charAtts, ...(baseBatchAttachments[idx] || [])];
+        const refs = referencesForPrompt(idx, prompts, referenceMode, activeImageReferences, mentionResolution?.assignments, referencesPerPrompt)
+          .map(reference => attachmentByReference.get(reference)).filter(Boolean);
+        return [...charAtts, ...refs];
       });
+      const activeIndices = activePreparedIndices(prepared.jobIds);
+      const cancelledIds = prepared.jobIds.filter((id, index) => !activeIndices.includes(index));
+      if (cancelledIds.length) await cancelPreparedGeneration(cancelledIds);
+      if (!activeIndices.length) return;
       const queued = await executeGenerationTask({
         type: "image",
         prompt,
-        prompts,
+        prompts: activeIndices.map(index => prompts[index]),
         aspect_ratio,
         count,
         model,
         autoDownload,
-        attachmentsPerPrompt,
-        preparedJobIds: prepared.jobIds,
+        attachmentsPerPrompt: activeIndices.map(index => attachmentsPerPrompt[index]),
+        preparedJobIds: activeIndices.map(index => prepared.jobIds[index]),
         btn,
         btnTextEl,
         defaultTextKey: "sidebar.btnGenerateImage"
@@ -3007,10 +3125,6 @@
       return;
     }
 
-    const commonAttachments = [];
-    const referenceAttachments = [];
-    if (selectedCharacter) commonAttachments.push(selectedCharacter.attachment);
-
     const videoSettings = {
       mode,
       model,
@@ -3049,18 +3163,28 @@
             expectedId: reference.expectedId,
             kind: reference.kind || "image",
           };
-          referenceAttachments.push(attachment);
           attachmentByReference.set(reference, attachment);
           continue;
         }
         uploadedVideoCount++;
         setFeedback(`Đang tải media tham chiếu ${uploadedVideoCount}/${localVideoReferences.length} lên Flow...`, true);
-        const uploaded = await uploadReferenceImage(reference.file, undefined, i + 1);
+        const uploadJobIds = queueJobsUsingReference(reference, {
+          prompts,
+          mode: referenceMode,
+          selectedReferences: activeVideoReferences,
+          mentionAssignments: mentionResolution?.assignments,
+          referencesPerPrompt,
+          jobIds: prepared.jobIds,
+        });
+        const uploaded = await uploadPreparedReference(reference.file, i + 1, uploadJobIds);
+        if (!uploaded) {
+          attachmentByReference.set(reference, null);
+          continue;
+        }
         const attachment = {
           ...uploadedAssetAttachment(uploaded),
           kind: reference.kind || "image",
         };
-        referenceAttachments.push(attachment);
         attachmentByReference.set(reference, attachment);
       }
 
@@ -3080,8 +3204,9 @@
           }
           uploadedFrameCount++;
           setFeedback(t("sidebar.frameUploading", { n: uploadedFrameCount, total: localFrameSources.length, name: source.name || source.file?.name || "" }), true);
-          const uploaded = await uploadReferenceImage(source.file, undefined, uploadedFrameCount);
-          attachmentByReference.set(source, uploadedAssetAttachment(uploaded));
+          const uploadJobIds = queueJobsUsingFrame(source, usedFrameAssignments, prepared.jobIds);
+          const uploaded = await uploadPreparedReference(source.file, uploadedFrameCount, uploadJobIds);
+          attachmentByReference.set(source, uploaded ? uploadedAssetAttachment(uploaded) : null);
         }
         for (let index = 0; index < selectedFrameAssignments.length; index++) {
           const assignment = selectedFrameAssignments[index];
@@ -3090,30 +3215,34 @@
         }
       }
 
-      const baseBatchAttachments = assignBatchReferences(prompts, referenceMode, [], referenceAttachments, referencesPerPrompt);
       const attachmentsPerPrompt = hasFrames
         ? prompts.map(() => [])
         : prompts.map((itemPrompt, idx) => {
             const itemChar = findCharacterMentionInPrompt(itemPrompt, currentCharacters) || selectedCharacter;
             const charAtts = itemChar ? [itemChar.attachment] : [];
-            if (referenceMode === "mention") {
-              const refs = mentionResolution.assignments[idx].map(reference => attachmentByReference.get(reference)).filter(Boolean);
-              return [...charAtts, ...refs];
-            }
-            return [...charAtts, ...(baseBatchAttachments[idx] || [])];
+            const refs = referencesForPrompt(idx, prompts, referenceMode, activeVideoReferences, mentionResolution?.assignments, referencesPerPrompt)
+              .map(reference => attachmentByReference.get(reference)).filter(Boolean);
+            return [...charAtts, ...refs];
           });
+      const activeIndices = activePreparedIndices(prepared.jobIds, chainVideo);
+      const cancelledIds = prepared.jobIds.filter((id, index) => !activeIndices.includes(index));
+      if (cancelledIds.length) await cancelPreparedGeneration(cancelledIds);
+      if (!activeIndices.length) return;
       const queued = await executeGenerationTask({
         type: "video",
         prompt,
-        prompts,
+        prompts: activeIndices.map(index => prompts[index]),
         aspect_ratio,
         count,
         autoDownload,
         video_settings: videoSettings,
-        attachmentsPerPrompt,
-        ...(hasFrames ? { firstFramesPerPrompt, lastFramesPerPrompt } : {}),
+        attachmentsPerPrompt: activeIndices.map(index => attachmentsPerPrompt[index]),
+        ...(hasFrames ? {
+          firstFramesPerPrompt: activeIndices.map(index => firstFramesPerPrompt[index]),
+          lastFramesPerPrompt: activeIndices.map(index => lastFramesPerPrompt[index]),
+        } : {}),
         chainVideo,
-        preparedJobIds: prepared.jobIds,
+        preparedJobIds: activeIndices.map(index => prepared.jobIds[index]),
         btn,
         btnTextEl,
         defaultTextKey: "sidebar.btnGenerateVideo"

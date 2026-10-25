@@ -1911,6 +1911,22 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
           addedJob = updatedJob;
           break;
         }
+        case "flow-queue:update-batch": {
+          const source = Array.isArray(message.jobs) ? message.jobs : [];
+          const updates = source.map(job => ({
+            id: String(job?.id || job?.taskId || "").trim(),
+            patch: {
+              ...(Object.prototype.hasOwnProperty.call(job || {}, "payload") ? { payload: job.payload } : {}),
+              ...(Object.prototype.hasOwnProperty.call(job || {}, "label") ? { label: job.label } : {}),
+              ...(job?.metadata && typeof job.metadata === "object" ? { metadata: job.metadata } : {}),
+              ...(Array.isArray(job?.removeMetadata) ? { removeMetadata: job.removeMetadata } : {}),
+            },
+          }));
+          if (!updates.length) throw Object.assign(new Error("At least one Flow queue job update is required."), { code: "FLOW_QUEUE_UPDATE_SIZE_INVALID" });
+          addedJob = await flowJobQueue.updateJobs(updates);
+          snapshot = await startEnqueuedWork({ autoStart: message.autoStart });
+          break;
+        }
         case "flow-queue:transform-lock":
           // FEAT-11b: read-only view of the transform execution lock —
           // current holder, any pending stop request, and any live
@@ -2477,40 +2493,51 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
   }
   if (message?.type === "flow-mcp:progress") {
     const requestId = message.requestId ?? message.request_id ?? message.commandId ?? message.command_id;
+    const isQueueProgress = String(requestId || "").startsWith("queue-");
     const tabId = _sender.tab?.id;
     const receiptId = ++progressReceiptSequence;
 
-    // Broadcast to UI pages (sidebar, popup) for real-time progress display
-    chrome.runtime.sendMessage({
-      type: "flow-mcp:progress-broadcast",
-      requestId: String(requestId || ""),
-      jobId: message.jobId ?? message.job_id,
-      progress: message.progress,
-    }).catch(() => {});
-
-    if (String(requestId || "").startsWith("queue-") && flowUrl(_sender.tab?.url)) {
+    if (isQueueProgress && flowUrl(_sender.tab?.url)) {
       const queueJobId = String(message.jobId ?? message.job_id ?? "").trim();
       if (queueJobId) {
         const progressMessage = String(message.progress || "Flow đang xử lý…");
         const progressPercent = progressMessage.match(/(?:^|\D)(\d{1,3})\s*%(?:\D|$)/)?.[1];
         void (async () => {
+          // Persist the displayed progress before a receipt checkpoint emits
+          // its queue snapshot. The direct broadcast below is intentionally
+          // disabled for queue jobs so a late message cannot overwrite a
+          // terminal failure in the sidebar.
+          await flowJobQueue.updateProgress(queueJobId, {
+            phase: "render",
+            message: progressMessage,
+            ...(progressPercent !== undefined ? { percent: Math.max(0, Math.min(100, Number(progressPercent))) } : {}),
+          });
           if (message.generationObservation && typeof message.generationObservation === "object") {
             await flowJobQueue.checkpointGenerationObservation(queueJobId, message.generationObservation);
           }
           if (message.generationResult && Array.isArray(message.generationResult.media)) {
             await flowJobQueue.checkpointGenerationResult(queueJobId, message.generationResult.media);
-          } else if (!message.generationObservation) {
-            await flowJobQueue.updateProgress(queueJobId, {
-              phase: "render",
-              message: progressMessage,
-              ...(progressPercent !== undefined ? { percent: Math.max(0, Math.min(100, Number(progressPercent))) } : {}),
-            });
           }
           respond({ ok: true, local: true, checkpointed: Boolean(message.generationObservation || message.generationResult) });
         })().catch(error => respond({ ok: false, error: String(error?.message || error) }));
       }
       if (!queueJobId) respond({ ok: false, error: "FLOW_QUEUE_JOB_ID_MISSING" });
       return true;
+    }
+
+    // Queue progress is broadcast through flow-queue:changed after it has
+    // been checkpointed. Sending a second, unversioned progress broadcast
+    // here can arrive after the queue's terminal failure event and replace
+    // the failure message with an older "still processing" message.
+    // Interactive MCP requests have no queue snapshot, so they keep this
+    // direct progress path.
+    if (!isQueueProgress) {
+      chrome.runtime.sendMessage({
+        type: "flow-mcp:progress-broadcast",
+        requestId: String(requestId || ""),
+        jobId: message.jobId ?? message.job_id,
+        progress: message.progress,
+      }).catch(() => {});
     }
 
     const isInteractive = activeInteractiveRequests.get(String(requestId)) === tabId;

@@ -21,6 +21,8 @@ The connector remembers the selected tab while you browse elsewhere. Use the sid
 
 Commands use a backend queue delivered through a bounded HTTPS long poll. Results and progress return through authenticated HTTPS POSTs. Every operation is capability-gated and carries a request ID and deadline. The extension rejects unsupported operations before dispatch. The backend does not replay commands after delivery: a disconnect before delivery is safe to retry, while a disconnect after delivery is reported as an unknown outcome. Inspect Flow before retrying any operation whose result is uncertain, especially a paid generation.
 
+The side panel's staged reference-upload jobs use the local `flow-queue:update-batch` queue action after upload; this is an extension UI message and does not change the backend connector request protocol.
+
 The extension connects to the backend independently of whether a Flow tab is open. Flow commands require an open Flow tab, which the extension selects when a command arrives. The backend issues a per-machine token that the extension stores and sends in the Authorization header (see the server-token field on the extension options page). The backend also accepts the existing WebSocket protocol. Deploy the backend before updating the extension so both sides support protocol 3.
 
 ## File handling

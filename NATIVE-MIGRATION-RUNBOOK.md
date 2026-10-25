@@ -6,7 +6,7 @@ The extension is the Flow page driver and owns its side-panel queue. The optiona
 
 The local MCP connector carries request IDs, deadlines, progress events, capabilities, and structured errors for AI-originated operations. AI tools and the side panel share the extension's persistent queue. The extension owns scene planning, prompts, dependencies, generation, edits, continuation, Agent batches, character mutations, and Flow page interactions.
 
-Uploads use Chrome's native file-input selection through DevTools Protocol, with validated image types, size limits, unique temporary names, and cleanup after Flow confirms processing. Chrome owns downloads; the extension completes each queued media download before advancing, then local MCP copies the already-downloaded file into the requested output directory. Queue state, retries, progress, pacing, and recovery remain in extension storage.
+Uploads use Chrome's native file-input selection through DevTools Protocol, with validated image types, size limits, unique temporary names, and cleanup after Flow confirms processing. Chrome owns downloads; the extension completes each queued media download before advancing, then local MCP copies the already-downloaded file into the requested output directory. Queue state, retries, progress, pacing, and recovery remain in extension storage. Side-panel reference-upload jobs stay visible as pending until the full batch payload passes preflight and is committed atomically.
 
 ## Operational rules
 

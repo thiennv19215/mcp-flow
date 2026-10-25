@@ -251,6 +251,180 @@ test('reference-preparation jobs stay visible in the queue until their payload i
   assert.equal(seen[0].attachments[0].assetName, 'asset:uploaded');
 });
 
+test('prepared batch updates preflight atomically before a running drain can release any member', async () => {
+  const seen = [];
+  let releaseActive;
+  const activeGate = new Promise(resolve => { releaseActive = resolve; });
+  const queue = makeQueue(async job => {
+    seen.push(job.id);
+    if (job.id === 'active-before-prepared-batch') await activeGate;
+    return { completed: true };
+  }, {
+    loadCapabilityRegistry: async () => ({ models: [], defaults: { maxReferences: 1 } }),
+  });
+
+  const active = await queue.add({ id: 'active-before-prepared-batch', operation: 'flow.test', payload: {} });
+  const activeWait = queue.wait(active.id, 5_000);
+  await queue.start();
+  await untilSnapshot(queue, snapshot => snapshot.jobs.some(job => job.id === active.id && job.status === 'running'));
+
+  const staged = await queue.addBatch([
+    { id: 'prepared-image-a', operation: 'flow.generation.submit', payload: { type: 'image', prompt: 'A', attachments: [] }, metadata: { preparingReferences: true } },
+    { id: 'prepared-image-b', operation: 'flow.generation.submit', payload: { type: 'image', prompt: 'B', attachments: [] }, metadata: { preparingReferences: true } },
+  ], { batchId: 'prepared-reference-atomicity' });
+
+  let releaseRegistry;
+  queue.capabilityRegistryPromise = new Promise(resolve => { releaseRegistry = resolve; });
+  const rejectedCommit = queue.updateJobs(staged.map((job, index) => ({
+    id: job.id,
+    patch: {
+      payload: {
+        type: 'image', prompt: job.payload.prompt,
+        attachments: index === 0 ? [{ assetName: 'asset:one' }] : [{ assetName: 'asset:two-a' }, { assetName: 'asset:two-b' }],
+      },
+      removeMetadata: ['preparingReferences'],
+    },
+  })));
+
+  await new Promise(resolve => setTimeout(resolve, 0));
+  releaseActive();
+  await activeWait;
+  if ((await queue.snapshot()).isRunning) await untilSnapshot(queue, snapshot => !snapshot.isRunning);
+  assert.deepEqual(seen, [active.id], 'the drain must skip the whole batch while its candidate payloads are being checked');
+  releaseRegistry({ models: [], defaults: { maxReferences: 1 } });
+  await assert.rejects(rejectedCommit, /references exceed/);
+  const afterRejectedCommit = await queue.list();
+  assert.ok(afterRejectedCommit.filter(job => staged.some(item => item.id === job.id)).every(job =>
+    job.metadata?.preparingReferences === true && job.payload.attachments.length === 0));
+  assert.deepEqual(seen, [active.id], 'a later member failing preflight must not release earlier members');
+
+  queue.capabilityRegistryPromise = Promise.resolve({ models: [], defaults: { maxReferences: 2 } });
+  await queue.updateJobs(staged.map(job => ({
+    id: job.id,
+    patch: {
+      payload: { type: 'image', prompt: job.payload.prompt, attachments: [{ assetName: `asset:${job.id}` }] },
+      removeMetadata: ['preparingReferences'],
+    },
+  })));
+  await queue.start();
+  const results = await Promise.all(staged.map(job => queue.wait(job.id, 5_000)));
+  assert.ok(results.every(result => result.job.status === 'completed'));
+  assert.deepEqual(seen.slice(1), staged.map(job => job.id));
+  await queue.stop();
+});
+
+test('prepared batch commits surviving jobs when one member is cancelled during delayed preflight', async () => {
+  const queue = makeQueue(async () => ({ completed: true }), {
+    loadCapabilityRegistry: async () => ({ models: [], defaults: { maxReferences: 2 } }),
+  });
+  const staged = await queue.addBatch([
+    { id: 'cancel-during-preflight-a', operation: 'flow.generation.submit', payload: { type: 'image', prompt: 'A', attachments: [] }, metadata: { preparingReferences: true } },
+    { id: 'cancel-during-preflight-b', operation: 'flow.generation.submit', payload: { type: 'image', prompt: 'B', attachments: [] }, metadata: { preparingReferences: true } },
+  ], { batchId: 'prepared-cancel-during-preflight' });
+
+  let releaseRegistry;
+  queue.capabilityRegistryPromise = new Promise(resolve => { releaseRegistry = resolve; });
+  const update = queue.updateJobs(staged.map((job, index) => ({
+    id: job.id,
+    patch: {
+      payload: {
+        type: 'image', prompt: job.payload.prompt,
+        attachments: index === 0 ? [{ assetName: 'cancelled-a' }, { assetName: 'cancelled-b' }] : [{ assetName: 'survivor' }],
+      },
+      removeMetadata: ['preparingReferences'],
+    },
+  })));
+
+  await new Promise(resolve => setTimeout(resolve, 0));
+  await queue.cancel(staged[0].id);
+  releaseRegistry({ models: [], defaults: { maxReferences: 1 } });
+
+  const committed = await update;
+  assert.deepEqual(committed.map(job => job.id), [staged[1].id], 'only the still-pending member should be returned as committed');
+  const afterUpdate = await Promise.all(staged.map(job => queue.get(job.id)));
+  assert.equal(afterUpdate[0].status, 'cancelled');
+  assert.equal(afterUpdate[0].metadata?.preparingReferences, true);
+  assert.equal(afterUpdate[0].payload.attachments.length, 0);
+  assert.equal(afterUpdate[1].status, 'pending');
+  assert.equal(afterUpdate[1].metadata?.preparingReferences, undefined);
+  assert.deepEqual(afterUpdate[1].payload.attachments, [{ assetName: 'survivor' }]);
+  await queue.stop();
+});
+
+test('failed prepared-batch persistence restores every job and fields that were previously absent', async () => {
+  const data = {};
+  let failSets = false;
+  const storage = {
+    async get(key) { return { [key]: data[key] }; },
+    async set(entries) {
+      if (failSets) throw new Error('storage boom');
+      Object.assign(data, entries);
+    },
+    async remove(key) { delete data[key]; },
+  };
+  const queue = new FlowJobQueue(async () => ({ completed: true }), { storage, minDelayMs: 0, maxDelayMs: 0 });
+  const added = await queue.addBatch([
+    { id: 'job-without-metadata-a', operation: 'flow.generation.submit', payload: { type: 'image', prompt: 'safe-a', attachments: [] } },
+    { id: 'job-without-metadata-b', operation: 'flow.generation.submit', payload: { type: 'image', prompt: 'safe-b', attachments: [] } },
+  ]);
+  failSets = true;
+  await assert.rejects(queue.updateJobs(added.map(job => ({
+    id: job.id,
+    patch: { payload: { type: 'image', prompt: `changed-${job.id}`, attachments: [] }, metadata: { temporary: true } },
+  }))), /storage boom/);
+  failSets = false;
+  const restored = await Promise.all(added.map(job => queue.get(job.id)));
+  assert.deepEqual(restored.map(job => job.payload.prompt), ['safe-a', 'safe-b']);
+  assert.ok(restored.every(job => Object.hasOwn(job, 'metadata') === false));
+  await queue.stop();
+});
+
+test('prepared shared-reference upload remains live until every owning prompt is cancelled', () => {
+  const sidebarSource = readFileSync(new URL('../extension/src/ui/sidebar.js', import.meta.url), 'utf8');
+  const start = sidebarSource.indexOf('function queueJobsUsingReference(');
+  const end = sidebarSource.indexOf('\n  function referencesForPrompt', start);
+  assert.ok(start >= 0 && end > start, 'sidebar must expose the prepared-reference owner helpers');
+  const sandbox = { cancelledPreparedQueueIds: new Set() };
+  vm.runInNewContext(`${sidebarSource.slice(start, end)}\nthis.__queueJobsUsingReference = queueJobsUsingReference; this.__ownersCancelled = preparedUploadOwnersCancelled;`, sandbox);
+
+  const sharedReference = {};
+  const owners = sandbox.__queueJobsUsingReference(sharedReference, {
+    prompts: ['first prompt', 'second prompt'],
+    mode: 'all',
+    selectedReferences: [sharedReference],
+    mentionAssignments: null,
+    referencesPerPrompt: 1,
+    jobIds: ['prompt-a', 'prompt-b'],
+  });
+  assert.deepEqual(Array.from(owners), ['prompt-a', 'prompt-b']);
+  sandbox.cancelledPreparedQueueIds.add('prompt-a');
+  assert.equal(sandbox.__ownersCancelled(owners), false, 'cancelling one dependent prompt must keep the shared upload alive');
+  const controller = new AbortController();
+  if (sandbox.__ownersCancelled(owners)) controller.abort();
+  assert.equal(controller.signal.aborted, false, 'the shared reference upload must not abort while one prompt remains live');
+  sandbox.cancelledPreparedQueueIds.add('prompt-b');
+  assert.equal(sandbox.__ownersCancelled(owners), true, 'the shared upload can abort after every owner is cancelled');
+  if (sandbox.__ownersCancelled(owners)) controller.abort();
+  assert.equal(controller.signal.aborted, true);
+});
+
+test('queue progress reaches snapshots before receipt checkpoints and keeps direct broadcasts interactive-only', () => {
+  const serviceWorkerJs = readFileSync(new URL('../extension/src/background/service-worker.js', import.meta.url), 'utf8');
+  const start = serviceWorkerJs.indexOf('if (message?.type === "flow-mcp:progress") {');
+  const queueProgressBroadcast = serviceWorkerJs.indexOf('// Queue progress is broadcast through flow-queue:changed', start);
+  assert.ok(start >= 0 && queueProgressBroadcast > start, 'service worker must keep the progress-message handler');
+  const queueBranch = serviceWorkerJs.slice(start, queueProgressBroadcast);
+  assert.ok(queueBranch.indexOf('await flowJobQueue.updateProgress(queueJobId') < queueBranch.indexOf('checkpointGenerationObservation'),
+    'the visible progress text must be persisted before an observation checkpoint broadcasts its snapshot');
+  assert.match(serviceWorkerJs.slice(queueProgressBroadcast), /if \(!isQueueProgress\)\s*\{\s*chrome\.runtime\.sendMessage/,
+    'direct progress broadcasts must remain limited to non-queue requests');
+  const sidebarSource = readFileSync(new URL('../extension/src/ui/sidebar.js', import.meta.url), 'utf8');
+  assert.match(sidebarSource, /Number\(snapshot\?\.waitingForUser\)\s*>\s*0[\s\S]*?job\?\.status\s*===\s*"waiting_for_user"/,
+    'library scans must wait while a manual-submit queue job is parked for the user');
+  assert.match(serviceWorkerJs, /case "flow-queue:update-batch"[\s\S]*?flowJobQueue\.updateJobs\(updates\)/,
+    'the sidebar batch commit must reach the queue atomic updater');
+});
+
 // NOTE: a cancel that lands between the runner's awaits and its abort
 // listener registration would otherwise be lost (AbortSignal listeners
 // added after abort never fire). The runner therefore checks

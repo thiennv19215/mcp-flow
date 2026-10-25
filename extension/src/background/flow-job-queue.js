@@ -116,6 +116,7 @@ export class FlowJobQueue {
     this.stopRequested = false;
     this.restartRequested = false;
     this.recoveryResumeRequested = false;
+    this.committingJobIds = new Map();
     this.listeners = new Set();
     this.writeChain = Promise.resolve();
     this.ready = this.#restore();
@@ -544,40 +545,138 @@ export class FlowJobQueue {
   // while its local files are uploaded, then the final payload is committed
   // and the worker is released. Keeping the mutation queue-owned preserves
   // persistence and avoids racing a runner with a half-built payload.
+  #patchedJob(job, patch = {}) {
+    const updated = clone(job);
+    if (Object.prototype.hasOwnProperty.call(patch, "payload")) {
+      updated.payload = clone(patch.payload ?? {});
+      updated.data = { ...(updated.data || {}), operation: updated.operation, payload: clone(updated.payload) };
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "label")) {
+      const label = String(patch.label || "Flow job").trim().slice(0, 160) || "Flow job";
+      updated.label = label;
+      updated.name = label;
+    }
+    if (patch.metadata && typeof patch.metadata === "object" && !Array.isArray(patch.metadata)) {
+      updated.metadata = { ...(updated.metadata || {}), ...clone(patch.metadata) };
+    }
+    if (Array.isArray(patch.removeMetadata)) {
+      for (const key of patch.removeMetadata) {
+        if (typeof key === "string" && key) delete updated.metadata?.[key];
+      }
+    }
+    return updated;
+  }
+
+  #replaceJob(target, source) {
+    for (const key of Object.keys(target)) {
+      if (!Object.prototype.hasOwnProperty.call(source, key)) delete target[key];
+    }
+    Object.assign(target, clone(source));
+  }
+
+  async #updateJobs(updates) {
+    await this.ready;
+    if (!Array.isArray(updates) || updates.length < 1 || updates.length > 100) {
+      throw Object.assign(new Error("A Flow queue update must contain between 1 and 100 jobs."), { code: "FLOW_QUEUE_UPDATE_SIZE_INVALID" });
+    }
+    const ids = new Set();
+    const targets = [];
+    const candidates = [];
+    for (const entry of updates) {
+      const id = String(entry?.id || "");
+      if (!id || ids.has(id)) throw Object.assign(new Error("Flow queue update ids must be non-empty and unique."), { code: "FLOW_QUEUE_UPDATE_IDS_INVALID" });
+      ids.add(id);
+      const target = this.jobs.find(item => item.id === id);
+      if (!target) throw Object.assign(new Error(`No Flow job with id ${id}.`), { code: "FLOW_QUEUE_JOB_NOT_FOUND" });
+      if (target.status !== "pending") {
+        throw Object.assign(new Error(`Flow job ${target.id} is no longer pending.`), { code: "FLOW_QUEUE_JOB_NOT_PENDING" });
+      }
+      targets.push(target);
+      candidates.push(this.#patchedJob(target, entry.patch || {}));
+    }
+
+    // Keep every target out of the drain while the async registry load,
+    // complete-batch preflight and persistence finish. Candidates are
+    // preflighted off-queue so no worker can observe a half-committed batch.
+    for (const id of ids) this.committingJobIds.set(id, (this.committingJobIds.get(id) || 0) + 1);
+    let committed = false;
+    try {
+      let commitTargets = targets;
+      let commitCandidates = candidates;
+      while (commitTargets.length) {
+        let preflightFailure = null;
+        try {
+          await this.#preflight(commitCandidates);
+        } catch (error) {
+          preflightFailure = error;
+        }
+
+        const remainingTargets = [];
+        const remainingCandidates = [];
+        let droppedCancelledTarget = false;
+        for (let index = 0; index < commitTargets.length; index++) {
+          const target = commitTargets[index];
+          if (!this.jobs.includes(target)) {
+            throw Object.assign(new Error(`Flow job ${target.id} was removed before its update could be committed.`), { code: "FLOW_QUEUE_JOB_NOT_FOUND" });
+          }
+          if (target.status === "cancelled") {
+            droppedCancelledTarget = true;
+            continue;
+          }
+          if (target.status !== "pending") {
+            throw Object.assign(new Error(`Flow job ${target.id} is no longer pending.`), { code: "FLOW_QUEUE_JOB_NOT_PENDING" });
+          }
+          remainingTargets.push(target);
+          remainingCandidates.push(commitCandidates[index]);
+        }
+
+        if (droppedCancelledTarget) {
+          // A cancellation may arrive while capability loading or validation
+          // is yielding. Drop only those cancelled members, then validate the
+          // surviving candidates as one batch before any mutation is visible.
+          commitTargets = remainingTargets;
+          commitCandidates = remainingCandidates;
+          continue;
+        }
+        if (preflightFailure) throw preflightFailure;
+        break;
+      }
+
+      if (!commitTargets.length) return [];
+      const before = commitTargets.map(job => clone(job));
+      try {
+        for (let index = 0; index < commitTargets.length; index++) this.#replaceJob(commitTargets[index], commitCandidates[index]);
+        await this.#persist();
+      } catch (error) {
+        for (let index = 0; index < commitTargets.length; index++) this.#replaceJob(commitTargets[index], before[index]);
+        throw error;
+      }
+      committed = true;
+      return commitTargets.map(job => clone(job));
+    } finally {
+      for (const id of ids) {
+        const remaining = (this.committingJobIds.get(id) || 1) - 1;
+        if (remaining > 0) this.committingJobIds.set(id, remaining);
+        else this.committingJobIds.delete(id);
+      }
+      if (committed) this.#emit(updates.length === 1 ? "job-updated" : "jobs-updated");
+    }
+  }
+
   async updateJob(id, patch = {}) {
     await this.ready;
-    const job = this.jobs.find(item => item.id === String(id));
-    if (!job) return null;
-    if (job.status !== "pending") {
+    if (!this.jobs.some(item => item.id === String(id))) return null;
+    const updated = await this.#updateJobs([{ id, patch }]);
+    if (!updated.length) {
+      const job = this.jobs.find(item => item.id === String(id));
+      if (!job) return null;
       throw Object.assign(new Error(`Flow job ${job.id} is no longer pending.`), { code: "FLOW_QUEUE_JOB_NOT_PENDING" });
     }
-    const before = clone(job);
-    try {
-      if (Object.prototype.hasOwnProperty.call(patch, "payload")) {
-        job.payload = clone(patch.payload ?? {});
-        job.data = { ...(job.data || {}), operation: job.operation, payload: clone(job.payload) };
-      }
-      if (Object.prototype.hasOwnProperty.call(patch, "label")) {
-        const label = String(patch.label || "Flow job").trim().slice(0, 160) || "Flow job";
-        job.label = label;
-        job.name = label;
-      }
-      if (patch.metadata && typeof patch.metadata === "object" && !Array.isArray(patch.metadata)) {
-        job.metadata = { ...(job.metadata || {}), ...clone(patch.metadata) };
-      }
-      if (Array.isArray(patch.removeMetadata)) {
-        for (const key of patch.removeMetadata) {
-          if (typeof key === "string" && key) delete job.metadata?.[key];
-        }
-      }
-      await this.#preflight([job]);
-      await this.#persist();
-    } catch (error) {
-      Object.assign(job, before);
-      throw error;
-    }
-    this.#emit("job-updated");
-    return clone(job);
+    return updated[0] || null;
+  }
+
+  async updateJobs(updates) {
+    return this.#updateJobs(updates);
   }
 
   async checkpointGenerationObservation(id, checkpoint) {
@@ -1059,7 +1158,7 @@ export class FlowJobQueue {
         // but must not be picked by the worker until the sidebar commits its
         // final Flow asset ids. This lets the user queue another job while a
         // previous one is still rendering without submitting incomplete refs.
-        const job = this.jobs.find(item => item.status === "pending" && item.metadata?.preparingReferences !== true);
+        const job = this.jobs.find(item => item.status === "pending" && item.metadata?.preparingReferences !== true && !this.committingJobIds.has(item.id));
         if (!job) break;
         if (job.metadata?.dependsOnId) {
           const dependency = this.jobs.find(item => item.id === job.metadata.dependsOnId);
@@ -1107,6 +1206,9 @@ export class FlowJobQueue {
           await new Promise(resolve => setTimeout(resolve, delay));
           if (!this.running || this.paused || this.stopRequested) break;
         }
+        // The selected pending job may have been cancelled or placed under
+        // a staged update while the inter-job delay yielded to the UI.
+        if (job.status !== "pending" || job.metadata?.preparingReferences === true || this.committingJobIds.has(job.id)) continue;
         this.currentJobId = job.id;
         this.controller = new AbortController();
         job.status = "running";
