@@ -1897,6 +1897,20 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
           snapshot = await startEnqueuedWork({ autoStart: message.autoStart });
           break;
         }
+        case "flow-queue:update": {
+          const id = String(message.id || message.taskId || "").trim();
+          if (!id) throw Object.assign(new Error("A Flow queue job id is required."), { code: "FLOW_QUEUE_ID_REQUIRED" });
+          const updatedJob = await flowJobQueue.updateJob(id, {
+            ...(Object.prototype.hasOwnProperty.call(message, "payload") ? { payload: message.payload } : {}),
+            ...(Object.prototype.hasOwnProperty.call(message, "label") ? { label: message.label } : {}),
+            ...(message.metadata && typeof message.metadata === "object" ? { metadata: message.metadata } : {}),
+            ...(Array.isArray(message.removeMetadata) ? { removeMetadata: message.removeMetadata } : {}),
+          });
+          if (!updatedJob) throw Object.assign(new Error(`No Flow job with id ${id}.`), { code: "FLOW_QUEUE_JOB_NOT_FOUND" });
+          snapshot = await startEnqueuedWork({ autoStart: message.autoStart });
+          addedJob = updatedJob;
+          break;
+        }
         case "flow-queue:transform-lock":
           // FEAT-11b: read-only view of the transform execution lock —
           // current holder, any pending stop request, and any live

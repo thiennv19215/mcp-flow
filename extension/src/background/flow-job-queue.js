@@ -539,6 +539,47 @@ export class FlowJobQueue {
     return clone(job);
   }
 
+  // Update a staged job before it is allowed to run. The create form uses
+  // this for reference uploads: the job is visible in the queue immediately,
+  // while its local files are uploaded, then the final payload is committed
+  // and the worker is released. Keeping the mutation queue-owned preserves
+  // persistence and avoids racing a runner with a half-built payload.
+  async updateJob(id, patch = {}) {
+    await this.ready;
+    const job = this.jobs.find(item => item.id === String(id));
+    if (!job) return null;
+    if (job.status !== "pending") {
+      throw Object.assign(new Error(`Flow job ${job.id} is no longer pending.`), { code: "FLOW_QUEUE_JOB_NOT_PENDING" });
+    }
+    const before = clone(job);
+    try {
+      if (Object.prototype.hasOwnProperty.call(patch, "payload")) {
+        job.payload = clone(patch.payload ?? {});
+        job.data = { ...(job.data || {}), operation: job.operation, payload: clone(job.payload) };
+      }
+      if (Object.prototype.hasOwnProperty.call(patch, "label")) {
+        const label = String(patch.label || "Flow job").trim().slice(0, 160) || "Flow job";
+        job.label = label;
+        job.name = label;
+      }
+      if (patch.metadata && typeof patch.metadata === "object" && !Array.isArray(patch.metadata)) {
+        job.metadata = { ...(job.metadata || {}), ...clone(patch.metadata) };
+      }
+      if (Array.isArray(patch.removeMetadata)) {
+        for (const key of patch.removeMetadata) {
+          if (typeof key === "string" && key) delete job.metadata?.[key];
+        }
+      }
+      await this.#preflight([job]);
+      await this.#persist();
+    } catch (error) {
+      Object.assign(job, before);
+      throw error;
+    }
+    this.#emit("job-updated");
+    return clone(job);
+  }
+
   async checkpointGenerationObservation(id, checkpoint) {
     await this.ready;
     const job = this.jobs.find(item => item.id === String(id));
@@ -1014,7 +1055,11 @@ export class FlowJobQueue {
     let bypassNextInterJobDelay = false;
     try {
       while (this.running && !this.paused && !this.stopRequested) {
-        const job = this.jobs.find(item => item.status === "pending");
+        // A staged reference-upload job is deliberately visible as pending,
+        // but must not be picked by the worker until the sidebar commits its
+        // final Flow asset ids. This lets the user queue another job while a
+        // previous one is still rendering without submitting incomplete refs.
+        const job = this.jobs.find(item => item.status === "pending" && item.metadata?.preparingReferences !== true);
         if (!job) break;
         if (job.metadata?.dependsOnId) {
           const dependency = this.jobs.find(item => item.id === job.metadata.dependsOnId);

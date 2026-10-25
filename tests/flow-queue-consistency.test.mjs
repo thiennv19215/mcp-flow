@@ -224,6 +224,33 @@ test('add() rolls back the staged job when persist fails, like addBatch()', asyn
   await queue.stop();
 });
 
+test('reference-preparation jobs stay visible in the queue until their payload is committed', async () => {
+  const seen = [];
+  const queue = makeQueue(async job => {
+    seen.push(job.payload);
+    return { completed: true };
+  });
+  const added = await queue.add({
+    id: 'preparing-reference-job',
+    operation: 'flow.generation.submit',
+    payload: { type: 'image', prompt: 'queued while uploading', attachments: [] },
+    metadata: { preparingReferences: true },
+  });
+  await queue.start();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal((await queue.snapshot()).pending, 1);
+  assert.equal(seen.length, 0);
+
+  await queue.updateJob(added.id, {
+    payload: { type: 'image', prompt: 'queued while uploading', attachments: [{ assetName: 'asset:uploaded' }] },
+    removeMetadata: ['preparingReferences'],
+  });
+  await queue.start();
+  const result = await queue.wait(added.id, 5_000);
+  assert.equal(result.job.status, 'completed');
+  assert.equal(seen[0].attachments[0].assetName, 'asset:uploaded');
+});
+
 // NOTE: a cancel that lands between the runner's awaits and its abort
 // listener registration would otherwise be lost (AbortSignal listeners
 // added after abort never fire). The runner therefore checks

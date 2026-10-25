@@ -2102,62 +2102,133 @@
   });
 }
 
-  async function executeGenerationTask({ type, prompt, prompts, aspect_ratio, count = 1, model, autoDownload = false, attachments = [], attachmentsPerPrompt, firstFramesPerPrompt, lastFramesPerPrompt, video_settings, chainVideo = false, btn, btnTextEl, defaultTextKey }) {
-    if (isGenerating) {
-      setFeedback("Đang có tác vụ đang chạy, vui lòng đợi!", false);
-      return;
-    }
-    if (!(await ensureFlowProjectSelected())) return false;
-    isGenerating = true;
-    if (btn) btn.disabled = true;
-
-    try {
-      const promptList = Array.isArray(prompts) && prompts.length ? prompts : [prompt];
-      chainVideo = type === "video" && chainVideo;
-      const chainIds = chainVideo ? promptList.map(() => `flow-video-chain-${crypto.randomUUID()}`) : [];
-      const jobs = promptList.map((itemPrompt, index) => {
-        const itemAttachments = attachmentsPerPrompt?.[index] || attachments;
-        const refMediaTypeMap = {};
-        for (const att of itemAttachments) {
-          if (att && typeof att === "object") {
-            const key = att.assetName || att.id || att.expectedId;
-            if (key && att.kind) {
-              refMediaTypeMap[key] = att.kind;
-              if (att.expectedId) refMediaTypeMap[att.expectedId] = att.kind;
-              if (att.assetName) refMediaTypeMap[att.assetName.replace(/^(?:asset|character):/i, "")] = att.kind;
-            }
+  function buildGenerationQueueJobs({ type, prompt, prompts, aspect_ratio, count = 1, model, autoDownload = false, attachments = [], attachmentsPerPrompt, firstFramesPerPrompt, lastFramesPerPrompt, video_settings, chainVideo = false, jobIds, preparing = false }) {
+    const promptList = Array.isArray(prompts) && prompts.length ? prompts : [prompt];
+    chainVideo = type === "video" && chainVideo;
+    const ids = promptList.map((_, index) => jobIds?.[index] || `${chainVideo ? "flow-video-chain" : `flow-${type}`}-${crypto.randomUUID()}`);
+    const framePreparationPlaceholder = preparing && type === "video" && video_settings?.mode === "frames"
+      ? { pendingReference: true }
+      : null;
+    return promptList.map((itemPrompt, index) => {
+      const itemAttachments = attachmentsPerPrompt?.[index] || attachments;
+      const refMediaTypeMap = {};
+      for (const att of itemAttachments) {
+        if (att && typeof att === "object") {
+          const key = att.assetName || att.id || att.expectedId;
+          if (key && att.kind) {
+            refMediaTypeMap[key] = att.kind;
+            if (att.expectedId) refMediaTypeMap[att.expectedId] = att.kind;
+            if (att.assetName) refMediaTypeMap[att.assetName.replace(/^(?:asset|character):/i, "")] = att.kind;
           }
         }
-        return {
-          ...(chainVideo ? { id: chainIds[index] } : {}),
-          ...(chainVideo && index > 0 ? { metadata: { dependsOnId: chainIds[index - 1], dependencyType: "chain_previous" } } : {}),
-          operation: "flow.generation.submit",
-          payload: {
-            type,
-            autoDownload: autoDownload === true,
-            prompt: itemPrompt,
-            ...(model ? { model } : {}),
-            aspectRatio: aspect_ratio,
-            aspect_ratio,
-            variants: count,
-            count,
-            attachments: itemAttachments,
-            ...(Object.keys(refMediaTypeMap).length > 0 ? { refMediaTypeMap } : {}),
-            ...((!chainVideo || index === 0) && firstFramesPerPrompt?.[index] ? { firstFrame: typeof firstFramesPerPrompt[index] === "string" ? { assetName: firstFramesPerPrompt[index] } : firstFramesPerPrompt[index] } : {}),
-            ...(!chainVideo && lastFramesPerPrompt?.[index] ? { lastFrame: typeof lastFramesPerPrompt[index] === "string" ? { assetName: lastFramesPerPrompt[index] } : lastFramesPerPrompt[index] } : {}),
-            ...(video_settings || {})
-          },
-          label: `[${type.toUpperCase()}] ${itemPrompt.slice(0, 96)}`,
-        };
-      });
+      }
+      const metadata = {
+        ...(chainVideo && index > 0 ? { dependsOnId: ids[index - 1], dependencyType: "chain_previous" } : {}),
+        ...(preparing ? { preparingReferences: true } : {}),
+      };
+      const payload = {
+        type,
+        autoDownload: autoDownload === true,
+        prompt: itemPrompt,
+        ...(model ? { model } : {}),
+        aspectRatio: aspect_ratio,
+        aspect_ratio,
+        variants: count,
+        count,
+        attachments: itemAttachments,
+        ...(Object.keys(refMediaTypeMap).length > 0 ? { refMediaTypeMap } : {}),
+        ...(framePreparationPlaceholder
+          ? { firstFrame: framePreparationPlaceholder }
+          : ((!chainVideo || index === 0) && firstFramesPerPrompt?.[index]
+            ? { firstFrame: typeof firstFramesPerPrompt[index] === "string" ? { assetName: firstFramesPerPrompt[index] } : firstFramesPerPrompt[index] }
+            : {})),
+        ...(!chainVideo && lastFramesPerPrompt?.[index] ? { lastFrame: typeof lastFramesPerPrompt[index] === "string" ? { assetName: lastFramesPerPrompt[index] } : lastFramesPerPrompt[index] } : {}),
+        ...(video_settings || {})
+      };
+      return {
+        id: ids[index],
+        operation: "flow.generation.submit",
+        payload,
+        ...(Object.keys(metadata).length ? { metadata } : {}),
+        label: `[${type.toUpperCase()}] ${itemPrompt.slice(0, 96)}`,
+      };
+    });
+  }
+
+  async function prepareGenerationTask(options) {
+    if (isGenerating) {
+      setFeedback("Đang có tác vụ đang chạy, vui lòng đợi!", false);
+      return null;
+    }
+    if (!(await ensureFlowProjectSelected())) return null;
+    isGenerating = true;
+    if (options.btn) options.btn.disabled = true;
+    try {
+      const jobs = buildGenerationQueueJobs({ ...options, preparing: true });
       if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) {
         throw new Error("Không thể kết nối với extension background. Vui lòng mở tiện ích trong Chrome Side Panel.");
       }
       const addResult = await chrome.runtime.sendMessage(jobs.length > 1
-        ? { type: "flow-queue:add-batch", jobs, batchLabel: `${type === "video" ? "Video" : "Image"} batch` }
-        : { type: "flow-queue:add", job: jobs[0] });
+        ? { type: "flow-queue:add-batch", jobs, batchLabel: `${options.type === "video" ? "Video" : "Image"} batch`, autoStart: false }
+        : { type: "flow-queue:add", job: jobs[0], autoStart: false });
       if (!addResult?.ok) throw new Error(addResult?.error?.message || "Không thể thêm tác vụ vào hàng đợi Flow");
       rememberSubmittedQueueJob(addResult);
+      setFeedback(t("sidebar.workflowPreparingReferences"), true);
+      addLog("flow.queue.add", `${jobs.length > 1 ? t("sidebar.multiPromptQueued", { count: jobs.length }) : `[${options.type.toUpperCase()}] ${options.prompt.slice(0, 96)}`}`, true);
+      return { jobIds: jobs.map(job => job.id), jobs };
+    } catch (err) {
+      isGenerating = false;
+      if (options.btn) options.btn.disabled = false;
+      setFeedback(`❌ ${err.message}`, false);
+      addLog("flow.queue.error", err.message, false);
+      throw err;
+    }
+  }
+
+  async function cancelPreparedGeneration(jobIds) {
+    if (!Array.isArray(jobIds) || typeof chrome === "undefined" || !chrome.runtime?.sendMessage) return;
+    await Promise.all(jobIds.map(async id => {
+      try { await chrome.runtime.sendMessage({ type: "flow-queue:cancel", id }); } catch { /* best effort cleanup */ }
+    }));
+  }
+
+  async function executeGenerationTask({ type, prompt, prompts, aspect_ratio, count = 1, model, autoDownload = false, attachments = [], attachmentsPerPrompt, firstFramesPerPrompt, lastFramesPerPrompt, video_settings, chainVideo = false, preparedJobIds, btn, btnTextEl, defaultTextKey }) {
+    const prepared = Array.isArray(preparedJobIds) && preparedJobIds.length > 0;
+    if (isGenerating && !prepared) {
+      setFeedback("Đang có tác vụ đang chạy, vui lòng đợi!", false);
+      return;
+    }
+    if (!prepared) {
+      if (!(await ensureFlowProjectSelected())) return false;
+    }
+    isGenerating = true;
+    if (btn) btn.disabled = true;
+
+    try {
+      const jobs = buildGenerationQueueJobs({ type, prompt, prompts, aspect_ratio, count, model, autoDownload, attachments, attachmentsPerPrompt, firstFramesPerPrompt, lastFramesPerPrompt, video_settings, chainVideo, jobIds: prepared ? preparedJobIds : undefined });
+      if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) {
+        throw new Error("Không thể kết nối với extension background. Vui lòng mở tiện ích trong Chrome Side Panel.");
+      }
+      if (prepared) {
+        for (let index = 0; index < jobs.length; index++) {
+          const job = jobs[index];
+          const updateResult = await chrome.runtime.sendMessage({
+            type: "flow-queue:update",
+            id: job.id,
+            payload: job.payload,
+            metadata: job.metadata,
+            removeMetadata: ["preparingReferences"],
+            autoStart: index === jobs.length - 1,
+          });
+          if (!updateResult?.ok) throw new Error(updateResult?.error?.message || "Không thể thêm tác vụ vào hàng đợi Flow.");
+        }
+      } else {
+        const addResult = await chrome.runtime.sendMessage(jobs.length > 1
+          ? { type: "flow-queue:add-batch", jobs, batchLabel: `${type === "video" ? "Video" : "Image"} batch` }
+          : { type: "flow-queue:add", job: jobs[0] });
+        if (!addResult?.ok) throw new Error(addResult?.error?.message || "Không thể thêm tác vụ vào hàng đợi Flow");
+        rememberSubmittedQueueJob(addResult);
+      }
       setFeedback(t("sidebar.workflowQueued"), true);
       addLog("flow.queue.add", `${jobs.length > 1 ? t("sidebar.multiPromptQueued", { count: jobs.length }) : `[${type.toUpperCase()}] ${prompt.slice(0, 96)}`}`, true);
       return true;
@@ -2296,7 +2367,7 @@
       const remove = document.createElement("button");
       remove.type = "button";
       remove.className = "ref-grid-remove";
-      remove.title = t("sidebar.frameClearSlot", "Xóa ảnh khung này");
+      remove.title = t("sidebar.frameClearSlot");
       remove.setAttribute("aria-label", remove.title);
       remove.innerHTML = '<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg>';
       remove.addEventListener("click", event => {
@@ -2548,11 +2619,46 @@
     return "image";
   }
 
-  const FLOW_LIBRARY_SNAPSHOT_TTL_MS = 10_000;
+  const FLOW_LIBRARY_SNAPSHOT_TTL_MS = 30_000;
+  const FLOW_LIBRARY_QUEUE_WAIT_TIMEOUT_MS = 120_000;
   let flowLibrarySnapshot = { projectId: "", fetchedAt: 0, assets: null, promise: null };
+  let flowLibraryQueueWaitPromise = null;
+
+  async function waitForFlowLibraryReadSlot() {
+    if (flowLibraryQueueWaitPromise) return flowLibraryQueueWaitPromise;
+    flowLibraryQueueWaitPromise = (async () => {
+      const deadline = Date.now() + FLOW_LIBRARY_QUEUE_WAIT_TIMEOUT_MS;
+      while (true) {
+        const response = await chrome.runtime.sendMessage({ type: "flow-queue:get" }).catch(() => null);
+        const snapshot = response?.snapshot || response;
+        const jobs = snapshot?.jobs || snapshot?.items || [];
+        const queueActive = snapshot?.isRunning === true || jobs.some(job => job?.status === "running");
+        if (!queueActive) return;
+        setFeedback(t("sidebar.uploadLibraryWaitingQueue"), true);
+        if (Date.now() >= deadline) throw new Error(t("sidebar.uploadLibraryScanFailed"));
+        await new Promise(resolve => setTimeout(resolve, 750));
+      }
+    })().finally(() => { flowLibraryQueueWaitPromise = null; });
+    return flowLibraryQueueWaitPromise;
+  }
+
+  async function dispatchFlowLibraryRead(operation, payload = {}) {
+    let lastError = null;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      await waitForFlowLibraryReadSlot();
+      try {
+        return await dispatchFlowOperation(operation, payload);
+      } catch (error) {
+        lastError = error;
+        if (error?.code !== "FLOW_TAB_BUSY") throw error;
+        await new Promise(resolve => setTimeout(resolve, 750));
+      }
+    }
+    throw lastError || new Error(t("sidebar.uploadLibraryScanFailed"));
+  }
 
   async function getFlowLibrarySnapshot() {
-    const context = await dispatchFlowOperation("flow.context");
+    const context = await dispatchFlowLibraryRead("flow.context");
     const projectId = typeof context?.projectId === "string" ? context.projectId.trim().toLowerCase() : "";
     if (context?.isProjectEditor !== true || !projectId) {
       throw new Error(t("sidebar.uploadLibraryProjectUnknown"));
@@ -2565,7 +2671,7 @@
     }
     if (!flowLibrarySnapshot.promise) {
       const snapshotProjectId = projectId;
-      const scanPromise = dispatchFlowOperation("flow.assets.list", {
+      const scanPromise = dispatchFlowLibraryRead("flow.assets.list", {
         includeIncomplete: true,
         requireComplete: true,
         maxItems: 5000,
@@ -2580,7 +2686,7 @@
         if (flowLibrarySnapshot.projectId !== snapshotProjectId) {
           throw new Error(t("sidebar.uploadLibraryProjectChanged"));
         }
-        return dispatchFlowOperation("flow.context").then(liveContext => {
+        return dispatchFlowLibraryRead("flow.context").then(liveContext => {
           const liveProjectId = typeof liveContext?.projectId === "string" ? liveContext.projectId.trim().toLowerCase() : "";
           if (liveContext?.isProjectEditor !== true || liveProjectId !== snapshotProjectId) {
             throw new Error(t("sidebar.uploadLibraryProjectChanged"));
@@ -2734,7 +2840,20 @@
         : refFilesImage;
     if (selectedCharacter) commonAttachments.push(selectedCharacter.attachment);
 
+    let prepared = null;
     try {
+      prepared = await prepareGenerationTask({
+        type: "image",
+        prompt,
+        prompts,
+        aspect_ratio,
+        count,
+        model,
+        autoDownload,
+        attachmentsPerPrompt: prompts.map(() => []),
+        btn,
+      });
+      if (!prepared) return;
       if (btn) btn.disabled = true;
       // Reuse selected Flow media IDs; local files are uploaded only when the
       // current project's library does not already contain the matching asset.
@@ -2783,14 +2902,19 @@
         model,
         autoDownload,
         attachmentsPerPrompt,
+        preparedJobIds: prepared.jobIds,
         btn,
         btnTextEl,
         defaultTextKey: "sidebar.btnGenerateImage"
       });
+      if (!queued) await cancelPreparedGeneration(prepared.jobIds);
+      else prepared = null;
       showUnresolvedMentionWarning("image", mentionResolution?.unresolvedNames, queued);
     } catch (err) {
+      if (prepared) await cancelPreparedGeneration(prepared.jobIds);
       setFeedback(`❌ ${err.message}`, false);
     } finally {
+      if (prepared && isGenerating) isGenerating = false;
       if (btn) btn.disabled = false;
       if (btnTextEl) btnTextEl.textContent = t("sidebar.btnGenerateImage");
     }
@@ -2887,7 +3011,28 @@
     const referenceAttachments = [];
     if (selectedCharacter) commonAttachments.push(selectedCharacter.attachment);
 
+    const videoSettings = {
+      mode,
+      model,
+      ...(duration != null ? { duration } : {}),
+      ...(resolution ? { resolution } : {}),
+      ...(mode !== "frames" && selectedVoice ? { voice: selectedVoice } : {})
+    };
+    let prepared = null;
     try {
+      prepared = await prepareGenerationTask({
+        type: "video",
+        prompt,
+        prompts,
+        aspect_ratio,
+        count,
+        autoDownload,
+        video_settings: videoSettings,
+        attachmentsPerPrompt: prompts.map(() => []),
+        chainVideo,
+        btn,
+      });
+      if (!prepared) return;
       if (btn) btn.disabled = true;
       // Reuse selected Flow media IDs; only newly chosen local files are uploaded.
       const activeVideoReferences = referenceMode === "none" || hasFrames ? []
@@ -2964,24 +3109,23 @@
         aspect_ratio,
         count,
         autoDownload,
-        video_settings: {
-          mode,
-          model,
-          ...(duration != null ? { duration } : {}),
-          ...(resolution ? { resolution } : {}),
-          ...(mode !== "frames" && selectedVoice ? { voice: selectedVoice } : {})
-        },
+        video_settings: videoSettings,
         attachmentsPerPrompt,
         ...(hasFrames ? { firstFramesPerPrompt, lastFramesPerPrompt } : {}),
         chainVideo,
+        preparedJobIds: prepared.jobIds,
         btn,
         btnTextEl,
         defaultTextKey: "sidebar.btnGenerateVideo"
       });
+      if (!queued) await cancelPreparedGeneration(prepared.jobIds);
+      else prepared = null;
       showUnresolvedMentionWarning("video", mentionResolution?.unresolvedNames, queued);
     } catch (err) {
+      if (prepared) await cancelPreparedGeneration(prepared.jobIds);
       setFeedback(`❌ ${err.message}`, false);
     } finally {
+      if (prepared && isGenerating) isGenerating = false;
       if (btn) btn.disabled = false;
       if (btnTextEl) btnTextEl.textContent = t("sidebar.btnGenerateVideo");
     }
@@ -3018,7 +3162,7 @@
   });
 
   document.querySelector("#btnRefreshAssets").onclick = event => runLibraryAction(event.currentTarget, async () => {
-    const result = await dispatchFlowOperation("flow.assets.list");
+    const result = await dispatchFlowLibraryRead("flow.assets.list");
     flowAssets = Array.isArray(result) ? result : (result?.assets || []);
     flowPhotosScanned = true;
     flowPhotosVisibleLimit = 30;
@@ -3758,11 +3902,11 @@
           const currentFrames = [videoFrameSelection.first, videoFrameSelection.last].filter(Boolean);
           if (currentFrames.length >= 2) {
             URL.revokeObjectURL(source.previewUrl);
-            setFeedback("Frames đã đủ 2 ảnh. Xóa một ảnh trước khi chụp thêm.", false);
+            setFeedback(t("sidebar.frameLimit"), false);
             return;
           }
           setVideoFrameSelections([...currentFrames, source]);
-          setFeedback("Đã chụp ảnh màn hình và thêm vào Frames!", true);
+          setFeedback(t("sidebar.frameCaptureAdded"), true);
           return;
         }
         referencePicker.addLocalFilesToReferences(currentGenType, [file]);
