@@ -7,6 +7,7 @@
     "test": "npm run test:quick",
     "test:quick": "node scripts/test-quick.mjs",
     "test:full": "node scripts/test-full.mjs",
+    "test:all": "node scripts/test-all.mjs",
     "build": "node scripts/clean-dist.mjs && tsc && node scripts/sync-extension-capabilities.mjs && node scripts/build-extension.mjs",
     "dev:extension": "node scripts/dev-extension.mjs",
     "start": "node dist/index.js"

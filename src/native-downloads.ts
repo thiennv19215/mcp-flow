@@ -224,16 +224,20 @@ export function extensionOf(file: string): string {
 
 export function unpackTakes(zip: string, targetStem: string): string[] {
   const work = mkdtempSync(join(tmpdir(), "flow-takes-"));
-  const takes = extractZip(zip, work).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-  const out: string[] = [];
-  for (const [i, path] of takes.entries()) {
-    const destination = `${targetStem}${i ? `-v${i + 1}` : ""}${extensionOf(path)}`;
-    renameSync(path, destination);
-    out.push(destination);
+  try {
+    const takes = extractZip(zip, work).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    const out: string[] = [];
+    for (const [i, path] of takes.entries()) {
+      const destination = `${targetStem}${i ? `-v${i + 1}` : ""}${extensionOf(path)}`;
+      renameSync(path, destination);
+      out.push(destination);
+    }
+    renameSync(zip, `${targetStem}-takes.zip`);
+    if (!out.length) throw new Error("Flow sent a ZIP with nothing usable inside it.");
+    return out;
+  } finally {
+    rmSync(work, { recursive: true, force: true });
   }
-  renameSync(zip, `${targetStem}-takes.zip`);
-  if (!out.length) throw new Error("Flow sent a ZIP with nothing usable inside it.");
-  return out;
 }
 
 export async function downloadNativeResults(
