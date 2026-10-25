@@ -953,6 +953,23 @@
     else callerSignal?.addEventListener?.("abort", onCallerAbort, { once: true });
     try {
       return await uploadStagedMediaCore(file, kind, command, { ...options, signal: controller.signal });
+    } catch (error) {
+      // Cancellation can happen before the confirmation loop starts (for
+      // example while Flow's Upload control is still being located). Those
+      // early deadline helpers historically report FLOW_OPERATION_TIMEOUT;
+      // preserve the caller's cancellation intent across every upload phase.
+      if (controller.signal.aborted && error?.code !== "FLOW_UPLOAD_CANCELLED") {
+        const fn = root.flowError || ((c, m, r, o) => Object.assign(new Error(m), { code: c, retryable: r, outcome_unknown: o }));
+        const cancelledError = fn(
+          "FLOW_UPLOAD_CANCELLED",
+          "The Flow media upload was cancelled before it completed.",
+          false,
+          error?.outcome_unknown === true,
+        );
+        if (error?.diagnostics) cancelledError.diagnostics = error.diagnostics;
+        throw cancelledError;
+      }
+      throw error;
     } finally {
       callerSignal?.removeEventListener?.("abort", onCallerAbort);
       if (flowUploadCancellers.get(uploadRequestId) === controller) flowUploadCancellers.delete(uploadRequestId);

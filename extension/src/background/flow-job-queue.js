@@ -3,6 +3,7 @@ import { validateChatGptJobPayloads, isChatGptOperation } from "./chatgpt-queue-
 import { projectRegenSlots, computeSlotAggregate, stampRegenLineage } from "./flow-regen-projection.js";
 
 const STORAGE_KEY = "flowMcpJobQueueV1";
+const PREPARING_REFERENCES_LEASE_MS = 120_000;
 const AUTO_RETRY_MAX = 2;
 const PAGE_BLOCKER_ERROR_CODES = new Set([
   "FLOW_UNKNOWN_OVERLAY_BLOCKING",
@@ -117,6 +118,7 @@ export class FlowJobQueue {
     this.restartRequested = false;
     this.recoveryResumeRequested = false;
     this.committingJobIds = new Map();
+    this.preparingReferencesRecoveryTimer = null;
     this.listeners = new Set();
     this.writeChain = Promise.resolve();
     this.ready = this.#restore();
@@ -212,7 +214,61 @@ export class FlowJobQueue {
     this.currentJobId = null;
     this.recoveryResumeRequested = state.running === true && state.paused !== true && !this.stopRequested && unresolved.length === 0;
     if (interrupted.length > 0) await this.#persist();
+    await this.#recoverAbandonedPreparingJobs();
     return this.#snapshot();
+  }
+
+  async #recoverAbandonedPreparingJobs() {
+    const now = Date.now();
+    const abandoned = this.jobs.filter(job => {
+      if (job.status !== "pending" || job.metadata?.preparingReferences !== true) return false;
+      const heartbeatAt = Number(job.metadata?.preparingReferencesHeartbeatAt) || 0;
+      return heartbeatAt <= 0 || now - heartbeatAt >= PREPARING_REFERENCES_LEASE_MS;
+    });
+    if (abandoned.length) {
+      const before = abandoned.map(job => clone(job));
+      for (const job of abandoned) {
+        job.status = "cancelled";
+        job.outcomeUnknown = false;
+        job.retrySafe = false;
+        job.errorCode = "FLOW_QUEUE_REFERENCE_PREPARATION_ABANDONED";
+        job.error = "Reference preparation stopped reporting progress. Start the generation again to upload its references.";
+        job.progress = { phase: "preparation_abandoned", message: "Reference upload preparation was abandoned." };
+        job.finishedAt = now;
+      }
+      try {
+        await this.#persist();
+      } catch (error) {
+        for (let index = 0; index < abandoned.length; index++) this.#replaceJob(abandoned[index], before[index]);
+        throw error;
+      }
+      this.#emit("preparation-abandoned");
+    }
+
+    this.#schedulePreparingReferencesRecovery();
+  }
+
+  #schedulePreparingReferencesRecovery() {
+    if (this.preparingReferencesRecoveryTimer) clearTimeout(this.preparingReferencesRecoveryTimer);
+    this.preparingReferencesRecoveryTimer = null;
+    const nextExpiry = Math.min(...this.jobs
+      .filter(job => job.status === "pending" && job.metadata?.preparingReferences === true)
+      .map(job => (Number(job.metadata?.preparingReferencesHeartbeatAt) || 0) + PREPARING_REFERENCES_LEASE_MS));
+    if (!Number.isFinite(nextExpiry)) return;
+    this.preparingReferencesRecoveryTimer = setTimeout(() => {
+      this.preparingReferencesRecoveryTimer = null;
+      void this.#recoverAbandonedPreparingJobs().catch(() => this.#retryPreparingReferencesRecovery());
+    }, Math.max(0, nextExpiry - Date.now()));
+    this.preparingReferencesRecoveryTimer?.unref?.();
+  }
+
+  #retryPreparingReferencesRecovery() {
+    if (this.preparingReferencesRecoveryTimer) clearTimeout(this.preparingReferencesRecoveryTimer);
+    this.preparingReferencesRecoveryTimer = setTimeout(() => {
+      this.preparingReferencesRecoveryTimer = null;
+      void this.#recoverAbandonedPreparingJobs().catch(() => this.#retryPreparingReferencesRecovery());
+    }, 15_000);
+    this.preparingReferencesRecoveryTimer?.unref?.();
   }
 
   async resumeRecovered() {
@@ -356,6 +412,9 @@ export class FlowJobQueue {
     this.#stampRegen(job);
     await this.#checkAdmission([job]);
     await this.#preflight([job]);
+    if (job.metadata?.preparingReferences === true) {
+      job.metadata = { ...job.metadata, preparingReferencesHeartbeatAt: Date.now() };
+    }
     this.jobs.push(job);
     try {
       await this.#persist();
@@ -367,6 +426,7 @@ export class FlowJobQueue {
       throw error;
     }
     this.#emit("added");
+    this.#schedulePreparingReferencesRecovery();
     return clone(job);
   }
 
@@ -430,6 +490,12 @@ export class FlowJobQueue {
     for (const job of jobs) this.#stampRegen(job, jobs);
     await this.#checkAdmission(jobs);
     await this.#preflight(jobs);
+    const preparationHeartbeatAt = Date.now();
+    for (const job of jobs) {
+      if (job.metadata?.preparingReferences === true) {
+        job.metadata = { ...job.metadata, preparingReferencesHeartbeatAt: preparationHeartbeatAt };
+      }
+    }
     this.jobs.push(...jobs);
     try {
       await this.#persist();
@@ -438,6 +504,7 @@ export class FlowJobQueue {
       throw error;
     }
     this.#emit("batch-added");
+    this.#schedulePreparingReferencesRecovery();
     return jobs.map(job => clone(job));
   }
 
@@ -677,6 +744,21 @@ export class FlowJobQueue {
 
   async updateJobs(updates) {
     return this.#updateJobs(updates);
+  }
+
+  async heartbeatPreparingReferences(ids) {
+    await this.ready;
+    const wanted = new Set((Array.isArray(ids) ? ids : []).map(id => String(id || "").trim()).filter(Boolean));
+    if (!wanted.size) return [];
+    const jobs = this.jobs.filter(job => wanted.has(job.id) && job.status === "pending" && job.metadata?.preparingReferences === true);
+    if (!jobs.length) return [];
+    const heartbeatAt = Date.now();
+    for (const job of jobs) {
+      job.metadata = { ...(job.metadata || {}), preparingReferencesHeartbeatAt: heartbeatAt };
+    }
+    await this.#persist();
+    this.#schedulePreparingReferencesRecovery();
+    return jobs.map(job => clone(job));
   }
 
   async checkpointGenerationObservation(id, checkpoint) {

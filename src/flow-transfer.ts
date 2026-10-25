@@ -1,5 +1,5 @@
-import { copyFileSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
-import { createHash, randomUUID } from "node:crypto";
+import { copyFileSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { extname, join } from "node:path";
 import type { Job } from "./job-types.js";
@@ -30,7 +30,6 @@ export async function stageNativeMedia(
   stagedDirs: string[],
   job?: Job,
 ): Promise<{ transferId: string; name: string }> {
-  const extension = extname(filePath).toLowerCase();
   const type = uploadMimeType(filePath);
   const isVideo = type.startsWith("video/");
   const maxBytes = isVideo ? 200 * 1024 * 1024 : 25 * 1024 * 1024;

@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { parseRangeHeader, resolveServerToken } from "../dist/server.js";
@@ -51,7 +51,9 @@ test("resolveServerToken never returns an empty token", () => {
 test("projectDir keeps dot-segment project names inside the output root", () => {
   for (const hostile of ["..", "."]) {
     const dir = projectDir(hostile);
-    assert.ok(dir.startsWith(OUTPUT_ROOT + "/"), `${hostile} escaped to ${dir}`);
+    const rel = relative(OUTPUT_ROOT, dir);
+    assert.ok(rel && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel), `${hostile} escaped to ${dir}`);
+    assert.equal(rel, "_");
     assert.notEqual(dir, join(OUTPUT_ROOT, ".."));
   }
   assert.equal(projectDir("My Film"), join(OUTPUT_ROOT, "My_Film"));
@@ -112,13 +114,13 @@ test("extractZip skips symlink entries instead of returning their targets", () =
     const stage = join(work, "stage");
     mkdirSync(stage, { recursive: true });
     writeFileSync(join(stage, "take1.mp4"), "real-take");
-    symlinkSync("/etc/passwd", join(stage, "evil.mp4"));
     const zip = join(work, "takes.zip");
     execFileSync("python3", ["-c", `
 import zipfile, os
 with zipfile.ZipFile(${JSON.stringify(zip)}, "w") as z:
     z.write(${JSON.stringify(join(stage, "take1.mp4"))}, "take1.mp4")
     info = zipfile.ZipInfo("evil.mp4")
+    info.create_system = 3
     info.external_attr = (0o120777 << 16)
     z.writestr(info, "/etc/passwd")
 `]);
@@ -126,7 +128,7 @@ with zipfile.ZipFile(${JSON.stringify(zip)}, "w") as z:
     const files = extractZip(zip, dest);
     // The old walk() used statSync (follows symlinks), so the symlink entry
     // was returned as a "take" pointing at /etc/passwd.
-    assert.deepEqual(files.map((f) => f.split("/").pop()), ["take1.mp4"]);
+    assert.deepEqual(files.map((f) => basename(f)), ["take1.mp4"]);
     assert.equal(readFileSync(join(dest, "take1.mp4"), "utf8"), "real-take");
   } finally {
     rmSync(work, { recursive: true, force: true });

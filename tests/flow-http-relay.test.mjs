@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // Cluster A1: the owner's generic HTTP dispatch (/api/<method>) must pass
 // the request body through to the Core method. Before this fix, methods
@@ -16,11 +16,12 @@ import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const serverPath = join(here, '..', 'dist', 'server.js');
+const serverUrl = pathToFileURL(serverPath).href;
 const PORT = 19000 + Math.floor(Math.random() * 900);
 const TOKEN = 'relay-test-token';
 
 const childSource = `
-import { startServer } from ${JSON.stringify(serverPath)};
+import { startServer } from ${JSON.stringify(serverUrl)};
 const seen = {};
 const core = {
   chatgpt_generate: async (args) => {

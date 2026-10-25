@@ -173,7 +173,7 @@ test('local media checks the complete Flow library before uploading', () => {
 test('generation does not block queue additions while another job is running', () => {
   assert.doesNotMatch(sidebarJs, /assertQueueIdleForReferenceUpload/);
   assert.doesNotMatch(sidebarJs, /referenceUploadQueueBusy/);
-  assert.match(sidebarJs, /uploadReferenceImage\(reference\.file/);
+  assert.match(sidebarJs, /uploadPreparedReference\(reference\.file/);
   assert.match(sidebarJs, /executeGenerationTask\(\{/);
 });
 

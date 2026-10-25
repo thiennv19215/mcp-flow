@@ -10,16 +10,23 @@ import { join } from "node:path";
 // FLOW_MCP_FFPROBE is read when dist/assemble.js loads, so point it at a
 // fake ffprobe before the dynamic import.
 const work = mkdtempSync(join(tmpdir(), "flow-assemble-test-"));
-const fakeProbe = join(work, "ffprobe");
-writeFileSync(fakeProbe, `#!/bin/sh
-for a in "$@"; do last="$a"; done
-case "$last" in
-  *noduration*) echo '{"streams":[{"codec_type":"video","width":320,"height":240}],"format":{}}' ;;
-  *navalue*) echo '{"streams":[{"codec_type":"video","width":320,"height":240}],"format":{"duration":"N/A"}}' ;;
-  *) echo '{"streams":[{"codec_type":"video","width":320,"height":240}],"format":{"duration":"2.5"}}' ;;
-esac
+const probeScript = join(work, "fake-probe.mjs");
+writeFileSync(probeScript, `
+const last = process.argv.at(-1) || "";
+const body = last.includes("noduration")
+  ? { streams: [{ codec_type: "video", width: 320, height: 240 }], format: {} }
+  : last.includes("navalue")
+    ? { streams: [{ codec_type: "video", width: 320, height: 240 }], format: { duration: "N/A" } }
+    : { streams: [{ codec_type: "video", width: 320, height: 240 }], format: { duration: "2.5" } };
+process.stdout.write(JSON.stringify(body));
 `);
-chmodSync(fakeProbe, 0o755);
+const fakeProbe = process.platform === "win32" ? join(work, "ffprobe.cmd") : join(work, "ffprobe");
+if (process.platform === "win32") {
+  writeFileSync(fakeProbe, `@echo off\r\n"${process.execPath}" "${probeScript}" %*\r\n`);
+} else {
+  writeFileSync(fakeProbe, `#!/bin/sh\nexec "${process.execPath}" "${probeScript}" "$@"\n`);
+  chmodSync(fakeProbe, 0o755);
+}
 process.env.FLOW_MCP_FFPROBE = fakeProbe;
 process.env.FLOW_MCP_FFMPEG = join(work, "ffmpeg-missing");
 

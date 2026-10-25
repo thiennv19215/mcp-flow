@@ -2034,6 +2034,20 @@
   const inFlightUploads = new Set();
   const terminalQueueAttempts = new Map();
   let lastQueueProgressLogKey = "";
+  let preparedReferenceHeartbeatTimer = null;
+
+  function keepPreparedReferencesAlive() {
+    if (preparedReferenceHeartbeatTimer || typeof chrome === "undefined" || !chrome.runtime?.sendMessage) return;
+    preparedReferenceHeartbeatTimer = setInterval(() => {
+      const ids = [...preparedGenerationQueueIds];
+      if (!ids.length) {
+        clearInterval(preparedReferenceHeartbeatTimer);
+        preparedReferenceHeartbeatTimer = null;
+        return;
+      }
+      chrome.runtime.sendMessage({ type: "flow-queue:preparing-heartbeat", ids }).catch(() => {});
+    }, 15_000);
+  }
 
   function rememberSubmittedQueueJob(result) {
     const id = result?.job?.id;
@@ -2172,7 +2186,7 @@
       }
       const metadata = {
         ...(chainVideo && index > 0 ? { dependsOnId: ids[index - 1], dependencyType: "chain_previous" } : {}),
-        ...(preparing ? { preparingReferences: true } : {}),
+        ...(preparing ? { preparingReferences: true, preparingReferencesHeartbeatAt: Date.now() } : {}),
       };
       const payload = {
         type,
@@ -2219,6 +2233,7 @@
         throw new Error("Không thể kết nối với extension background. Vui lòng mở tiện ích trong Chrome Side Panel.");
       }
       for (const job of jobs) preparedGenerationQueueIds.add(job.id);
+      keepPreparedReferencesAlive();
       const addResult = await chrome.runtime.sendMessage(jobs.length > 1
         ? { type: "flow-queue:add-batch", jobs, batchLabel: `${options.type === "video" ? "Video" : "Image"} batch`, autoStart: false }
         : { type: "flow-queue:add", job: jobs[0], autoStart: false });
@@ -2275,7 +2290,7 @@
             id: job.id,
             payload: job.payload,
             metadata: job.metadata,
-            removeMetadata: ["preparingReferences"],
+            removeMetadata: ["preparingReferences", "preparingReferencesHeartbeatAt"],
           })),
           autoStart: true,
         });
@@ -2741,11 +2756,15 @@
         if (!response?.ok) throw new Error(t("sidebar.uploadLibraryScanFailed"));
         const snapshot = response?.snapshot || response;
         const jobs = snapshot?.jobs || snapshot?.items || [];
-        const queueActive = snapshot?.isRunning === true || Number(snapshot?.waitingForUser) > 0 ||
+        const unknownOutcome = snapshot?.attention?.type === "flow-outcome-unknown" ||
+          (snapshot?.isPaused === true && jobs.some(job => job?.outcomeUnknown === true));
+        const queueActive = unknownOutcome || snapshot?.isRunning === true || Number(snapshot?.waitingForUser) > 0 ||
           jobs.some(job => job?.status === "running" || job?.status === "waiting_for_user");
         if (!queueActive) return;
-        setFeedback(t("sidebar.uploadLibraryWaitingQueue"), true);
-        if (Date.now() >= deadline) throw new Error(t("sidebar.uploadLibraryScanFailed"));
+        setFeedback(t(unknownOutcome ? "sidebar.uploadLibraryWaitingOutcome" : "sidebar.uploadLibraryWaitingQueue"), true);
+        if (Date.now() >= deadline) {
+          throw new Error(t(unknownOutcome ? "sidebar.uploadLibraryOutcomeTimeout" : "sidebar.uploadLibraryScanFailed"));
+        }
         await new Promise(resolve => setTimeout(resolve, 750));
       }
     })().finally(() => { flowLibraryQueueWaitPromise = null; });
@@ -2940,7 +2959,6 @@
       return;
     }
     const selectedCharacter = selectedFlowCharacter(document.querySelector("#selectCharImage") || document.querySelector("#genCharacterSelect"));
-    const character = selectedCharacter?.name || "";
     if (!validateCharacterSelections(prompts, selectedCharacter, "ảnh")) return;
 
     const activeImageReferences = referenceMode === "none" ? []

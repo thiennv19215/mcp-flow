@@ -4,7 +4,7 @@ import { assemble } from "./assemble.js";
 import { clearFlowPrompt, createFlowProject, downloadAsset, renameAsset, trashAsset, getCorrelationObserverHealth, getFlowState, listAssets, listCharacters, listFlowProjects, listFlowVoiceOptions, openFlowProject, rememberCharacter, uploadFlowMediaToProject } from "./flow.js";
 import type { Job } from "./job-types.js";
 import { attachReferences, clearFlowReferences, removeFlowReferenceKind } from "./flow.js";
-import { BIN, COMPUTER, IS_MAC, IS_WIN, moveToBin } from "./platform.js";
+import { BIN, moveToBin } from "./platform.js";
 import { TECHNIQUES, techniqueById } from "./techniques.js";
 import { OUTPUT_ROOT, castDirForContext, outputRootForContext, projectDir } from "./paths.js";
 import { shapes, type Args } from "./schemas.js";
@@ -177,7 +177,7 @@ export function extensionJobAsLegacy(job: ExtensionQueueJob): Job {
   } as unknown as Job;
 }
 
-async function queueIsActive(core?: any): Promise<boolean> {
+async function queueIsActive(): Promise<boolean> {
   const snapshot = await extensionQueueSnapshot();
   return snapshot.isRunning === true || snapshot.jobs.some(job => ["pending", "running", "waiting_for_user"].includes(job.status));
 }
@@ -370,12 +370,12 @@ export class LocalCore implements Core {
   }
 
   async observer_health(_args: Args<"observer_health">) {
-    if (this.mediaUploadActive || await queueIsActive(this)) throw new Error("Flow is processing another operation. Check observer health after it finishes.");
+    if (this.mediaUploadActive || await queueIsActive()) throw new Error("Flow is processing another operation. Check observer health after it finishes.");
     return getCorrelationObserverHealth();
   }
 
   async clear_prompt({ expected_prompt }: Args<"clear_prompt">) {
-    if (this.mediaUploadActive || await queueIsActive(this)) throw new Error(BUSY);
+    if (this.mediaUploadActive || await queueIsActive()) throw new Error(BUSY);
     this.mediaUploadActive = true;
     try { return await clearFlowPrompt(expected_prompt); }
     finally { this.mediaUploadActive = false; }
@@ -505,33 +505,33 @@ export class LocalCore implements Core {
   }
   async assets({ kind }: Args<"assets">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
-    if (await queueIsActive(this)) throw new Error(BUSY);
+    if (await queueIsActive()) throw new Error(BUSY);
     return (await listAssets()).filter((a) => !kind || a.kind === kind).map(({ name, kind }) => ({ name, kind }));
   }
 
   async upload_media({ path }: Args<"upload_media">) {
-    if (this.mediaUploadActive || await queueIsActive(this)) throw new Error(BUSY);
+    if (this.mediaUploadActive || await queueIsActive()) throw new Error(BUSY);
     this.mediaUploadActive = true;
     try { return await uploadFlowMediaToProject(path); }
     finally { this.mediaUploadActive = false; }
   }
 
   async attach_references({ references, inspect_only }: Args<"attach_references">) {
-    if (this.mediaUploadActive || await queueIsActive(this)) throw new Error(BUSY);
+    if (this.mediaUploadActive || await queueIsActive()) throw new Error(BUSY);
     this.mediaUploadActive = true;
     try { return await attachReferences(references, inspect_only === true); }
     finally { this.mediaUploadActive = false; }
   }
 
   async clear_references(_args: Args<"clear_references">) {
-    if (this.mediaUploadActive || await queueIsActive(this)) throw new Error(BUSY);
+    if (this.mediaUploadActive || await queueIsActive()) throw new Error(BUSY);
     this.mediaUploadActive = true;
     try { return await clearFlowReferences(); }
     finally { this.mediaUploadActive = false; }
   }
 
   async remove_reference_kind({ kind }: Args<"remove_reference_kind">) {
-    if (this.mediaUploadActive || await queueIsActive(this)) throw new Error(BUSY);
+    if (this.mediaUploadActive || await queueIsActive()) throw new Error(BUSY);
     this.mediaUploadActive = true;
     try { return await removeFlowReferenceKind(kind); }
     finally { this.mediaUploadActive = false; }
@@ -543,26 +543,26 @@ export class LocalCore implements Core {
   }
 
   async voice_options() {
-    if (this.mediaUploadActive || await queueIsActive(this)) throw new Error(BUSY);
+    if (this.mediaUploadActive || await queueIsActive()) throw new Error(BUSY);
     this.mediaUploadActive = true;
     try { return await listFlowVoiceOptions(); }
     finally { this.mediaUploadActive = false; }
   }
 
   async create_project() {
-    if (this.mediaUploadActive || await queueIsActive(this)) throw new Error(BUSY);
+    if (this.mediaUploadActive || await queueIsActive()) throw new Error(BUSY);
     return createFlowProject();
   }
 
   async open_project({ project_id, language }: Args<"open_project">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
-    if (await queueIsActive(this)) throw new Error(BUSY);
+    if (await queueIsActive()) throw new Error(BUSY);
     return openFlowProject(project_id, language);
   }
 
   async download({ project, assets, quality }: Args<"download">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
-    if (await queueIsActive(this)) throw new Error(BUSY);
+    if (await queueIsActive()) throw new Error(BUSY);
     const dir = projectDir(project);
     mkdirSync(dir, { recursive: true });
     const files: string[] = [];
@@ -649,19 +649,19 @@ export class LocalCore implements Core {
 
   async trash({ name }: Args<"trash">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
-    if (await queueIsActive(this)) throw new Error(BUSY);
+    if (await queueIsActive()) throw new Error(BUSY);
     return trashAsset(name);
   }
 
   async rename_asset({ name, id, new_name }: Args<"rename_asset">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
-    if (await queueIsActive(this)) throw new Error(BUSY);
+    if (await queueIsActive()) throw new Error(BUSY);
     return renameAsset(name, new_name, id);
   }
 
   async character(a: Args<"character">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
-    if (await queueIsActive(this)) throw new Error(BUSY);
+    if (await queueIsActive()) throw new Error(BUSY);
     if (!a.image && !a.describe) throw new Error("Pass either `describe` (Flow draws the portrait) or `image`.");
     let characterInput = { ...a };
     if (a.image && !/^asset:/i.test(a.image)) {
@@ -682,7 +682,7 @@ export class LocalCore implements Core {
 
   async character_edit({ name, rename, change, look }: Args<"character_edit">) {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
-    if (await queueIsActive(this)) throw new Error(BUSY);
+    if (await queueIsActive()) throw new Error(BUSY);
     const output_dir = castOutputDir();
     const targetName = rename || name;
     const before = await nativeDownloadIds();
@@ -712,7 +712,7 @@ export class LocalCore implements Core {
 
   async characters() {
     if (this.mediaUploadActive) throw new Error("A media upload is using the Flow tab. Retry after it finishes.");
-    if (await queueIsActive(this)) throw new Error(BUSY);
+    if (await queueIsActive()) throw new Error(BUSY);
     return (await listCharacters()).map((character) => ({
       ...character,
       use_as: `character:${character.name}`,

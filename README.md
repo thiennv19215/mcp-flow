@@ -151,7 +151,7 @@ Hai version trong repo này version độc lập, vì backend và extension phá
 theo nhịp khác nhau — đừng "đồng bộ" chúng cho bằng nhau:
 
 - `package.json` → version của backend/MCP server (hiện `0.1.16`).
-- `extension/manifest.json` → version của extension (hiện `0.2.45`).
+- `extension/manifest.json` → version của extension (hiện `0.2.51`).
 
 Khi bump một bên, chỉ bump bên đó. Test không hardcode version: giá trị
 version trong fixture lấy từ `extension/manifest.json` thật.

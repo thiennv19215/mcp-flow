@@ -5,7 +5,18 @@ import { promisify } from "node:util";
 
 import { FFMPEG_HINT } from "./platform.js";
 
-const run = promisify(execFile);
+const exec = promisify(execFile);
+// Windows does not execute .cmd/.bat files through execFile unless shell mode
+// is enabled. This also lets the test and user-provided wrappers behave like
+// native ffprobe/ffmpeg binaries without changing the normal executable path.
+const run = (file: string, args: string[], options: Record<string, unknown> = {}) => exec(
+  file,
+  args,
+  {
+    ...options,
+    ...(process.platform === "win32" && /\.(?:cmd|bat)$/i.test(file) ? { shell: true } : {}),
+  } as Parameters<typeof execFile>[2],
+);
 const FFMPEG = process.env.FLOW_MCP_FFMPEG ?? "ffmpeg";
 const FFPROBE = process.env.FLOW_MCP_FFPROBE ?? "ffprobe";
 
@@ -32,7 +43,7 @@ async function probe(file: string): Promise<ClipInfo> {
   const { stdout } = await run(FFPROBE, ["-v", "error", "-show_entries", "stream=codec_type,width,height:format=duration", "-of", "json", file]).catch(() => {
     throw new Error(`"${basename(file)}" isn't a playable video - it may be an unfinished download or a ZIP of several clips. Remove it, or pick other clips.`);
   });
-  const data = JSON.parse(stdout) as { streams: { codec_type: string; width?: number; height?: number }[]; format?: { duration?: string } };
+  const data = JSON.parse(String(stdout)) as { streams: { codec_type: string; width?: number; height?: number }[]; format?: { duration?: string } };
   const video = data.streams.find((s) => s.codec_type === "video");
   if (!video?.width || !video.height) throw new Error(`${file} has no video stream.`);
   // ffprobe reports no duration (or "N/A") for some files; a NaN here would
@@ -84,7 +95,7 @@ export async function assemble(o: AssembleOptions): Promise<{ output: string; cl
   let hold = 0;
   if (o.hold_last_frame !== false && o.voiceover) {
     const { stdout } = await run(FFPROBE, ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", o.voiceover]);
-    hold = Math.max(0, Number(stdout.trim()) + 0.6 - infos.reduce((sum, i) => sum + i.duration, 0));
+    hold = Math.max(0, Number(String(stdout).trim()) + 0.6 - infos.reduce((sum, i) => sum + i.duration, 0));
   }
   // Size the film to the biggest clip so a 720p opener cannot pull a 1080p clip down with it.
   const { width, height } = infos.reduce((a, b) => (b.width * b.height > a.width * a.height ? b : a));

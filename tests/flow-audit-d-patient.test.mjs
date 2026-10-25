@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // Audit cluster D item 4: flow_generate / flow_agent_images / flow_edit
 // must be wrapped in patient() like flow_continue, so a slow core hands
@@ -18,9 +18,10 @@ import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const toolsPath = join(here, '..', 'dist', 'mcp-tools.js');
+const toolsUrl = pathToFileURL(toolsPath).href;
 
 const childSource = `
-import { createFlowMcpServer } from ${JSON.stringify(toolsPath)};
+import { createFlowMcpServer } from ${JSON.stringify(toolsUrl)};
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 

@@ -63,12 +63,32 @@ export function extractZip(zip: string, dest: string): string[] {
   try {
     execFileSync("tar", ["-xf", zip, "-C", dest], { stdio: "ignore" });
   } catch {
-    // tar may have written a partial tree before failing; start the unzip
-    // fallback from a clean directory so half-extracted files from the
-    // failed attempt are not mixed into the result.
+    // bsdtar can reject an archive containing a symlink on Windows. List
+    // those entries first, then retry while excluding only the links; this
+    // preserves ordinary media instead of falling through to a Unix-only
+    // `unzip` binary that may not exist on Windows.
+    let symlinkNames: string[] = [];
+    try {
+      const listing = execFileSync("tar", ["-tvf", zip], { encoding: "utf8" });
+      symlinkNames = listing.split(/\r?\n/).flatMap((line) => {
+        const arrow = line.indexOf(" -> ");
+        if (arrow < 0 || !/^\s*l/.test(line)) return [];
+        const name = line.slice(0, arrow).trim().split(/\s+/).pop();
+        return name ? [name] : [];
+      });
+    } catch {
+      // If the archive cannot be listed, let the normal unzip fallback report
+      // the original extraction failure.
+    }
     rmSync(dest, { recursive: true, force: true });
     mkdirSync(dest, { recursive: true });
-    execFileSync("unzip", ["-o", "-q", zip, "-d", dest], { stdio: "ignore" });
+    try {
+      execFileSync("tar", ["-xf", zip, "-C", dest, ...symlinkNames.flatMap((name) => ["--exclude", name])], { stdio: "ignore" });
+    } catch {
+      // tar may be unavailable or unable to read this ZIP; use unzip as the
+      // portable fallback on systems that provide it.
+      execFileSync("unzip", ["-o", "-q", zip, "-d", dest], { stdio: "ignore" });
+    }
   }
   const files: string[] = [];
   const walk = (dir: string) => {

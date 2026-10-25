@@ -1849,6 +1849,10 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
         case "flow-queue:get":
           snapshot = await flowJobQueue.snapshot();
           break;
+        case "flow-queue:preparing-heartbeat": {
+          const jobs = await flowJobQueue.heartbeatPreparingReferences(message.ids);
+          return { ok: true, preparedJobIds: jobs.map(job => job.id) };
+        }
         case "flow-queue:add": {
           const source = message.job || {};
           const jobInput = {

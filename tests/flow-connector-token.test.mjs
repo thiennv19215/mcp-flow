@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import WebSocket from 'ws';
 
 // Audit cluster D item 5: the extension connector endpoints must require
@@ -19,6 +19,7 @@ import WebSocket from 'ws';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const serverPath = join(here, '..', 'dist', 'server.js');
+const serverUrl = pathToFileURL(serverPath).href;
 const PORT = 19100 + Math.floor(Math.random() * 800);
 const TOKEN = 'connector-test-token';
 const WS_TOKEN = 'connector-ws-token';
@@ -26,7 +27,7 @@ const WS_TOKEN = 'connector-ws-token';
 const ORIGIN = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
 
 const childSource = `
-import { startServer } from ${JSON.stringify(serverPath)};
+import { startServer } from ${JSON.stringify(serverUrl)};
 const core = { status: async () => ({ ok: true }) };
 const role = await startServer(core);
 if (role !== 'owner') { console.error('not owner: ' + role); process.exit(1); }

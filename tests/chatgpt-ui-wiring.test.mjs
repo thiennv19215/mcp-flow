@@ -293,13 +293,13 @@ test('GPT-14: leaving chatgpt mode restores the Flow form (Flow behavior unchang
   vm.runInThisContext(i18nSource);
   globalThis.I18n._currentLocale = 'vi';
   assert.equal(globalThis.I18n.t('sidebar.referencePickerLimit'), 'Tối đa 3 ảnh tham chiếu');
-  // The Flow submit path itself is untouched: executeGenerationTask still
-  // builds flow.generation.submit jobs with the Flow payload shape.
-  const execStart = sidebarJs.indexOf('async function executeGenerationTask(');
-  const execBody = sidebarJs.slice(execStart, execStart + 6000);
-  assert.match(execBody, /operation: "flow\.generation\.submit"/);
-  assert.match(execBody, /aspectRatio: aspect_ratio/);
-  assert.doesNotMatch(execBody, /chatgpt/, 'the Flow job builder never mentions chatgpt');
+  // The Flow submit path itself is untouched: the extracted job builder still
+  // creates flow.generation.submit jobs with the Flow payload shape.
+  const buildStart = sidebarJs.indexOf('function buildGenerationQueueJobs(');
+  const buildBody = sidebarJs.slice(buildStart, buildStart + 5000);
+  assert.match(buildBody, /operation: "flow\.generation\.submit"/);
+  assert.match(buildBody, /aspectRatio: aspect_ratio/);
+  assert.doesNotMatch(buildBody, /chatgpt/, 'the Flow job builder never mentions chatgpt');
 });
 
 // ---------------------------------------------------------------------------
