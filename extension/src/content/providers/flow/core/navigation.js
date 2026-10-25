@@ -720,7 +720,7 @@
   async function ensureFlowLibrarySection(label, options = {}) {
     const checkTime = () => root.FlowUiDeadline?.requireTime(Number.isFinite(options.deadline) ? options.deadline : Infinity, `opening the Flow ${label} library`, false, options.signal);
     checkTime();
-    await leaveFlowDetailView();
+    await leaveFlowDetailView(options);
 
     const isAtProjectRoot = () => {
       const desc = (root.ProviderRegistry || root.FlowDriverRegistry)?.describeUrl?.(location.href);

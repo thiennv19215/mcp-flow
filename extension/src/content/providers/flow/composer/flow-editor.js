@@ -433,16 +433,30 @@
   }
 
   async function activateFlowSubmitButton(button, expectedPrompt) {
-    const targetButton = button || (expectedPrompt ? getFlowSubmitButton(expectedPrompt) : null);
-    if (!targetButton || !targetButton.isConnected) {
+    const isVisible = typeof root.visible === "function" ? root.visible : () => true;
+    let targetButton = button || (expectedPrompt ? getFlowSubmitButton(expectedPrompt) : null);
+    if (!targetButton || !targetButton.isConnected || !isVisible(targetButton)) {
       throw root.flowError("FLOW_SUBMIT_BUTTON_MISSING", "Flow's Start generation button disappeared before activation.", true);
     }
     if (targetButton.disabled || targetButton.getAttribute("aria-disabled") === "true") {
       throw root.flowError("FLOW_SUBMIT_DISABLED", "Flow's Start generation button is disabled; nothing was submitted.", true);
     }
 
+    // Flow may replace the composer between the wait and the trusted gesture.
+    // Re-resolve the live submit control when possible so a connected but stale
+    // hidden button can never receive the activation sequence.
+    const liveButton = expectedPrompt && typeof document !== "undefined" ? getFlowSubmitButton(expectedPrompt) : null;
+    if (liveButton && liveButton !== targetButton) targetButton = liveButton;
+    if (!targetButton.isConnected || !isVisible(targetButton) ||
+        targetButton.disabled || targetButton.getAttribute("aria-disabled") === "true") {
+      throw root.flowError("FLOW_SUBMIT_BUTTON_MISSING", "Flow's Start generation button changed before activation.", true);
+    }
+
     try { targetButton.scrollIntoView?.({ behavior: "instant", block: "center" }); } catch {}
     const rect = targetButton.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) {
+      throw root.flowError("FLOW_SUBMIT_BUTTON_MISSING", "Flow's Start generation button is not interactable before activation.", true);
+    }
     const x = rect.left + rect.width / 2;
     const y = rect.top + rect.height / 2;
     const eventOptions = {
@@ -466,7 +480,7 @@
       if (targetButton.disabled || targetButton.getAttribute("aria-disabled") === "true") {
         controlAccepted = true;
       } else if (!targetButton.isConnected) {
-        const liveButton = getFlowSubmitButton(expectedPrompt);
+        const liveButton = typeof document !== "undefined" ? getFlowSubmitButton(expectedPrompt) : null;
         if (liveButton && (liveButton.disabled || liveButton.getAttribute("aria-disabled") === "true")) {
           controlAccepted = true;
         }

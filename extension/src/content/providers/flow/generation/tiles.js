@@ -571,11 +571,38 @@
     const norm = foldTileTitleStrict;
     const wanted = norm(title);
     const exact = options.exact !== false;
+    const deadline = Number.isFinite(options.deadline) ? options.deadline : Infinity;
+    const requireTime = operation => {
+      if (root.FlowUiDeadline?.requireTime) {
+        root.FlowUiDeadline.requireTime(deadline, operation, false, options.signal);
+        return;
+      }
+      if (options.signal?.aborted) {
+        throw root.flowError?.("FLOW_OPERATION_TIMEOUT", `Timed out while ${operation}; the Flow operation was cancelled.`, false, false) || new Error(`Timed out while ${operation}; the Flow operation was cancelled.`);
+      }
+      if (Date.now() >= deadline) {
+        throw root.flowError?.("FLOW_OPERATION_TIMEOUT", `Timed out while ${operation}.`, true, false) || new Error(`Timed out while ${operation}.`);
+      }
+    };
+    const pause = async (ms, operation) => {
+      requireTime(operation);
+      if (root.FlowUiDeadline?.boundedWait) {
+        await root.FlowUiDeadline.boundedWait(ms, deadline, operation, false, options.signal);
+        return;
+      }
+      if (options.signal?.aborted) {
+        requireTime(operation);
+      }
+      if (typeof root.wait === "function") await root.wait(ms);
+      else await new Promise(resolve => setTimeout(resolve, ms));
+      requireTime(operation);
+    };
     const scroller = flowMediaGridScrollContainer();
     if (scroller) scroller.scrollTop = 0;
-    await root.wait?.(200);
+    await pause(200, "waiting for the requested Flow tile");
 
     for (let step = 0; step < retries; step++) {
+      requireTime("locating the requested Flow tile");
       const tileContainers = (typeof root.flowQueryAll === "function" ? root.flowQueryAll("tiles.container", document, { checkVisible: false }) : null) ||
         [...document.querySelectorAll("flow-grid-tile-container")];
       const tile = tileContainers.find(el => {
@@ -588,8 +615,9 @@
       const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
       if (top >= max - 2) break;
       scroller.scrollTop = Math.min(max, top + Math.max(200, scroller.clientHeight * 0.78));
-      await root.wait?.(250);
+      await pause(250, "waiting for the Flow tile grid to render");
     }
+    if (Number.isFinite(deadline) && Date.now() >= deadline) requireTime("locating the requested Flow tile");
     return null;
   }
 

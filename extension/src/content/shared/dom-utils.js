@@ -259,9 +259,10 @@ function flowButton(name, root = document) {
   const candidates = [...root.querySelectorAll('button,[role="button"]')].filter(visible);
   
   // 1. Direct match: so khớp chính xác tên truyền vào
-  const direct = candidates.find(el =>
+  const directMatches = candidates.filter(el =>
     matchesName(semanticActionText(el).replace(/\s+/g, " ").trim(), name, null, true));
-  if (direct) return direct;
+  if (directMatches.length === 1) return directMatches[0];
+  if (directMatches.length > 1) return null;
 
   const synonyms = (globalThis.I18n?.getPatterns?.(normName)?.length ? globalThis.I18n.getPatterns(normName) : BUTTON_SYNONYMS[normName]);
   if (!synonyms || !synonyms.length) return null;
@@ -282,34 +283,43 @@ function flowButton(name, root = document) {
   };
 
   // PASS 1: So khớp CHÍNH XÁC (Exact match toàn bộ chuỗi) - Ngăn chặn 100% click nhầm DOM
+  const exactMatches = new Set();
   for (const el of candidates) {
     const { rawText, rawAria, rawInner, cleanText, cleanAria, cleanInner } = getCleanTexts(el);
     for (const syn of synonyms) {
       const wanted = normalizeFlowUiText(syn);
       if ([rawText, rawAria, rawInner, cleanText, cleanAria, cleanInner]
         .some(value => normalizeFlowUiText(value) === wanted)) {
-        return el;
+        exactMatches.add(el);
+        break;
       }
     }
   }
+  if (exactMatches.size === 1) return [...exactMatches][0];
+  if (exactMatches.size > 1) return null;
 
   // PASS 2: Phục hồi bằng Icon đặc trưng của Flow
+  const iconMatches = [];
   for (const el of candidates) {
     const { icon } = getCleanTexts(el);
     if (!icon) continue;
 
-    if (normName === "settings trigger" && (icon === "tune" || icon === "settings")) return el;
-    if (normName === "more options" && (icon === "more_vert" || icon === "more_horiz")) return el;
-    if ((normName === "back" || normName === "go back") && (icon === "arrow_back" || icon === "arrow-back" || icon === "arrow_left")) return el;
-    if (normName === "close" && (icon === "close" || icon === "clear")) return el;
+    if (normName === "settings trigger" && (icon === "tune" || icon === "settings")) iconMatches.push(el);
+    if (normName === "more options" && (icon === "more_vert" || icon === "more_horiz")) iconMatches.push(el);
+    if ((normName === "back" || normName === "go back") && (icon === "arrow_back" || icon === "arrow-back" || icon === "arrow_left")) iconMatches.push(el);
+    if (normName === "close" && (icon === "close" || icon === "clear")) iconMatches.push(el);
     if ((normName === "add ingredients to the prompt box" || normName === "add media menu" || normName === "add media") &&
-        (icon === "add" || icon === "add_circle") && !isFlowProjectNavigationControl(el)) return el;
+        (icon === "add" || icon === "add_circle") && !isFlowProjectNavigationControl(el)) iconMatches.push(el);
     if (normName === "download scene" || normName === "download image" || normName === "download video") {
-      if (icon === "download" || icon === "file_download") return el;
+      if (icon === "download" || icon === "file_download") iconMatches.push(el);
     }
   }
+  const uniqueIconMatches = [...new Set(iconMatches)];
+  if (uniqueIconMatches.length === 1) return uniqueIconMatches[0];
+  if (uniqueIconMatches.length > 1) return null;
 
   // PASS 3: So khớp Cụm từ an toàn (CHỈ áp dụng cho từ có dấu cách hoặc dài >= 6 ký tự)
+  const phraseMatches = [];
   for (const el of candidates) {
     const { rawText, rawAria, cleanText, cleanAria } = getCleanTexts(el);
     for (const syn of synonyms) {
@@ -320,18 +330,20 @@ function flowButton(name, root = document) {
           const folded = normalizeFlowUiText(value);
           return folded.startsWith(wanted + " ") || folded.endsWith(" " + wanted);
         })) {
-          return el;
+          phraseMatches.push(el);
+          break;
         }
         // Substring includes CHỈ cho cụm từ dài >= 8 ký tự (ví dụ: "bắt đầu tạo", "thêm thành phần vào hộp câu lệnh")
         if (syn.length >= 8 && [rawText, rawAria, cleanText, cleanAria]
           .some(value => normalizeFlowUiText(value).includes(wanted))) {
-          return el;
+          phraseMatches.push(el);
+          break;
         }
       }
     }
   }
-
-  return null;
+  const uniquePhraseMatches = [...new Set(phraseMatches)];
+  return uniquePhraseMatches.length === 1 ? uniquePhraseMatches[0] : null;
 }
 
 // Frame-slot controls must not use flowButton's fuzzy action synonyms. In
@@ -945,11 +957,20 @@ function clickFlowNavigation(label) {
   return true;
 }
 
-async function waitForFlowRoute(predicate, timeoutMs, message) {
-  const deadline = Date.now() + timeoutMs;
+async function waitForFlowRoute(predicate, timeoutMs, message, options = {}) {
+  const deadline = Math.min(Date.now() + timeoutMs, Number.isFinite(options.deadline) ? options.deadline : Infinity);
   while (Date.now() < deadline) {
     if (predicate(location.pathname)) return true;
-    await wait(100);
+    if (globalThis.FlowUiDeadline?.requireTime) {
+      globalThis.FlowUiDeadline.requireTime(deadline, message || "waiting for Flow route", false, options.signal);
+    } else if (options.signal?.aborted) {
+      throw flowError("FLOW_OPERATION_TIMEOUT", message || "Flow route wait was cancelled.", false);
+    }
+    if (globalThis.FlowUiDeadline?.boundedWait) {
+      await globalThis.FlowUiDeadline.boundedWait(100, deadline, message || "waiting for Flow route", false, options.signal);
+    } else {
+      await wait(Math.min(100, Math.max(1, deadline - Date.now())));
+    }
   }
   throw flowError("FLOW_NAVIGATION_TIMEOUT", message, true);
 }
@@ -1244,8 +1265,8 @@ function blurFlowNavigationFocus() {
   if (focused?.closest?.("mat-sidenav,[role=navigation]")) focused.blur();
 }
 
-async function ensureFlowLibrarySection(label) {
-  await leaveFlowDetailView();
+async function ensureFlowLibrarySection(label, options = {}) {
+  await leaveFlowDetailView(options);
 
   const isAtProjectRoot = () => {
     const desc = globalThis.FlowDriverRegistry?.describeUrl?.(location.href);
@@ -1264,7 +1285,7 @@ async function ensureFlowLibrarySection(label) {
   let target = flowNavigationItem(label);
   if (!target && label === "All media") {
     // Thử phục hồi về Project Editor nếu bị kẹt ở sub-route
-    await ensureFlowProjectEditor();
+    await ensureFlowProjectEditor(options);
     if (isAtProjectRoot()) return true;
     target = flowNavigationItem(label);
   }
@@ -1275,7 +1296,7 @@ async function ensureFlowLibrarySection(label) {
   }
 
   target.click();
-  const deadline = Date.now() + (label === "Characters" ? 10_000 : 5000);
+  const deadline = Math.min(Date.now() + (label === "Characters" ? 10_000 : 5000), Number.isFinite(options.deadline) ? options.deadline : Infinity);
   const hasCharacterAction = () => [...document.querySelectorAll("flow-custom-tile")].some(tile => {
     if (!visible(tile)) return false;
     const addIcon = [...(tile.querySelectorAll?.("mat-icon") || [])].some(icon =>
@@ -1291,7 +1312,8 @@ async function ensureFlowLibrarySection(label) {
   while (Date.now() < deadline) {
     const loading = [...document.querySelectorAll('[role="progressbar"],[aria-busy="true"]')].some(visible);
     if (!loading && hasSectionMarker()) break;
-    await wait(150);
+    if (globalThis.FlowUiDeadline?.boundedWait) await globalThis.FlowUiDeadline.boundedWait(150, deadline, `opening the Flow ${label} library`, false, options.signal);
+    else await wait(Math.min(150, Math.max(1, deadline - Date.now())));
   }
   if (!hasSectionMarker()) {
     if (label === "All media" && isAtProjectRoot()) return true;

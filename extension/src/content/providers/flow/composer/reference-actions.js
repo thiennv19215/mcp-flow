@@ -1788,17 +1788,17 @@
     lastReferenceActionDiagnostics = { ...lastReferenceActionDiagnostics, searchResultsVerified: false, pickerScanPages: 0, pickerScanEndReached: false };
     return { recognized: true, resultsVerified: false, fallbackToScan: true };
   }
-  async function returnToProjectComposer() {
+  async function returnToProjectComposer(config = {}) {
     if (isNewCharacterRoute(location.pathname)) {
       const back = await waitForEnabledFlowButton("Go back", 3000);
       if (!back) throw flowError("FLOW_CHARACTER_BACK_MISSING", "Flow's New character page has no Go back control.", true, true);
       back.click();
-      await waitForFlowRoute(path => !isNewCharacterRoute(path), 15_000, "Flow did not leave the New character page.");
+      await waitForFlowRoute(path => !isNewCharacterRoute(path), 15_000, "Flow did not leave the New character page.", config);
     } else if (isCharacterEditorRoute(location.pathname)) {
       const done = await waitForEnabledFlowButton("Done", 3000) || await waitForEnabledFlowButton("Done editing", 1000);
       if (!done) throw flowError("FLOW_CHARACTER_SAVE_MISSING", "Flow's character editor has no Done control; its current state may be unsaved.", false, true);
       done.click();
-      await waitForFlowRoute(path => !isCharacterRoute(path), 15_000, "Flow did not close the character editor.");
+      await waitForFlowRoute(path => !isCharacterRoute(path), 15_000, "Flow did not close the character editor.", config);
     }
     if (isCharacterRoute(location.pathname)) throw flowError("FLOW_CHARACTER_ROUTE_UNEXPECTED", "Flow is still on a character page; the character picker cannot be opened safely.", true, true);
     const agentMode = root.FlowAgent?.findNativeAgentModeControl?.();
@@ -1819,7 +1819,7 @@
     let operationError;
     try {
       requireTime(deadline, "opening the character picker");
-      await returnToProjectComposer();
+      await returnToProjectComposer(config);
       await open(undefined, deadline, config.signal);
       if (!picker() && emptyPickerMessage()) return [];
       try { await category("Characters", deadline, config.signal); }

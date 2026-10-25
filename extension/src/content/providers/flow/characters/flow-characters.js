@@ -229,29 +229,29 @@
     return [...matches.values()];
   }
 
-  async function closeCurrentCharacterRoute() {
+  async function closeCurrentCharacterRoute(options = {}) {
     if (newCharacterRoute(location.pathname)) {
-      await leaveNewCharacterPage();
+      await leaveNewCharacterPage(options);
     } else if (characterEditorRoute(location.pathname)) {
       const done = await waitForEnabledFlowButton("Done", 3000) || await waitForEnabledFlowButton("Done editing", 1000);
       if (!done) throw flowError("FLOW_CHARACTER_SAVE_MISSING", "Flow's character editor has no save/close control; the character may be partially saved.", false, true);
       done.click();
-      await waitForFlowRoute(path => !characterRoute(path), 15_000, "Flow did not close the character editor.");
+      await waitForFlowRoute(path => !characterRoute(path), 15_000, "Flow did not close the character editor.", options);
     }
   }
 
-  async function leaveNewCharacterPage() {
+  async function leaveNewCharacterPage(options = {}) {
     const back = await waitForEnabledFlowButton("Go back", 3000) ||
       await waitForEnabledFlowButton("Back", 1000) ||
       await waitForEnabledFlowButton("Quay lại", 1000);
     if (back) {
       back.click();
-      if (await waitForFlowRoute(path => !newCharacterRoute(path), 5000, "Flow did not leave the New character page.").catch(() => false)) return true;
+      if (await waitForFlowRoute(path => !newCharacterRoute(path), 5000, "Flow did not leave the New character page.", options).catch(() => false)) return true;
     }
     // Flow sometimes renders the route before its button; its navigation helper can recover through project root.
-    await root.FlowNavigation?.leaveFlowDetailView?.().catch(() => {});
+    await root.FlowNavigation?.leaveFlowDetailView?.(options).catch(() => {});
     if (newCharacterRoute(location.pathname)) {
-      await root.FlowNavigation?.ensureFlowProjectEditor?.().catch(() => {});
+      await root.FlowNavigation?.ensureFlowProjectEditor?.(options).catch(() => {});
     }
     if (newCharacterRoute(location.pathname)) {
       throw flowError("FLOW_CHARACTER_BACK_MISSING", "Flow's New character page did not leave after Go back or project navigation recovery.", true, true);
@@ -259,16 +259,16 @@
     return true;
   }
 
-  async function ensureCharacterLibrary({ allowNewCharacterPage = false } = {}) {
-    await closeCurrentCharacterRoute();
-    await ensureFlowLibrarySection("Characters");
+  async function ensureCharacterLibrary({ allowNewCharacterPage = false, ...options } = {}) {
+    await closeCurrentCharacterRoute(options);
+    await ensureFlowLibrarySection("Characters", options);
     if (newCharacterRoute(location.pathname) && allowNewCharacterPage &&
         (flowButton("Add from project") || flowButton("Upload"))) {
       return { newCharacterPage: true };
     }
     if (newCharacterRoute(location.pathname)) {
-      await leaveNewCharacterPage();
-      await ensureFlowLibrarySection("Characters");
+      await leaveNewCharacterPage(options);
+      await ensureFlowLibrarySection("Characters", options);
     }
     if (characterRoute(location.pathname)) {
       throw flowError("FLOW_CHARACTER_ROUTE_UNEXPECTED", "Flow is still on a character form or editor instead of the Characters library.", true, true);
@@ -399,7 +399,7 @@
       if (c.image && !localImage && !sourceTitle) throw flowError("FLOW_INVALID_ARGUMENT", "Character image asset title is empty.");
       let portraitMedia;
       await closeNativeAgentSession();
-      await closeCurrentCharacterRoute();
+      await closeCurrentCharacterRoute({ signal: command.signal });
       const activeAgent = flowButton("Agent");
       if (activeAgent?.getAttribute("aria-pressed") === "true") await setNativeAgentMode(false);
       if (localImage) {
@@ -407,7 +407,7 @@
         const file = stagedNativeFiles.get(localImage.transferId);
         if (!file) throw flowError("FLOW_TRANSFER_UNKNOWN", "The staged character image is no longer available.", true);
       }
-      const characterEntry = await ensureCharacterLibrary({ allowNewCharacterPage: true });
+      const characterEntry = await ensureCharacterLibrary({ allowNewCharacterPage: true, signal: command.signal });
       let newPageReady = characterEntry.newCharacterPage;
       if (!newPageReady) {
         const existing = await findCharacterTiles(characterName);
@@ -415,7 +415,7 @@
         if (existing.length === 1) throw flowError("FLOW_CHARACTER_EXISTS", `A character named "${characterName}" already exists; no new character was created.`, true);
       }
       if (!c.image) {
-        await ensureFlowLibrarySection("All media");
+        await ensureFlowLibrarySection("All media", { signal: command.signal });
         newPageReady = false;
         const editorBox = root.getVisibleFlowPromptEditor?.() || (typeof root.flowQuery === "function" ? root.flowQuery("editor", document) : null);
         if (!editorBox) throw flowError("NATIVE_CAPABILITY_UNSUPPORTED", "Flow's image composer is unavailable for description-based character creation.", true);
@@ -439,13 +439,13 @@
       let enteredEditor = false;
       let completedResult;
       try {
-        if (!newPageReady) await ensureFlowLibrarySection("Characters");
+        if (!newPageReady) await ensureFlowLibrarySection("Characters", { signal: command.signal });
         let newPage = newPageReady || newCharacterRoute(location.pathname);
         if (!newPage) {
           const create = await waitForCharacterCreateButton(10_000);
           if (!create) throw flowError("FLOW_CHARACTER_CREATE_MISSING", "Flow's Characters library does not show New character.", true);
           create.click();
-          await waitForFlowRoute(path => newCharacterRoute(path), 15_000, "Flow did not open the New character page.");
+          await waitForFlowRoute(path => newCharacterRoute(path), 15_000, "Flow did not open the New character page.", { signal: command.signal });
           newPage = true;
         }
         if (!newPage) throw flowError("FLOW_CHARACTER_ROUTE_UNEXPECTED", "Flow did not reach the New character page.", true, true);
@@ -462,7 +462,7 @@
           } catch (error) {
             throw flowError("FLOW_CHARACTER_UPLOAD_FAILED", `Flow did not accept the staged character image: ${String(error?.message || error)}. Nothing was submitted.`, true, false);
           }
-          await waitForFlowRoute(path => characterEditorRoute(path), 90_000, "Flow did not open the character editor after the image upload.");
+          await waitForFlowRoute(path => characterEditorRoute(path), 90_000, "Flow did not open the character editor after the image upload.", { signal: command.signal });
         } else {
           const add = await waitForEnabledFlowButton("Add from project", 15_000);
           if (!add) throw flowError("FLOW_CHARACTER_CREATE_MISSING", "Flow's New character page is not ready.", true);
@@ -486,7 +486,7 @@
           const addMedia = await waitForEnabledFlowButton("Add media", 10_000);
           if (!addMedia) throw flowError("FLOW_ADD_MEDIA_MISSING", "Flow did not show Add media for the selected portrait.", true);
           addMedia.click();
-          await waitForFlowRoute(path => characterEditorRoute(path), 90_000, "Flow did not open the character editor.");
+          await waitForFlowRoute(path => characterEditorRoute(path), 90_000, "Flow did not open the character editor.", { signal: command.signal });
         }
         enteredEditor = true;
         characterUrl = location.href;
@@ -543,10 +543,10 @@
         if (!done) throw flowError("FLOW_CHARACTER_SAVE_MISSING", "Flow has not presented a Done button; character may be partially created.", false, true);
         done.click();
         lastCharacterNameDiagnostics = { ...lastCharacterNameDiagnostics, save_clicked: true };
-        await waitForFlowRoute(path => !characterRoute(path), 15_000, "Flow did not save and close the character editor.");
+        await waitForFlowRoute(path => !characterRoute(path), 15_000, "Flow did not save and close the character editor.", { signal: command.signal });
         lastCharacterNameDiagnostics = { ...lastCharacterNameDiagnostics, route_exited: true };
         enteredEditor = false;
-        await ensureFlowLibrarySection("Characters");
+        await ensureFlowLibrarySection("Characters", { signal: command.signal });
         let saved = [];
         let previousNameMatches = [];
         let libraryScanComplete = true;
@@ -578,9 +578,9 @@
         return completedResult;
       } finally {
         try {
-          if (newCharacterRoute(location.pathname)) await leaveNewCharacterPage();
-          else if (enteredEditor && characterEditorRoute(location.pathname)) await closeCurrentCharacterRoute();
-          await ensureFlowLibrarySection("All media");
+          if (newCharacterRoute(location.pathname)) await leaveNewCharacterPage({ signal: command.signal });
+          else if (enteredEditor && characterEditorRoute(location.pathname)) await closeCurrentCharacterRoute({ signal: command.signal });
+          await ensureFlowLibrarySection("All media", { signal: command.signal });
           if (characterRoute(location.pathname)) throw flowError("FLOW_CHARACTER_CLEANUP_INCOMPLETE", "Flow remained on a character page after the create workflow cleanup.", true, true);
         } catch (error) {
           if (completedResult) completedResult.cleanupWarning = String(error?.message || error).slice(0, 300);
@@ -595,7 +595,7 @@
       if (renameTo.length > 60) throw flowError("FLOW_INVALID_ARGUMENT", "A character name must contain at most 60 characters.");
       if (renameTo && normalize(renameTo) === normalize(characterName)) throw flowError("FLOW_INVALID_ARGUMENT", "The new character name must differ from the current name.");
       await closeNativeAgentSession();
-      await ensureCharacterLibrary();
+      await ensureCharacterLibrary({ signal: command.signal });
       const activeAgent = flowButton("Agent");
       if (activeAgent?.getAttribute("aria-pressed") === "true") await setNativeAgentMode(false);
       const matches = await findCharacterTiles(characterName.trim());
@@ -603,7 +603,7 @@
       const target = matches[0];
       if (!target) throw flowError("FLOW_CHARACTER_NOT_FOUND", `No character called "${characterName}". Use flow_characters to list them.`, true);
       target.scrollIntoView({ block: "center" }); target.click();
-      await waitForFlowRoute(path => characterEditorRoute(path), 20_000, `Flow did not open character "${characterName}".`);
+      await waitForFlowRoute(path => characterEditorRoute(path), 20_000, `Flow did not open character "${characterName}".`, { signal: command.signal });
       await wait(500);
       let completedResult;
       try {
@@ -669,14 +669,14 @@
           lastCharacterNameDiagnostics = { ...lastCharacterNameDiagnostics, save_clicked: true };
           recordCharacterNameSaveResponse({ control_label: saveControlLabel, click_sent: true });
         }
-        await waitForFlowRoute(path => !characterRoute(path), 15_000, "Flow did not close the character editor.");
+        await waitForFlowRoute(path => !characterRoute(path), 15_000, "Flow did not close the character editor.", { signal: command.signal });
         if (renameTo) {
           lastCharacterNameDiagnostics = { ...lastCharacterNameDiagnostics, route_exited: true, post_save_route: location.pathname };
           recordCharacterNameSaveResponse({ control_label: saveControlLabel, click_sent: true, route_exited: true, post_save_route: location.pathname });
         }
         let savedName = characterName;
         if (renameTo) {
-          await ensureFlowLibrarySection("Characters");
+          await ensureFlowLibrarySection("Characters", { signal: command.signal });
           let renamed = [];
           let originalMatches = [];
           let libraryScanComplete = true;
@@ -707,8 +707,8 @@
         return completedResult;
       } finally {
         try {
-          if (characterRoute(location.pathname)) await closeCurrentCharacterRoute();
-          await ensureFlowLibrarySection("All media");
+          if (characterRoute(location.pathname)) await closeCurrentCharacterRoute({ signal: command.signal });
+          await ensureFlowLibrarySection("All media", { signal: command.signal });
           if (characterRoute(location.pathname)) throw flowError("FLOW_CHARACTER_CLEANUP_INCOMPLETE", "Flow remained on a character page after the edit workflow cleanup.", true, true);
         } catch (error) {
           if (completedResult) completedResult.cleanupWarning = String(error?.message || error).slice(0, 300);

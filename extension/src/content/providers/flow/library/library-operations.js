@@ -147,10 +147,10 @@
           throw this.error("FLOW_INVALID_ARGUMENT", "A new asset title must be different, non-empty, at most 120 characters, and contain no control characters.");
         }
         const normalizeTitle = value => String(value || "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
+        const mutationDeadline = Date.now() + Math.min(25_000, Number(command.timeoutMs) || 25_000);
         let sourceAsset = null;
         if (name === "flow.asset.rename") {
-          const deadline = Date.now() + Math.min(25_000, Number(command.timeoutMs) || 25_000);
-          const assets = await menu.scanNativeAssets({ requireComplete: true, maxDurationMs: 12_000, deadline, signal: command.signal });
+          const assets = await menu.scanNativeAssets({ requireComplete: true, maxDurationMs: 12_000, deadline: mutationDeadline, signal: command.signal });
           const sourceMatches = assets.filter(asset => normalizeTitle(asset.name) === normalizeTitle(title));
           if (sourceMatches.length !== 1) throw this.error(sourceMatches.length ? "FLOW_AMBIGUOUS_ASSET" : "FLOW_ASSET_NOT_FOUND", sourceMatches.length ? `More than one asset is named "${title}"; no mutation was performed.` : `Could not find exact asset title "${title}" in the complete library scan.`, true, false);
           sourceAsset = sourceMatches[0];
@@ -166,7 +166,7 @@
           const copies = await tiles.countFlowTitleAcrossGrid(title);
           if (copies !== 1) throw this.error(copies > 1 ? "FLOW_AMBIGUOUS_ASSET" : "FLOW_ASSET_NOT_FOUND", copies > 1 ? `${copies} assets are named "${title}"; no mutation was performed.` : `Could not find asset "${title}".`, true);
         }
-        const tile = await tiles.findFlowTile(title, name === "flow.asset.rename" ? 30 : undefined);
+        const tile = await tiles.findFlowTile(title, name === "flow.asset.rename" ? 30 : undefined, { deadline: mutationDeadline, signal: command.signal });
         if (!tile) throw this.error("FLOW_ASSET_NOT_FOUND", `Could not find asset "${title}" after scanning the project grid.`, true);
         const tileId = root.mediaId?.(tile);
         if (name === "flow.asset.rename" && (String(tileId || "").toLowerCase() !== String(sourceAsset?.id || "").toLowerCase() || normalizeTitle(tile.getAttribute?.("aria-label") || tile.getAttribute?.("title")) !== normalizeTitle(title))) {

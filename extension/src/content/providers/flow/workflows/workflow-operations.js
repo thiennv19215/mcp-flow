@@ -192,15 +192,15 @@
         await agent.closeNativeAgentSession();
         const activeAgent = root.flowButton?.("Agent");
         if (activeAgent?.getAttribute("aria-pressed") === "true") await agent.setNativeAgentMode(false);
-        await nav.ensureFlowLibrarySection("All media", { deadline });
+        await nav.ensureFlowLibrarySection("All media", { deadline, signal: command.signal });
         const assets = await menu.scanNativeAssets({ deadline });
         const { source, matches } = this.resolveWorkflowVideoSource(assets, sourcePrefix);
         if (matches.length > 1) throw this.error("FLOW_AMBIGUOUS_ASSET", `${matches.length} videos begin with "${sourcePrefix}". Use the exact title.`, false, false);
         if (!source) throw this.error("FLOW_VIDEO_NOT_FOUND", `No video beginning "${sourcePrefix}" exists in the project.`, false, false);
-        const tile = await tiles.findFlowTile(source.name);
+        const tile = await tiles.findFlowTile(source.name, 100, { deadline, signal: command.signal });
         if (!tile || !tile.querySelector("flow-video-tile")) throw this.error("FLOW_VIDEO_NOT_FOUND", `Video "${source.name}" is no longer visible.`, false, false);
         tile.scrollIntoView({ block: "center" }); tile.click();
-        await nav.waitForFlowRoute(path => /\/edit\//i.test(path), Math.min(30_000, Math.max(1, deadline - Date.now())), "Flow did not open the source video editor.");
+        await nav.waitForFlowRoute(path => /\/edit\//i.test(path), Math.min(30_000, Math.max(1, deadline - Date.now())), "Flow did not open the source video editor.", { deadline, signal: command.signal });
         const seek = await root.waitForEnabledFlowButton?.("Skip to next clip", Math.min(30_000, Math.max(1, deadline - Date.now())));
         if (!seek) throw this.error("FLOW_TIMELINE_MISSING", "The source video timeline is not ready.", false, false);
         seek.click();
@@ -212,10 +212,10 @@
         const back = root.flowButton?.("Back button to go to previous page");
         if (!back) throw this.error("FLOW_EDIT_BACK_MISSING", "Flow saved the frame, but its Back control is unavailable.", false, true);
         back.click();
-        await nav.waitForFlowRoute(path => !/\/edit(?:\/|$)/i.test(path), Math.min(20_000, Math.max(1, deadline - Date.now())), "Flow did not return to the project after saving the last frame.", { deadline });
-        await nav.ensureFlowLibrarySection("All media", { deadline });
+        await nav.waitForFlowRoute(path => !/\/edit(?:\/|$)/i.test(path), Math.min(20_000, Math.max(1, deadline - Date.now())), "Flow did not return to the project after saving the last frame.", { deadline, signal: command.signal });
+        await nav.ensureFlowLibrarySection("All media", { deadline, signal: command.signal });
         const title = `Saved frame from ${source.name}`;
-        const frame = await tiles.findFlowTile(title, 200);
+        const frame = await tiles.findFlowTile(title, 200, { deadline, signal: command.signal });
         if (!frame) throw this.error("FLOW_FRAME_NOT_FOUND", `Flow did not add the saved frame "${title}".`, false, true);
         const rawId = root.mediaId?.(frame);
         const id = await root.resolveNativeMediaUuid?.(rawId, "image") || rawId;
@@ -239,17 +239,17 @@
         await agent.closeNativeAgentSession();
         const activeAgent = root.flowButton?.("Agent");
         if (activeAgent?.getAttribute("aria-pressed") === "true") await agent.setNativeAgentMode(false);
-        await nav.ensureFlowLibrarySection("All media", { deadline });
+        await nav.ensureFlowLibrarySection("All media", { deadline, signal: command.signal });
         const assets = await menu.scanNativeAssets({ deadline });
         const { source: found, matches } = this.resolveWorkflowVideoSource(assets, source);
         if (matches.length > 1) throw this.error("FLOW_AMBIGUOUS_ASSET", `${matches.length} videos begin with "${source}"; no edit was started. Use the full title from flow_assets.`, true, false);
         if (!found) throw this.error("FLOW_VIDEO_NOT_FOUND", `No video beginning "${source}" exists in the project. Use flow_assets to list titles.`, true);
         await tiles.stabilizeFlowResultViewport({ deadline, signal: command.signal });
         const before = tiles.collectNativeMedia().map(item => item.id || `title:${item.title}`);
-        const tile = await tiles.findFlowTile(found.name);
+        const tile = await tiles.findFlowTile(found.name, 100, { deadline, signal: command.signal });
         if (!tile || !tile.querySelector("flow-video-tile")) throw this.error("FLOW_VIDEO_NOT_FOUND", `Video "${found.name}" is no longer visible in the project.`, true);
         tile.scrollIntoView({ block: "center" }); tile.click();
-        await nav.waitForFlowRoute(path => /\/edit\//i.test(path), Math.min(30_000, Math.max(1, deadline - Date.now())), "Flow did not open the video editor.");
+        await nav.waitForFlowRoute(path => /\/edit\//i.test(path), Math.min(30_000, Math.max(1, deadline - Date.now())), "Flow did not open the video editor.", { deadline, signal: command.signal });
         const box = await editor.preflightGenerationPrompt(params, false);
         if (!box) throw this.error("FLOW_COMPOSER_MISSING", "Flow's edit prompt is not visible.", true);
         const prompt = String(params.prompt || "").replace(/\s*\n+\s*/g, " ").trim();
@@ -268,8 +268,8 @@
           const back = root.flowButton?.("Back button to go to previous page");
           if (!back) throw this.error("FLOW_EDIT_BACK_MISSING", "Flow finished the video edit, but its Back control is unavailable. The result remains in Flow.", true, true);
           back.click();
-          await nav.waitForFlowRoute(path => !/\/edit(?:\/|$)/i.test(path), 20000, "Flow finished the edit but did not return to the project.");
-          await nav.ensureFlowLibrarySection("All media");
+          await nav.waitForFlowRoute(path => !/\/edit(?:\/|$)/i.test(path), 20000, "Flow finished the edit but did not return to the project.", { deadline, signal: command.signal });
+          await nav.ensureFlowLibrarySection("All media", { deadline, signal: command.signal });
           await tiles.stabilizeFlowResultViewport({ deadline, signal: command.signal });
           const results = await tiles.waitForProgressResult(command, before, 1, "video", 90000);
           return { media: results, trustedGesture: false, ...evidence };
@@ -287,7 +287,7 @@
         await agent.closeNativeAgentSession();
         const activeAgent = root.flowButton?.("Agent");
         if (activeAgent?.getAttribute("aria-pressed") === "true") await agent.setNativeAgentMode(false);
-        await nav.ensureFlowLibrarySection("All media", { deadline });
+        await nav.ensureFlowLibrarySection("All media", { deadline, signal: command.signal });
         await agent.setNativeAgentMode(true);
         const agentSettingsEvidence = await agent.setNativeAgentSettings("Always", params.aspect_ratio || "16:9");
         await root.FlowSettings?.chooseNativeModel?.("Nano Banana", "image", { deadline });
@@ -534,7 +534,7 @@
         await agent.closeNativeAgentSession();
         const activeAgent = root.flowButton?.("Agent");
         if (activeAgent?.getAttribute("aria-pressed") === "true") await agent.setNativeAgentMode(false);
-        await nav.ensureFlowLibrarySection("All media", { deadline });
+        await nav.ensureFlowLibrarySection("All media", { deadline, signal: command.signal });
         const assets = await menu.scanNativeAssets({ deadline });
         const { source, matches } = this.resolveWorkflowVideoSource(assets, sourcePrefix);
         if (matches.length > 1) throw this.error("FLOW_AMBIGUOUS_ASSET", `${matches.length} videos begin with "${sourcePrefix}"; no continuation was started. Use the full title from flow_assets.`, true, false);
@@ -545,10 +545,10 @@
         let outcomeUnknown = false;
         let submitOnlyDispatched = false;
         try {
-          const tile = await tiles.findFlowTile(source.name);
+          const tile = await tiles.findFlowTile(source.name, 100, { deadline, signal: command.signal });
           if (!tile || !tile.querySelector("flow-video-tile")) throw this.error("FLOW_VIDEO_NOT_FOUND", `Video "${source.name}" is no longer visible in the project.`, true);
           tile.scrollIntoView({ block: "center" }); tile.click();
-          await nav.waitForFlowRoute(path => /\/edit\//i.test(path), Math.min(30_000, Math.max(1, deadline - Date.now())), "Flow did not open the source video editor.");
+          await nav.waitForFlowRoute(path => /\/edit\//i.test(path), Math.min(30_000, Math.max(1, deadline - Date.now())), "Flow did not open the source video editor.", { deadline, signal: command.signal });
           await root.waitForEnabledFlowButton?.("Skip to next clip", Math.min(30_000, Math.max(1, deadline - Date.now()))).then(btn => {
             if (!btn) throw this.error("FLOW_TIMELINE_MISSING", "The source video timeline is not ready.", true);
             btn.click();
@@ -560,12 +560,12 @@
           const back = root.flowButton?.("Back button to go to previous page");
           if (!back) throw this.error("FLOW_EDIT_BACK_MISSING", "Flow saved the frame, but its Back control is unavailable.", true, true);
           back.click();
-          await nav.waitForFlowRoute(path => !/\/edit(?:\/|$)/i.test(path), Math.min(20_000, Math.max(1, deadline - Date.now())), "Flow did not return to the project after saving the last frame.", { deadline });
-          await nav.ensureFlowLibrarySection("All media", { deadline });
+          await nav.waitForFlowRoute(path => !/\/edit(?:\/|$)/i.test(path), Math.min(20_000, Math.max(1, deadline - Date.now())), "Flow did not return to the project after saving the last frame.", { deadline, signal: command.signal });
+          await nav.ensureFlowLibrarySection("All media", { deadline, signal: command.signal });
           await tiles.stabilizeFlowResultViewport({ deadline, signal: command.signal });
 
           const frameTitle = `Saved frame from ${source.name}`;
-          const frame = await tiles.findFlowTile(frameTitle, 200);
+          const frame = await tiles.findFlowTile(frameTitle, 200, { deadline, signal: command.signal });
           if (!frame) throw this.error("FLOW_FRAME_NOT_FOUND", `Flow did not add the saved frame "${frameTitle}".`, false, true);
           const rawFrameId = root.mediaId?.(frame);
           const frameId = await root.resolveNativeMediaUuid?.(rawFrameId, "image") || rawFrameId;
