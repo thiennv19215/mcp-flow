@@ -47,6 +47,8 @@ npm install
 npm run build
 ```
 
+For day-to-day changes, `npm test` runs the focused smoke suite (10 files, 193 tests). Run `npm run test:full` before a release to execute every test file in `tests/`.
+
 > **Mac: do not put this folder in `~/Desktop`, `~/Documents` or `~/Downloads`.** macOS protects those
 > folders, and apps that launch the server from there can be refused permission to read its own
 > files (`EPERM: operation not permitted`). `~/flow-mcp` or anywhere in your home folder is fine.
