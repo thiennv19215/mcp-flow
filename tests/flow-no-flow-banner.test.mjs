@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const sidebarHtml = readFileSync(new URL('../extension/src/ui/sidebar.html', import.meta.url), 'utf8');
+const sidebarCss = readFileSync(new URL('../extension/src/ui/sidebar.css', import.meta.url), 'utf8');
 const sidebarJs = readFileSync(new URL('../extension/src/ui/sidebar.js', import.meta.url), 'utf8');
 const i18n = readFileSync(new URL('../extension/src/content/shared/i18n.js', import.meta.url), 'utf8');
 
@@ -21,4 +22,10 @@ test('sidebar shows a no-Flow-tab banner with an open-Flow action', () => {
 test('the banner hint exists in both locales', () => {
   const occurrences = i18n.match(/noFlowTabHint:/g) || [];
   assert.equal(occurrences.length, 2, 'vi and en both define popup.noFlowTabHint');
+});
+
+test('the no-Flow banner keeps its text readable beside the full-width primary button', () => {
+  assert.match(sidebarCss, /\.no-flow-banner \.btn-primary\s*\{\s*width:\s*auto;\s*max-width:\s*100%\s*\}/);
+  assert.match(sidebarCss, /@media\s*\(max-width:\s*420px\)[\s\S]*?\.no-flow-banner\s*\{[^}]*flex-direction:\s*column/);
+  assert.match(sidebarCss, /@media\s*\(max-width:\s*420px\)[\s\S]*?\.no-flow-banner \.btn-primary\s*\{\s*width:\s*100%/);
 });

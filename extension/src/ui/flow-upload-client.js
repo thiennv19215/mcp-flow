@@ -172,7 +172,8 @@ class FlowUploadClient {
           transferId,
           requestId,
           name: safeName,
-          kind
+          kind,
+          ...(typeof options.callerKey === "string" && options.callerKey ? { callerKey: options.callerKey } : {})
         }
       });
 

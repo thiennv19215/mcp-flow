@@ -240,6 +240,22 @@
       if (labels.length) parts.push(`options seen: ${labels.join(", ")}`);
       if (parts.length) lines.push(`Frame picker: ${parts.join(" · ")}`);
     }
+    const frameControls = diagnostics.frameControls;
+    if (frameControls && typeof frameControls === "object") {
+      const parts = [];
+      if (typeof frameControls.buildRevision === "string" && /^[a-f0-9]{8,12}$/i.test(frameControls.buildRevision)) parts.push(`build ${frameControls.buildRevision}`);
+      if (typeof frameControls.resolverAvailable === "boolean") parts.push(`resolver ${frameControls.resolverAvailable ? "available" : "missing"}`);
+      if (typeof frameControls.startResolved === "boolean") parts.push(`Start ${frameControls.startResolved ? "found" : "missing"}`);
+      if (typeof frameControls.endResolved === "boolean") parts.push(`End ${frameControls.endResolved ? "found" : "missing"}`);
+      if (Number.isFinite(frameControls.frameTriggerCount)) parts.push(`${frameControls.frameTriggerCount} triggers`);
+      if (Array.isArray(frameControls.frameGroups)) {
+        const groupSizes = frameControls.frameGroups.slice(0, 4)
+          .map(group => Number.isFinite(group?.triggerCount) ? group.triggerCount : null)
+          .filter(count => count !== null);
+        if (groupSizes.length) parts.push(`groups ${groupSizes.join("/")}`);
+      }
+      if (parts.length) lines.push(`Frame controls: ${parts.join(" · ")}`);
+    }
     // Videofix M-H: the observe phase's evidence bundle (observeError in
     // generation-operations.js) arrives flat on the diagnostics object
     // and until now rendered nothing, so a job that failed in observe

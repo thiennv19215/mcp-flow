@@ -1442,8 +1442,12 @@
       return;
     }
     {
-      const button = slot === "start" ? flowButton("Start") : slot === "end" ? flowButton("End") : await ensureAddMediaButton(deadline, signal);
-      if (!button) throw flowError("FLOW_ASSET_PICKER_MISSING", `Flow's ${slot || "reference"} picker is unavailable.`, true);
+      const button = slot === "start" || slot === "end" ? root.flowFrameButton?.(slot) : await ensureAddMediaButton(deadline, signal);
+      if (!button) {
+        const error = flowError("FLOW_ASSET_PICKER_MISSING", `Flow's ${slot || "reference"} picker is unavailable.`, true);
+        if (slot === "start" || slot === "end") error.diagnostics = { frameControls: root.inspectFlowFrameControls?.() || null };
+        throw error;
+      }
       const priorLists = new Set([...document.querySelectorAll('[role="listbox"]')]);
       const controlledIds = [button.getAttribute?.("aria-controls"), button.getAttribute?.("aria-owns")].filter(Boolean).flatMap(value => String(value).split(/\s+/));
       button.click();
@@ -1882,7 +1886,7 @@
   // (aria-expanded flips when the picker opens/closes) is deliberately
   // excluded so picker visibility alone never looks like a slot change.
   function frameSlotSignature(slot) {
-    const button = slot === "start" ? flowButton("Start") : slot === "end" ? flowButton("End") : null;
+    const button = slot === "start" || slot === "end" ? root.flowFrameButton?.(slot) : null;
     if (!button) return "missing";
     const container = button.parentElement?.parentElement || button.parentElement || button;
     const media = [...(container.querySelectorAll?.("img,video") || [])];

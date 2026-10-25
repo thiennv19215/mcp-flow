@@ -42,6 +42,7 @@
       return components.chooseNativePickerAsset(assetName, slot, {
         ...options,
         ...(value.expectedId ? { expectedId: value.expectedId } : {}),
+        ...(value.verifiedIdentity ? { verifiedIdentity: value.verifiedIdentity } : {}),
         ...(value.kind ? { kind: value.kind } : {}),
         ...(value.search_value ? { search_value: value.search_value } : {}),
       });
@@ -267,13 +268,14 @@
         // re-uploaded and the expectedId the attach stages below use is
         // rewritten. A missing library ref fails here with the distinct
         // preflight code instead of surfacing as a mid-submit attach
-        // error. Existence here only proves presence (by id or by name);
-        // the attach stages still verify identity exactly as before.
+        // error. A title plus the same persistent ID can also attest the
+        // exact frame option when Flow's picker DOM omits IDs; title-only
+        // presence still cannot provide that attestation.
         const refChecks = [];
-        const addRefCheck = (assetName, expectedId, kind, applyId) => {
+        const addRefCheck = (assetName, expectedId, kind, applyId, applyVerifiedIdentity) => {
           const name = typeof assetName === "string" ? assetName.replace(/^asset:/i, "").trim() : "";
           if (!name) return;
-          refChecks.push({ assetName: name, expectedId: typeof expectedId === "string" && expectedId ? expectedId : undefined, kind, applyId: applyId || null });
+          refChecks.push({ assetName: name, expectedId: typeof expectedId === "string" && expectedId ? expectedId : undefined, kind, applyId: applyId || null, applyVerifiedIdentity: applyVerifiedIdentity || null });
         };
         for (const item of referenceAttachments) {
           if (typeof item === "string") addRefCheck(item, undefined, undefined, null);
@@ -286,11 +288,11 @@
         if (firstFrame) addRefCheck(firstFrame.assetName, firstFrame.expectedId, firstFrame.kind, newId => {
           firstFrame.expectedId = newId;
           if (payload.firstFrame && typeof payload.firstFrame === "object") payload.firstFrame.expectedId = newId;
-        });
+        }, identity => { firstFrame.verifiedIdentity = identity; });
         if (lastFrame) addRefCheck(lastFrame.assetName, lastFrame.expectedId, lastFrame.kind, newId => {
           lastFrame.expectedId = newId;
           if (payload.lastFrame && typeof payload.lastFrame === "object") payload.lastFrame.expectedId = newId;
-        });
+        }, identity => { lastFrame.verifiedIdentity = identity; });
         if (refChecks.length) {
           const catalogProjectId = (() => {
             try { return root.location?.pathname?.match(/\/project\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/|$)/i)?.[1]?.toLowerCase() || null; } catch { return null; }
@@ -319,13 +321,32 @@
           // here, before anything is submitted. "unknown" keeps the old
           // degrade discipline: an unavailable scan cannot prove
           // absence, so the attach stages below remain the authority.
+          const identityIdsFor = (ref, entry) => {
+            const values = ref.expectedId ? [ref.expectedId] : [entry?.mediaId, entry?.uuid].filter(value => typeof value === "string" && value);
+            const ids = new Set(values.filter(value => typeof value === "string" && value).map(value => value.toLowerCase()));
+            return !ref.expectedId && ids.size > 1 ? new Set() : ids;
+          };
+          const verifiedAssetIdentity = (ref, entry, asset) => {
+            if (String(asset?.name || "").trim() !== ref.assetName) return null;
+            if ((asset?.kind || asset?.type) && (asset.kind || asset.type) !== "image") return null;
+            const rawId = [asset?.id, asset?.persistentMediaId].find(value => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value));
+            if (!rawId) return null;
+            const ids = identityIdsFor(ref, entry);
+            if (!ids.has(rawId.toLowerCase())) return null;
+            return { assetName: ref.assetName, id: rawId.toLowerCase() };
+          };
           const refNameTrust = (ref, entry) => {
             if (typeof menu.collectAssets !== "function") return "unknown";
             let assets;
             try { assets = menu.collectAssets({ includeIncomplete: true }); } catch { return "unknown"; }
             const ids = new Set([ref.expectedId, entry?.mediaId, entry?.uuid].filter(value => typeof value === "string" && value));
-            if (ids.size > 0 && assets.some(asset => ids.has(asset?.id) || ids.has(asset?.persistentMediaId))) return "id";
             const named = assets.filter(asset => String(asset?.name || "").trim() === ref.assetName);
+            const identityAsset = named.find(asset => verifiedAssetIdentity(ref, entry, asset));
+            if (identityAsset) {
+              ref.verifiedIdentity = verifiedAssetIdentity(ref, entry, identityAsset);
+              return "identity";
+            }
+            if (ids.size > 0 && assets.some(asset => ids.has(asset?.id) || ids.has(asset?.persistentMediaId))) return "id";
             if (named.some(asset => asset?.nameSource === "dedicated")) return "dedicated";
             if (named.length > 0) return "fallback-only";
             // Review round 3 MUST: collectAssets reads only MOUNTED
@@ -348,26 +369,32 @@
           };
           // Review round 3 MUST (disambiguation cache): one scroll-scan
           // per submit, shared by every absent identity-bearing ref.
-          // null = not attempted yet; a Set of scanned ids, or the
-          // string "incomplete" when the scan could not prove it
+          // null = not attempted yet; a complete set of scanned asset
+          // records, or "incomplete" when the scan could not prove it
           // reached the end of the grid (or failed outright).
-          let libraryScanIds = null;
+          let libraryScanAssets = null;
           const disambiguateAbsentRef = async (ref, entry) => {
-            if (libraryScanIds === null) {
+            if (libraryScanAssets === null) {
               try {
                 let reachedEnd = false;
                 const scanned = await menu.scanNativeAssets({
                   deadline: flowDeadline, maxDurationMs: 10_000, includeIncomplete: true,
                   onDiagnostics: diagnostics => { reachedEnd = diagnostics?.reachedEnd === true; },
                 });
-                libraryScanIds = reachedEnd
-                  ? new Set((Array.isArray(scanned) ? scanned : []).flatMap(asset => [asset?.id, asset?.persistentMediaId]).filter(value => typeof value === "string" && value))
+                libraryScanAssets = reachedEnd
+                  ? (Array.isArray(scanned) ? scanned : [])
                   : "incomplete";
-              } catch { libraryScanIds = "incomplete"; }
+              } catch { libraryScanAssets = "incomplete"; }
             }
-            if (libraryScanIds === "incomplete") return "unknown";
+            if (libraryScanAssets === "incomplete") return "unknown";
+            const identityAsset = libraryScanAssets.find(asset => verifiedAssetIdentity(ref, entry, asset));
+            if (identityAsset) {
+              ref.verifiedIdentity = verifiedAssetIdentity(ref, entry, identityAsset);
+              return "identity";
+            }
             const ids = [ref.expectedId, entry?.mediaId, entry?.uuid].filter(value => typeof value === "string" && value);
-            return ids.some(id => libraryScanIds.has(id)) ? "id" : "absent";
+            const libraryIds = new Set(libraryScanAssets.flatMap(asset => [asset?.id, asset?.persistentMediaId]).filter(value => typeof value === "string" && value));
+            return ids.some(id => libraryIds.has(id)) ? "id" : "absent";
           };
           await runFlowStage("revalidating queued references", async ({ signal }) => {
             const missing = [];
@@ -388,6 +415,14 @@
               // so the gate still fails fast for removed refs.
               if (trust === "absent" && (ref.expectedId || entry?.mediaId || entry?.uuid) && typeof menu.scanNativeAssets === "function") {
                 trust = await disambiguateAbsentRef(ref, entry);
+              }
+              if (trust === "identity") {
+                const identity = ref.verifiedIdentity;
+                if (identity) {
+                  if (!ref.expectedId) ref.applyId?.(identity.id);
+                  ref.applyVerifiedIdentity?.(identity);
+                }
+                continue;
               }
               if (trust === "unknown" || trust === "id" || trust === "dedicated") continue;
               let restoredId = null;
@@ -500,7 +535,10 @@
           // same precedence the sidebar's uploadedAssetAttachment uses)
           // so the picker's title leg can match the tile it just made.
           const pickerTitle = uploadReceipt?.uploadName || uploadReceipt?.name || attachment.name;
-          return await runFlowStage(`selecting uploaded image ${attachment.name}`, ({ signal }) => components.chooseNativePickerAsset(pickerTitle, slot, { deadline: flowDeadline, signal, command, expectedId: uploadReceipt?.id }), true);
+          return await runFlowStage(`selecting uploaded image ${attachment.name}`, ({ signal }) => components.chooseNativePickerAsset(pickerTitle, slot, {
+            deadline: flowDeadline, signal, command, expectedId: uploadReceipt?.id,
+            ...(uploadReceipt?.id ? { verifiedIdentity: { assetName: pickerTitle, id: uploadReceipt.id } } : {}),
+          }), true);
         };
 
         const resolveValue = async (value, slot) => {

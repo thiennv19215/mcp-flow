@@ -122,6 +122,8 @@
         return menu.scanNativeAssets({
           includeIncomplete: payload.includeIncomplete === true,
           maxItems: payload.maxItems,
+          requireComplete: payload.requireComplete === true,
+          maxDurationMs: payload.maxDurationMs,
           signal: command.signal,
         });
       }

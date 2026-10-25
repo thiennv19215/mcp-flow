@@ -213,15 +213,10 @@ test('an unstructured i2p reply yields no fields with the raw text preserved', (
 
 // --- sidebar surface contract ----------------------------------------------
 
-test('the sidebar ships the Prompt Assistant surface wired to the message contract', () => {
-  for (const id of ['promptAssistantPanel', 'paFormat', 'paIdea', 'paBuildBtn', 'paRequest', 'paReply', 'paParseBtn', 'paPromptList', 'paI2pReply', 'paI2pParseBtn', 'paI2pResult']) {
-    assert.ok(sidebarHtml.includes(`id="${id}"`), `sidebar.html must contain #${id}`);
+test('the sidebar omits the prompt toolbar and Prompt Assistant surface', () => {
+  for (const id of ['promptSearchBtn', 'chatAIBtn', 'importTxtBtn', 'promptCharCount', 'promptSaveBtn', 'promptAssistantPanel', 'paFormat', 'paIdea', 'paBuildBtn', 'paRequest', 'paReply', 'paParseBtn', 'paPromptList', 'paI2pReply', 'paI2pParseBtn', 'paI2pResult']) {
+    assert.ok(!sidebarHtml.includes(`id="${id}"`), `sidebar.html must omit #${id}`);
   }
-  assert.ok(sidebarSource.includes('id="chatAIBtn"') || sidebarSource.includes("querySelector(\"#chatAIBtn\")"),
-    'sidebar.js must bind the existing #chatAIBtn shell button');
-  for (const type of ['flow-prompt-assistant:build', 'flow-prompt-assistant:parse', 'flow-prompt-assistant:parse-i2p']) {
-    assert.ok(sidebarSource.includes(type), `sidebar.js must use the ${type} message`);
-  }
-  assert.ok(sidebarSource.includes('data-pa-insert'), 'parsed prompts must offer insert-into-composer');
-  assert.ok(sidebarSource.includes('data-pa-insert-i2p'), 'i2p results must offer insert-into-composer');
+  assert.ok(!sidebarHtml.includes('class="prompt-editor-toolbar"'), 'sidebar.html must omit the prompt toolbar');
+  assert.ok(!sidebarSource.includes('flow-prompt-assistant:'), 'sidebar.js must not bind the removed Prompt Assistant surface');
 });

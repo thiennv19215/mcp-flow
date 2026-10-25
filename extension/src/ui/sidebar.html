@@ -6,7 +6,7 @@
   <title>Flow MCP</title>
   <link rel="stylesheet" href="sidebar.css">
   <link rel="stylesheet" href="sidebar-light.css">
-  <link rel="stylesheet" href="flowmcp-ui.css">
+  <link rel="stylesheet" href="flow-mcp-ui.css">
 </head>
 <body data-tf-rev="b7f3a91c">
   <!-- Loading Overlay -->
@@ -169,22 +169,22 @@
           <span data-i18n="tab.prompts">Prompts</span>
         </button>
         <!-- 4. Tasks (Multi-task) -->
-        <button class="flowmcp-tab tab-btn" data-tab="tab-tasks" id="navTasks" data-i18n-title="tab.tasks" role="tab" aria-selected="false" tabindex="-1">
+        <button hidden class="flowmcp-tab tab-btn" data-tab="tab-tasks" id="navTasks" data-i18n-title="tab.tasks" role="tab" aria-selected="false" tabindex="-1">
           <svg width="17" height="17" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path fill="currentColor" d="M13.5 6.188h-9c-1.813 0-2.812.999-2.812 2.812v5.25c0 1.814.999 2.813 2.812 2.813h9c1.813 0 2.813-1 2.813-2.813V9c0-1.814-1-2.812-2.813-2.812m1.688 8.062c0 1.183-.505 1.688-1.688 1.688h-9c-1.183 0-1.687-.505-1.687-1.688V9c0-1.183.504-1.687 1.687-1.687h9c1.183 0 1.688.504 1.688 1.687zM3.938 4.5c0-.31.251-.562.562-.562h9a.563.563 0 0 1 0 1.124h-9a.563.563 0 0 1-.562-.562m1.5-2.25c0-.31.252-.562.562-.562h6a.563.563 0 0 1 0 1.125H6a.563.563 0 0 1-.562-.563m5.792 8.336L8.869 9.141a1.27 1.27 0 0 0-1.93 1.08v2.809c0 .464.24.877.647 1.104a1.27 1.27 0 0 0 1.283-.025l2.36-1.444a1.21 1.21 0 0 0 .584-1.04 1.21 1.21 0 0 0-.583-1.039m-.588 1.118L8.28 13.15a.14.14 0 0 1-.146.003.14.14 0 0 1-.072-.123v-2.81c0-.067.04-.104.072-.123a.14.14 0 0 1 .072-.02q.033 0 .074.023l2.361 1.446h.001q.045.028.045.078a.09.09 0 0 1-.046.08"></path>
           </svg>
           <span data-i18n="tab.tasks">Tasks</span>
         </button>
-        <div class="flowmcp-tab-divider"></div>
+        <div hidden class="flowmcp-tab-divider"></div>
         <!-- 5. Photos -->
-        <button class="flowmcp-tab tab-btn flowmcp-tab--icon-only" data-tab="tab-photos" id="navPhotos" data-i18n-tooltip="tab.photos" aria-label="Photos" role="tab" aria-selected="false" tabindex="-1">
+        <button hidden class="flowmcp-tab tab-btn flowmcp-tab--icon-only" data-tab="tab-photos" id="navPhotos" data-i18n-tooltip="tab.photos" aria-label="Photos" role="tab" aria-selected="false" tabindex="-1">
           <svg width="18" height="18" viewBox="0 0 20 20" fill="currentColor">
             <path d="M8.958 8.501a1.5 1.5 0 1 1 0 2.999 1.5 1.5 0 0 1 0-2.999"></path>
             <path fill-rule="evenodd" d="M6.974 3.95a3.065 3.065 0 0 1 3.461-2.608l5.975.84a3.065 3.065 0 0 1 2.608 3.462l-.84 5.975a3.064 3.064 0 0 1-3.46 2.607l-.938-.132.03.206a3.065 3.065 0 0 1-2.608 3.462l-5.975.839a3.065 3.065 0 0 1-3.461-2.607l-.84-5.975a3.065 3.065 0 0 1 2.608-3.462l3.134-.441zm-.517 9.528a1.337 1.337 0 0 0-1.871.263l-1.513 2.007.009.06a1.736 1.736 0 0 0 1.96 1.477l5.45-.767zm3.237-6.443-5.974.838a1.736 1.736 0 0 0-1.477 1.96l.568 4.051.713-.944a2.666 2.666 0 0 1 3.733-.524l4.72 3.557a1.73 1.73 0 0 0 .516-1.487l-.84-5.975a1.735 1.735 0 0 0-1.959-1.476m.557-4.375a1.735 1.735 0 0 0-1.96 1.476l-.252 1.787 1.47-.206a3.066 3.066 0 0 1 3.462 2.61l.617 4.397 1.314.186a1.735 1.735 0 0 0 1.96-1.477l.84-5.975a1.736 1.736 0 0 0-1.478-1.96z" clip-rule="evenodd"></path>
           </svg>
         </button>
                 <!-- 6. Tools -->
-        <button class="flowmcp-tab tab-btn flowmcp-tab--icon-only" data-tab="tab-tools" id="navTools" data-i18n-tooltip="tab.tools" aria-label="Tools" role="tab" aria-selected="false" tabindex="-1">
+        <button hidden class="flowmcp-tab tab-btn flowmcp-tab--icon-only" data-tab="tab-tools" id="navTools" data-i18n-tooltip="tab.tools" aria-label="Tools" role="tab" aria-selected="false" tabindex="-1">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path fill="currentColor" fill-rule="evenodd" d="M5.933 2.754c1.29-2.339 4.661-2.339 5.951 0l2.19 3.97.002.001.718 1.308Q15.144 8 15.5 8a7.5 7.5 0 1 1-7.483 7.996H4.4c-2.577 0-4.224-2.762-2.976-5.03l4.51-8.21zm10.473 8.211c.504.916.535 1.913.225 2.776l-.025.064A3.37 3.37 0 0 1 13.43 16h-3.406a5.5 5.5 0 1 0 5.86-5.986zM10.134 3.72c-.53-.96-1.92-.96-2.45 0l-4.508 8.208a1.396 1.396 0 0 0 1.223 2.068h9.03a1.395 1.395 0 0 0 1.307-1.887l-.083-.177-1.28-2.33-.003-.007-1.047-1.906z" clip-rule="evenodd"></path>
           </svg>
@@ -224,6 +224,31 @@
         <!-- ========================================== -->
         <div id="tab-gen" class="tab-pane active" role="tabpanel">
           <div class="tab-gen-scroll">
+            <!-- Flow project gate: generation must be bound to an explicitly chosen project. -->
+            <section class="flow-project-gate hidden" id="flowProjectGate" role="region" aria-live="polite" aria-labelledby="flowProjectGateTitle">
+              <div class="flow-project-gate-header">
+                <div class="flow-project-gate-icon" aria-hidden="true">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 7.5 12 3l9 4.5L12 12 3 7.5Z"></path>
+                    <path d="M3 12.5 12 17l9-4.5M3 17.5 12 22l9-4.5"></path>
+                  </svg>
+                </div>
+                <div>
+                  <strong id="flowProjectGateTitle" data-i18n="sidebar.projectGateTitle">Chọn project Flow</strong>
+                  <p id="flowProjectGateHint" data-i18n="sidebar.projectGateHint">Đang ở trang chủ. Chọn project trước khi tạo ảnh hoặc video.</p>
+                </div>
+              </div>
+              <div class="flow-project-gate-controls">
+                <select id="flowProjectGateSelect" aria-label="Chọn project Flow">
+                  <option value="" data-i18n="sidebar.projectGatePlaceholder">Tải danh sách project…</option>
+                </select>
+                <button type="button" class="flow-project-gate-refresh" id="flowProjectGateRefresh" title="Làm mới project" aria-label="Làm mới project">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 11a8 8 0 1 0 2 5"></path><polyline points="20 4 20 11 13 11"></polyline></svg>
+                </button>
+                <button type="button" class="btn btn-primary flow-project-gate-open" id="flowProjectGateOpen" disabled data-i18n="sidebar.projectGateOpen">Mở project</button>
+              </div>
+              <div class="flow-project-gate-status" id="flowProjectGateStatus" role="status" aria-live="polite"></div>
+            </section>
             <!-- Prompt Input Section -->
             <section class="section">
               <div class="section-header">
@@ -246,40 +271,6 @@
               </div>
               <div class="prompt-editor-wrapper">
                 <textarea id="promptsArea" data-i18n-placeholder="gen.promptPlaceholder" placeholder="Enter your prompt here...&#10;&#10;sitting in a cafe&#10;walking on the beach&#10;flying in space"></textarea>
-                <div class="prompt-editor-toolbar">
-                  <button class="prompt-toolbar-icon-btn" id="promptSearchBtn" data-i18n-title="gen.promptSearch" title="Search prompt" type="button">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" role="img" aria-label="Scan">
-                      <g fill="currentColor">
-                        <path d="M2 14.25c.41 0 .75.34.75.75v2.5c0 2.07 1.68 3.75 3.75 3.75H9c.41 0 .75.34.75.75s-.34.75-.75.75H6.5c-2.89 0-5.25-2.35-5.25-5.25V15c0-.41.34-.75.75-.75m20 1c.41 0 .75.34.75.75v1.5c0 2.9-2.36 5.25-5.25 5.25H16c-.41 0-.75-.34-.75-.75s.34-.75.75-.75h1.5c2.07 0 3.75-1.68 3.75-3.75V16c0-.41.34-.75.75-.75"></path>
-                        <path fill-rule="evenodd" d="M14 5.75c2.42 0 3.75 1.33 3.75 3.75v1.75H19c.41 0 .75.34.75.75s-.34.75-.75.75h-1.25v1.75c0 2.42-1.33 3.75-3.75 3.75h-4c-2.42 0-3.75-1.33-3.75-3.75v-1.75H5c-.41 0-.75-.34-.75-.75s.34-.75.75-.75h1.25V9.5c0-2.42 1.33-3.75 3.75-3.75zm-6.25 7v1.75c0 1.58.67 2.25 2.25 2.25h4c1.58 0 2.25-.67 2.25-2.25v-1.75zM10 7.25c-1.58 0-2.25.67-2.25 2.25v1.75h8.5V9.5c0-1.58-.67-2.25-2.25-2.25z" clip-rule="evenodd"></path>
-                        <path d="M9 1.25c.41 0 .75.34.75.75s-.34.75-.75.75H6.5c-2.07 0-3.75 1.68-3.75 3.75V9c0 .41-.34.75-.75.75s-.75-.34-.75-.75V6.5c0-2.9 2.36-5.25 5.25-5.25zm8.5 0c2.89 0 5.25 2.35 5.25 5.25V9c0 .41-.34.75-.75.75s-.75-.34-.75-.75V6.5c0-2.07-1.68-3.75-3.75-3.75H15c-.41 0-.75-.34-.75-.75s.34-.75.75-.75z"></path>
-                      </g>
-                    </svg>
-                  </button>
-                  <button class="btn btn-secondary btn-xs" id="chatAIBtn" data-i18n-title="gen.promptAssistantTitle" title="Prompt Assistant — turn one idea into a batch of prompts" type="button">
-                    <svg width="12" height="12" viewBox="0 0 18 18" fill="none" role="img" aria-label="Prompt Assistant">
-                      <path d="M3.47158 3.7689C4.43604 4.12493 5.19375 4.88096 5.55044 5.84302C5.64791 6.10611 5.89926 6.28072 6.18038 6.28072C6.46138 6.28072 6.71273 6.10611 6.81033 5.84328C7.16715 4.88096 7.92499 4.12493 8.88932 3.7689C9.15287 3.67152 9.32787 3.42073 9.32787 3.14036C9.32787 2.85999 9.15287 2.6092 8.88932 2.51182C7.92499 2.15579 7.16728 1.39976 6.81033 0.437441C6.71273 0.17461 6.46138 0 6.18038 0C5.89926 0 5.64804 0.17461 5.55044 0.437703C5.19362 1.39976 4.43591 2.15579 3.47158 2.51182C3.20803 2.6092 3.03303 2.85999 3.03303 3.14036C3.03303 3.42073 3.20803 3.67152 3.47158 3.7689ZM6.18038 2.07621C6.4783 2.48407 6.83814 2.84324 7.24704 3.14036C6.83801 3.43748 6.4783 3.79639 6.18038 4.20451C5.8826 3.79639 5.52289 3.43748 5.11386 3.14036C5.52276 2.84324 5.8826 2.48407 6.18038 2.07621ZM14.9858 15.163C14.4549 14.967 14.0377 14.5507 13.8412 14.0209C13.7436 13.7578 13.4923 13.5832 13.2113 13.5832C12.9302 13.5832 12.6788 13.7578 12.5813 14.0209C12.385 14.5507 11.9678 14.967 11.4368 15.163C11.1731 15.2604 10.9981 15.5112 10.9981 15.7916C10.9981 16.072 11.1731 16.3228 11.4368 16.4201C11.9678 16.6162 12.385 17.0324 12.5813 17.5623C12.6788 17.8254 12.9302 18 13.2113 18C13.4923 18 13.7436 17.8254 13.8412 17.5623C14.0377 17.0324 14.4549 16.6162 14.9858 16.4201C15.2495 16.3228 15.4245 16.072 15.4245 15.7916C15.4245 15.5112 15.2495 15.2604 14.9858 15.163ZM13.2113 16.0521C13.1293 15.9604 13.0422 15.8735 12.9502 15.7916C13.0422 15.7097 13.1293 15.6227 13.2113 15.5311C13.2934 15.6227 13.3805 15.7097 13.4723 15.7916C13.3805 15.8735 13.2934 15.9604 13.2113 16.0521ZM13.6885 9.89753L15.3237 8.25012C15.8941 7.67524 15.8918 6.74224 15.3186 6.17025L13.5778 4.43331C13.2988 4.15477 12.9277 4.00137 12.5329 4.00137C12.1382 4.00137 11.7671 4.15477 11.4882 4.43331L9.83338 6.08445C9.83292 6.08491 9.83233 6.08523 9.83187 6.08569C9.83145 6.08608 9.83122 6.08661 9.83076 6.08707L2.44678 13.4546C2.32071 13.5803 2.25 13.7507 2.25 13.9285V16.8463C2.25 17.2165 2.55067 17.5165 2.92166 17.5165H5.846C6.02519 17.5165 6.19704 17.445 6.32324 17.3178L13.6885 9.89753ZM12.4381 5.38097C12.5033 5.31578 12.5631 5.31631 12.6279 5.38097L14.3687 7.1179C14.4208 7.17 14.4209 7.25482 14.3691 7.30717L13.2069 8.47813L11.2613 6.55513L12.4381 5.38097ZM5.56592 16.1762H3.59332V14.206L10.3113 7.50299L12.2616 9.4305L5.56592 16.1762Z" fill="currentColor"></path>
-                    </svg>
-                    <span class="prompt-toolbar-btn-label">Prompt Assistant</span>
-                  </button>
-                  <button class="btn btn-secondary btn-xs" id="importTxtBtn" data-i18n-title="gen.importTxtTitle" title="Import prompts from .txt file" type="button">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                      <polyline points="14 2 14 8 20 8"></polyline>
-                      <line x1="12" y1="18" x2="12" y2="12"></line>
-                      <polyline points="9 15 12 12 15 15"></polyline>
-                    </svg>
-                    <span class="prompt-toolbar-btn-label" data-i18n="gen.importTxt">Import .txt</span>
-                  </button>
-                  <input type="file" id="importTxtFile" accept=".txt,.csv" class="hidden" />
-                  <span class="prompt-char-count" id="promptCharCount">0 characters</span>
-                  <button class="prompt-header-save-btn" id="promptSaveBtn" data-i18n-title="gen.promptSave" title="Save current prompt" type="button">
-                    <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-                      <path d="M10.417 9.752a.665.665 0 1 1 0 1.33h-2.5a.665.665 0 0 1 0-1.33zM12.084 6.419a.665.665 0 0 1 0 1.33H7.917a.665.665 0 0 1 0-1.33z" />
-                      <path fill-rule="evenodd" d="M13.48 1.835A3.465 3.465 0 0 1 16.943 5.3v11.703a.915.915 0 0 1-1.345.808l-.116-.074-2.537-1.886-2.35 2.014a.915.915 0 0 1-1.126.052l-.065-.052-2.352-2.014-2.53 1.885-.116.075a.916.916 0 0 1-1.346-.809V5.3a3.465 3.465 0 0 1 3.465-3.465zm-6.954 1.33A2.135 2.135 0 0 0 4.391 5.3v10.876l2.135-1.59a.915.915 0 0 1 1.142.039l2.332 2 2.333-2a.914.914 0 0 1 1.14-.04l2.14 1.593V5.3a2.135 2.135 0 0 0-2.134-2.135z" clip-rule="evenodd" />
-                    </svg>
-                  </button>
-                </div>
                 <div class="multi-prompt-hint hidden" id="multiPromptHint">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="10" />
@@ -288,24 +279,6 @@
                   </svg>
                   <span data-i18n="gen.multiPromptHint">Separate each prompt with a blank line</span>
                 </div>
-              </div>
-              <div class="prompt-assistant-panel hidden" id="promptAssistantPanel">
-                <div class="prompt-assistant-controls">
-                  <select id="paFormat">
-                    <option value="single-en">Single prompt (EN)</option>
-                    <option value="single-vi">Một prompt (VI)</option>
-                    <option value="scenes">Scene breakdown</option>
-                  </select>
-                </div>
-                <textarea id="paIdea" rows="2" placeholder="Ý tưởng của bạn..."></textarea>
-                <button class="btn btn-secondary btn-xs" id="paBuildBtn" type="button">Tạo yêu cầu</button>
-                <textarea id="paRequest" rows="5" readonly placeholder="Yêu cầu gửi cho nhà cung cấp chat sẽ hiện ở đây — sao chép và gửi thủ công."></textarea>
-                <textarea id="paReply" rows="4" placeholder="Dán câu trả lời của nhà cung cấp chat vào đây..."></textarea>
-                <button class="btn btn-secondary btn-xs" id="paParseBtn" type="button">Tách prompt</button>
-                <div id="paPromptList"></div>
-                <textarea id="paI2pReply" rows="4" placeholder="Dán câu trả lời image-to-prompt (khối I2P) vào đây..."></textarea>
-                <button class="btn btn-secondary btn-xs" id="paI2pParseBtn" type="button">Tách I2P</button>
-                <div id="paI2pResult"></div>
               </div>
               <!-- Hidden backward compatibility prompt inputs -->
               <textarea id="inputPromptImage" class="hidden"></textarea>
@@ -329,13 +302,13 @@
                   </svg>
                   <span data-provider-label data-i18n="gen.providerChatGPT">ChatGPT</span>
                 </button>
-                <button type="button" class="provider-tab" data-provider="grok" role="tab" aria-selected="false">
+                <button hidden type="button" class="provider-tab" data-provider="grok" role="tab" aria-selected="false">
                   <svg class="provider-tab-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M9.27 15.29l7.978-5.897c.391-.29.95-.177 1.137.272.98 2.369.542 5.215-1.41 7.169-1.951 1.954-4.667 2.382-7.149 1.406l-2.711 1.257c3.889 2.661 8.611 2.003 11.562-.953 2.341-2.344 3.066-5.539 2.388-8.42l.006.007c-.983-4.232.242-5.924 2.75-9.383.06-.082.12-.164.179-.248l-3.301 3.305v-.01L9.267 15.292" />
                   </svg>
                   <span data-provider-label data-i18n="gen.providerGrok">Grok</span>
                 </button>
-                <button type="button" class="provider-tab" data-provider="muse" role="tab" aria-selected="false">
+                <button hidden type="button" class="provider-tab" data-provider="muse" role="tab" aria-selected="false">
                   <svg class="provider-tab-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                     <circle cx="12" cy="12" r="9"/>
                   </svg>
@@ -426,7 +399,6 @@
                       <option value="veo 3.1" selected>Veo 3.1</option>
                       <option value="veo 3.1 lite">Veo 3.1 Lite</option>
                       <option value="veo 3.1 fast">Veo 3.1 Fast</option>
-                      <option value="veo 3.1 quality">Veo 3.1 Quality</option>
                       <option value="omni 1.1 flash">Omni 1.1 Flash</option>
                     </select>
                     <svg class="select-arrow" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
@@ -435,7 +407,6 @@
                     <option value="veo 3.1">Veo 3.1</option>
                     <option value="veo 3.1 lite">Veo 3.1 Lite</option>
                     <option value="veo 3.1 fast">Veo 3.1 Fast</option>
-                    <option value="veo 3.1 quality">Veo 3.1 Quality</option>
                     <option value="omni 1.1 flash">Omni 1.1 Flash</option>
                   </select>
                 </div>
@@ -686,28 +657,39 @@
                   <span data-i18n="gen.videoFrames">Video Frames</span>
                 </label>
               </div>
-              <div id="frameSourcePanelContainer"></div>
+              <p class="section-hint video-frames-hint" data-i18n="sidebar.videoFramesHint">Chọn ảnh từ thư viện Flow hoặc tải ảnh lên; bấm Start/End để chọn. Start bắt buộc, End tùy chọn. Tối đa 2 ảnh.</p>
+              <div class="video-frames-upload-row">
+                <button class="video-frames-upload-btn" id="videoFramesUploadBtn" type="button">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M5 14v5h14v-5"/></svg>
+                  <span data-i18n="sidebar.frameLibraryUploadButton">Tải ảnh lên Flow</span>
+                </button>
+                <input class="hidden" id="videoFramesUploadInput" type="file" accept="image/*" />
+                <span class="video-frames-upload-status" id="videoFramesUploadStatus" hidden role="status" aria-live="polite"></span>
+              </div>
               <div id="globalFrameConfig" class="frame-config">
                 <div class="frame-slot" id="genTabFrame1Slot">
                   <div class="frame-slot-header"><span class="frame-slot-label" data-i18n="gen.frameStart">Start</span></div>
                   <div class="frame-slot-body" id="genTabFrame1Body">
-                    <div class="frame-dropzone" id="genTabFrame1PickBtn">
-                      <span class="frame-dropzone-text" data-i18n="gen.addFrame">+ Add Start Frame</span>
-                    </div>
+                    <button type="button" class="frame-dropzone" id="genTabFrame1PickBtn">
+                      <span class="frame-dropzone-content">
+                        <span class="frame-dropzone-text" data-i18n="gen.addFrame">+ Add Start Frame</span>
+                        <span class="frame-dropzone-source" data-i18n="sidebar.framePickerSlotHint">Thư viện Flow hoặc máy tính</span>
+                      </span>
+                    </button>
                   </div>
-                  <input type="hidden" id="genTabFrame1FileId" value="" />
                 </div>
                 <div class="frame-slot" id="genTabFrame2Slot">
                   <div class="frame-slot-header"><span class="frame-slot-label" data-i18n="gen.frameEnd">End</span></div>
                   <div class="frame-slot-body" id="genTabFrame2Body">
-                    <div class="frame-dropzone" id="genTabFrame2PickBtn">
-                      <span class="frame-dropzone-text" data-i18n="gen.addFrame">+ Add End Frame</span>
-                    </div>
+                    <button type="button" class="frame-dropzone" id="genTabFrame2PickBtn">
+                      <span class="frame-dropzone-content">
+                        <span class="frame-dropzone-text" data-i18n="gen.addFrame">+ Add End Frame</span>
+                        <span class="frame-dropzone-source" data-i18n="sidebar.framePickerSlotHint">Thư viện Flow hoặc máy tính</span>
+                      </span>
+                    </button>
                   </div>
-                  <input type="hidden" id="genTabFrame2FileId" value="" />
                 </div>
               </div>
-              <div id="perPromptFramesContainer" class="hidden"></div>
             </section>
 
             <!-- Auto Download Options -->
@@ -730,7 +712,7 @@
                       <span class="toggle-track"><span class="toggle-thumb"></span></span>
                       <span class="toggle-label" data-i18n="gen.removeWatermark">No watermark</span>
                     </label>
-                    <span class="wm-kind-flags" id="genTabWatermarkKinds">
+                    <span hidden class="wm-kind-flags" id="genTabWatermarkKinds">
                       <label class="toolbar-toggle wm-toggle wm-toggle--xs" for="genTabWatermarkImage" title="Xóa logo cho ảnh">
                         <input type="checkbox" id="genTabWatermarkImage" checked />
                         <span class="toggle-track"><span class="toggle-thumb"></span></span>
@@ -811,18 +793,19 @@
           <div id="subtab-myprompts" class="prompts-subtab-pane">
             <div class="myprompts-container">
               <div class="myprompts-toolbar">
-                <div class="input-group">
+              <div class="input-group myprompts-search-group">
                   <input type="text" id="myPromptsSearch" placeholder="Tìm kiếm prompts..." />
                 </div>
               </div>
-              <section class="section-card" style="margin-top:10px;">
-                <div class="form-group"><label class="form-label" for="promptName" id="lblPromptName">Tên prompt</label><input class="form-input" id="promptName" placeholder="Ví dụ: Product hero"></div>
-                <div class="form-group"><label class="form-label" for="promptDraft" id="lblPromptDraft">Nội dung prompt</label><textarea class="form-textarea" id="promptDraft" placeholder="Nhập prompt cần lưu. Dùng {{tên_biến}} để tạo biến cần điền khi chèn."></textarea></div>
-                <div class="form-group"><label class="form-label" for="promptCategory">Danh mục</label><input class="form-input" id="promptCategory" placeholder="Ví dụ: Sản phẩm"></div>
-                <div class="form-group"><label class="form-label" for="promptTags">Thẻ (cách nhau bằng dấu phẩy)</label><input class="form-input" id="promptTags" placeholder="Ví dụ: hero, studio"></div>
+              <section class="section-card myprompt-editor-card" style="margin-top:10px;">
+                <div class="form-group myprompt-field"><label class="form-label" for="promptName" id="lblPromptName">Tên prompt</label><input class="form-input" id="promptName" placeholder="Ví dụ: Product hero"></div>
+                <div class="form-group myprompt-field"><label class="form-label" for="promptDraft" id="lblPromptDraft">Nội dung prompt</label><textarea class="form-textarea" id="promptDraft" placeholder="Nhập prompt cần lưu. Dùng {{tên_biến}} để tạo biến cần điền khi chèn."></textarea></div>
+                <div class="form-group myprompt-field"><label class="form-label" for="promptCategory">Danh mục</label><input class="form-input" id="promptCategory" placeholder="Ví dụ: Sản phẩm"></div>
+                <div class="form-group myprompt-field"><label class="form-label" for="promptTags">Thẻ (cách nhau bằng dấu phẩy)</label><input class="form-input" id="promptTags" placeholder="Ví dụ: hero, studio"></div>
                 <button type="button" class="btn btn-primary" id="btnSavePrompt"><span id="txtSavePrompt">Lưu prompt</span></button>
+                <p class="myprompt-storage-note"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 4h14v16H5z"></path><path d="M8 4v5h8V4M8 16h8"></path></svg><span data-i18n="sidebar.promptLocalNote">Lưu cục bộ trên thiết bị này.</span></p>
               </section>
-              <div class="form-group" style="margin-top:10px;"><label class="form-label" for="promptAddonSelect">Addon/style gắn khi tạo ảnh/video (chỉ áp dụng lúc tạo, không lưu vào prompt)</label><select class="form-input" id="promptAddonSelect"><option value="">Không dùng addon</option></select></div>
+              <div class="form-group myprompt-addon-field" style="margin-top:10px;"><label class="form-label" for="promptAddonSelect">Addon/style gắn khi tạo ảnh/video (chỉ áp dụng lúc tạo, không lưu vào prompt)</label><select class="form-input" id="promptAddonSelect"><option value="">Không dùng addon</option></select></div>
               <div class="myprompts-list" id="myPromptsList" style="margin-top:10px;"></div>
               <div id="savedPromptsList" class="flow-saved-prompts" style="margin-top:10px;"></div>
               <p id="savedPromptsEmpty" class="flow-inline-note">Chưa có prompt nào được lưu.</p>

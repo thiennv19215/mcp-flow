@@ -94,6 +94,17 @@ test('IMG-09 client: a stable upload request id is minted at transfer creation a
   assert.equal(result.id, 'media-xyz');
 });
 
+test('upload identity client: the stable caller key reaches the content-side dedupe check', async () => {
+  const harness = clientHarness();
+  await harness.client.upload(makeFile(0x4a, 128), {
+    kind: 'image',
+    name: 'renamed-photo.png',
+    callerKey: 'flow-sidebar-reference-v1',
+  });
+  const mediaUpload = harness.sent.find(message => message.operation === 'flow.media.upload');
+  assert.equal(mediaUpload.payload.callerKey, 'flow-sidebar-reference-v1');
+});
+
 test('IMG-09 client: aborting during chunk streaming stops the stream and cleans up the staged transfer', async () => {
   const harness = clientHarness();
   const controller = new AbortController();

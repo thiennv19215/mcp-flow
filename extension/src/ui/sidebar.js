@@ -10,6 +10,10 @@
     return characterUuidPattern.test(value) ? value.toLowerCase() : "";
   };
   let flowProjects = [];
+  let flowProjectsLoaded = false;
+  let flowProjectGateRefreshPromise = null;
+  let flowProjectGatePollTimer = null;
+  let flowProjectContext = { projectId: "", isProjectEditor: false };
   let flowAssets = [];
   let flowPhotosVisibleLimit = 30;
   let flowPhotosScanned = false;
@@ -52,7 +56,13 @@
 
   async function dispatchFlowOperation(operation, payload = {}) {
     const response = await chrome.runtime.sendMessage({ type: "flow-mcp:dispatch", operation, payload });
-    if (!response?.ok) throw new Error(response?.error?.message || `Flow operation failed: ${operation}`);
+    if (!response?.ok) {
+      const error = new Error(response?.error?.message || `Flow operation failed: ${operation}`);
+      if (response?.error?.code) error.code = response.error.code;
+      if (response?.error?.retryable !== undefined) error.retryable = response.error.retryable;
+      if (response?.error?.outcome_unknown !== undefined) error.outcome_unknown = response.error.outcome_unknown;
+      throw error;
+    }
     return response.value;
   }
 
@@ -88,6 +98,133 @@
     if ([...select.options].some(option => option.value === previous)) select.value = previous;
   }
 
+  function flowProjectId(project) {
+    return String(project?.id || project?.projectId || project?.project_id || "").trim();
+  }
+
+  function flowProjectName(project) {
+    return String(project?.name || project?.title || flowProjectId(project) || "Flow project").trim();
+  }
+
+  function setFlowProjectGate({ visible, status = "", error = false, busy = false } = {}) {
+    const gate = document.querySelector("#flowProjectGate");
+    const statusEl = document.querySelector("#flowProjectGateStatus");
+    const select = document.querySelector("#flowProjectGateSelect");
+    const refresh = document.querySelector("#flowProjectGateRefresh");
+    const open = document.querySelector("#flowProjectGateOpen");
+    const isFlow = document.querySelector("#genProvider")?.value === "flow";
+    if (gate) gate.classList.toggle("hidden", !visible || !isFlow);
+    if (statusEl) {
+      statusEl.textContent = status;
+      statusEl.dataset.error = error ? "true" : "false";
+    }
+    if (select) select.disabled = busy;
+    if (refresh) {
+      refresh.disabled = busy;
+      refresh.setAttribute("aria-busy", String(busy));
+    }
+    if (open) {
+      open.disabled = busy || !select?.value;
+      open.setAttribute("aria-busy", String(busy));
+    }
+    const start = document.querySelector("#startBtn");
+    if (start) start.disabled = isFlow ? (visible || busy) : false;
+  }
+
+  function renderFlowProjectGateProjects(projects) {
+    const select = document.querySelector("#flowProjectGateSelect");
+    if (!select) return;
+    const previous = select.value;
+    fillSelect(select, projects, flowProjectId, flowProjectName, t("sidebar.projectGatePlaceholder"));
+    if (previous && [...select.options].some(option => option.value === previous)) select.value = previous;
+    const open = document.querySelector("#flowProjectGateOpen");
+    if (open) open.disabled = !select.value;
+  }
+
+  async function refreshFlowProjectGate({ force = false } = {}) {
+    if (flowProjectGateRefreshPromise && !force) return flowProjectGateRefreshPromise;
+    if (document.querySelector("#genProvider")?.value !== "flow") {
+      setFlowProjectGate({ visible: false });
+      return null;
+    }
+    flowProjectGateRefreshPromise = (async () => {
+      try {
+        const context = await dispatchFlowOperation("flow.context");
+        const projectId = String(context?.projectId || "").trim();
+        const inProject = context?.isProjectEditor === true && Boolean(projectId);
+        const previousContext = flowProjectContext;
+        flowProjectContext = { projectId, isProjectEditor: inProject };
+        if (inProject) {
+          const active = flowProjects.find(project => flowProjectId(project).toLowerCase() === projectId.toLowerCase());
+          setFlowProjectGate({ visible: false });
+          if (!previousContext.isProjectEditor || previousContext.projectId.toLowerCase() !== projectId.toLowerCase()) {
+            setFeedback(t("sidebar.projectGateReady", { name: flowProjectName(active || { id: projectId }) }), true);
+            void loadFlowCharacters();
+          }
+          return context;
+        }
+
+        if (force || !flowProjectsLoaded) {
+          setFlowProjectGate({ visible: true, status: t("sidebar.projectGateLoading"), busy: true });
+          const result = await dispatchFlowOperation("flow.projects.list");
+          flowProjects = Array.isArray(result) ? result : (result?.projects || []);
+          flowProjectsLoaded = true;
+        }
+        renderFlowProjectGateProjects(flowProjects);
+        setFlowProjectGate({
+          visible: true,
+          status: flowProjects.length ? "" : t("sidebar.projectGateEmpty"),
+          error: false,
+        });
+        return context;
+      } catch (error) {
+        flowProjectContext = { projectId: "", isProjectEditor: false };
+        flowProjectsLoaded = false;
+        setFlowProjectGate({ visible: true, status: error?.message || t("errors.projectRequired"), error: true });
+        return null;
+      } finally {
+        flowProjectGateRefreshPromise = null;
+      }
+    })();
+    return flowProjectGateRefreshPromise;
+  }
+
+  async function openFlowProjectFromGate() {
+    const select = document.querySelector("#flowProjectGateSelect");
+    const open = document.querySelector("#flowProjectGateOpen");
+    const projectId = String(select?.value || "").trim();
+    if (!projectId) {
+      setFlowProjectGate({ visible: true, status: t("sidebar.projectGatePlaceholder"), error: true });
+      select?.focus();
+      return;
+    }
+    const project = flowProjects.find(item => flowProjectId(item) === projectId);
+    setFlowProjectGate({ visible: true, status: t("sidebar.projectGateOpening"), busy: true });
+    try {
+      await assertQueueIdleForDirectAction();
+      await dispatchFlowOperation("flow.project.open", { projectId });
+      await refreshFlowProjectGate({ force: true });
+      if (!flowProjectContext.isProjectEditor) {
+        setFlowProjectGate({ visible: true, status: t("errors.projectRequired"), error: true });
+        return;
+      }
+      setFeedback(t("sidebar.projectGateReady", { name: flowProjectName(project || { id: projectId }) }), true);
+    } catch (error) {
+      setFlowProjectGate({ visible: true, status: error?.message || t("errors.projectRequired"), error: true });
+    } finally {
+      if (open) open.disabled = !select?.value;
+    }
+  }
+
+  async function ensureFlowProjectSelected() {
+    if (document.querySelector("#genProvider")?.value !== "flow") return true;
+    const context = await refreshFlowProjectGate({ force: true });
+    if (context?.isProjectEditor === true && context?.projectId) return true;
+    setFlowProjectGate({ visible: true, status: t("errors.projectRequired"), error: true });
+    document.querySelector("#flowProjectGateSelect")?.focus();
+    return false;
+  }
+
   async function runLibraryAction(button, action) {
     if (button) button.disabled = true;
     try {
@@ -111,15 +248,20 @@
 
 
   function updateVideoFrameInputs() {
-    const framesMode = document.querySelector("#selectModeVideo")?.value === "frames";
+    const isVideo = document.querySelector("#genType")?.value === "video" &&
+      document.querySelector("#genProvider")?.value !== "chatgpt";
+    const framesMode = isVideo && document.querySelector("#selectModeVideo")?.value === "frames";
     const group = document.querySelector("#videoFrameNamesGroup");
     if (group) group.hidden = !framesMode;
-    for (const selector of ["#videoReferenceOptionsGroup", "#videoReferenceSection", "#videoCharacterGroup"]) {
+    for (const selector of ["#videoReferenceOptionsGroup", "#videoCharacterGroup"]) {
       const control = document.querySelector(selector);
       if (control) control.hidden = framesMode;
     }
+    const referenceSection = document.querySelector("#refImagesSection");
+    referenceSection?.classList.toggle("hidden", framesMode);
     const voiceGroup = document.querySelector("#flowVoicePickerGroup");
-    if (voiceGroup) voiceGroup.hidden = framesMode;
+    if (voiceGroup) voiceGroup.hidden = !isVideo || framesMode;
+    document.querySelector("#videoFramesSection")?.classList.toggle("hidden", !framesMode);
     if (framesMode && !lastVideoFramesMode) {
       const voiceSelect = document.querySelector("#flowVoiceSelect");
       if (voiceSelect) voiceSelect.value = "";
@@ -146,7 +288,6 @@
     }
     applyVideoChainQuantityState(enabled, !enabled && lastVideoChainEnabled);
     lastVideoChainEnabled = enabled;
-    if (enabled && document.querySelector("#selectModeVideo")?.value === "frames") renderVideoFrameAssignments();
   }
 
   function normalizeModelValue(value) {
@@ -575,8 +716,6 @@
     setText("#lblCharVideo", t("sidebar.characterSelect") + ":");
     setText("#videoFrameNamesHint", t("sidebar.videoFrameNamesHint"));
     updateVideoChainUI();
-    renderVideoFrameSources();
-    renderVideoFrameAssignments();
     updateVideoFrameInputs();
     applyFlowModelControls();
     setText("#txtBtnSubmitVideo", t("sidebar.btnGenerateVideo"));
@@ -1117,6 +1256,7 @@
 
       const isFrames = String(document.querySelector("#videoInputType")?.value || "").toLowerCase() === "frames";
       document.querySelector("#videoFramesSection")?.classList.toggle("hidden", isImage || !isFrames);
+      updateVideoFrameInputs();
 
       const submitText = document.querySelector("#genSubmitBtnText");
       if (submitText) submitText.textContent = isImage ? t("sidebar.btnGenerateImage", "Tạo ảnh") : t("sidebar.btnGenerateVideo", "Tạo video");
@@ -1291,105 +1431,6 @@
     }
   }
 
-  // FEAT-14: Prompt Assistant surface. The pure logic (local format
-  // set, request assembly, reply parsing, image-to-prompt structured
-  // parse) lives in the background (flow-prompt-assistant.js); this
-  // panel talks to it over the flow-prompt-assistant:* message
-  // contract and reports plainly until the handlers are wired. The
-  // assembled request is copied to the chat provider by hand for now —
-  // the live send path waits on the ChatGPT live-DOM phase (GPT-B1).
-  let promptAssistantPrompts = [];
-  let promptAssistantI2p = null;
-
-  function insertPromptIntoComposer(text) {
-    const editor = document.querySelector("#promptsArea");
-    if (!editor || !text) return;
-    editor.value = editor.value.trim() ? `${editor.value.trim()}\n\n${text}` : text;
-    editor.dispatchEvent(new Event("input", { bubbles: true }));
-  }
-
-  function renderPromptAssistantResults() {
-    const list = document.querySelector("#paPromptList");
-    if (list) {
-      list.replaceChildren();
-      for (const [index, prompt] of promptAssistantPrompts.entries()) {
-        const row = document.createElement("article");
-        row.className = "flow-history-item";
-        row.innerHTML = `<div class="flow-history-item__body"><div class="flow-history-item__detail">${escapeHtml(prompt)}</div></div><div class="flow-history-item__actions"><button type="button" class="btn btn-secondary btn-sm" data-pa-insert="${index}">Chèn</button></div>`;
-        list.append(row);
-      }
-    }
-    const result = document.querySelector("#paI2pResult");
-    if (!result) return;
-    result.replaceChildren();
-    if (!promptAssistantI2p) return;
-    const { subject, promptEn, promptVi, complete } = promptAssistantI2p;
-    const lines = [
-      subject ? `Chủ đề: ${subject}` : null,
-      promptEn ? `EN: ${promptEn}` : null,
-      promptVi ? `VI: ${promptVi}` : null,
-      complete ? null : "(Thiếu trường — xem nguyên văn ở ô dán phía trên.)",
-    ].filter(Boolean);
-    for (const line of lines) {
-      const div = document.createElement("div");
-      div.textContent = line;
-      result.append(div);
-    }
-    for (const [lang, value] of [["EN", promptEn], ["VI", promptVi]]) {
-      if (!value) continue;
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "btn btn-secondary btn-sm";
-      button.setAttribute("data-pa-insert-i2p", lang);
-      button.textContent = `Chèn ${lang}`;
-      result.append(button);
-    }
-  }
-
-  async function buildPromptAssistantRequest() {
-    const idea = document.querySelector("#paIdea")?.value.trim() || "";
-    const format = document.querySelector("#paFormat")?.value || "single-en";
-    try {
-      const res = await chrome.runtime.sendMessage({ type: "flow-prompt-assistant:build", format, idea });
-      if (!res?.ok) throw new Error(res?.error?.message || "Chưa tạo được yêu cầu.");
-      const out = document.querySelector("#paRequest");
-      if (out) out.value = res.text || "";
-    } catch (err) {
-      setFeedback(`❌ ${err.message}`, false);
-      addLog("flow.promptAssistant.build.error", err.message, false);
-    }
-  }
-
-  async function parsePromptAssistantReply() {
-    const text = document.querySelector("#paReply")?.value || "";
-    try {
-      const res = await chrome.runtime.sendMessage({ type: "flow-prompt-assistant:parse", text });
-      if (!res?.ok) throw new Error(res?.error?.message || "Chưa tách được prompt.");
-      promptAssistantPrompts = Array.isArray(res.prompts) ? res.prompts : [];
-      renderPromptAssistantResults();
-      if (!promptAssistantPrompts.length) {
-        setFeedback("Không tách được prompt nào — câu trả lời thiếu khối PROMPTS.", false);
-      }
-    } catch (err) {
-      setFeedback(`❌ ${err.message}`, false);
-      addLog("flow.promptAssistant.parse.error", err.message, false);
-    }
-  }
-
-  async function parsePromptAssistantI2p() {
-    const text = document.querySelector("#paI2pReply")?.value || "";
-    try {
-      const res = await chrome.runtime.sendMessage({ type: "flow-prompt-assistant:parse-i2p", text });
-      if (!res?.ok) throw new Error(res?.error?.message || "Chưa tách được I2P.");
-      promptAssistantI2p = res.result || null;
-      renderPromptAssistantResults();
-    } catch (err) {
-      setFeedback(`❌ ${err.message}`, false);
-      addLog("flow.promptAssistant.parseI2p.error", err.message, false);
-    }
-  }
-
-
   function renderSavedPrompts() {
     const list = document.querySelector("#savedPromptsList");
     const empty = document.querySelector("#savedPromptsEmpty");
@@ -1499,6 +1540,8 @@
 
   async function loadFlowCharacters() {
     try {
+      const context = await dispatchFlowOperation("flow.context");
+      if (context?.isProjectEditor !== true || !context?.projectId) return;
       const res = await chrome.runtime.sendMessage({
         type: "flow-mcp:dispatch",
         operation: "flow.characters.list",
@@ -1718,7 +1761,7 @@
   });
 
   // Tab views with roving focus for keyboard users.
-  const tabs = [...document.querySelectorAll(".flowmcp-tab")];
+  const tabs = [...document.querySelectorAll(".flowmcp-tab:not([hidden])")];
   const activateTab = tab => {
       if (!tab) return;
       document.querySelectorAll(".flowmcp-tab").forEach(t => t.classList.remove("active"));
@@ -1982,25 +2025,6 @@
     persistWorkflowEditor();
   });
 
-  document.querySelector("#chatAIBtn")?.addEventListener("click", () => {
-    document.querySelector("#promptAssistantPanel")?.classList.toggle("hidden");
-  });
-  document.querySelector("#paBuildBtn")?.addEventListener("click", () => { void buildPromptAssistantRequest(); });
-  document.querySelector("#paParseBtn")?.addEventListener("click", () => { void parsePromptAssistantReply(); });
-  document.querySelector("#paI2pParseBtn")?.addEventListener("click", () => { void parsePromptAssistantI2p(); });
-  document.querySelector("#paPromptList")?.addEventListener("click", event => {
-    const insert = event.target.closest("[data-pa-insert]")?.dataset.paInsert;
-    if (insert === undefined) return;
-    const prompt = promptAssistantPrompts[Number(insert)];
-    if (prompt) insertPromptIntoComposer(prompt);
-  });
-  document.querySelector("#paI2pResult")?.addEventListener("click", event => {
-    const lang = event.target.closest("[data-pa-insert-i2p]")?.dataset.paInsertI2p;
-    if (!lang || !promptAssistantI2p) return;
-    insertPromptIntoComposer(lang === "VI" ? promptAssistantI2p.promptVi : promptAssistantI2p.promptEn);
-  });
-
-
   let isGenerating = false;
   let flowQueuePanel = null;
   const submittedQueueJobIds = new Set();
@@ -2083,6 +2107,7 @@
       setFeedback("Đang có tác vụ đang chạy, vui lòng đợi!", false);
       return;
     }
+    if (!(await ensureFlowProjectSelected())) return false;
     isGenerating = true;
     if (btn) btn.disabled = true;
 
@@ -2243,9 +2268,7 @@
   }
 
   const referencePicker = window.createFlowReferencePicker({ dispatchFlowOperation, setFeedback });
-  let videoFrameSources = referencePicker.getFrameSources();
-  let videoFrameAssignments = [];
-  let activeVideoFrameSlot = null;
+  const videoFrameSelection = { first: null, last: null };
 
   function bindFrameThumbnail(container, source, placeholderClass) {
     if (!container || !source) return false;
@@ -2263,226 +2286,65 @@
     return true;
   }
 
-  // Render a picked frame into a Gen-tab slot's body only. Replacing the
-  // whole slot would destroy its header, label and hidden file input.
-  function renderGenTabFrameSlot(bodySelector, source) {
-    const body = document.querySelector(bodySelector);
-    if (!body || !source) return;
-    body.replaceChildren();
-    bindFrameThumbnail(body, source, "video-frame-slot__empty");
+  function renderGenTabFrameSlot(buttonSelector, source, labelKey) {
+    const button = document.querySelector(buttonSelector);
+    if (!button || !source) return;
+    if (!button.dataset.emptyText) button.dataset.emptyText = button.querySelector(".frame-dropzone-text")?.textContent || "";
+    if (!button.dataset.emptyHint) button.dataset.emptyHint = button.querySelector(".frame-dropzone-source")?.textContent || t("sidebar.framePickerSlotHint");
+    const sourceName = source.name || source.file?.name || t("sidebar.frameImage");
+    const label = t(labelKey) + ": " + sourceName;
+    button.className = "frame-thumb-wrap";
+    button.setAttribute("aria-label", label);
+    button.title = label;
+    button.replaceChildren();
+    bindFrameThumbnail(button, source, "frame-thumb-fallback");
   }
 
-  function currentVideoPromptsForFrames() {
-    const prompt = document.querySelector("#inputPromptVideo")?.value.trim() || "";
-    if (!prompt) return [];
-    try { return promptsForGeneration(prompt, document.querySelector("#multiPromptVideo")?.checked === true); }
-    catch { return []; }
+  function restoreGenTabFrameDropzone(button) {
+    if (!button) return;
+    if (!button.dataset.emptyText) button.dataset.emptyText = button.querySelector(".frame-dropzone-text")?.textContent || "";
+    if (!button.dataset.emptyHint) button.dataset.emptyHint = button.querySelector(".frame-dropzone-source")?.textContent || t("sidebar.framePickerSlotHint");
+    button.className = "frame-dropzone";
+    button.removeAttribute("title");
+    const slotLabelKey = button.id === "genTabFrame2PickBtn" ? "sidebar.frameEnd" : "sidebar.frameStart";
+    button.setAttribute("aria-label", `${t(slotLabelKey)} — ${t("sidebar.framePickerSlotHint")}`);
+    const content = document.createElement("span");
+    content.className = "frame-dropzone-content";
+    const text = document.createElement("span");
+    text.className = "frame-dropzone-text";
+    text.textContent = button.dataset.emptyText;
+    const hint = document.createElement("span");
+    hint.className = "frame-dropzone-source";
+    hint.textContent = button.dataset.emptyHint;
+    content.append(text, hint);
+    button.replaceChildren(content);
   }
 
-  function renderVideoFrameSources() {
-    const grid = document.querySelector("#videoFrameSourceGrid");
-    const summary = document.querySelector("#videoFrameSourceSummary");
-    if (!grid) return;
-    grid.replaceChildren();
-    if (summary) summary.textContent = t("sidebar.frameSourceCount", { count: videoFrameSources.length });
-    for (const source of videoFrameSources) {
-      const card = document.createElement("div");
-      card.className = "video-frame-source-card";
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "video-frame-source";
-      button.title = t("sidebar.frameAssignSourceTitle", { name: source.name || source.file?.name || "" });
-      if (!bindFrameThumbnail(button, source, "video-frame-source__placeholder")) {
-        const placeholder = document.createElement("span");
-        placeholder.className = "video-frame-source__placeholder";
-        placeholder.textContent = "▧";
-        button.append(placeholder);
-      }
-      const name = document.createElement("span");
-      name.className = "video-frame-source__name";
-      name.textContent = source.name || source.file?.name || t("sidebar.frameImage");
-      button.append(name);
-      button.onclick = () => {
-        if (!activeVideoFrameSlot || !videoFrameAssignments[activeVideoFrameSlot.index]) {
-          setFeedback(t("sidebar.frameChooseSlot"), false);
-          return;
-        }
-        videoFrameAssignments[activeVideoFrameSlot.index][activeVideoFrameSlot.key] = source;
-        activeVideoFrameSlot = null;
-        renderVideoFrameAssignments();
-      };
-      const actions = document.createElement("div");
-      actions.className = "video-frame-source-actions";
-      const makeSourceAction = (labelKey, symbol, action) => {
-        const control = document.createElement("button");
-        control.type = "button";
-        control.className = "video-frame-source-action";
-        control.title = t(labelKey);
-        control.setAttribute("aria-label", t(labelKey));
-        control.textContent = symbol;
-        control.onclick = event => {
-          event.stopPropagation();
-          action();
-        };
-        return control;
-      };
-      const sourceIndex = videoFrameSources.indexOf(source);
-      actions.append(
-        makeSourceAction("sidebar.frameMoveSourceUp", "↑", () => {
-          videoFrameSources = referencePicker.moveFrameSource(source, -1);
-          renderVideoFrameSources();
-        }),
-        makeSourceAction("sidebar.frameMoveSourceDown", "↓", () => {
-          videoFrameSources = referencePicker.moveFrameSource(source, 1);
-          renderVideoFrameSources();
-        }),
-        makeSourceAction("sidebar.frameRemoveSource", "×", () => {
-          videoFrameSources = referencePicker.removeFrameSource(source);
-          videoFrameAssignments.forEach(assignment => {
-            if (assignment.first === source) assignment.first = null;
-            if (assignment.last === source) assignment.last = null;
-          });
-          renderVideoFrameSources();
-          renderVideoFrameAssignments();
-        }),
-      );
-      actions.children[0].disabled = sourceIndex <= 0;
-      actions.children[1].disabled = sourceIndex < 0 || sourceIndex >= videoFrameSources.length - 1;
-      card.append(button, actions);
-      grid.append(card);
+  function setVideoFrameSelection(slotKey, source) {
+    const previous = videoFrameSelection[slotKey];
+    if (previous?.source === "local" && previous !== source &&
+        !Object.entries(videoFrameSelection).some(([key, selected]) => key !== slotKey && selected === previous) &&
+        previous.previewUrl) {
+      URL.revokeObjectURL(previous.previewUrl);
     }
-  }
+    videoFrameSelection[slotKey] = source || null;
 
-  function syncVideoFrameAssignmentCount() {
-    const prompts = currentVideoPromptsForFrames();
-    while (videoFrameAssignments.length < prompts.length) videoFrameAssignments.push({ first: null, last: null });
-    if (videoFrameAssignments.length > prompts.length) videoFrameAssignments.length = prompts.length;
-    if (activeVideoFrameSlot && activeVideoFrameSlot.index >= prompts.length) activeVideoFrameSlot = null;
-    renderVideoFrameAssignments();
-  }
-
-  function renderVideoFrameAssignments() {
-    const container = document.querySelector("#videoFrameAssignments");
-    if (!container) return;
-    const prompts = currentVideoPromptsForFrames();
-    container.replaceChildren();
-    while (videoFrameAssignments.length < prompts.length) videoFrameAssignments.push({ first: null, last: null });
-    if (videoFrameAssignments.length > prompts.length) videoFrameAssignments.length = prompts.length;
-    const chainVideo = document.querySelector("#chainVideoFromPrevious")?.checked === true &&
-      document.querySelector("#selectModeVideo")?.value === "frames";
-    prompts.forEach((prompt, index) => {
-      if (chainVideo && index > 0) return;
-      const row = document.createElement("section");
-      row.className = "video-frame-assignment";
-      const promptLabel = document.createElement("div");
-      promptLabel.className = "video-frame-assignment__prompt";
-      promptLabel.textContent = t("sidebar.framePromptLabel", { index: index + 1, prompt: prompt.replace(/\s+/g, " ").slice(0, 72) });
-      const slots = document.createElement("div");
-      slots.className = "video-frame-assignment__slots";
-      const slotsToRender = chainVideo ? [["first", "sidebar.frameStart"]] : [["first", "sidebar.frameStart"], ["last", "sidebar.frameEnd"]];
-      for (const [key, labelKey] of slotsToRender) {
-        const wrap = document.createElement("div");
-        wrap.className = "video-frame-slot-wrap";
-        const source = videoFrameAssignments[index]?.[key] || null;
-        const slot = document.createElement("button");
-        slot.type = "button";
-        slot.className = `video-frame-slot${activeVideoFrameSlot?.index === index && activeVideoFrameSlot?.key === key ? " is-active" : ""}`;
-        slot.title = source?.name || source?.file?.name || t(labelKey);
-        if (!bindFrameThumbnail(slot, source, "video-frame-slot__empty")) {
-          const empty = document.createElement("span");
-          empty.className = "video-frame-slot__empty";
-          empty.textContent = "▧";
-          slot.append(empty);
-        }
-        const slotLabel = document.createElement("span");
-        slotLabel.className = "video-frame-slot__label";
-        slotLabel.textContent = source?.name || source?.file?.name || t(labelKey);
-        slot.append(slotLabel);
-        slot.onclick = () => {
-          activeVideoFrameSlot = { index, key };
-          renderVideoFrameAssignments();
-        };
-        wrap.append(slot);
-        if (source) {
-          const clear = document.createElement("button");
-          clear.type = "button";
-          clear.className = "video-frame-slot-clear";
-          clear.title = t("sidebar.frameClearSlot");
-          clear.setAttribute("aria-label", t("sidebar.frameClearSlot"));
-          clear.textContent = "×";
-          clear.onclick = () => {
-            videoFrameAssignments[index][key] = null;
-            renderVideoFrameAssignments();
-          };
-          wrap.append(clear);
-        }
-        slots.append(wrap);
-      }
-      row.append(promptLabel, slots);
-      container.append(row);
-    });
-  }
-
-  function syncVideoFrameSources(sources) {
-    videoFrameSources = Array.isArray(sources) ? sources : [];
-    const availableSources = new Set(videoFrameSources);
-    videoFrameAssignments = videoFrameAssignments.map(assignment => ({
-      first: availableSources.has(assignment?.first) ? assignment.first : null,
-      last: availableSources.has(assignment?.last) ? assignment.last : null,
-    }));
-    renderVideoFrameSources();
-    renderVideoFrameAssignments();
-  }
-
-  referencePicker.setFrameSourcesChanged(syncVideoFrameSources);
-
-  function applyVideoFrameAssignment(mode) {
-    const prompts = currentVideoPromptsForFrames();
-    while (videoFrameAssignments.length < prompts.length) videoFrameAssignments.push({ first: null, last: null });
-    if (mode === "clear") {
-      for (let index = 0; index < prompts.length; index++) videoFrameAssignments[index] = { first: null, last: null };
-      activeVideoFrameSlot = null;
-      renderVideoFrameAssignments();
+    const buttonSelector = slotKey === "first" ? "#genTabFrame1PickBtn" : "#genTabFrame2PickBtn";
+    const button = document.querySelector(buttonSelector);
+    if (!button) return;
+    if (source) {
+      renderGenTabFrameSlot(buttonSelector, source, slotKey === "first" ? "sidebar.frameStart" : "sidebar.frameEnd");
       return;
     }
-    prompts.forEach((_, index) => {
-      const assignment = videoFrameAssignments[index];
-      if (mode === "start" && videoFrameSources[index] && !assignment.first) assignment.first = videoFrameSources[index];
-      if (mode === "chain") {
-        if (videoFrameSources[index] && !assignment.first) assignment.first = videoFrameSources[index];
-        if (videoFrameSources[index + 1] && !assignment.last) assignment.last = videoFrameSources[index + 1];
-      }
-      if (mode === "pairs") {
-        if (videoFrameSources[index * 2] && !assignment.first) assignment.first = videoFrameSources[index * 2];
-        if (videoFrameSources[index * 2 + 1] && !assignment.last) assignment.last = videoFrameSources[index * 2 + 1];
-      }
-    });
-    activeVideoFrameSlot = null;
-    renderVideoFrameAssignments();
+    restoreGenTabFrameDropzone(button);
   }
 
-  document.querySelector("#btnChooseVideoFrameSources")?.addEventListener("click", () => {
-    referencePicker.openFrames(syncVideoFrameSources);
-  });
-  document.querySelector("#btnAssignVideoFrames")?.addEventListener("click", () => {
-    applyVideoFrameAssignment(document.querySelector("#videoFrameAssignmentMode")?.value || "start");
-  });
-  document.querySelector("#inputPromptVideo")?.addEventListener("input", syncVideoFrameAssignmentCount);
-  document.querySelector("#multiPromptVideo")?.addEventListener("change", () => {
-    if (!document.querySelector("#multiPromptVideo")?.checked) {
-      const chainToggle = document.querySelector("#chainVideoFromPrevious");
-      if (chainToggle) chainToggle.checked = false;
+  referencePicker.setFrameProjectChanged(projectId => {
+    for (const key of ["first", "last"]) {
+      const source = videoFrameSelection[key];
+      if (source?.source === "flow" && source.projectId !== projectId) setVideoFrameSelection(key, null);
     }
-    syncVideoFrameAssignmentCount();
-    updateVideoChainUI();
   });
-  document.querySelector("#chainVideoFromPrevious")?.addEventListener("change", () => {
-    updateVideoChainUI();
-    renderVideoFrameAssignments();
-  });
-  renderVideoFrameSources();
-  renderVideoFrameAssignments();
-
   document.querySelector("#selectModeVideo")?.addEventListener("change", updateVideoFrameInputs);
   document.querySelector("#selectModelImage")?.addEventListener("change", applyFlowModelControls);
   document.querySelector("#selectModelVideo")?.addEventListener("change", applyFlowModelControls);
@@ -2681,11 +2543,114 @@
     return "image";
   }
 
+  const FLOW_LIBRARY_SNAPSHOT_TTL_MS = 10_000;
+  let flowLibrarySnapshot = { projectId: "", fetchedAt: 0, assets: null, promise: null };
+
+  async function getFlowLibrarySnapshot() {
+    const context = await dispatchFlowOperation("flow.context");
+    const projectId = typeof context?.projectId === "string" ? context.projectId.trim().toLowerCase() : "";
+    if (context?.isProjectEditor !== true || !projectId) {
+      throw new Error(t("sidebar.uploadLibraryProjectUnknown"));
+    }
+    if (flowLibrarySnapshot.projectId !== projectId) {
+      flowLibrarySnapshot = { projectId, fetchedAt: 0, assets: null, promise: null };
+    }
+    if (Array.isArray(flowLibrarySnapshot.assets) && Date.now() - flowLibrarySnapshot.fetchedAt < FLOW_LIBRARY_SNAPSHOT_TTL_MS) {
+      return flowLibrarySnapshot.assets;
+    }
+    if (!flowLibrarySnapshot.promise) {
+      const snapshotProjectId = projectId;
+      const scanPromise = dispatchFlowOperation("flow.assets.list", {
+        includeIncomplete: true,
+        requireComplete: true,
+        maxItems: 5000,
+        maxDurationMs: 25_000,
+      }).catch(error => {
+        const scanError = new Error(t("sidebar.uploadLibraryScanFailed"));
+        if (error?.code) scanError.code = error.code;
+        throw scanError;
+      });
+      flowLibrarySnapshot.promise = scanPromise.then(assets => {
+        if (!Array.isArray(assets)) throw new Error(t("sidebar.uploadLibraryInvalid"));
+        if (flowLibrarySnapshot.projectId !== snapshotProjectId) {
+          throw new Error(t("sidebar.uploadLibraryProjectChanged"));
+        }
+        return dispatchFlowOperation("flow.context").then(liveContext => {
+          const liveProjectId = typeof liveContext?.projectId === "string" ? liveContext.projectId.trim().toLowerCase() : "";
+          if (liveContext?.isProjectEditor !== true || liveProjectId !== snapshotProjectId) {
+            throw new Error(t("sidebar.uploadLibraryProjectChanged"));
+          }
+          flowLibrarySnapshot.assets = assets;
+          flowLibrarySnapshot.fetchedAt = Date.now();
+          return assets;
+        });
+      }).finally(() => {
+        if (flowLibrarySnapshot.projectId === snapshotProjectId) flowLibrarySnapshot.promise = null;
+      });
+    }
+    return await flowLibrarySnapshot.promise;
+  }
+
+  function normalizeFlowAssetTitle(value) {
+    return String(value || "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
+  }
+
+  async function findExistingFlowAsset(file, kind) {
+    const fileName = String(file?.name || "").trim();
+    if (!fileName) return null;
+    setFeedback(t("sidebar.uploadLibraryChecking", { name: fileName }), true);
+    const assets = await getFlowLibrarySnapshot();
+    const wantedName = normalizeFlowAssetTitle(fileName);
+    const matches = assets.filter(asset => {
+      if (!asset || asset.kind !== kind) return false;
+      return [asset.name, asset.fileName].some(name => normalizeFlowAssetTitle(name) === wantedName);
+    });
+    if (matches.length > 1) {
+      throw new Error(t("sidebar.uploadLibraryAmbiguous", { name: fileName }));
+    }
+    if (!matches.length) return null;
+    const asset = matches[0];
+    if (asset.busy || asset.error || asset.ready === false) {
+      throw new Error(t("sidebar.uploadLibraryBusy", { name: fileName }));
+    }
+    return {
+      reusedFromLibrary: true,
+      assetName: `asset:${asset.name}`,
+      expectedId: asset.id || asset.persistentMediaId || asset.fileId,
+      kind,
+    };
+  }
+
   async function uploadReferenceImage(file, onProgress, referenceIndex) {
+    const kind = referenceUploadKind(file);
+    const existingAsset = await findExistingFlowAsset(file, kind);
+    if (existingAsset) {
+      setFeedback(t("sidebar.uploadLibraryUsingExisting", { name: file.name }), true);
+      return existingAsset;
+    }
+    setFeedback(t("sidebar.uploadLibraryMissing", { name: file?.name || "" }), true);
     if (window.FlowUploadClient) {
-      return await uploadWithCancel(file, { onProgress, kind: referenceUploadKind(file), referenceIndex });
+      try {
+        return await uploadWithCancel(file, { onProgress, kind, referenceIndex, callerKey: "flow-sidebar-reference-v1" });
+      } finally {
+        // A successful upload (or an ambiguous timeout) may have changed Flow's
+        // library, so the next selection must perform a fresh complete scan.
+        flowLibrarySnapshot = {
+          projectId: flowLibrarySnapshot.projectId,
+          fetchedAt: 0,
+          assets: null,
+          promise: null,
+        };
+      }
     }
     throw new Error("Dịch vụ tải ảnh lên Flow chưa được khởi tạo");
+  }
+
+  async function uploadFrameImageToLibrary(file, onProgress) {
+    await assertQueueIdleForReferenceUpload();
+    const uploaded = await uploadReferenceImage(file, onProgress, 1);
+    await referencePicker.refreshFlowAssets();
+    return uploaded;
   }
 
   // One builder for every attachment that comes out of an upload result
@@ -2701,6 +2666,13 @@
   // resolve, so it stays as the fallback. Missing fields fall back to
   // the pre-identity behaviour exactly.
   function uploadedAssetAttachment(uploaded) {
+    if (uploaded?.reusedFromLibrary === true && uploaded.assetName) {
+      return {
+        assetName: uploaded.assetName,
+        ...(uploaded.expectedId ? { expectedId: uploaded.expectedId } : {}),
+        ...(uploaded.kind ? { kind: uploaded.kind } : {}),
+      };
+    }
     const tileName = typeof uploaded === "string" ? uploaded : (uploaded?.uploadName || uploaded?.name || uploaded?.title || String(uploaded));
     const expectedId = uploaded && typeof uploaded === "object" ? (uploaded.mediaUuid || uploaded.id || uploaded.mediaId) : undefined;
     return {
@@ -2773,7 +2745,8 @@
 
     try {
       if (btn) btn.disabled = true;
-      // Reuse selected Flow media IDs; only newly chosen local files are uploaded.
+      // Reuse selected Flow media IDs; local files are uploaded only when the
+      // current project's library does not already contain the matching asset.
       const attachmentByReference = new Map();
       const localImageReferences = activeImageReferences.filter(reference => reference.source === "local");
       if (localImageReferences.length > 0) {
@@ -2892,9 +2865,8 @@
     const selectedReferenceMode = document.querySelector("#multiRefModeVideo")?.value || "all";
     const referenceMode = mode === "frames" ? "none" : selectedReferenceMode;
     const referencesPerPrompt = Number(document.querySelector("#multiRefCountVideo")?.value) || 1;
-    syncVideoFrameAssignmentCount();
     const hasFrames = mode === "frames";
-    const selectedFrameAssignments = videoFrameAssignments.slice(0, prompts.length);
+    const selectedFrameAssignments = prompts.map(() => ({ ...videoFrameSelection }));
     if (chainVideo && prompts.length < 2) {
       setFeedback(t("sidebar.videoChainNeedsPrompts"), false);
       return;
@@ -2904,11 +2876,7 @@
       setFeedback(t("sidebar.videoChainReferencesConflict"), false);
       return;
     }
-    if (hasFrames && !videoFrameSources.length) {
-      setFeedback(t("sidebar.videoFramesNeedInput"), false);
-      return;
-    }
-    if (hasFrames && selectedFrameAssignments.slice(0, chainVideo ? 1 : prompts.length).some(assignment => !assignment?.first)) {
+    if (hasFrames && !videoFrameSelection.first) {
       setFeedback(chainVideo ? t("sidebar.videoChainNeedsStart") : t("sidebar.videoFramesNeedStart"), false);
       return;
     }
@@ -3946,14 +3914,12 @@
   function initGenerationControls() {
     const promptsArea = document.querySelector("#promptsArea");
     const multiPromptCheck = document.querySelector("#multiPromptCheck");
-    const promptCharCount = document.querySelector("#promptCharCount");
     const promptCountBadge = document.querySelector("#promptCount");
     const multiPromptHint = document.querySelector("#multiPromptHint");
 
     function updatePromptsMetrics() {
       if (!promptsArea) return;
       const val = promptsArea.value;
-      if (promptCharCount) promptCharCount.textContent = `${val.length} ký tự`;
       const isMulti = multiPromptCheck?.checked === true;
       if (multiPromptHint) multiPromptHint.classList.toggle("hidden", !isMulti);
       const count = val.trim() ? (isMulti ? val.trim().split(/\n\s*\n/).filter(Boolean).length : 1) : 0;
@@ -3990,49 +3956,10 @@
       }
     });
 
-    // Import TXT file into promptsArea
-    const importTxtBtn = document.querySelector("#importTxtBtn");
-    if (importTxtBtn) {
-      const txtInput = document.createElement("input");
-      txtInput.type = "file";
-      txtInput.accept = ".txt";
-      txtInput.hidden = true;
-      document.body.appendChild(txtInput);
-      importTxtBtn.addEventListener("click", () => txtInput.click());
-      txtInput.addEventListener("change", async () => {
-        const file = txtInput.files?.[0];
-        txtInput.value = "";
-        if (!file) return;
-        try {
-          const text = await file.text();
-          const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith("#"));
-          if (!lines.length) throw new Error("Tệp không có dòng văn bản hợp lệ.");
-          const imported = lines.join("\n\n");
-          promptsArea.value = promptsArea.value.trim() ? `${promptsArea.value.trim()}\n\n${imported}` : imported;
-          if (lines.length > 1 && multiPromptCheck) multiPromptCheck.checked = true;
-          updatePromptsMetrics();
-          setFeedback(`Đã nhập ${lines.length} câu lệnh từ file!`, true);
-        } catch (err) {
-          setFeedback(`Lỗi nhập tệp: ${err.message}`, false);
-        }
-      });
-    }
-
-    // Save prompt button
-    document.querySelector("#promptSaveBtn")?.addEventListener("click", async () => {
-      const val = promptsArea?.value.trim();
-      if (!val) { setFeedback("Vui lòng nhập câu lệnh để lưu!", false); return; }
-      const item = { id: crypto.randomUUID?.() || `${Date.now()}`, name: val.slice(0, 36), prompt: val, createdAt: Date.now() };
-      savedPrompts = [item, ...savedPrompts.filter(p => p.prompt !== val)].slice(0, 100);
-      await writeUiStorage(SAVED_PROMPTS_KEY, savedPrompts);
-      renderSavedPrompts();
-      setFeedback("Đã lưu câu lệnh vào thư viện Prompts!", true);
-    });
-
     // Provider Tabs
-    document.querySelectorAll("#genProviderTabs .provider-tab").forEach(tab => {
+    document.querySelectorAll("#genProviderTabs .provider-tab:not([hidden])").forEach(tab => {
       tab.addEventListener("click", () => {
-        document.querySelectorAll("#genProviderTabs .provider-tab").forEach(button => {
+        document.querySelectorAll("#genProviderTabs .provider-tab:not([hidden])").forEach(button => {
           const selected = button === tab;
           button.classList.toggle("provider-tab--active", selected);
           button.setAttribute("aria-selected", String(selected));
@@ -4042,9 +3969,11 @@
         if (hiddenProvider) hiddenProvider.value = provider;
         applyGenProviderConfig(provider);
         if (provider !== "flow") {
+          setFlowProjectGate({ visible: false });
           setFeedback(`Provider: ${provider.toUpperCase()} (Tự động thực thi qua Flow MCP Studio)`, true);
         } else {
           setFeedback("Google Flow Provider đang hoạt động", true);
+          void refreshFlowProjectGate({ force: true });
         }
       });
     });
@@ -4106,30 +4035,62 @@
 
     bindGenerationControlSync();
 
-    document.querySelector("#genTabFrame1Slot")?.addEventListener("click", () => {
-      referencePicker.openFrames(sources => {
-        syncVideoFrameSources(sources);
-        if (sources[0]) {
-          applyVideoFrameAssignment("start");
-          renderGenTabFrameSlot("#genTabFrame1Body", sources[0]);
-        }
-      });
+    const frameStartButton = document.querySelector("#genTabFrame1PickBtn");
+    frameStartButton?.setAttribute("aria-haspopup", "dialog");
+    frameStartButton?.setAttribute("aria-controls", "referencePickerModal");
+    frameStartButton?.setAttribute("aria-label", `${t("sidebar.frameStart")} — ${t("sidebar.framePickerSlotHint")}`);
+    frameStartButton?.addEventListener("click", () => {
+      referencePicker.openFrameSlot(source => setVideoFrameSelection("first", source));
     });
 
-    document.querySelector("#genTabFrame2Slot")?.addEventListener("click", () => {
-      const previousSources = referencePicker.getFrameSources();
-      referencePicker.openFrames(sources => {
-        syncVideoFrameSources(sources);
-        // The picker returns the cumulative source pool, so a single pick on
-        // the End slot may sit at index 0. Prefer the source this pick added;
-        // fall back to the second pool entry, then the only entry.
-        const picked = [...sources].reverse().find(source => !previousSources.includes(source)) || sources[1] || sources[0];
-        if (picked) {
-          if (!videoFrameAssignments[0]) videoFrameAssignments[0] = { first: null, last: null };
-          videoFrameAssignments[0].last = picked;
-          renderGenTabFrameSlot("#genTabFrame2Body", picked);
-        }
-      });
+    const frameEndButton = document.querySelector("#genTabFrame2PickBtn");
+    frameEndButton?.setAttribute("aria-haspopup", "dialog");
+    frameEndButton?.setAttribute("aria-controls", "referencePickerModal");
+    frameEndButton?.setAttribute("aria-label", `${t("sidebar.frameEnd")} — ${t("sidebar.framePickerSlotHint")}`);
+    frameEndButton?.addEventListener("click", () => {
+      referencePicker.openFrameSlot(source => setVideoFrameSelection("last", source));
+    });
+
+    const frameUploadButton = document.querySelector("#videoFramesUploadBtn");
+    const frameUploadInput = document.querySelector("#videoFramesUploadInput");
+    const frameUploadStatus = document.querySelector("#videoFramesUploadStatus");
+    const setFrameUploadStatus = (message, isError = false) => {
+      if (!frameUploadStatus) return;
+      frameUploadStatus.textContent = message;
+      frameUploadStatus.hidden = !message;
+      frameUploadStatus.dataset.error = isError ? "true" : "false";
+      frameUploadStatus.setAttribute("role", isError ? "alert" : "status");
+      frameUploadStatus.setAttribute("aria-live", isError ? "assertive" : "polite");
+    };
+    frameUploadButton?.addEventListener("click", () => frameUploadInput?.click());
+    frameUploadInput?.addEventListener("change", async () => {
+      const file = frameUploadInput.files?.[0];
+      frameUploadInput.value = "";
+      if (!file || !frameUploadButton) return;
+      frameUploadButton.disabled = true;
+      frameUploadButton.setAttribute("aria-busy", "true");
+      const pending = t("sidebar.frameLibraryUploadPending");
+      setFrameUploadStatus(pending);
+      setFeedback(pending, true);
+      try {
+        const uploaded = await uploadFrameImageToLibrary(file, progress => {
+          const message = t("sidebar.frameLibraryUploadProgress", { name: file.name, progress });
+          setFrameUploadStatus(message);
+          setFeedback(message, true);
+        });
+        const message = uploaded?.reusedFromLibrary === true
+          ? t("sidebar.frameLibraryUploadReused", { name: file.name })
+          : t("sidebar.frameLibraryUploadComplete", { name: file.name });
+        setFrameUploadStatus(message);
+        setFeedback(message, true);
+      } catch (error) {
+        const message = error?.message || String(error);
+        setFrameUploadStatus(message, true);
+        setFeedback(`❌ ${message}`, false);
+      } finally {
+        frameUploadButton.disabled = false;
+        frameUploadButton.removeAttribute("aria-busy");
+      }
     });
 
     // Reference images buttons
@@ -4177,6 +4138,23 @@
 
     document.querySelector("#startBtn")?.addEventListener("click", () => {
       document.querySelector("#genSubmitBtn")?.click();
+    });
+
+    document.querySelector("#flowProjectGateSelect")?.addEventListener("change", event => {
+      const selected = event.currentTarget.value;
+      const open = document.querySelector("#flowProjectGateOpen");
+      if (open) open.disabled = !selected;
+      const status = document.querySelector("#flowProjectGateStatus");
+      if (status && selected) {
+        status.textContent = "";
+        status.dataset.error = "false";
+      }
+    });
+    document.querySelector("#flowProjectGateRefresh")?.addEventListener("click", () => {
+      void refreshFlowProjectGate({ force: true });
+    });
+    document.querySelector("#flowProjectGateOpen")?.addEventListener("click", () => {
+      void openFlowProjectFromGate();
     });
 
     let runMode = "parallel";
@@ -4464,8 +4442,13 @@
     return fetchStatus();
   }).then(() => {
     return loadFlowCharacters();
+  }).then(() => {
+    return refreshFlowProjectGate({ force: true });
   });
 
   // Auto poll status periodically
   setInterval(fetchStatus, 3000);
+  flowProjectGatePollTimer = setInterval(() => {
+    if (document.querySelector("#genProvider")?.value === "flow") void refreshFlowProjectGate();
+  }, 5000);
 })();

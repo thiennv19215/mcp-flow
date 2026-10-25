@@ -49,9 +49,12 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
   const wanted = String(assetName || "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
   if (!wanted || !["start", "end"].includes(slot)) throw flowError("FLOW_INVALID_ARGUMENT", "Frame selection requires an exact asset title and a Start or End slot.", false, false);
   const buttonForSlot = () => {
-    const label = slot === "start" ? "Start" : "End";
     const composer = (typeof root.flowQuery === "function" ? root.flowQuery("composerRoot") : null) || document;
-    const roots = [composer];
+    // Prefer the active composer, but also search the document. Flow can
+    // briefly keep a stale/incomplete composer root mounted while swapping
+    // its prompt subtree; frame controls remain safely identifiable by the
+    // dedicated two-slot row even when that root misses them.
+    const roots = [...new Set([composer, document])];
     for (let index = 0; index < roots.length; index++) {
       const current = roots[index];
       if (current.shadowRoot && !roots.includes(current.shadowRoot)) roots.push(current.shadowRoot);
@@ -60,24 +63,74 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
       } catch {}
     }
     for (const scope of roots) {
-      const candidate = root.flowButton?.(label, scope);
+      const candidate = root.flowFrameButton?.(slot, scope);
       if (candidate) return candidate;
     }
     return null;
+  };
+  const frameControlSnapshot = () => {
+    const triggers = deepQueryAll(document, ".frame-trigger").filter(visible);
+    const groups = [...new Set(triggers.map(trigger => trigger.parentElement).filter(Boolean))];
+    const label = element => String(accessibleName(element) || element?.getAttribute?.("aria-label") || element?.innerText || "")
+      .replace(/\s+/g, " ").trim().slice(0, 80);
+    return {
+      flowFrameButtonAvailable: typeof root.flowFrameButton === "function",
+      composerRoot: (() => {
+        const composer = typeof root.flowQuery === "function" ? root.flowQuery("composerRoot") : null;
+        return composer ? { tag: composer.tagName || null, className: String(composer.className?.baseVal || composer.className || "") } : null;
+      })(),
+      frameTriggerCount: triggers.length,
+      frameGroups: groups.slice(0, 4).map(group => {
+        const groupTriggers = triggers.filter(trigger => trigger.parentElement === group);
+        return {
+          className: String(group.className?.baseVal || group.className || ""),
+          triggerCount: groupTriggers.length,
+          slotControls: groupTriggers.map(trigger => deepQueryAll(trigger, "button,[role='button']")
+            .filter(visible).map(control => ({ label: label(control), className: String(control.className?.baseVal || control.className || "") })).slice(0, 3)),
+        };
+      }),
+    };
   };
   const controlledByOpener = (opener, id) => {
     const scope = opener?.getRootNode?.() || document;
     return scope.getElementById?.(id) || deepQueryAll(scope, "[id]").find(element => element.id === id) || document.getElementById(id);
   };
-  const listForOpener = (opener, priorLists) => {
+  const pickerLikeDialog = surface => {
+    if (!surface || !visible(surface)) return false;
+    if (surface.getAttribute?.("role") === "dialog" || /^(?:mat-dialog-container|flow-dialog)$/i.test(surface.tagName || "")) return true;
+    return listOptions(surface, false).length > 0 || deepQueryAll(surface, '[role="tab"],input,[role="textbox"]').length > 0;
+  };
+  const pickerSurfaces = () => {
+    const configured = typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.listBox", document) : [];
+    return [...new Set([
+      ...(Array.isArray(configured) ? configured : []),
+      ...deepQueryAll(document, '[role="listbox"]'),
+      ...deepQueryAll(document, '[role="dialog"]'),
+      ...deepQueryAll(document, "mat-dialog-container"),
+      ...deepQueryAll(document, "flow-dialog"),
+    ])];
+  };
+  const pickerListFromSurface = surface => {
+    if (!surface || !visible(surface)) return null;
+    if (surface.getAttribute?.("role") === "listbox") return surface;
+    const nested = deepQueryAll(surface, '[role="listbox"]').filter(visible);
+    if (nested.length === 1) return nested[0];
+    if (nested.length > 1) return null;
+    return pickerLikeDialog(surface) ? surface : null;
+  };
+  const listForOpener = (opener, priorSurfaces) => {
     const ids = [opener?.getAttribute("aria-controls"), opener?.getAttribute("aria-owns")].filter(Boolean).flatMap(value => value.split(/\s+/));
-    const controlled = [...new Set(ids.map(id => controlledByOpener(opener, id)).filter(el => el?.getAttribute("role") === "listbox" && visible(el)))];
+    const controlled = [...new Set(ids.map(id => pickerListFromSurface(controlledByOpener(opener, id))).filter(Boolean))];
     if (controlled.length === 1) return controlled[0];
     if (controlled.length > 1) return null;
-    const configuredLists = typeof root.flowQueryAll === "function" ? root.flowQueryAll("components.listBox", document) : [];
-    const lists = [...new Set([...configuredLists, ...deepQueryAll(document, '[role="listbox"]')])].filter(visible);
-    const newlyOpened = lists.filter(el => !priorLists.has(el));
-    return newlyOpened.length === 1 ? newlyOpened[0] : null;
+    const allSurfaces = pickerSurfaces().filter(visible);
+    const newlyVisibleLists = allSurfaces.filter(el => el.getAttribute?.("role") === "listbox" && !priorSurfaces.has(el));
+    if (newlyVisibleLists.length === 1) return newlyVisibleLists[0];
+    if (newlyVisibleLists.length > 1) return null;
+    const newlyVisibleDialogs = allSurfaces
+      .filter(el => !priorSurfaces.has(el) && pickerLikeDialog(el))
+      .map(pickerListFromSurface).filter(Boolean);
+    return newlyVisibleDialogs.length === 1 ? newlyVisibleDialogs[0] : null;
   };
   const pickerScopeRoots = activeList => {
     if (!activeList) return [];
@@ -94,6 +147,13 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
     }
     return roots;
   };
+  const pickerIsLoading = activeList => {
+    if (!activeList) return false;
+    const roots = pickerScopeRoots(activeList);
+    return roots.some(scope =>
+      (typeof root.flowQueryVisible === "function" && Boolean(root.flowQueryVisible("common.loadingIndicator", scope))) ||
+      deepQueryAll(scope, '[role="progressbar"],[aria-busy="true"]').some(visible));
+  };
   const scopedPickerElements = (activeList, selector, configuredKey) => {
     const roots = pickerScopeRoots(activeList);
     const configured = typeof root.flowQueryAll === "function" && configuredKey
@@ -106,8 +166,11 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
     let stableAt = 0;
     while (Date.now() < settleDeadline) {
       const list = listGetter();
-      const loading = (typeof root.flowQueryVisible === "function" && Boolean(root.flowQueryVisible("common.loadingIndicator", document))) ||
-        deepQueryAll(document, '[role="progressbar"],[aria-busy="true"]').some(visible);
+      // Only wait on activity inside this picker's surface. Flow can keep
+      // unrelated project tiles or background tasks busy while the picker
+      // is already ready; a document-wide spinner check made that valid
+      // picker look stuck until the frame deadline expired.
+      const loading = pickerIsLoading(list);
       if (list && !loading) {
         const options = listOptions(list);
         if (options.length || explicitEmptyState(list)) return list;
@@ -261,23 +324,86 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
   recordFramePickerDiagnostics("opening");
 
   let opener = buttonForSlot();
-  if (!opener) throw flowError("FLOW_FRAMES_CONTROLS_UNAVAILABLE", `Flow's ${slot} frame picker is unavailable. Nothing was submitted.`, true, false);
+  if (!opener) {
+    const error = flowError("FLOW_FRAMES_CONTROLS_UNAVAILABLE", `Flow's ${slot} frame picker is unavailable. Nothing was submitted.`, true, false);
+    error.diagnostics = { frameControls: frameControlSnapshot() };
+    throw error;
+  }
+  const isSelectedFrameChip = element => {
+    const className = String(element?.className?.baseVal || element?.className || "");
+    return /(?:^|\s)chip-container(?:\s|$)/.test(className) &&
+      !/(?:^|\s)chip-container-disabled(?:\s|$)/.test(className) &&
+      Boolean(element.querySelector?.("img,video"));
+  };
+  const requestedIdentity = config.expectedId ||
+    (normalize(config.verifiedIdentity?.assetName) === normalize(assetName) ? config.verifiedIdentity?.id : null);
+  const requestedIdentityValue = requestedIdentity
+    ? await globalThis.resolveNativeMediaUuid?.(requestedIdentity, "image") || requestedIdentity
+    : null;
+  if (isSelectedFrameChip(opener) && uuidPattern.test(String(requestedIdentityValue || ""))) {
+    const selectedIdentityRaw = typeof mediaId === "function" ? mediaId(opener) : null;
+    const selectedIdentity = selectedIdentityRaw
+      ? await globalThis.resolveNativeMediaUuid?.(selectedIdentityRaw, "image") || selectedIdentityRaw
+      : null;
+    if (uuidPattern.test(String(selectedIdentity || "")) && String(selectedIdentity).toLowerCase() === String(requestedIdentityValue).toLowerCase()) {
+      recordFramePickerDiagnostics("existing_slot_confirmed", null, {
+        selectedMediaId: String(selectedIdentity).toLowerCase(),
+        expectedMediaId: String(requestedIdentityValue).toLowerCase(),
+        confirmation: "existing_slot_identity",
+      });
+      return { name: assetName, kind: "image", slot, id: String(selectedIdentity).toLowerCase(), confirmed: true, reusedExisting: true };
+    }
+  }
+  if (isSelectedFrameChip(opener)) {
+    const previousSignature = slotSignature();
+    opener.click();
+    const clearDeadline = Math.min(Date.now() + 2500, deadline);
+    let cleared = false;
+    while (Date.now() < clearDeadline) {
+      const current = buttonForSlot();
+      if (current && !isSelectedFrameChip(current) && slotSignature() !== previousSignature) {
+        opener = current;
+        cleared = true;
+        break;
+      }
+      await boundedWait(100, `clearing the selected ${slot} frame before replacement`);
+    }
+    if (!cleared) throw flowError("FLOW_FRAME_SLOT_CLEAR_UNCONFIRMED", `Flow did not clear the existing ${slot} frame before opening its picker. Nothing was selected.`, true, false);
+  }
   const beforeSlot = slotSignature();
   let list;
+  let exactPickerObservedOpen = false;
+  let exactPickerSurface = null;
   let frameControlledIds = [];
+  const pickerOpenAttempts = [];
   for (let attempt = 0; attempt < 3 && Date.now() < deadline; attempt++) {
     requireTime(`opening Flow's ${slot} frame picker`);
     opener = buttonForSlot();
     if (!opener) break;
-    const priorLists = new Set(deepQueryAll(document, '[role="listbox"]'));
+    const priorSurfaces = new Set(pickerSurfaces().filter(visible));
     const controlledIds = [opener.getAttribute("aria-controls"), opener.getAttribute("aria-owns")].filter(Boolean).flatMap(value => value.split(/\s+/));
     frameControlledIds = controlledIds;
     opener.click();
     const listGetter = () => {
-      return listForOpener(buttonForSlot(), priorLists);
+      return listForOpener(buttonForSlot(), priorSurfaces);
     };
     try { list = await pickerSettled(listGetter, 5000); } catch (error) {
-      if (attempt === 2) throw error;
+      const currentOpener = buttonForSlot();
+      const attemptDiagnostics = {
+        attempt: attempt + 1,
+        openerExpanded: currentOpener?.getAttribute("aria-expanded") || null,
+        openerControls: currentOpener?.getAttribute("aria-controls") || null,
+        openerOwns: currentOpener?.getAttribute("aria-owns") || null,
+        visibleListboxCount: deepQueryAll(document, '[role="listbox"]').filter(visible).length,
+        visibleDialogCount: deepQueryAll(document, '[role="dialog"]').filter(visible).length,
+        visiblePageBusyCount: deepQueryAll(document, '[role="progressbar"],[aria-busy="true"]').filter(visible).length,
+      };
+      pickerOpenAttempts.push(attemptDiagnostics);
+      recordFramePickerDiagnostics("picker_open_wait", null, { pickerOpenAttempts: [...pickerOpenAttempts] });
+      if (attempt === 2) {
+        error.diagnostics = { ...(error.diagnostics || {}), framePicker: inspectNativeFramePickerDiagnostics() };
+        throw error;
+      }
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
       await boundedWait(250, `reopening Flow's ${slot} frame picker`);
       continue;
@@ -296,6 +422,8 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
     return list?.isConnected !== false && visible(list) ? list : null;
   };
   recordFramePickerDiagnostics("picker_open", list);
+  exactPickerObservedOpen = true;
+  exactPickerSurface = list.closest?.('[role="dialog"],mat-dialog-container,flow-dialog,.cdk-overlay-pane,[class*="picker" i],[class*="surface" i]') || list;
 
   const categories = ["All", "Tất cả", "Ingredients", "Thành phần", "Uploads", "Tải lên"];
   let matches = new Map();
@@ -429,14 +557,31 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
     let selectedId = (tileId && !tileId.startsWith("title:") ? tileId : null) || option.getAttribute("data-media-id") ||
       deepQueryAll(option, "[data-media-id]")[0]?.getAttribute("data-media-id") || tileId || undefined;
     selectedId = await globalThis.resolveNativeMediaUuid?.(selectedId, "image") || selectedId;
-    const expectedId = await globalThis.resolveNativeMediaUuid?.(config.expectedId, "image") || config.expectedId;
+    let expectedId = await globalThis.resolveNativeMediaUuid?.(config.expectedId, "image") || config.expectedId;
+    let verifiedIdentityUsed = false;
+    const verifiedIdentity = config.verifiedIdentity && typeof config.verifiedIdentity === "object" ? config.verifiedIdentity : null;
+    const verifiedName = normalize(verifiedIdentity?.assetName) === normalize(assetName);
+    const verifiedId = verifiedName
+      ? await globalThis.resolveNativeMediaUuid?.(verifiedIdentity?.id, "image") || verifiedIdentity?.id
+      : null;
+    if (verifiedName && uuidPattern.test(String(verifiedId || ""))) {
+      if (expectedId && String(expectedId).toLowerCase() !== String(verifiedId).toLowerCase()) {
+        throw flowError("FLOW_ASSET_ID_MISMATCH", `The verified Flow library identity for "${assetName}" does not match the expected media ID. No frame was selected.`, false, false);
+      }
+      expectedId = String(verifiedId).toLowerCase();
+    }
     if (!uuidPattern.test(String(selectedId || ""))) {
-      if (expectedId && uuidPattern.test(String(expectedId))) {
-        // Review round 1 S4 / round 2 S1: never stamp the expected id
-        // onto a selection that did not expose one. The mismatch check
-        // below would then compare the value with itself and pass
-        // vacuously, mis-reporting identity and breaking correlation.
-        // Fail closed like the Ingredients picker does.
+      if (verifiedName && expectedId && uuidPattern.test(String(expectedId)) && !selectedViaIdentity) {
+        // The Flow library scan (or the uploader's confirmed receipt) proved
+        // this exact title belongs to this persistent ID. Some picker builds
+        // omit IDs from option DOM, so the unique exact-title option can use
+        // that proof without weakening the normal fail-closed path.
+        selectedId = String(expectedId).toLowerCase();
+        verifiedIdentityUsed = true;
+      } else if (expectedId && uuidPattern.test(String(expectedId))) {
+        // Without the exact title+ID attestation above, never borrow the
+        // expected ID for a selection that did not expose one. Otherwise
+        // the mismatch check below would compare the value with itself.
         throw flowError("FLOW_ASSET_ID_MISMATCH", `Flow's exact frame option for "${assetName}" did not expose a verifiable media ID, so it cannot be proven to be the expected asset (${expectedId}). No frame was selected.`, false, false);
       } else {
         throw flowError("FLOW_ASSET_ID_UNAVAILABLE", `Flow's exact frame option for "${assetName}" did not expose a uniquely verifiable backend UUID. No frame was selected.`, false, false);
@@ -445,7 +590,7 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
     if (expectedId && selectedId.toLowerCase() !== String(expectedId).toLowerCase()) {
       throw flowError("FLOW_ASSET_ID_MISMATCH", `Flow's picker selected a different media ID than the completed upload for "${assetName}". No frame was selected.`, false, false);
     }
-    recordFramePickerDiagnostics("selection_identity_verified", list, { selectedMediaId: selectedId.toLowerCase(), expectedMediaId: expectedId || null, optionIdentityUsed: selectedViaIdentity });
+    recordFramePickerDiagnostics("selection_identity_verified", list, { selectedMediaId: selectedId.toLowerCase(), expectedMediaId: expectedId || null, optionIdentityUsed: selectedViaIdentity, verifiedIdentityFallbackUsed: verifiedIdentityUsed });
     option.click();
     recordFramePickerDiagnostics("option_clicked", list, { selectedMediaId: selectedId.toLowerCase(), optionIdentityUsed: selectedViaIdentity });
     const selectionDeadline = Math.min(Date.now() + 5000, deadline);
@@ -521,7 +666,13 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
         recordFramePickerDiagnostics("cleanup_check", currentList, { pickerState: "open", stateSource: "exact_frame_list" });
         return { open: true, list: currentList, source: "exact_frame_list" };
       }
-      const expanded = buttonForSlot()?.getAttribute("aria-expanded");
+      if (exactPickerObservedOpen && exactPickerSurface && exactPickerSurface !== currentList &&
+          exactPickerSurface.isConnected !== false && visible(exactPickerSurface)) {
+        recordFramePickerDiagnostics("cleanup_check", exactPickerSurface, { pickerState: "open", stateSource: "exact_frame_picker_surface" });
+        return { open: true, list: exactPickerSurface, source: "exact_frame_picker_surface" };
+      }
+      const currentOpener = buttonForSlot();
+      const expanded = currentOpener?.getAttribute("aria-expanded");
       if (expanded === "true") {
         recordFramePickerDiagnostics("cleanup_check", null, { pickerState: "open", stateSource: "frame_opener_aria_expanded" });
         return { open: true, list: null, source: "frame_opener_aria_expanded" };
@@ -529,6 +680,19 @@ async function chooseNativePickerAsset(assetName, slot, config = {}) {
       if (expanded === "false") {
         recordFramePickerDiagnostics("cleanup_check", null, { pickerState: "closed", stateSource: "frame_opener_aria_expanded" });
         return { open: false, list: null, source: "frame_opener_aria_expanded" };
+      }
+      // Flow replaces an empty-chip button with a generic image chip after a
+      // frame is selected. That chip has no aria-expanded state, so the exact
+      // picker surface disappearing together with a changed image-chip slot
+      // is the authoritative close signal. If the slot did not change, keep
+      // the state unknown rather than assuming the picker closed.
+      const currentClass = String(currentOpener?.className?.baseVal || currentOpener?.className || "");
+      const selectedFrameChip = /(?:^|\s)chip-container(?:\s|$)/.test(currentClass) &&
+        !/(?:^|\s)chip-container-disabled(?:\s|$)/.test(currentClass) &&
+        Boolean(currentOpener.querySelector?.("img,video"));
+      if (exactPickerObservedOpen && selectedFrameChip && slotSignature() !== beforeSlot) {
+        recordFramePickerDiagnostics("cleanup_check", null, { pickerState: "closed", stateSource: "exact_frame_picker_surface_disappeared" });
+        return { open: false, list: null, source: "exact_frame_picker_surface_disappeared" };
       }
       recordFramePickerDiagnostics("cleanup_check", null, { pickerState: "unknown", stateSource: "no_exact_list_or_expanded_state" });
       return { open: null, list: null, source: "no_exact_list_or_expanded_state" };

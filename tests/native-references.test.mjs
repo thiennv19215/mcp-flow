@@ -24,7 +24,8 @@ test('generation frame routing passes its explicit UUID through to the picker', 
   vm.runInContext(generationOperationsSource, context);
   const operations = new context.FlowGenerationOperations({});
   const uuid = 'b5d304ab-eeb8-4001-8110-86a225761c0f';
-  const frame = operations.frameValue({ assetName: 'fm-a6f6c32f9203-upload.png', expectedId: uuid });
+  const frame = operations.frameValue({ assetName: 'fm-a6f6c32f9203-upload.png', expectedId: uuid,
+    verifiedIdentity: { assetName: 'fm-a6f6c32f9203-upload.png', id: uuid } });
   assert.deepEqual(JSON.parse(JSON.stringify(frame)), { assetName: 'fm-a6f6c32f9203-upload.png', expectedId: uuid });
 
   let selected;
@@ -69,12 +70,14 @@ function localUploadGenerationHarness({ failPopupCleanup = false } = {}) {
       uploadStagedFlowMedia: async () => {
         events.push('upload-complete');
         uploadPopupOpen = true;
-        return { id: mediaId, uploaded: true };
+        return { id: mediaId, uploaded: true, uploadName: 'confirmed-upload.png' };
       },
-      chooseNativePickerAsset: async (_name, _slot, options) => {
+      chooseNativePickerAsset: async (name, _slot, options) => {
         events.push('attach-reference');
         assert.equal(uploadPopupOpen, false, 'reference selection waits until the upload popup is closed');
+        assert.equal(name, 'confirmed-upload.png', 'the picker uses the title Flow confirmed for the uploaded tile');
         assert.equal(options.expectedId, mediaId);
+        assert.deepEqual(JSON.parse(JSON.stringify(options.verifiedIdentity)), { assetName: 'confirmed-upload.png', id: mediaId });
         return { name: 'local-ref.png', kind: 'image', id: mediaId, confirmed: true };
       },
     },
@@ -920,13 +923,21 @@ test('first-frame selection is confirmed by the chosen asset appearing in the St
     parentElement: { parentElement: { querySelectorAll: selector => selector === 'img,video' && slotAsset ? [{ currentSrc: slotAsset, getAttribute: () => null }] : [] } },
     click: () => { openerClicks++; pickerOpen = !pickerOpen; },
   };
+  const selectedChip = {
+    name: 'Thành phần tạo hình ảnh',
+    className: 'chip-container',
+    getAttribute: name => name === 'aria-label' ? 'Thành phần tạo hình ảnh' : null,
+    parentElement: { parentElement: { querySelectorAll: selector => selector === 'img,video' && slotAsset ? [{ currentSrc: slotAsset, getAttribute: () => null }] : [] } },
+    querySelector: selector => /img|video/.test(selector) && slotAsset ? {} : null,
+    click: () => { openerClicks++; pickerOpen = !pickerOpen; },
+  };
   const selectedTile = { querySelectorAll: () => [], getAttribute: name => name === 'aria-label' ? 'MCP Test Mug' : null };
   const option = {
     name: 'MCP Test Mug',
     getAttribute: name => name === 'aria-selected' && slotAsset ? 'true' : null,
     querySelectorAll: () => [],
     querySelector: () => null,
-    click() { optionClicks++; slotAsset = 'https://flow.google.com/asb/asset-123?token=private-test#fragment'; pickerOpen = true; frameListPresent = false; },
+    click() { optionClicks++; slotAsset = 'https://flow.google.com/asb/asset-123?token=private-test#fragment'; pickerOpen = false; frameListPresent = false; },
   };
   const list = { getAttribute: name => name === 'role' ? 'listbox' : null, querySelectorAll: selector => selector === '[role="option"]' ? [option] : selector === 'flow-grid-tile-container' ? [selectedTile] : [], closest: () => null };
   const unrelatedList = { querySelectorAll: () => [], closest: () => null };
@@ -946,6 +957,7 @@ test('first-frame selection is confirmed by the chosen asset appearing in the St
     CustomEvent: class CustomEvent { constructor(type) { this.type = type; } }, mediaId: value => value === selectedTile ? `asb:${asbId}` : undefined,
     visible: el => el !== list || (pickerOpen && frameListPresent),
     accessibleName: el => el.name || '', flowButton: name => name === 'Start' ? opener : null,
+    flowFrameButton: slot => slot === 'start' ? (slotAsset ? selectedChip : opener) : null,
     flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
     KeyboardEvent: class KeyboardEvent {},
     wait: async ms => { clock += ms; },
@@ -958,13 +970,14 @@ test('first-frame selection is confirmed by the chosen asset appearing in the St
   assert.equal(result.id, mediaUuid, 'the selected thumbnail ASB identity is resolved to its exact Flow UUID');
   assert.equal(slotAsset, 'https://flow.google.com/asb/asset-123?token=private-test#fragment');
   assert.equal(pickerOpen, false, 'the frame picker is closed and verified after Flow confirms the selection');
-  assert.equal(openerClicks, 2, 'when Escape is ignored, cleanup toggles the exact Start opener once');
+  assert.equal(openerClicks, 1, 'Flow closes the picker while replacing the empty opener with an image chip');
   assert.deepEqual(context.document.querySelectorAll('[role="listbox"]'), [unrelatedList], 'the unrelated listbox remains visible and untouched');
   const frameDiagnostics = context.FlowComponents.inspectFramePickerDiagnostics();
   assert.equal(frameDiagnostics.phase, 'picker_closed');
   assert.equal(frameDiagnostics.selectedMediaId, mediaUuid);
   assert.equal(frameDiagnostics.confirmation, 'slot_signature_changed_and_exact_list_disappeared');
-  assert.equal(frameDiagnostics.stateSource, 'frame_opener_aria_expanded');
+  assert.equal(frameDiagnostics.stateSource, 'exact_frame_picker_surface_disappeared',
+    'the exact picker closing remains verifiable after Flow replaces the opener with a chip without aria-expanded');
   assert.equal(frameDiagnostics.exactFrameList.present, false, 'diagnostics distinguish the vanished exact frame list from the still-visible unrelated listbox');
   const exportedFrameDiagnostics = JSON.stringify(frameDiagnostics);
   assert.match(exportedFrameDiagnostics, /https:\/\/flow\.google\.com\/asb\/asset-123/);
@@ -989,17 +1002,20 @@ test('first-frame selection is confirmed by the chosen asset appearing in the St
   aliasEntries = [{ asb: asbId, mediaUuid, mediaType: 'image' }];
   omitExpandedState = true;
   const clicksBeforeAmbiguousAttempt = openerClicks;
-  await assert.rejects(context.chooseNativePickerAsset('MCP Test Mug', 'start'), error =>
-    error.code === 'FLOW_ASSET_PICKER_CLOSE_FAILED' && error.outcome_unknown === false &&
-      /no_exact_list_or_expanded_state/.test(error.message) && /selectedMediaId/.test(error.message));
+  const replacementOpenerResult = await context.chooseNativePickerAsset('MCP Test Mug', 'start');
+  assert.equal(replacementOpenerResult.confirmed, true,
+    'a changed image chip plus disappearance of the exact picker confirms closure without aria-expanded');
   assert.equal(optionClicks, 2, 'the option was selected once before the picker became unidentifiable');
-  assert.equal(openerClicks - clicksBeforeAmbiguousAttempt, 1, 'ambiguous cleanup does not toggle a control without visible expanded-state evidence');
+  assert.equal(openerClicks - clicksBeforeAmbiguousAttempt, 1, 'confirmed picker closure does not toggle the replacement image chip');
+  const replacementDiagnostics = context.FlowComponents.inspectFramePickerDiagnostics();
+  assert.equal(replacementDiagnostics.phase, 'picker_closed');
+  assert.equal(replacementDiagnostics.closeMethod, 'exact_frame_picker_surface_disappeared');
   assert.deepEqual(context.document.querySelectorAll('[role="listbox"]'), [unrelatedList], 'ambiguous cleanup never treats the unrelated listbox as the frame picker');
 });
 
-function framePickerIdentityHarness(optionSpecs) {
+function framePickerIdentityHarness(optionSpecs, { globalBusy = false, pickerNeverOpens = false, preMountedHidden = false, surfaceRole = 'listbox', selectedStart = false, selectedStartId = null, composerRootMissesControls = false } = {}) {
   let pickerOpen = false;
-  let slotAsset = '';
+  let slotAsset = selectedStart ? 'existing-frame' : '';
   let clock = 0;
   const clicks = [];
   const tileIds = new Map();
@@ -1021,7 +1037,7 @@ function framePickerIdentityHarness(optionSpecs) {
   });
   const list = {
     isConnected: true,
-    getAttribute: name => name === 'role' ? 'listbox' : null,
+    getAttribute: name => name === 'role' ? surfaceRole : null,
     querySelectorAll: selector => selector === '[role="option"]' ? options
       : selector === 'flow-grid-tile-container' ? tiles : [],
     closest: () => null,
@@ -1032,13 +1048,28 @@ function framePickerIdentityHarness(optionSpecs) {
     innerText: 'Start',
     parentElement: { parentElement: { querySelectorAll: selector => selector === 'img,video' && slotAsset
       ? [{ currentSrc: `https://flow.google.com/media/${slotAsset}`, getAttribute: () => null }] : [] } },
-    click() { pickerOpen = !pickerOpen; },
+    click() { if (!pickerNeverOpens) pickerOpen = !pickerOpen; },
+  };
+  const selectedChip = {
+    className: 'chip-container',
+    getAttribute: name => name === 'aria-label' ? 'Thành phần tạo hình ảnh' : null,
+    parentElement: { parentElement: { querySelectorAll: selector => selector === 'img,video' && slotAsset
+      ? [{ currentSrc: `https://flow.google.com/media/${slotAsset}`, getAttribute: () => null }] : [] } },
+    querySelector: selector => /img|video/.test(selector) && slotAsset ? {} : null,
+    click() { slotAsset = ''; },
   };
   const allTab = { name: 'All', getAttribute: name => name === 'aria-selected' ? 'true' : null };
+  const globalSpinner = { getAttribute: name => name === 'role' ? 'progressbar' : null, querySelectorAll: () => [] };
+  const composerRoot = { tagName: 'FLOW-BASE-PROMPT-BOX', className: '', querySelectorAll: () => [], shadowRoot: null };
   const document = {
     querySelectorAll(selector) {
-      if (selector === '[role="listbox"]') return pickerOpen ? [list] : [];
-      if (selector === '[role="progressbar"],[aria-busy="true"]') return [];
+      if (selector === '[role="listbox"],[role="dialog"],mat-dialog-container,flow-dialog') {
+        return (pickerOpen || preMountedHidden) ? [list] : [];
+      }
+      if (selector === '[role="dialog"]') return surfaceRole === 'dialog' && (pickerOpen || preMountedHidden) ? [list] : [];
+      if (selector === '[role="listbox"]') return surfaceRole === 'listbox' && (pickerOpen || preMountedHidden) ? [list] : [];
+      if (selector === '[role="dialog"],mat-dialog-container,flow-dialog') return surfaceRole === 'dialog' && (pickerOpen || preMountedHidden) ? [list] : [];
+      if (selector === '[role="progressbar"],[aria-busy="true"]') return globalBusy ? [globalSpinner] : [];
       if (selector === '[role="tab"]') return [allTab];
       return [];
     },
@@ -1047,19 +1078,48 @@ function framePickerIdentityHarness(optionSpecs) {
   };
   const context = vm.createContext({ document, location: { href: 'https://flow.google.com/project/test', pathname: '/project/test' },
     Date: class MockDate extends Date { static now() { return clock; } }, setTimeout, clearTimeout,
+    FlowUiDeadline: { makeDeadline: () => clock + 35_000, requireTime: () => {}, boundedWait: async ms => { clock += ms; } },
     window: { addEventListener() {}, removeEventListener() {}, dispatchEvent() {} },
     CustomEvent: class CustomEvent { constructor(type) { this.type = type; } },
-    mediaId: value => tileIds.get(value),
+    mediaId: value => tileIds.get(value) || (value === selectedChip ? selectedStartId : undefined),
     visible: el => el !== list || pickerOpen,
     accessibleName: el => el.name || '',
+    flowQuery: name => name === 'composerRoot' && composerRootMissesControls ? composerRoot : null,
     flowButton: name => name === 'Start' ? opener : null,
+    flowFrameButton: (slot, scope) => slot === 'start' &&
+      !(composerRootMissesControls && scope === composerRoot) ? (slotAsset ? selectedChip : opener) : null,
     flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
     KeyboardEvent: class KeyboardEvent {},
     wait: async ms => { clock += ms; },
   });
   vm.runInContext(source, context);
-  return { context, clicks };
+  return { context, clicks, slotAsset: () => slotAsset };
 }
+
+test('an already selected frame with the expected identity is reused without clearing it', async () => {
+  const mediaUuid = '22222222-2222-4222-8222-222222222222';
+  const { context, clicks, slotAsset } = framePickerIdentityHarness([
+    { label: 'still.png', id: mediaUuid },
+  ], { selectedStart: true, selectedStartId: mediaUuid });
+  const result = await context.chooseNativePickerAsset('still.png', 'start', { expectedId: mediaUuid });
+  assert.equal(result.confirmed, true);
+  assert.equal(result.reusedExisting, true);
+  assert.equal(result.id, mediaUuid);
+  assert.equal(slotAsset(), 'existing-frame');
+  assert.deepEqual(clicks, [], 'the library picker is not reopened for the already selected identity');
+});
+
+test('a different selected frame chip is cleared before the replacement picker opens', async () => {
+  const mediaUuid = '22222222-2222-4222-8222-222222222222';
+  const { context, clicks, slotAsset } = framePickerIdentityHarness([
+    { label: 'still.png', id: mediaUuid },
+  ], { selectedStart: true });
+  const result = await context.chooseNativePickerAsset('still.png', 'start');
+  assert.equal(result.confirmed, true);
+  assert.equal(result.id, mediaUuid);
+  assert.equal(slotAsset(), mediaUuid);
+  assert.deepEqual(clicks, [0], 'the frame selection comes from the exact picker option after clearing the old chip');
+});
 
 test('frame picker selects by expected media identity when the option title is unrelated', async () => {
   const mediaUuid = '22222222-2222-4222-8222-222222222222';
@@ -1071,6 +1131,64 @@ test('frame picker selects by expected media identity when the option title is u
   assert.equal(result.id, mediaUuid);
   assert.deepEqual(clicks, [0]);
   assert.equal(context.FlowNativeFramePicker.inspectDiagnostics().optionIdentityUsed, true);
+});
+
+test('frame picker falls back to the live document when Flow returns an incomplete composer root', async () => {
+  const mediaUuid = '22222222-2222-4222-8222-222222222222';
+  const { context, clicks } = framePickerIdentityHarness([
+    { label: 'still.png', id: mediaUuid },
+  ], { composerRootMissesControls: true });
+  const result = await context.chooseNativePickerAsset('still.png', 'start', { expectedId: mediaUuid });
+  assert.equal(result.confirmed, true);
+  assert.equal(result.id, mediaUuid);
+  assert.deepEqual(clicks, [0], 'the document fallback resolves the real frame slot without clicking Flow submit');
+});
+
+test('frame picker ignores a busy indicator outside its own picker surface', async () => {
+  const mediaUuid = '22222222-2222-4222-8222-222222222222';
+  const { context, clicks } = framePickerIdentityHarness([
+    { label: 'still.png', id: mediaUuid },
+  ], { globalBusy: true });
+  const result = await context.chooseNativePickerAsset('still.png', 'start', { expectedId: mediaUuid });
+  assert.equal(result.confirmed, true);
+  assert.equal(result.id, mediaUuid);
+  assert.deepEqual(clicks, [0]);
+});
+
+test('frame picker recognizes a hidden listbox already mounted before the opener click', async () => {
+  const mediaUuid = '22222222-2222-4222-8222-222222222222';
+  const { context, clicks } = framePickerIdentityHarness([
+    { label: 'still.png', id: mediaUuid },
+  ], { preMountedHidden: true });
+  const result = await context.chooseNativePickerAsset('still.png', 'start', { expectedId: mediaUuid });
+  assert.equal(result.confirmed, true);
+  assert.equal(result.id, mediaUuid);
+  assert.deepEqual(clicks, [0]);
+});
+
+test('frame picker recognizes a dialog surface when Flow does not use role=listbox', async () => {
+  const mediaUuid = '22222222-2222-4222-8222-222222222222';
+  const { context, clicks } = framePickerIdentityHarness([
+    { label: 'still.png', id: mediaUuid },
+  ], { surfaceRole: 'dialog' });
+  const result = await context.chooseNativePickerAsset('still.png', 'start', { expectedId: mediaUuid });
+  assert.equal(result.confirmed, true);
+  assert.equal(result.id, mediaUuid);
+  assert.deepEqual(clicks, [0]);
+});
+
+test('frame picker timeout includes bounded evidence when Flow does not expose a picker list', async () => {
+  const mediaUuid = '22222222-2222-4222-8222-222222222222';
+  const { context, clicks } = framePickerIdentityHarness([
+    { label: 'still.png', id: mediaUuid },
+  ], { pickerNeverOpens: true });
+  await assert.rejects(context.chooseNativePickerAsset('still.png', 'start', { expectedId: mediaUuid }), error => {
+    assert.equal(error.code, 'FLOW_ASSET_PICKER_LOADING');
+    assert.equal(error.diagnostics.framePicker.pickerOpenAttempts.length, 3);
+    assert.equal(error.diagnostics.framePicker.pickerOpenAttempts[2].visibleListboxCount, 0);
+    return true;
+  });
+  assert.deepEqual(clicks, [], 'nothing is selected while the picker list is missing');
 });
 
 test('reviewfix false-stamp: a title match that exposes no UUID fails closed instead of borrowing the expected id', async () => {
@@ -1088,6 +1206,46 @@ test('reviewfix false-stamp: a title match that exposes no UUID fails closed ins
   await assert.rejects(context.chooseNativePickerAsset('still.png', 'start', { expectedId: expectedUuid }), error =>
     error.code === 'FLOW_ASSET_ID_MISMATCH' && error.outcome_unknown === false);
   assert.deepEqual(clicks, [], 'nothing is clicked: the unverified title match is rejected before selection');
+});
+
+test('frame picker accepts an exact title without a DOM ID only when Flow library identity was verified', async () => {
+  const expectedUuid = '55555555-5555-4555-8555-555555555555';
+  const { context, clicks } = framePickerIdentityHarness([
+    { label: 'still.png', id: 'title:still.png' },
+  ]);
+  const result = await context.chooseNativePickerAsset('still.png', 'start', {
+    expectedId: expectedUuid,
+    verifiedIdentity: { assetName: 'still.png', id: expectedUuid },
+  });
+  assert.equal(result.confirmed, true);
+  assert.equal(result.id, expectedUuid);
+  assert.deepEqual(clicks, [0]);
+  assert.equal(context.FlowNativeFramePicker.inspectDiagnostics().verifiedIdentityFallbackUsed, true);
+});
+
+test('frame picker does not use verified identity proof for a different title', async () => {
+  const expectedUuid = '55555555-5555-4555-8555-555555555555';
+  const { context, clicks } = framePickerIdentityHarness([
+    { label: 'still.png', id: 'title:still.png' },
+  ]);
+  await assert.rejects(context.chooseNativePickerAsset('still.png', 'start', {
+    expectedId: expectedUuid,
+    verifiedIdentity: { assetName: 'another.png', id: expectedUuid },
+  }), error => error.code === 'FLOW_ASSET_ID_MISMATCH' && error.outcome_unknown === false);
+  assert.deepEqual(clicks, []);
+});
+
+test('frame picker does not replace an unresolved expected ID with the verified title identity', async () => {
+  const expectedAlias = 'asb:0123456789abcdefghij0123456789ab';
+  const verifiedUuid = '55555555-5555-4555-8555-555555555555';
+  const { context, clicks } = framePickerIdentityHarness([
+    { label: 'still.png', id: 'title:still.png' },
+  ]);
+  await assert.rejects(context.chooseNativePickerAsset('still.png', 'start', {
+    expectedId: expectedAlias,
+    verifiedIdentity: { assetName: 'still.png', id: verifiedUuid },
+  }), error => error.code === 'FLOW_ASSET_ID_MISMATCH' && error.outcome_unknown === false);
+  assert.deepEqual(clicks, []);
 });
 
 test('reviewfix picker confirm: an identity-selected option with a drifted title confirms by identity while the picker stays open', async () => {
@@ -1147,6 +1305,7 @@ test('reviewfix picker confirm: an identity-selected option with a drifted title
     visible: el => el !== list || pickerOpen,
     accessibleName: el => el.name || '',
     flowButton: name => name === 'Start' ? opener : null,
+    flowFrameButton: slot => slot === 'start' ? opener : null,
     flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
     KeyboardEvent: class KeyboardEvent {},
     wait: async ms => { clock += ms; },
@@ -1253,6 +1412,7 @@ test('an unconfirmed frame choice keeps its primary error when the exact picker 
     visible: value => value !== list || pickerOpen,
     accessibleName: value => value === opener ? 'Start' : value === allTab ? 'All' : value.getAttribute?.('aria-label') || '',
     flowButton: name => name === 'Start' ? opener : null,
+    flowFrameButton: slot => slot === 'start' ? opener : null,
     wait: async ms => { clock += ms; },
     flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
   });
@@ -2041,6 +2201,145 @@ test('Vietnamese localization: flowButton recognizes Vietnamese button synonyms 
   assert.equal(flowButton('Start generation'), buttons[1]);
   assert.equal(flowButton('Clear prompt'), buttons[2]);
   assert.equal(flowButton('Back'), buttons[3]);
+});
+
+test('frame slot button matching never mistakes the Vietnamese generation submit for Start', () => {
+  const domUtilsSource = readFileSync(new URL('../extension/src/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const frameGroup = { parentElement: null };
+  const startTrigger = { parentElement: frameGroup };
+  const endTrigger = { parentElement: frameGroup };
+  frameGroup.querySelectorAll = selector => selector === '.frame-trigger' ? [startTrigger, endTrigger] : [];
+  const button = (name, { disabled = false, aria = name, className = '', image = false, parentElement = null } = {}) => ({
+    innerText: name,
+    disabled,
+    className,
+    parentElement,
+    getAttribute: key => key === 'aria-label' ? aria : key === 'disabled' && disabled ? '' : null,
+    querySelector: selector => image && /img|video/.test(selector) ? {} : null,
+    getBoundingClientRect: () => ({ width: 120, height: 32 }),
+  });
+  const start = button('cancel', { aria: 'Thành phần tạo hình ảnh', className: 'chip-container', image: true, parentElement: startTrigger });
+  const swap = button('swap_horiz', { aria: 'Hoán đổi khung hình đầu tiên và cuối cùng', parentElement: frameGroup });
+  const end = button('Kết thúc', { parentElement: endTrigger });
+  const submit = button('arrow_forward', { aria: 'Bắt đầu tạo', disabled: true });
+  const buttons = [submit, start, swap, end];
+  const context = vm.createContext({ globalThis: {}, window: {},
+    document: { querySelectorAll: selector => selector.includes('button') ? buttons : [], getElementById: () => null },
+    location: { href: 'https://flow.google.com/project/test' },
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+    accessibleName: element => element.getAttribute('aria-label') || element.innerText,
+  });
+  vm.runInContext(domUtilsSource, context);
+
+  assert.equal(context.globalThis.flowButton('Start'), submit,
+    'the generic matcher reproduces the live DOM prefix collision');
+  assert.equal(context.globalThis.flowFrameButton('start'), start);
+  assert.equal(context.globalThis.flowFrameButton('end'), end);
+  assert.equal(context.globalThis.flowFrameButton('unknown'), null);
+
+  const noStartContext = vm.createContext({ globalThis: {}, window: {},
+    document: { querySelectorAll: selector => selector.includes('button') ? [submit, end] : [], getElementById: () => null },
+    location: { href: 'https://flow.google.com/project/test' },
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+    accessibleName: element => element.getAttribute('aria-label') || element.innerText,
+  });
+  vm.runInContext(domUtilsSource, noStartContext);
+  assert.equal(noStartContext.globalThis.flowFrameButton('start'), null,
+    'when the real Start slot is absent, a disabled submit is not treated as its replacement');
+});
+
+test('empty Vietnamese Start frame is resolved only from the live frame control group', () => {
+  const domUtilsSource = readFileSync(new URL('../extension/src/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const frameGroup = { className: 'ingredient-bar-container', parentElement: null };
+  const startTrigger = { className: 'frame-trigger', parentElement: frameGroup };
+  const endTrigger = { className: 'frame-trigger', parentElement: frameGroup };
+  frameGroup.querySelectorAll = selector => selector === '.frame-trigger' ? [startTrigger, endTrigger] : [];
+  const button = (name, { disabled = false, aria = null, className = '', parentElement = null } = {}) => ({
+    innerText: name,
+    textContent: name,
+    disabled,
+    className,
+    parentElement,
+    getAttribute: key => key === 'aria-label' ? aria : key === 'disabled' && disabled ? '' : null,
+    querySelector: () => null,
+    getBoundingClientRect: () => ({ width: 56, height: 56 }),
+  });
+  const start = button('Bắt đầu', { className: 'empty-chip', parentElement: startTrigger });
+  const swap = button('swap_horiz', { aria: 'Hoán đổi khung hình đầu tiên và cuối cùng', parentElement: frameGroup });
+  const end = button('Kết thúc', { className: 'empty-chip', parentElement: endTrigger });
+  const submit = button('arrow_forward', { aria: 'Bắt đầu tạo' });
+  const buttons = [submit, start, swap, end];
+  const context = vm.createContext({ globalThis: {}, window: {},
+    document: { querySelectorAll: selector => selector.includes('button') ? buttons : [], getElementById: () => null },
+    location: { href: 'https://flow.google.com/project/test' },
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+    accessibleName: element => element.getAttribute('aria-label') || element.innerText,
+  });
+  vm.runInContext(domUtilsSource, context);
+
+  assert.equal(context.globalThis.flowFrameButton('start'), start);
+  assert.equal(context.globalThis.flowFrameButton('end'), end);
+
+  const noFrameRow = vm.createContext({ globalThis: {}, window: {},
+    document: { querySelectorAll: selector => selector.includes('button') ? [submit] : [], getElementById: () => null },
+    location: { href: 'https://flow.google.com/project/test' },
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+    accessibleName: element => element.getAttribute('aria-label') || element.innerText,
+  });
+  vm.runInContext(domUtilsSource, noFrameRow);
+  assert.equal(noFrameRow.globalThis.flowFrameButton('start'), null,
+    'an enabled Bắt đầu tạo submit outside the frame group must not resolve as Start');
+});
+
+test('selected Start and End image chips stay resolvable in the live frame row', () => {
+  const domUtilsSource = readFileSync(new URL('../extension/src/content/shared/dom-utils.js', import.meta.url), 'utf8');
+  const createFrameContext = ({ start = 'selected', end = 'selected' } = {}) => {
+    const frameGroup = { className: 'ingredient-bar-container', parentElement: null };
+    const startTrigger = { className: 'frame-trigger', parentElement: frameGroup };
+    const endTrigger = { className: 'frame-trigger', parentElement: frameGroup };
+    frameGroup.querySelectorAll = selector => selector === '.frame-trigger' ? [startTrigger, endTrigger] : [];
+    const button = (name, { aria = null, className = '', image = false, parentElement = null } = {}) => ({
+      innerText: name,
+      textContent: name,
+      disabled: false,
+      className,
+      parentElement,
+      getAttribute: key => key === 'aria-label' ? aria : null,
+      querySelector: selector => image && /img|video/.test(selector) ? {} : null,
+      getBoundingClientRect: () => ({ width: 56, height: 56 }),
+    });
+    const startControl = start === 'selected'
+      ? button('cancel', { aria: 'Thành phần tạo hình ảnh', className: 'chip-container', image: true, parentElement: startTrigger })
+      : button('Bắt đầu', { className: 'empty-chip', parentElement: startTrigger });
+    const endControl = end === 'selected'
+      ? button('cancel', { aria: 'Thành phần tạo hình ảnh', className: 'chip-container', image: true, parentElement: endTrigger })
+      : end === 'disabled'
+        ? button('cancel', { aria: 'Thành phần tạo hình ảnh', className: 'chip-container chip-container-disabled', image: true, parentElement: endTrigger })
+        : button('Kết thúc', { className: 'empty-chip', parentElement: endTrigger });
+    const swap = button('swap_horiz', { aria: 'Hoán đổi khung hình đầu tiên và cuối cùng', parentElement: frameGroup });
+    const buttons = [startControl, swap, endControl];
+    const context = vm.createContext({ globalThis: {}, window: {},
+      document: { querySelectorAll: selector => selector.includes('button') ? buttons : [], getElementById: () => null },
+      location: { href: 'https://flow.google.com/project/test' },
+      getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+      accessibleName: element => element.getAttribute('aria-label') || element.innerText,
+    });
+    vm.runInContext(domUtilsSource, context);
+    return { context, startControl, endControl };
+  };
+
+  const selectedBoth = createFrameContext();
+  assert.equal(selectedBoth.context.globalThis.flowFrameButton('start'), selectedBoth.startControl);
+  assert.equal(selectedBoth.context.globalThis.flowFrameButton('end'), selectedBoth.endControl);
+
+  const emptyStart = createFrameContext({ start: 'empty', end: 'selected' });
+  assert.equal(emptyStart.context.globalThis.flowFrameButton('start'), emptyStart.startControl);
+  assert.equal(emptyStart.context.globalThis.flowFrameButton('end'), emptyStart.endControl);
+
+  const endRejected = createFrameContext({ start: 'empty', end: 'disabled' });
+  assert.equal(endRejected.context.globalThis.flowFrameButton('start'), endRejected.startControl);
+  assert.equal(endRejected.context.globalThis.flowFrameButton('end'), null,
+    'a Flow error/disabled chip is never treated as a valid End frame');
 });
 
 test('Vietnamese upload, confirmation, and character save labels resolve as exact aliases', () => {

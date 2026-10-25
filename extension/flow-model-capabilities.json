@@ -33,10 +33,6 @@
         "labels": { "vi": "Veo 3.1 Fast", "en": "Veo 3.1 Fast" }
       },
       {
-        "value": "veo 3.1 quality",
-        "labels": { "vi": "Veo 3.1 Quality", "en": "Veo 3.1 Quality" }
-      },
-      {
         "value": "omni 1.1 flash",
         "labels": { "vi": "Omni 1.1 Flash", "en": "Omni 1.1 Flash" }
       }

@@ -33,6 +33,7 @@
       this.dragOffset = { x: 0, y: 0 };
       this.timerInterval = null;
       this.domScanInterval = null;
+      this.actionFeedbackTimer = null;
 
       this.init();
     }
@@ -354,18 +355,22 @@
         /* Queue panel layout: compact summary + Auto Gen groups. */
         #flow-mcp-tracker-root {
           box-sizing: border-box;
-          width: min(500px, calc(100vw - 24px));
-          max-height: min(470px, calc(100vh - 32px));
+          width: min(410px, calc(100vw - 24px));
+          max-height: min(360px, calc(100vh - 32px));
           border-radius: 14px;
           background: linear-gradient(180deg, rgba(25, 29, 37, 0.94), rgba(11, 14, 20, 0.97));
         }
         #flow-mcp-tracker-root.expanded {
-          width: min(620px, calc(100vw - 24px));
-          max-height: min(640px, calc(100vh - 24px));
+          width: min(500px, calc(100vw - 24px));
+          max-height: min(440px, calc(100vh - 24px));
         }
+        #flow-mcp-tracker-root.collapsed .flow-ft-summary,
+        #flow-mcp-tracker-root.collapsed .flow-ft-progress-bar,
+        #flow-mcp-tracker-root.collapsed .flow-ft-feedback,
+        #flow-mcp-tracker-root.collapsed .flow-ft-content { display: none !important; }
         .flow-ft-header {
           gap: 8px;
-          padding: 7px 9px;
+          padding: 6px 8px;
           background: rgba(255, 255, 255, 0.045);
         }
         .flow-ft-icon {
@@ -399,17 +404,17 @@
         .flow-ft-summary {
           display: flex;
           align-items: center;
-          gap: 9px;
-          padding: 6px 12px 5px;
+          gap: 7px;
+          padding: 5px 8px 4px;
           color: #9ca3af;
-          font-size: 11px;
+          font-size: 10px;
           border-bottom: 1px solid rgba(255, 255, 255, 0.07);
           white-space: nowrap;
           overflow-x: auto;
         }
         .flow-ft-summary-total { color: #f3f4f6; font-family: ui-monospace, monospace; margin-right: 2px; }
         .flow-ft-summary-item { display: inline-flex; align-items: center; gap: 4px; }
-        .flow-ft-summary-item strong { font-size: 12px; color: #e5e7eb; }
+        .flow-ft-summary-item strong { font-size: 11px; color: #e5e7eb; }
         .flow-ft-summary-item.sent strong { color: #93c5fd; }
         .flow-ft-summary-item.rendering strong { color: #ccff00; }
         .flow-ft-summary-item.queued strong { color: #facc15; }
@@ -417,7 +422,7 @@
         .flow-ft-summary-item.failed strong { color: #fb7185; }
         .flow-ft-group {
           border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-          padding: 5px 0 4px;
+          padding: 4px 0 3px;
         }
         .flow-ft-group:last-child { border-bottom: 0; }
         .flow-ft-group-header {
@@ -455,15 +460,15 @@
         .flow-ft-task {
           display: flex;
           align-items: flex-start;
-          gap: 9px;
-          min-height: 39px;
-          padding: 3px 4px;
+          gap: 7px;
+          min-height: 32px;
+          padding: 2px 3px;
           border-radius: 8px;
         }
         .flow-ft-task:hover { background: rgba(255,255,255,0.05); }
         .flow-ft-task-index {
           width: 24px;
-          height: 38px;
+          height: 30px;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -476,7 +481,7 @@
         .flow-ft-task-line { display: flex; align-items: center; gap: 7px; min-width: 0; }
         .flow-ft-task-type { color: #c4d4e8; font-size: 11px; font-weight: 700; white-space: nowrap; }
         .flow-ft-task-prompt { min-width: 0; flex: 1 1 auto; color: #f3f4f6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-        .flow-ft-task-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; min-height: 16px; color: #8b95a5; font-size: 10px; }
+        .flow-ft-task-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 7px; min-width: 0; min-height: 14px; color: #8b95a5; font-size: 10px; }
         .flow-ft-task-error { min-width: 0; margin-top: 3px; color: #fda4af; font-size: 10px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
         .flow-ft-task-remove { flex: 0 0 auto; opacity: .7; }
         .flow-ft-task-remove:hover { opacity: 1; color: #fb7185; }
@@ -487,9 +492,39 @@
         .flow-ft-status-tag.failed { color: #fb7185; background: rgba(251,113,133,.14); }
         .flow-ft-status-tag.cancelled { color: #9ca3af; background: rgba(148,163,184,.14); }
         .flow-ft-status-tag.awaiting-user { color: #93c5fd; background: rgba(96,165,250,.14); }
-        .flow-ft-task .flow-ft-thumb { width: 28px; height: 28px; border-radius: 6px; }
-        .flow-ft-task .flow-ft-spinner { width: 15px; height: 15px; }
-        .flow-ft-task .flow-ft-action-btn { padding: 3px 7px; }
+        .flow-ft-content { max-height: 270px; padding: 5px 8px; gap: 4px; }
+        .flow-ft-task .flow-ft-thumb { width: 24px; height: 24px; border-radius: 5px; }
+        .flow-ft-task .flow-ft-spinner { width: 13px; height: 13px; }
+        .flow-ft-task .flow-ft-action-btn { padding: 2px 6px; }
+        .flow-ft-download-done {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 23px;
+          height: 23px;
+          color: #34d399;
+          font-size: 12px;
+          font-weight: 700;
+        }
+        .flow-ft-group-progress { margin-bottom: 4px; height: 2px; }
+        .flow-ft-mini-btn { width: 25px; height: 23px; }
+        .flow-ft-feedback {
+          padding: 4px 8px;
+          border-bottom: 1px solid rgba(255,255,255,.07);
+          color: #a7f3d0;
+          font-size: 10px;
+          line-height: 1.35;
+        }
+        .flow-ft-feedback[data-error="true"] { color: #fda4af; }
+        .flow-ft-feedback[hidden] { display: none !important; }
+        @media (max-width: 420px) {
+          #flow-mcp-tracker-root,
+          #flow-mcp-tracker-root.expanded { width: calc(100vw - 16px); }
+          .flow-ft-header { gap: 5px; padding: 5px 6px; }
+          .flow-ft-controls { gap: 3px; }
+          .flow-ft-btn { width: 22px; height: 22px; }
+          .flow-ft-queue-state { max-width: 76px; overflow: hidden; text-overflow: ellipsis; }
+        }
       `;
       (document.head || document.documentElement).appendChild(style);
     }
@@ -513,22 +548,22 @@
           <div class="flow-ft-auto">Auto</div>
           <div class="flow-ft-queue-state" id="flow-ft-queue-state">Sẵn sàng</div>
           <div class="flow-ft-controls">
-            <button class="flow-ft-btn" data-ft-action="expand" title="Mở rộng/thu gọn">
+            <button class="flow-ft-btn" data-ft-action="expand" title="Mở rộng" aria-label="Mở rộng" aria-expanded="false" type="button">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
             </button>
-            <button class="flow-ft-btn" data-ft-action="lock" title="Khóa vị trí">🔒</button>
-            <button class="flow-ft-btn" data-ft-action="clear" title="Xóa các task đã xong">🗑</button>
-            <button class="flow-ft-btn flow-ft-resume-btn" data-ft-action="resume" title="Chạy tiếp hàng chờ" style="display:none">▶</button>
-            <button class="flow-ft-btn" data-ft-action="pause" title="Tạm dừng hàng chờ">
+            <button class="flow-ft-btn" data-ft-action="lock" title="Khóa vị trí" aria-label="Khóa vị trí" aria-pressed="false" type="button">🔒</button>
+            <button class="flow-ft-btn" data-ft-action="clear" title="Xóa các task đã xong" aria-label="Xóa các task đã xong" type="button" style="display:none">🗑</button>
+            <button class="flow-ft-btn flow-ft-resume-btn" data-ft-action="resume" title="Chạy tiếp hàng chờ" aria-label="Chạy tiếp hàng chờ" type="button" style="display:none">▶</button>
+            <button class="flow-ft-btn" data-ft-action="pause" title="Tạm dừng hàng chờ" aria-label="Tạm dừng hàng chờ" type="button" style="display:none">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="4" width="5" height="16" rx="1"/><rect x="14" y="4" width="5" height="16" rx="1"/></svg>
             </button>
-            <button class="flow-ft-btn flow-ft-stop-btn" data-ft-action="stop" title="Dừng hàng chờ">
+            <button class="flow-ft-btn flow-ft-stop-btn" data-ft-action="stop" title="Dừng hàng chờ" aria-label="Dừng hàng chờ" type="button" style="display:none">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>
             </button>
-            <button class="flow-ft-btn" id="flow-ft-minimize-btn" title="Thu nhỏ">
+            <button class="flow-ft-btn" id="flow-ft-minimize-btn" title="Thu gọn nội dung" aria-label="Thu gọn nội dung" type="button">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>
             </button>
-            <button class="flow-ft-btn" id="flow-ft-close-btn" title="Đóng">
+            <button class="flow-ft-btn" id="flow-ft-close-btn" title="Ẩn tracker" aria-label="Ẩn tracker" type="button">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
           </div>
@@ -544,6 +579,7 @@
         <div class="flow-ft-progress-bar">
           <div class="flow-ft-progress-fill" id="flow-ft-progress-fill"></div>
         </div>
+        <div class="flow-ft-feedback" id="flow-ft-feedback" hidden role="status" aria-live="polite"></div>
         <div class="flow-ft-content" id="flow-ft-content">
           <div class="flow-ft-empty">Chưa có video hoặc ảnh nào đang xử lý.</div>
         </div>
@@ -584,18 +620,35 @@
     bindEvents() {
       // Minimize & Close buttons
       const minBtn = this.rootEl?.querySelector("#flow-ft-minimize-btn");
-      minBtn?.addEventListener("click", () => this.setMinimized(true));
+      minBtn?.addEventListener("click", () => {
+        const collapsed = this.rootEl?.classList.toggle("collapsed") === true;
+        if (!minBtn) return;
+        minBtn.title = collapsed ? "Mở nội dung" : "Thu gọn nội dung";
+        minBtn.setAttribute("aria-label", minBtn.title);
+        minBtn.setAttribute("aria-expanded", String(!collapsed));
+        minBtn.innerHTML = collapsed
+          ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/><line x1="12" y1="5" x2="12" y2="19"/></svg>'
+          : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+      });
 
       const closeBtn = this.rootEl?.querySelector("#flow-ft-close-btn");
       closeBtn?.addEventListener("click", () => this.setMinimized(true));
 
       this.rootEl?.querySelector('[data-ft-action="expand"]')?.addEventListener("click", () => {
-        this.rootEl?.classList.toggle("expanded");
+        const expanded = this.rootEl?.classList.toggle("expanded") === true;
+        const button = this.rootEl?.querySelector('[data-ft-action="expand"]');
+        button?.setAttribute("aria-expanded", String(expanded));
+        if (button) {
+          button.title = expanded ? "Thu nhỏ kích thước" : "Mở rộng";
+          button.setAttribute("aria-label", button.title);
+        }
       });
       this.rootEl?.querySelector('[data-ft-action="lock"]')?.addEventListener("click", event => {
         this.positionLocked = !this.positionLocked;
         event.currentTarget.classList.toggle("active", this.positionLocked);
         event.currentTarget.title = this.positionLocked ? "Mở khóa vị trí" : "Khóa vị trí";
+        event.currentTarget.setAttribute("aria-label", event.currentTarget.title);
+        event.currentTarget.setAttribute("aria-pressed", String(this.positionLocked));
       });
       this.rootEl?.querySelector('[data-ft-action="pause"]')?.addEventListener("click", () => {
         void this.sendQueueAction("flow-queue:pause");
@@ -637,10 +690,41 @@
     }
 
     async sendQueueAction(type, id) {
-      if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) return;
+      if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) {
+        this.showActionFeedback("Không kết nối được với hàng đợi Flow.", true);
+        return { ok: false };
+      }
       try {
-        await chrome.runtime.sendMessage({ type, ...(id ? { id } : {}) });
-      } catch (_) {}
+        const response = await chrome.runtime.sendMessage({ type, ...(id ? { id } : {}) });
+        if (!response?.ok) {
+          this.showActionFeedback(response?.error?.message || "Flow không thực hiện được thao tác này.", true);
+          return response || { ok: false };
+        }
+        const successMessages = {
+          "flow-queue:pause": "Đã tạm dừng hàng chờ.",
+          "flow-queue:resume": "Đã tiếp tục hàng chờ.",
+          "flow-queue:stop": "Đã dừng hàng chờ.",
+          "flow-queue:remove": "Đã cập nhật hàng chờ.",
+          "flow-queue:download": "Đã thêm kết quả vào hàng đợi tải xuống.",
+        };
+        this.showActionFeedback(successMessages[type] || "Đã cập nhật hàng chờ.");
+        return response;
+      } catch (error) {
+        this.showActionFeedback(error?.message || "Không thể gửi thao tác tới hàng đợi Flow.", true);
+        return { ok: false, error };
+      }
+    }
+
+    showActionFeedback(message, isError = false) {
+      const feedback = this.rootEl?.querySelector("#flow-ft-feedback");
+      if (!feedback) return;
+      feedback.textContent = String(message || "");
+      feedback.hidden = !message;
+      feedback.dataset.error = isError ? "true" : "false";
+      feedback.setAttribute("role", isError ? "alert" : "status");
+      feedback.setAttribute("aria-live", isError ? "assertive" : "polite");
+      if (this.actionFeedbackTimer) clearTimeout(this.actionFeedbackTimer);
+      if (message) this.actionFeedbackTimer = setTimeout(() => { feedback.hidden = true; }, 4500);
     }
 
     clearFinishedTasks() {
@@ -1007,8 +1091,12 @@
       }
       const resumeButton = this.rootEl?.querySelector('[data-ft-action="resume"]');
       const pauseButton = this.rootEl?.querySelector('[data-ft-action="pause"]');
+      const stopButton = this.rootEl?.querySelector('[data-ft-action="stop"]');
+      const clearButton = this.rootEl?.querySelector('[data-ft-action="clear"]');
       if (resumeButton) resumeButton.style.display = !isRunning && !waitingForUser && (pendingCount > 0 || isPaused) ? "inline-flex" : "none";
       if (pauseButton) pauseButton.style.display = isRunning ? "inline-flex" : "none";
+      if (stopButton) stopButton.style.display = isRunning || pendingCount > 0 || waitingForUser ? "inline-flex" : "none";
+      if (clearButton) clearButton.style.display = completedCount + failedCount + jobList.filter(job => job.status === "cancelled").length > 0 ? "inline-flex" : "none";
 
       // Update progress bar
       if (this.progressFillEl) {
@@ -1048,18 +1136,17 @@
         const groupPercent = groupJobs.length ? Math.round(groupDone * 100 / groupJobs.length) : 0;
         const groupId = String(groupJobs[0].batchId || groupJobs[0].metadata?.batchId || `job-${groupJobs[0].id}`);
         const tasks = groupJobs.map((job, index) => this.renderTask(job, index + 1)).join("");
+        const groupHasDownloads = groupJobs.length > 1 && groupJobs.some(job => this.canDownloadGeneratedMedia(job) || (job.status === "completed" && job.mediaUrl));
+        const groupActions = groupJobs.length > 1
+          ? `${groupHasDownloads ? '<button class="flow-ft-mini-btn" data-ft-action="download-group" title="Tải các kết quả trong nhóm" aria-label="Tải các kết quả trong nhóm" type="button">↓</button>' : ""}<button class="flow-ft-mini-btn danger" data-ft-action="remove-group" data-group-job-id="${escapeHtml(groupJobs[0].id)}" title="Xóa nhóm" aria-label="Xóa nhóm" type="button">🗑</button>`
+          : "";
         return `
           <section class="flow-ft-group" data-group-id="${escapeHtml(groupId)}">
             <div class="flow-ft-group-header">
               <span class="flow-ft-group-dot"></span>
               <span class="flow-ft-group-name">Auto Gen</span>
               <span class="flow-ft-group-time">${groupElapsed}</span>
-              <div class="flow-ft-group-actions">
-                <button class="flow-ft-mini-btn" data-ft-action="pause-group" title="Tạm dừng">Ⅱ</button>
-                <button class="flow-ft-mini-btn" data-ft-action="stop-group" title="Dừng">■</button>
-                <button class="flow-ft-mini-btn" data-ft-action="download-group" title="Tải kết quả">↓</button>
-                <button class="flow-ft-mini-btn danger" data-ft-action="remove-group" data-group-job-id="${escapeHtml(groupJobs[0].id)}" title="Xóa nhóm">🗑</button>
-              </div>
+              ${groupActions ? `<div class="flow-ft-group-actions">${groupActions}</div>` : ""}
             </div>
             <div class="flow-ft-group-progress"><span style="width:${groupPercent}%"></span></div>
             ${tasks}
@@ -1070,16 +1157,10 @@
       this.contentEl.querySelectorAll("[data-ft-action='remove-group']").forEach(button => {
         button.addEventListener("click", () => {
           const group = button.closest(".flow-ft-group");
-          const ids = [...(group?.querySelectorAll("[data-task-id]") || [])].map(item => item.dataset.taskId).filter(Boolean);
+          const ids = [...new Set([...(group?.querySelectorAll("[data-task-id]") || [])].map(item => item.dataset.taskId).filter(Boolean))];
           if (!ids.length && button.dataset.groupJobId) ids.push(button.dataset.groupJobId);
           for (const id of ids) void this.sendQueueAction("flow-queue:remove", id);
         });
-      });
-      this.contentEl.querySelectorAll("[data-ft-action='pause-group']").forEach(button => {
-        button.addEventListener("click", () => void this.sendQueueAction("flow-queue:pause"));
-      });
-      this.contentEl.querySelectorAll("[data-ft-action='stop-group']").forEach(button => {
-        button.addEventListener("click", () => void this.sendQueueAction("flow-queue:stop"));
       });
       this.contentEl.querySelectorAll("[data-ft-action='download-group']").forEach(button => {
         button.addEventListener("click", () => {
@@ -1089,8 +1170,8 @@
             for (const taskButton of pendingDownloads) void this.sendQueueAction("flow-queue:download", taskButton.dataset.taskId);
             return;
           }
-          const media = group?.querySelector("a.flow-ft-action-btn");
-          media?.click();
+          const mediaLinks = [...(group?.querySelectorAll("a.flow-ft-action-btn") || [])];
+          for (const media of mediaLinks) media.click();
         });
       });
       this.contentEl.querySelectorAll("[data-ft-action='download-task']").forEach(button => {
@@ -1125,16 +1206,10 @@
       if (job.thumbnail) thumbContent = `<img src="${escapeHtml(job.thumbnail)}" alt="Thumbnail">`;
       let actionHtml = "";
       const download = Array.isArray(job.result?.result?.browserDownloads) ? job.result.result.browserDownloads[0] : Array.isArray(job.result?.browserDownloads) ? job.result.browserDownloads[0] : null;
-      const checkpoint = job.metadata?.generationResultCheckpoint?.media;
-      const resultMedia = job.result?.result?.result?.media || job.result?.result?.media || job.result?.media;
-      const generatedMedia = Array.isArray(checkpoint) && checkpoint.length ? checkpoint : resultMedia;
-      const downloadState = String(job.progress?.download?.state || "skipped").toLowerCase();
-      const canDownload = job.operation !== "flow.queue.download-generated" && (isCompleted || isFailed) && Array.isArray(generatedMedia) && generatedMedia.some(item =>
-        item?.id && (item?.title || item?.name) && ["image", "video"].includes(String(item?.kind || item?.type || "").toLowerCase()),
-      ) && !["queued", "downloading", "completed"].includes(downloadState);
-      if (canDownload) actionHtml = `<button class="flow-ft-action-btn" data-ft-action="download-task" data-task-id="${escapeHtml(job.id)}" title="Tải media đã tạo">↓</button>`;
+      const canDownload = this.canDownloadGeneratedMedia(job);
+      if (canDownload) actionHtml = `<button class="flow-ft-action-btn" data-ft-action="download-task" data-task-id="${escapeHtml(job.id)}" title="Tải lại media đã tạo" aria-label="Tải lại media đã tạo" type="button">↓</button>`;
       else if (isCompleted && job.mediaUrl) actionHtml = `<a class="flow-ft-action-btn" href="${escapeHtml(job.mediaUrl)}" target="_blank" download>↓</a>`;
-      else if (download?.filename) actionHtml = `<span class="flow-ft-action-btn" title="${escapeHtml(download.filename)}">↓</span>`;
+      else if (download?.filename) actionHtml = `<span class="flow-ft-download-done" title="Đã tải xuống: ${escapeHtml(download.filename)}" role="img" aria-label="Đã tải xuống">✓</span>`;
       return `
         <div class="flow-ft-task" data-job-id="${escapeHtml(job.id)}">
           <div class="flow-ft-task-index">#${index}</div>
@@ -1155,6 +1230,17 @@
           <button class="flow-ft-mini-btn flow-ft-task-remove danger" data-ft-action="remove-task" data-task-id="${escapeHtml(job.id)}" title="Xóa task">🗑</button>
         </div>
       `;
+    }
+
+    canDownloadGeneratedMedia(job) {
+      if (!job || !["completed", "failed"].includes(job.status) || job.operation === "flow.queue.download-generated") return false;
+      const checkpoint = job.metadata?.generationResultCheckpoint?.media;
+      const resultMedia = job.result?.result?.result?.media || job.result?.result?.media || job.result?.media;
+      const generatedMedia = Array.isArray(checkpoint) && checkpoint.length ? checkpoint : resultMedia;
+      const downloadState = String(job.progress?.download?.state || "skipped").toLowerCase();
+      return Array.isArray(generatedMedia) && generatedMedia.some(item =>
+        item?.id && (item?.title || item?.name) && ["image", "video"].includes(String(item?.kind || item?.type || "").toLowerCase()),
+      ) && !["queued", "downloading"].includes(downloadState);
     }
   }
 

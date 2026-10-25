@@ -575,6 +575,70 @@ test('selectAndConfirmMode throws FLOW_FRAMES_MODE_UNAVAILABLE when frames contr
   );
 });
 
+test('selectAndConfirmMode waits for Start and End when Frames mode is already selected', async () => {
+  let clock = 1_000;
+  class MockDate extends Date { static now() { return clock; } }
+  const frames = {
+    label: 'Khung hình',
+    visible: true,
+    getAttribute: name => name === 'aria-checked' ? 'true' : null,
+    closest: () => null,
+    querySelector: () => null,
+  };
+  const context = vm.createContext({
+    Date: MockDate, Map, Promise, Set, Object, Math, String, Number, Boolean, Array, Error, console,
+    document: { querySelectorAll: () => [frames], querySelector: () => null },
+    visible: element => element.visible !== false,
+    accessibleName: element => element.label || '',
+    normalizeFlowUiText: value => String(value || '').toLowerCase().trim(),
+    wait: async ms => { clock += ms; },
+    flowFrameButton: () => clock >= 1_200 ? {} : null,
+    flowError: (code, message) => Object.assign(new Error(message), { code }),
+  });
+  vm.runInContext(settingsSource, context);
+  await context.FlowSettings.selectAndConfirmMode('Frames', true, { deadline: 1_400 });
+  assert.equal(clock, 1_200, 'settings preparation waits for the delayed native Start/End controls');
+});
+
+test('selectAndConfirmMode attaches the live frame-control snapshot when Start or End is missing', async () => {
+  let clock = 1_000;
+  class MockDate extends Date { static now() { return clock; } }
+  const frames = {
+    label: 'Khung hình',
+    visible: true,
+    getAttribute: name => name === 'aria-checked' ? 'true' : null,
+    closest: () => null,
+    querySelector: () => null,
+  };
+  const frameControls = {
+    resolverAvailable: true,
+    startResolved: false,
+    endResolved: false,
+    frameTriggerCount: 0,
+    frameGroups: [],
+  };
+  const context = vm.createContext({
+    Date: MockDate, Map, Promise, Set, Object, Math, String, Number, Boolean, Array, Error, console,
+    document: { querySelectorAll: () => [frames], querySelector: () => null },
+    visible: element => element.visible !== false,
+    accessibleName: element => element.label || '',
+    normalizeFlowUiText: value => String(value || '').toLowerCase().trim(),
+    wait: async ms => { clock += ms; },
+    flowFrameButton: () => null,
+    inspectFlowFrameControls: () => frameControls,
+    flowError: (code, message) => Object.assign(new Error(message), { code }),
+  });
+  vm.runInContext(settingsSource, context);
+  await assert.rejects(
+    context.FlowSettings.selectAndConfirmMode('Frames', true, { deadline: clock + 250 }),
+    error => {
+      assert.equal(error.code, 'FLOW_FRAMES_CONTROLS_UNAVAILABLE');
+      assert.deepEqual(JSON.parse(JSON.stringify(error.diagnostics.frameControls)), frameControls);
+      return true;
+    },
+  );
+});
+
 test('exactModeControl resolves Radix trigger suffix for VIDEO_FRAMES and VIDEO_REFERENCES', () => {
   const framesBtn = {
     id: 'radix-vue-trigger-VIDEO_FRAMES',

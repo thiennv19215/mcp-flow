@@ -75,6 +75,7 @@ function fallbackHarness({ loadOnScan = true } = {}) {
     visible: el => el !== list || pickerOpen,
     accessibleName: el => el.name || '',
     flowButton: name => name === 'Start' ? opener : null,
+    flowFrameButton: slot => slot === 'start' ? opener : null,
     flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
     KeyboardEvent: class KeyboardEvent {},
     wait: async ms => { clock += ms; },

@@ -1046,7 +1046,7 @@
     let frames = findFrames();
     if (!frames) throw root.flowError("FLOW_FRAMES_MODE_UNAVAILABLE", "Flow does not show a Frames mode control after local frame upload. Nothing was submitted.", true, false);
     if (!nativeRadioSelected(frames) && frames.getAttribute("aria-selected") !== "true") frames.click();
-    const hasFrameControls = () => Boolean(root.flowButton?.("Start") && root.flowButton?.("End"));
+    const hasFrameControls = () => Boolean(root.flowFrameButton?.("start") && root.flowFrameButton?.("end"));
     const deadline = Math.min(Date.now() + 5000, Number.isFinite(options.deadline) ? options.deadline : Infinity);
     let confirmed = false;
     while (Date.now() < deadline) {
@@ -1060,8 +1060,10 @@
     await closeFlowSettings(options);
     const controlsDeadline = Math.min(Date.now() + 4000, Number.isFinite(options.deadline) ? options.deadline : Infinity);
     while (Date.now() < controlsDeadline && !hasFrameControls()) await waitPreparation(options, 100, "waiting for Flow frame controls after upload");
-    if (!root.flowButton?.("Start") || !root.flowButton?.("End")) {
-      throw root.flowError("FLOW_FRAMES_CONTROLS_UNAVAILABLE", "Flow selected Frames but did not restore both Start and End frame controls. Nothing was submitted.", true, false);
+    if (!root.flowFrameButton?.("start") || !root.flowFrameButton?.("end")) {
+      const error = root.flowError("FLOW_FRAMES_CONTROLS_UNAVAILABLE", "Flow selected Frames but did not restore both Start and End frame controls. Nothing was submitted.", true, false);
+      error.diagnostics = { frameControls: root.inspectFlowFrameControls?.() || null };
+      throw error;
     }
   }
 

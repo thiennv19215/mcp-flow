@@ -334,6 +334,155 @@ function flowButton(name, root = document) {
   return null;
 }
 
+// Frame-slot controls must not use flowButton's fuzzy action synonyms. In
+// Vietnamese, "bắt đầu" is also a prefix of the disabled "Bắt đầu tạo"
+// submit button, so a generic Start lookup can click the wrong control and
+// leave the native picker waiting for a dialog that never opens.
+function flowFrameButton(slot, root = document) {
+  const normalizedSlot = String(slot || "").trim().toLowerCase();
+  if (normalizedSlot !== "start" && normalizedSlot !== "end") return null;
+  const candidates = [...root.querySelectorAll('button,[role="button"]')];
+  const aliases = aliasesForFrameSlot(normalizedSlot);
+  const blocked = /(?:start generation|bắt đầu tạo|generate|create video|tạo video|tạo ảnh|tạo hình ảnh)/i;
+  const fold = value => normalizeFlowUiText(String(value || "").replace(/\s+/g, " ").trim());
+  const isDisabled = element => element.disabled === true ||
+    element.getAttribute?.("disabled") != null ||
+    String(element.getAttribute?.("aria-disabled") || "").toLowerCase() === "true" ||
+    String(element.getAttribute?.("aria-busy") || "").toLowerCase() === "true";
+  const labelValues = element => [
+    accessibleName(element),
+    element.getAttribute?.("aria-label"),
+    element.getAttribute?.("title"),
+    element.innerText,
+    element.textContent,
+  ].filter(Boolean).map(value => String(value).replace(/\s+/g, " ").trim());
+  const matches = (element, allowPrefix, matchAliases = aliases) => {
+    if (isDisabled(element) || !visible(element)) return false;
+    const labels = labelValues(element);
+    if (!labels.length || labels.some(label => blocked.test(label))) return false;
+    return labels.some(label => {
+      const value = fold(label);
+      return matchAliases.some(alias => {
+        const wanted = fold(alias);
+        const unambiguousPrefix = wanted.includes(" ") && wanted !== fold("kết thúc");
+        return value === wanted || (allowPrefix && unambiguousPrefix && value.startsWith(`${wanted} `));
+      });
+    });
+  };
+  const exact = [...new Set(candidates.filter(element => matches(element, false)))];
+  if (exact.length === 1) return exact[0];
+  if (exact.length > 1) return null;
+  const prefixed = [...new Set(candidates.filter(element => matches(element, true)))];
+  if (prefixed.length === 1) return prefixed[0];
+  if (prefixed.length > 1) return null;
+
+  // Flow renders empty slots with Start/End labels, but selected slots as
+  // generic image chips. Resolve either state by the two frame-trigger groups
+  // around Flow's swap control. The plain "Bắt đầu" label is only trusted in
+  // that row, so it cannot collide with the generation submit button.
+  const frameSwap = candidates.filter(element => !isDisabled(element) && visible(element) &&
+    labelValues(element).some(label => /(?:swap|hoan doi).*(?:first|dau tien).*(?:last|cuoi)|(?:first|dau tien).*(?:last|cuoi).*(?:frame|khung)/i.test(fold(label))));
+  if (frameSwap.length !== 1) return null;
+  const isWithin = (element, ancestor) => {
+    for (let current = element; current; current = current.parentElement) if (current === ancestor) return true;
+    return false;
+  };
+  for (let ancestor = frameSwap[0].parentElement, depth = 0;
+    ancestor && ancestor !== root && depth < 4;
+    ancestor = ancestor.parentElement, depth++) {
+    if (frameSwap[0].parentElement !== ancestor) continue;
+    const frameTriggers = [...(ancestor.querySelectorAll?.(".frame-trigger") || [])];
+    if (frameTriggers.length !== 2) continue;
+    const targetTrigger = frameTriggers[normalizedSlot === "start" ? 0 : 1];
+    const emptyAliases = normalizedSlot === "start" ? ["start", "bắt đầu"] : ["end", "kết thúc"];
+    const slotControls = candidates.filter(element => {
+      if (element === frameSwap[0] || isDisabled(element) || !visible(element) || !isWithin(element, targetTrigger)) return false;
+      const className = String(element.className || "");
+      const emptySlot = /(?:^|\s)empty-chip(?:\s|$)/.test(className) && matches(element, false, emptyAliases);
+      const selectedImage = /(?:^|\s)chip-container(?:\s|$)/.test(className) &&
+        !/(?:^|\s)chip-container-disabled(?:\s|$)/.test(className) &&
+        Boolean(element.querySelector?.("img,video"));
+      return emptySlot || selectedImage;
+    });
+    if (slotControls.length === 1) return slotControls[0];
+    if (slotControls.length > 1) return null;
+  }
+  return null;
+}
+
+function inspectFlowFrameControls() {
+  const queryAll = selector => {
+    const found = [];
+    const pending = [document];
+    const visited = new Set();
+    while (pending.length) {
+      const scope = pending.shift();
+      if (!scope || visited.has(scope)) continue;
+      visited.add(scope);
+      try { found.push(...scope.querySelectorAll(selector)); } catch {}
+      try {
+        for (const element of scope.querySelectorAll("*")) {
+          if (element.shadowRoot && !visited.has(element.shadowRoot)) pending.push(element.shadowRoot);
+        }
+      } catch {}
+    }
+    return [...new Set(found)];
+  };
+  const triggers = queryAll(".frame-trigger").filter(element => {
+    try { return visible(element); } catch { return false; }
+  });
+  const groups = [...new Set(triggers.map(trigger => trigger.parentElement).filter(Boolean))];
+  const label = element => String(accessibleName(element) || element?.getAttribute?.("aria-label") || element?.innerText || element?.textContent || "")
+    .replace(/\s+/g, " ").trim().slice(0, 80);
+  const resolve = slot => {
+    try { return Boolean(flowFrameButton(slot)); } catch { return false; }
+  };
+  return {
+    buildRevision: typeof globalThis.__flowMcpExtensionBuildRevision === "string" && /^[a-f0-9]{64}$/i.test(globalThis.__flowMcpExtensionBuildRevision)
+      ? globalThis.__flowMcpExtensionBuildRevision.slice(0, 12)
+      : null,
+    resolverAvailable: typeof globalThis.flowFrameButton === "function",
+    startResolved: resolve("start"),
+    endResolved: resolve("end"),
+    frameTriggerCount: triggers.length,
+    frameGroups: groups.slice(0, 4).map(group => {
+      const groupTriggers = triggers.filter(trigger => trigger.parentElement === group);
+      return {
+        className: String(group.className?.baseVal || group.className || "").slice(0, 100),
+        triggerCount: groupTriggers.length,
+        controls: groupTriggers.map(trigger => queryAllWithin(trigger, "button,[role='button']")
+          .filter(element => { try { return visible(element); } catch { return false; } })
+          .map(element => ({ label: label(element), className: String(element.className?.baseVal || element.className || "").slice(0, 100) }))).slice(0, 4),
+      };
+    }),
+  };
+}
+
+function queryAllWithin(scope, selector) {
+  if (!scope?.querySelectorAll) return [];
+  const found = [];
+  const pending = [scope];
+  const visited = new Set();
+  while (pending.length) {
+    const current = pending.shift();
+    if (!current || visited.has(current)) continue;
+    visited.add(current);
+    try { found.push(...current.querySelectorAll(selector)); } catch {}
+    try {
+      for (const element of current.querySelectorAll("*")) {
+        if (element.shadowRoot && !visited.has(element.shadowRoot)) pending.push(element.shadowRoot);
+      }
+    } catch {}
+  }
+  return [...new Set(found)];
+}
+
+function aliasesForFrameSlot(slot) {
+  return slot === "end"
+    ? ["end", "end frame", "add end frame", "select end frame", "replace end frame", "khung kết thúc", "khung cuối", "khung hình kết thúc", "thêm khung kết thúc", "kết thúc"]
+    : ["start", "start frame", "add start frame", "select start frame", "replace start frame", "khung bắt đầu", "khung đầu", "khung hình bắt đầu", "thêm khung bắt đầu"];
+}
+
 async function waitForEnabledFlowButton(name, timeoutMs = 8000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -1160,6 +1309,8 @@ if (typeof globalThis !== "undefined") {
   globalThis.flowError = flowError;
   globalThis.classifyFlowError = classifyFlowError;
   globalThis.flowButton = flowButton;
+  globalThis.flowFrameButton = flowFrameButton;
+  globalThis.inspectFlowFrameControls = inspectFlowFrameControls;
   globalThis.waitForEnabledFlowButton = waitForEnabledFlowButton;
   globalThis.isFlowProjectNavigationControl = isFlowProjectNavigationControl;
   globalThis.normalizeAspectRatio = normalizeAspectRatio;

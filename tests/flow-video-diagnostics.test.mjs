@@ -436,6 +436,7 @@ test('dispatch wait: a missing observer health still yields the default diagnost
 
 function pickerHarness({ optionNames = ['Alpha Asset', 'Beta Asset'], withOpener = true } = {}) {
   let pickerOpen = false;
+  let unsafeSubmitClicks = 0;
   const container = { querySelectorAll: () => [] };
   const opener = {
     innerText: '',
@@ -463,12 +464,14 @@ function pickerHarness({ optionNames = ['Alpha Asset', 'Beta Asset'], withOpener
     getElementById: () => null,
     dispatchEvent: () => { pickerOpen = false; },
   };
+  const submitButton = { innerText: 'Bắt đầu tạo', disabled: true, click: () => { unsafeSubmitClicks++; } };
   const sandbox = {
     document: documentFake,
     location: { href: 'https://flow.google.com/project/proj-1', pathname: '/project/proj-1' },
     visible: el => el !== list || pickerOpen,
     accessibleName: el => el?.name || '',
-    flowButton: label => (label === 'Start' && withOpener ? opener : null),
+    flowButton: label => label === 'Start' ? (withOpener ? opener : submitButton) : null,
+    flowFrameButton: slot => (slot === 'start' && withOpener ? opener : null),
     flowError: (code, message, retryable, outcome_unknown) =>
       Object.assign(new Error(message), { code, retryable, outcome_unknown }),
     KeyboardEvent: class KeyboardEvent { constructor(type, init) { this.type = type; Object.assign(this, init); } },
@@ -481,7 +484,7 @@ function pickerHarness({ optionNames = ['Alpha Asset', 'Beta Asset'], withOpener
   };
   const context = vm.createContext(sandbox);
   vm.runInContext(pickerSource, context);
-  return { context };
+  return { context, unsafeSubmitClicks: () => unsafeSubmitClicks };
 }
 
 test('frame picker: an in-try failure rethrows with the recorded picker diagnostics attached', async () => {
@@ -509,17 +512,20 @@ test('frame picker: an in-try failure rethrows with the recorded picker diagnost
   assert.equal(context.FlowNativeFramePicker.inspectDiagnostics().phase, 'picker_closed');
 });
 
-test('frame picker: a failure before the guarded section keeps no fabricated diagnostics', async () => {
-  const { context } = pickerHarness({ withOpener: false });
+test('frame picker: missing frame controls include a live snapshot and never click submit', async () => {
+  const { context, unsafeSubmitClicks } = pickerHarness({ withOpener: false });
   await assert.rejects(
     context.chooseNativePickerAsset('Wanted Asset', 'start', { deadline: Date.now() + 35_000 }),
     error => {
       assert.equal(error.code, 'FLOW_FRAMES_CONTROLS_UNAVAILABLE');
-      assert.equal(error.diagnostics, undefined,
-        'errors thrown before the picker try block are not retro-fitted with diagnostics');
+      assert.equal(error.diagnostics?.frameControls?.flowFrameButtonAvailable, true,
+        'the snapshot records whether the dedicated frame-control resolver was loaded');
+      assert.equal(error.diagnostics?.frameControls?.frameTriggerCount, 0,
+        'the snapshot reports the live absence of frame triggers');
       return true;
     },
   );
+  assert.equal(unsafeSubmitClicks(), 0, 'the fuzzy generic matcher is never clicked as a frame opener');
 });
 
 // ---------------------------------------------------------------------------
@@ -661,6 +667,31 @@ test('panel: frame picker diagnostics render phase, asset and the first option l
   for (let i = 1; i <= 6; i++) assert.ok(text.includes(`Option ${i}`), `option label ${i} is shown`);
   assert.ok(!text.includes('Option 7'), 'option labels are capped at ~6');
   assert.ok(!text.includes('Option 8'), 'option labels are capped at ~6');
+});
+
+test('panel: missing frame controls show resolver and live Start/End DOM counts', () => {
+  const itemsElement = renderPanelItems([{
+    id: 'job-frame-controls-missing',
+    label: 'frames job',
+    status: 'failed',
+    errorCode: 'FLOW_FRAMES_CONTROLS_UNAVAILABLE',
+    error: 'Flow did not show both frame controls.',
+    diagnostics: {
+      frameControls: {
+        buildRevision: 'd28eecc66272',
+        resolverAvailable: true,
+        startResolved: true,
+        endResolved: false,
+        frameTriggerCount: 2,
+        frameGroups: [
+          { className: 'ingredient-bar-container', triggerCount: 2, controls: [] },
+        ],
+      },
+    },
+  }]);
+  const text = diagnosticsText(itemsElement);
+  assert.match(text, /Frame controls: build d28eecc66272 · resolver available · Start found · End missing · 2 triggers · groups 2/);
+  assert.doesNotMatch(text, /ingredient-bar-container/, 'DOM class details are not shown to the user');
 });
 
 test('panel: a job without diagnostics renders no diagnostics block', () => {

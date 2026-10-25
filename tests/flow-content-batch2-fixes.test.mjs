@@ -714,6 +714,7 @@ function slotAttachHarness({ applyToSlot }) {
     mediaId: () => '22222222-2222-4222-8222-222222222222',
     accessibleName: (el) => el.name || el.getAttribute?.('aria-label') || '',
     flowButton: (name) => (name === 'Start' ? slotButton : null),
+    flowFrameButton: (slot) => (slot === 'start' ? slotButton : null),
     wait: async (ms) => { tick += ms; },
     flowError: (code, message, retryable, outcome_unknown) => Object.assign(new Error(message), { code, retryable, outcome_unknown }),
   });

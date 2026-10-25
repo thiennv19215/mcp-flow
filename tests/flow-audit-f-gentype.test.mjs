@@ -67,7 +67,7 @@ function runRestore(job) {
   };
   const imgBtn = makeElement(); imgBtn.dataset.value = 'image';
   const vidBtn = makeElement(); vidBtn.dataset.value = 'video';
-  const calls = { feedback: [], voice: [], renderCards: [] };
+  const calls = { feedback: [], voice: [], renderCards: [], frameInputs: 0 };
   const sandbox = {
     document: {
       querySelector: sel => el(sel),
@@ -75,6 +75,7 @@ function runRestore(job) {
     },
     I18n: { getLocale: () => 'vi' },
     referencePicker: { renderReferenceCards: type => calls.renderCards.push(type) },
+    updateVideoFrameInputs: () => { calls.frameInputs++; },
     setFeedback: (msg, ok) => calls.feedback.push([msg, ok]),
     updateVoiceUiState: voice => calls.voice.push(voice),
     t: (key, fallback) => (typeof fallback === 'string' ? fallback : key),
@@ -95,19 +96,21 @@ test('setGenType is declared at IIFE level, not nested in initGenerationControls
 });
 
 test('template restore to video updates the gen-type toggle (not just the hidden select)', () => {
-  const { elements, imgBtn, vidBtn } = runRestore({ payload: { type: 'video', prompt: 'p', aspectRatio: '9:16', count: 2, mode: 'text', model: 'm' } });
+  const { elements, imgBtn, vidBtn, calls } = runRestore({ payload: { type: 'video', prompt: 'p', aspectRatio: '9:16', count: 2, mode: 'text', model: 'm' } });
   assert.equal(elements.get('#genType').value, 'video');
   assert.equal(vidBtn._classes.has('active'), true, 'video toggle button must become active');
   assert.equal(imgBtn._classes.has('active'), false, 'image toggle button must deactivate');
   assert.equal(elements.get('#videoModelContainer')._classes.has('hidden'), false);
   assert.equal(elements.get('#imageModelContainer')._classes.has('hidden'), true);
+  assert.equal(calls.frameInputs, 1, 'video mode changes should refresh the active Frames UI');
 });
 
 test('template restore to image flips the toggle back', () => {
-  const { elements, imgBtn, vidBtn } = runRestore({ payload: { type: 'image', prompt: 'p', aspectRatio: '16:9', count: 1, model: 'm' } });
+  const { elements, imgBtn, vidBtn, calls } = runRestore({ payload: { type: 'image', prompt: 'p', aspectRatio: '16:9', count: 1, model: 'm' } });
   assert.equal(elements.get('#genType').value, 'image');
   assert.equal(imgBtn._classes.has('active'), true);
   assert.equal(vidBtn._classes.has('active'), false);
   assert.equal(elements.get('#imageModelContainer')._classes.has('hidden'), false);
   assert.equal(elements.get('#videoModelContainer')._classes.has('hidden'), true);
+  assert.equal(calls.frameInputs, 1, 'image mode changes should restore the regular picker UI');
 });

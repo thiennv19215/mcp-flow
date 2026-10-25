@@ -97,43 +97,46 @@
       }
       throw unavailableError(`Flow does not offer the exact ${name} mode for the selected model. Nothing was submitted.`);
     }
-    if (modeControlSelected(control)) return;
-    control.click();
-    const deadline = Math.min(Date.now() + 5000, Number.isFinite(options.deadline) ? options.deadline : Infinity);
-    let confirmed = false;
-    while (Date.now() < deadline) {
-      checkPreparation(options, `confirming Flow ${name} mode`);
-      control = exactModeControl(name);
-      if (isDisabledModeControl(control)) {
+    let confirmed = modeControlSelected(control);
+    if (!confirmed) {
+      control.click();
+      const deadline = Math.min(Date.now() + 5000, Number.isFinite(options.deadline) ? options.deadline : Infinity);
+      while (Date.now() < deadline) {
+        checkPreparation(options, `confirming Flow ${name} mode`);
+        control = exactModeControl(name);
+        if (isDisabledModeControl(control)) {
+          if (options.optional === true) {
+            noteModeWarning(`${name} mode control became disabled before selection could be confirmed; continuing with current Flow settings.`);
+            return;
+          }
+          throw unavailableError(`Flow's exact ${name} mode control became disabled before selection could be confirmed. Nothing was submitted.`);
+        }
+        if (modeControlSelected(control)) { confirmed = true; break; }
+        if (!flowSettingsPanelVisible()) await openFlowSettings(options);
+        await waitPreparation(options, 100, `confirming Flow ${name} mode`);
+      }
+      if (!confirmed) {
+        control = exactModeControl(name);
+        if (isDisabledModeControl(control)) {
+          if (options.optional === true) return;
+          throw unavailableError(`Flow's exact ${name} mode control is disabled. Nothing was submitted.`);
+        }
         if (options.optional === true) {
-          noteModeWarning(`${name} mode control became disabled before selection could be confirmed; continuing with current Flow settings.`);
+          noteModeWarning(`Flow did not confirm ${name} mode selection; proceeding without blocking.`);
           return;
         }
-        throw unavailableError(`Flow's exact ${name} mode control became disabled before selection could be confirmed. Nothing was submitted.`);
+        const code = framesMode ? "FLOW_FRAMES_MODE_UNCONFIRMED" : "FLOW_VIDEO_MODE_UNCONFIRMED";
+        throw root.flowError(code, `Flow did not confirm that ${name} mode is selected. Nothing was submitted.`, true, false);
       }
-      if (modeControlSelected(control)) { confirmed = true; break; }
-      if (!flowSettingsPanelVisible()) await openFlowSettings(options);
-      await waitPreparation(options, 100, `confirming Flow ${name} mode`);
-    }
-    if (!confirmed) {
-      control = exactModeControl(name);
-      if (isDisabledModeControl(control)) {
-        if (options.optional === true) return;
-        throw unavailableError(`Flow's exact ${name} mode control is disabled. Nothing was submitted.`);
-      }
-      if (options.optional === true) {
-        noteModeWarning(`Flow did not confirm ${name} mode selection; proceeding without blocking.`);
-        return;
-      }
-      const code = framesMode ? "FLOW_FRAMES_MODE_UNCONFIRMED" : "FLOW_VIDEO_MODE_UNCONFIRMED";
-      throw root.flowError(code, `Flow did not confirm that ${name} mode is selected. Nothing was submitted.`, true, false);
     }
     if (framesMode) {
-      const hasFrameControls = () => Boolean(root.flowButton?.("Start") && root.flowButton?.("End"));
+      const hasFrameControls = () => Boolean(root.flowFrameButton?.("start") && root.flowFrameButton?.("end"));
       const controlsDeadline = Math.min(Date.now() + 4000, Number.isFinite(options.deadline) ? options.deadline : Infinity);
       while (Date.now() < controlsDeadline && !hasFrameControls()) await waitPreparation(options, 100, "waiting for Flow frame controls");
       if (!hasFrameControls()) {
-        throw root.flowError("FLOW_FRAMES_CONTROLS_UNAVAILABLE", "Flow selected Frames but did not show both Start and End frame controls. Nothing was submitted.", true, false);
+        const error = root.flowError("FLOW_FRAMES_CONTROLS_UNAVAILABLE", "Flow selected Frames but did not show both Start and End frame controls. Nothing was submitted.", true, false);
+        error.diagnostics = { frameControls: root.inspectFlowFrameControls?.() || null };
+        throw error;
       }
     }
   }

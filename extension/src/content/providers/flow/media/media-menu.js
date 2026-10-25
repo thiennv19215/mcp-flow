@@ -1179,6 +1179,28 @@
     }).filter(Boolean);
   }
 
+  function explicitEmptyProjectMediaState() {
+    const descriptor = (root.ProviderRegistry || root.FlowDriverRegistry)?.describeUrl?.(root.location?.href || "");
+    if (descriptor?.isProjectEditor !== true || !descriptor.projectId) return null;
+
+    // Flow's current empty-project editor uses this drop-zone message and
+    // does not mount a media grid until the first project asset exists. It is
+    // a complete empty baseline only when no modal/picker or loading surface
+    // is obscuring the editor; otherwise an empty picker search could be
+    // mistaken for an empty project library.
+    const overlays = [...document.querySelectorAll('[role="dialog"],[role="listbox"],mat-dialog-container,flow-dialog')]
+      .some(element => root.visible?.(element) !== false);
+    if (overlays) return null;
+    const main = document.querySelector("#main-content") || document.querySelector("main,[role='main']");
+    if (!main || root.visible?.(main) === false) return null;
+    const text = String(main.innerText || main.textContent || "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
+    const hasEmptyState = text.includes("start creating or drop media") || text.includes("bắt đầu tạo hoặc thả nội dung nghe nhìn");
+    if (!hasEmptyState) return null;
+    const busy = [...main.querySelectorAll('[role="progressbar"],[aria-busy="true"]')]
+      .some(element => root.visible?.(element) !== false);
+    return busy ? null : { source: "project_editor_empty_dropzone", projectId: descriptor.projectId };
+  }
+
   async function scanNativeAssets(options = {}) {
     const maxDurationMs = Math.max(1000, Math.min(25_000, Number(options.maxDurationMs) || 25_000));
     const maxItems = !options.exactName && !options.requireComplete && Number.isFinite(Number(options.maxItems))
@@ -1267,7 +1289,13 @@
       const gridAfter = (typeof root.flowQuery === "function" && root.flowQuery("tiles.container", document, { checkVisible: false })) ||
         document.querySelector("flow-grid-tile-container");
       if (!gridAfter) {
-        throw new Error("Flow's All media grid is not visible. Open the project and try again.");
+        const emptyProject = explicitEmptyProjectMediaState();
+        if (emptyProject) {
+          options.onDiagnostics?.({ steps: 0, uniqueTiles: 0, reachedEnd: true, emptyProject: true, emptyStateSource: emptyProject.source, projectId: emptyProject.projectId });
+          return [];
+        }
+        throw root.flowError?.("FLOW_ASSET_GRID_NOT_VISIBLE", "Flow's All media grid is not visible and the project does not expose a verified empty state. No media was uploaded.", true, false) ||
+          new Error("Flow's All media grid is not visible and the project does not expose a verified empty state. No media was uploaded.");
       }
       const container = gridScroller();
       if (!container) {

@@ -30,14 +30,17 @@ function settingsContext() {
   return context;
 }
 
-test('capability registry exposes the Veo 3.1 tiers with frames support, mirroring the reference model registry', () => {
+test('the sidebar hides Veo 3.1 Quality while retaining tier capability compatibility', () => {
   const values = registry.uiModels.video.map(model => model.value);
-  for (const tier of ['veo 3.1 lite', 'veo 3.1 fast', 'veo 3.1 quality']) {
+  for (const tier of ['veo 3.1 lite', 'veo 3.1 fast']) {
     assert.ok(values.includes(tier), `sidebar video models include ${tier}`);
     assert.ok(sidebarHtml.includes(`value="${tier}"`), `sidebar.html static options include ${tier}`);
   }
+  assert.ok(!values.includes('veo 3.1 quality'), 'Veo 3.1 Quality is omitted from the model picker');
+  assert.ok(!sidebarHtml.includes('value="veo 3.1 quality"'), 'static model options omit Veo 3.1 Quality');
   const tierRule = registry.models.find(rule => rule.match?.includes('veo 3.1 fast'));
   assert.ok(tierRule, 'a registry rule matches the tiered models');
+  assert.ok(tierRule.match.includes('veo 3.1 quality'), 'the hidden legacy alias remains supported for existing jobs');
   assert.equal(tierRule.supportsFrames, true);
   assert.equal(tierRule.maxReferences, 3);
   assert.deepEqual(tierRule.durations, [8]);

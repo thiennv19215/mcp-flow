@@ -1938,10 +1938,12 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
         case "flow-queue:clear":
           snapshot = await flowJobQueue.clear();
           break;
-        case "flow-queue:remove":
-          await flowJobQueue.remove(String(message.id || message.taskId || ""));
+        case "flow-queue:remove": {
+          const removed = await flowJobQueue.remove(String(message.id || message.taskId || ""));
+          if (!removed) throw Object.assign(new Error("The Flow task could not be removed from the queue."), { code: "FLOW_QUEUE_REMOVE_FAILED" });
           snapshot = await flowJobQueue.snapshot();
           break;
+        }
         case "flow-queue:download": {
           const result = await enqueueGeneratedMediaDownload(String(message.id || message.taskId || ""));
           addedJob = result.job;

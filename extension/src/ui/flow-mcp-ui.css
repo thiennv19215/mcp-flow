@@ -705,6 +705,78 @@ option,
   display: none !important;
 }
 
+/* My Prompts: keep the editor compact, readable, and full-width. */
+#subtab-myprompts {
+  min-height: 0;
+}
+#subtab-myprompts .myprompts-container {
+  min-height: 100%;
+  box-sizing: border-box;
+}
+#subtab-myprompts .myprompts-toolbar {
+  padding: 8px 12px;
+}
+#subtab-myprompts .myprompts-search-group {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+}
+#subtab-myprompts #myPromptsSearch {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+#subtab-myprompts .myprompt-editor-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 10px 12px 0 !important;
+  padding: 12px;
+}
+#subtab-myprompts .myprompt-field,
+#subtab-myprompts .myprompt-addon-field {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+  margin: 0;
+}
+#subtab-myprompts .myprompt-field .form-label,
+#subtab-myprompts .myprompt-addon-field .form-label {
+  display: block;
+  line-height: 1.35;
+}
+#subtab-myprompts .myprompt-field .form-input,
+#subtab-myprompts .myprompt-field .form-textarea,
+#subtab-myprompts .myprompt-addon-field .form-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+#subtab-myprompts #promptDraft {
+  height: 132px;
+  min-height: 132px;
+  max-height: 280px;
+  resize: vertical;
+}
+#subtab-myprompts #btnSavePrompt {
+  width: 100%;
+  margin-top: 1px;
+}
+.myprompt-storage-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: -2px 0 0;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  line-height: 1.4;
+}
+.myprompt-storage-note svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--primary);
+}
+
 @media (max-width: 480px) {
   .flow-mcp-options { padding: 20px 12px; }
   .tabs-content { padding-right: 10px; padding-left: 10px; }

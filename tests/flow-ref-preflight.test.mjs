@@ -245,7 +245,7 @@ function makeContentHarness({ catalogEntry = null, assets = [], stagedFiles = []
     FlowSettings: {},
     FlowComponents: {
       chooseNativePickerAsset: async (name, slot, options = {}) => {
-        calls.picker.push({ name, expectedId: options.expectedId });
+        calls.picker.push({ name, expectedId: options.expectedId, verifiedIdentity: options.verifiedIdentity });
         calls.order.push('picker');
         return { confirmed: true, id: options.expectedId || UUID_OLD, kind: 'image' };
       },
@@ -331,4 +331,19 @@ test('IMG-04 (content c): submit with the ref tile still present does not re-upl
   assert.equal(result.submitted, true);
   assert.deepEqual(calls.uploads, []);
   assert.equal(calls.picker[0].expectedId, UUID_OLD);
+});
+
+test('IMG-04 (content frame): exact library title and matching media ID attest a frame when the picker DOM omits its ID', async () => {
+  const { operations, calls } = makeContentHarness({
+    assets: [{ name: 'Start.png', id: UUID_OLD, persistentMediaId: UUID_OLD }],
+  });
+  const result = await operations.execute('flow.generation.submit', {
+    type: 'video', mode: 'frames', prompt: 'animate the still',
+    firstFrame: { assetName: 'Start.png', expectedId: UUID_OLD },
+  }, {});
+  assert.equal(result.submitted, true);
+  assert.deepEqual(calls.uploads, [], 'an image already in Flow is selected without another upload');
+  assert.equal(calls.picker[0].name, 'Start.png');
+  assert.equal(calls.picker[0].expectedId, UUID_OLD);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.picker[0].verifiedIdentity)), { assetName: 'Start.png', id: UUID_OLD });
 });
